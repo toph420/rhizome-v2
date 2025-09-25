@@ -1,0 +1,44 @@
+project_name: rhizome-v2
+language: typescript
+description: Document reading and knowledge synthesis app with ECS architecture
+
+# TypeScript/Next.js specific patterns
+include_patterns:
+  - "src/**/*.ts"
+  - "src/**/*.tsx" 
+  - "app/**/*.ts"
+  - "app/**/*.tsx"
+  - "components/**/*.ts"
+  - "components/**/*.tsx"
+  - "lib/**/*.ts"
+  - "lib/**/*.tsx"
+  - "supabase/**/*.ts"
+  - "*.ts"
+  - "*.tsx"
+
+exclude_patterns:
+  - "node_modules/**"
+  - ".next/**"
+  - "dist/**"
+  - "build/**"
+  - "*.min.js"
+  - "*.map"
+  - ".git/**"
+
+# Important files for context
+context_files:
+  - "package.json"
+  - "tsconfig.json"
+  - "next.config.js"
+  - "tailwind.config.js"
+  - "CLAUDE_CODE.md"
+  - "ECS_IMPLEMENTATION.md"
+  - "UI_PATTERNS.md"
+  - "STORAGE_PATTERNS.md"
+  - ".env.local"
+
+# Project-specific settings
+settings:
+  max_file_size_kb: 500
+  enable_auto_indexing: true
+  index_on_save: true
