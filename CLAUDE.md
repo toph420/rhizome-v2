@@ -1,10 +1,12 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Rhizome V2 - Document Reader & Knowledge Synthesis
 
 ## Project Overview
 
-Rhizome V2 is a **document reader with integrated flashcard study system** and **AI-powered knowledge synthesis**. It processes PDFs and other documents to clean markdown, enables annotatiting and quick flashcard creation, and discovers connections between ideas across your reading.
+Rhizome V2 is a **document reader with integrated flashcard study system** and **AI-powered knowledge synthesis**. It processes PDFs and other documents to clean markdown, enables annotating and quick flashcard creation, and discovers connections between ideas across your reading.
 
 ## Core Architecture Principles
 
@@ -119,10 +121,13 @@ supabase/
 
 ## ECS Implementation
 
-Use the existing ECS class in `lib/ecs/index.ts`. DO NOT create new entity managers.
+Use the existing ECS class in `src/lib/ecs/ecs.ts`. DO NOT create new entity managers.
 
-Common patterns:
+The ECS class is a singleton pattern - import and use it directly:
+
 ```typescript
+import { ecs } from '@/lib/ecs'
+
 // Creating flashcard
 await ecs.createEntity(userId, {
   flashcard: { question, answer },
@@ -130,12 +135,31 @@ await ecs.createEntity(userId, {
   source: { chunk_id, document_id }
 })
 
-// Query due cards
+// Query entities by component types
 const dueCards = await ecs.query(
   ['flashcard', 'study'], 
   userId,
   { document_id }
 )
+
+// Get single entity with all components
+const entity = await ecs.getEntity(entityId, userId)
+
+// Update component data
+await ecs.updateComponent(componentId, newData, userId)
+
+// Delete entity (cascades to components)
+await ecs.deleteEntity(entityId, userId)
+```
+
+**Available ECS Methods:**
+- `createEntity(userId, components)` - Create entity with initial components
+- `query(componentTypes, userId, filters?)` - Find entities by component types
+- `getEntity(entityId, userId)` - Get single entity with all components
+- `updateComponent(componentId, data, userId)` - Update component data
+- `deleteEntity(entityId, userId)` - Delete entity and components
+- `addComponent(entityId, type, data, userId)` - Add component to existing entity
+- `removeComponent(componentId, userId)` - Remove single component
 
 ## Storage Architecture - CRITICAL
 
@@ -181,16 +205,21 @@ userId/
 ### ALWAYS Use Gemini for Everything
 ```typescript
 // supabase/functions/process-document/index.ts
+import { GoogleGenAI } from 'npm:@google/genai'
 
 async function processDocument(documentId: string, pdfUrl: string) {
-  // 1. Convert PDF to base64
+  // 1. Initialize Google GenAI (NEW SDK)
+  const ai = new GoogleGenAI({ apiKey: Deno.env.get('GOOGLE_AI_API_KEY') })
+  
+  // 2. Convert PDF to base64
   const pdfResponse = await fetch(pdfUrl)
   const pdfBuffer = await pdfResponse.arrayBuffer()
   const pdfBase64 = Buffer.from(pdfBuffer).toString('base64')
   
-  // 2. Send to Gemini - IT HANDLES EVERYTHING
-  const result = await gemini.generateContent({
-    model: 'gemini-1.5-pro',
+  // 3. Send to Gemini - IT HANDLES EVERYTHING
+  // CRITICAL: Use ai.models.generateContent (note .models namespace)
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',  // Updated model name
     contents: [{
       parts: [
         {
@@ -199,28 +228,38 @@ async function processDocument(documentId: string, pdfUrl: string) {
             data: pdfBase64
           }
         },
-        {
-          text: EXTRACTION_AND_CHUNKING_PROMPT // See below
-        }
+        { text: EXTRACTION_AND_CHUNKING_PROMPT }
       ]
     }],
-    generationConfig: {
+    config: {  // Changed from generationConfig to config
       responseMimeType: "application/json",
       responseSchema: DOCUMENT_SCHEMA
     }
   })
   
-  // 3. Save markdown to STORAGE (not database!)
-  const { markdown, chunks } = result
-  const storagePath = `${userId}/${documentId}`
+  // 4. Parse response (result.text contains JSON string)
+  const { markdown, chunks } = JSON.parse(result.text)
   
+  // 5. Save markdown to STORAGE (not database!)
+  const storagePath = `${userId}/${documentId}`
   await supabase.storage
     .from('documents')
     .upload(`${storagePath}/content.md`, markdown)
   
-  // 4. Save chunks to DATABASE (for queries)
+  // 6. Generate embeddings and save chunks to DATABASE
   for (const chunk of chunks) {
-    const embedding = await gemini.embedContent(chunk.content)
+    // CRITICAL: Use ai.models.embedContent (note .models namespace)
+    const embedResult = await ai.models.embedContent({
+      model: 'text-embedding-004',
+      contents: chunk.content,
+      config: {
+        outputDimensionality: 768
+      }
+    })
+    
+    // Extract embedding vector (note the nested structure)
+    const embedding = embedResult.embedding.values
+    
     await supabase.from('chunks').insert({
       document_id: documentId,
       content: chunk.content,
@@ -235,6 +274,38 @@ Extract this PDF to perfect markdown preserving all formatting.
 Then break into semantic chunks (complete thoughts).
 Return JSON with full markdown and chunk array.
 `
+```
+
+### Key API Changes (@google/genai)
+```typescript
+// ❌ OLD SDK (@google/generative-ai) - DEPRECATED
+import { GoogleGenerativeAI } from '@google/generative-ai'
+const genAI = new GoogleGenerativeAI(apiKey)
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' })
+const result = await model.generateContent(...)
+
+// ✅ NEW SDK (@google/genai) - USE THIS
+import { GoogleGenAI } from 'npm:@google/genai'  // Deno
+// OR: import { GoogleGenAI } from '@google/genai'  // Node.js
+
+const ai = new GoogleGenAI({ apiKey })
+const result = await ai.models.generateContent({  // Note .models namespace
+  model: 'gemini-2.5-flash',
+  contents: 'Your prompt',
+  config: { /* options */ }  // Note: config not generationConfig
+})
+
+// Response structure
+result.text  // Direct text access
+JSON.parse(result.text)  // For JSON responses
+
+// Embeddings
+const embedResult = await ai.models.embedContent({  // Note .models namespace
+  model: 'text-embedding-004',
+  contents: 'text to embed',
+  config: { outputDimensionality: 768 }
+})
+const vector = embedResult.embedding.values  // Note nested structure
 ```
 
 ## Document Reader Pattern
@@ -367,44 +438,51 @@ const data = await pdfParse(Buffer.from(dataBuffer))
 const markdown = data.text // Clean this up with your logic
 ```
 
-## Common Development Tasks
+## Essential Commands
 
-### Initialize Project (If not exists)
+### Development
 ```bash
-# Create Next.js app with TypeScript and Tailwind
-npx create-next-app@latest . --typescript --tailwind --app
-
-# Install dependencies
-npm install @supabase/supabase-js @tanstack/react-query zustand framer-motion
-npm install @radix-ui/react-* pdf-parse jszip
-
-# Initialize Supabase and shadcn
-npx supabase init
-npx shadcn@latest init
-```
-
-### Run Development Environment
-```bash
-# Terminal 1: Start Next.js
+# Start all services (Supabase + Edge Functions + Next.js)
 npm run dev
 
-# Terminal 2: Start local Supabase
-npx supabase start
+# Start only Next.js (if Supabase already running)
+npm run dev:next
 
-# Terminal 3: Apply database schema
-npx supabase db push
+# Check service status
+npm run status
+
+# Stop all services
+npm run stop
 ```
 
-### Build & Test
+### Build & Quality Checks
 ```bash
-# Build for production
+# Type checking
 npm run build
 
-# Type checking
-npm run type-check
-
-# Linting
+# Linting (includes JSDoc validation)
 npm run lint
+
+# Run tests
+npm test
+
+# Watch mode for tests
+npm run test:watch
+
+# Generate API documentation from JSDoc
+npm run docs
+```
+
+### Database Operations
+```bash
+# Reset database (applies all migrations)
+npx supabase db reset
+
+# Create new migration
+npx supabase migration new <name>
+
+# Check migration status
+npx supabase migration list
 ```
 
 ## Code Architecture
@@ -434,6 +512,201 @@ npm run lint
 - Right panels for connections/notes
 - Inline overlays for quick actions
 - Split screen for study mode
+
+
+## Code Quality Guidelines
+
+### TypeScript
+- Use `ReactElement` from 'react' (not JSX.Element)
+- Never use `any` type
+- Explicit return types for functions
+
+## JSDoc Documentation Standards
+
+  ### Policy: Public API Only
+  - JSDoc **required** on **exported** declarations only (enforced as warnings)
+  - Internal helpers, private functions, and React components **exempt**
+  - TypeScript validates JSDoc types via `checkJs: true`
+
+  ### What Needs JSDoc
+  - ✅ Exported functions in `/src/lib/` (ECS, processing, utilities)
+  - ✅ Exported hooks in `/src/stores/`
+  - ✅ Public API interfaces and types
+  - ❌ React components (props are self-documenting)
+  - ❌ Internal helpers within files
+  - ❌ Next.js pages and API routes
+
+  ### Generate Documentation
+  ```bash
+  npm run docs  # Creates docs/api/ from src/lib
+
+  Enforcement
+
+  - ESLint warns on missing JSDoc (doesn't block build)
+  - TypeScript validates JSDoc accuracy
+  - Focus on quality over quantity
+
+### Documentation - REQUIRED
+- **All functions, methods, and classes MUST have JSDoc comments**
+- Include description, parameters (@param), and return value (@returns)
+- TypeScript interfaces, type aliases, and enums require documentation
+- Descriptions must be complete sentences ending with periods
+- Example:
+## Documentation Requirements
+
+ALL exported functions, classes, and interfaces MUST have JSDoc:
+```typescript
+/**
+ * Creates an entity with components in the ECS system.
+ * Handles atomic creation with rollback on failure.
+ * 
+ * @param userId - The ID of the user creating the entity
+ * @param components - Map of component types to their data
+ * @returns The created entity's ID
+ * @throws {Error} If entity or component creation fails
+ * 
+ * @example
+ * const id = await ecs.createEntity(userId, {
+ *   flashcard: { question: 'Q1', answer: 'A1' },
+ *   study: { due: new Date() }
+ * })
+ */
+```
+
+### File Organization  
+- Soft limit: 500 lines per file
+- Components: ~200 lines
+- Functions: ~50 lines
+
+### Development
+- Use `rg` for searching (not grep/find)
+- Co-locate tests in __tests__ folders
+- Validate external data with Zod
+- Run `npm run lint` before committing to check JSDoc compliance
+
+### What to Avoid
+- Over-engineering for future needs (YAGNI)
+- Creating duplicate functionality
+- Files over 500 lines
+- Prop drilling beyond 2 levels
+- Undocumented functions or classes (enforced by ESLint)
+
+
+## Export System - REQUIRED
+
+```typescript
+// Users MUST be able to export their data
+
+async function exportDocument(documentId: string) {
+  // 1. Get files from storage
+  const markdown = await downloadFromStorage(`${userId}/${documentId}/content.md`)
+  
+  // 2. Get user data from database
+  const annotations = await ecs.query(['annotation'], userId, { document_id })
+  const flashcards = await ecs.query(['flashcard'], userId, { document_id })
+  
+  // 3. Create ZIP bundle
+  const zip = new JSZip()
+  zip.file('content.md', markdown)
+  zip.file('annotations.json', JSON.stringify(annotations))
+  zip.file('flashcards.json', JSON.stringify(flashcards))
+  
+  // 4. Save to storage for download
+  const blob = await zip.generateAsync({ type: 'blob' })
+  return uploadToStorage(`${userId}/${documentId}/export.zip`, blob)
+}
+```
+
+## State Management Rules
+
+```typescript
+// Client state - Use Zustand
+const useReaderStore = create((set) => ({
+  selectedText: null,
+  setSelectedText: (text) => set({ selectedText: text })
+}))
+
+// Server state - Use React Query
+const { data } = useQuery({
+  queryKey: ['chunks', documentId],
+  queryFn: () => getChunks(documentId),
+  staleTime: Infinity // Chunks never change
+})
+
+// NEVER use useState for server data
+❌ const [chunks, setChunks] = useState()
+✅ const { data: chunks } = useQuery()
+```
+
+## Performance Patterns
+
+```typescript
+// ✅ GOOD - Stream from storage
+const url = await getSignedUrl(path)
+const response = await fetch(url)
+const reader = response.body.getReader()
+
+// ❌ BAD - Store in database
+const { markdown_content } = await supabase
+  .from('documents')
+  .select('markdown_content') // NO!
+
+// ✅ GOOD - Query with pgvector
+const similar = await supabase.rpc('match_chunks', {
+  query_embedding: embedding
+})
+
+// ❌ BAD - Filter in memory
+const all = await getAllChunks()
+const similar = all.filter(...) // NO!
+```
+
+
+
+
+## Documentation Structure
+
+### Primary Documents
+
+For detailed information, see:
+- `docs/ARCHITECTURE.MD` - Read for understanding overall system design
+- `docs/SUPABASE_AUTH_RULES.md` - Reference when dealing with auth/database
+- `docs/UI_PATTERNS.md` - Look at for component layout decisions
+- `docs/STORAGE_PATTERNS.md` - Hybrid storage details
+- `docs/ECS_IMPLEMENTATION.md` - Entity-Component-System guide, Check when creating/querying entities
+- `docs/lib/REACT_GUIDELINES.md` - Consult for ALL React/Next.js decisions
+
+
+### When to Check REACT_GUIDELINES.md
+
+**ALWAYS consult `docs/lib/REACT_GUIDELINES.md` when:**
+- Creating new components (Server vs Client decision)
+- Adding interactivity (needs 'use client'?)
+- Fetching data (Server Component vs Server Action)
+- Handling forms (Server Actions pattern)
+- Managing state (where does it belong?)
+- Implementing mutations (always use Server Actions)
+- Deciding on file location (which folder?)
+
+**Quick Decision References:**
+```
+Need onClick/onChange? → Check `docs/lib/REACT_GUIDELINES.md` Client Components section
+Need to fetch data? → Check `docs/lib/REACT_GUIDELINES.md` Server Components section  
+Need to save data? → Check `docs/lib/REACT_GUIDELINES.md` Server Actions section
+Need a modal? → NO! Check `docs/UI_PATTERNS.md` for alternatives
+```
+
+### Document Priority Order
+
+1. **For React/Component questions**: `docs/lib/REACT_GUIDELINES.md` → `docs/UI_PATTERNS.md`
+2. **For data operations**: `docs/ECS_IMPLEMENTATION.md` → `docs/lib/REACT_GUIDELINES.md` (Server Actions)
+3. **For auth issues**: `docs/SUPABASE_AUTH_RULES.md`
+4. **For architecture questions**: `docs/ARCHITECTURE.md` → `/CLAUDE.md`
+
+## Critical Rule
+If there's ANY doubt about Server vs Client Components, Server Actions, or React patterns:
+**STOP and read `docs/lib/REACT_GUIDELINES.md` first**
+
 
 ## Current Implementation Status
 
@@ -506,206 +779,73 @@ This timeline better reflects your AI-first architecture and focuses on getting 
 4. Get PDF → Storage → Markdown working
 5. Ship first working version today
 
+## Development Environment Details
+
+### Service Architecture
+The `npm run dev` script starts three services in sequence:
+1. **Supabase** (PostgreSQL + Storage + Auth) - Port 54321
+2. **Supabase Edge Functions** - Port 54321/functions/v1/
+3. **Next.js Dev Server** - Port 3000
+
+### Environment Variables
+Required in `.env.local`:
+```bash
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<from supabase start output>
+SUPABASE_SERVICE_ROLE_KEY=<from supabase start output>
+GEMINI_API_KEY=<your Google AI Studio key>
+```
+
+### Hardcoded Values for MVP
+- User ID: `'dev-user-123'` (created in migration 004)
+- RLS disabled on all tables (migration 003)
+- Auth bypassed using `supabaseAdmin` client
+
+### File Locations
+- **Server Actions**: `src/app/actions/` (use 'use server')
+- **Client Components**: `src/components/` (use 'use client' only when needed)
+- **Utilities**: `src/lib/` (pure functions, no React)
+- **Stores**: `src/stores/` (Zustand for client state)
+- **Types**: `src/types/` (TypeScript interfaces)
+- **Edge Functions**: `supabase/functions/`
+- **Migrations**: `supabase/migrations/`
+
 ## Important Implementation Notes
 
-1. **Always use ECS for data**: Never create direct database queries for user content
-2. **Stream large files**: Use signed URLs and streaming for markdown content
-3. **Optimistic updates**: Update UI immediately, sync with server in background
-4. **Virtual scrolling**: Required for long documents (>100 pages)
-5. **Batch operations**: Group database operations for performance
-
-## Error Prevention Checklist
-
-- [ ] Never use modal dialogs - use panels/docks/overlays
-- [ ] Never store large text in database - use Storage
-- [ ] Never bypass ECS for user content
-- [ ] Never load entire documents in memory
-- [ ] Never block UI during processing
-
-## Code Quality Guidelines
-
-### TypeScript
-- Use `ReactElement` from 'react' (not JSX.Element)
-- Never use `any` type
-- Explicit return types for functions
-
-### Documentation - REQUIRED
-- **All functions, methods, and classes MUST have JSDoc comments**
-- Include description, parameters (@param), and return value (@returns)
-- TypeScript interfaces, type aliases, and enums require documentation
-- Descriptions must be complete sentences ending with periods
-- Example:
-## Documentation Requirements
-
-ALL exported functions, classes, and interfaces MUST have JSDoc:
-```typescript
-/**
- * Creates an entity with components in the ECS system.
- * Handles atomic creation with rollback on failure.
- * 
- * @param userId - The ID of the user creating the entity
- * @param components - Map of component types to their data
- * @returns The created entity's ID
- * @throws {Error} If entity or component creation fails
- * 
- * @example
- * const id = await ecs.createEntity(userId, {
- *   flashcard: { question: 'Q1', answer: 'A1' },
- *   study: { due: new Date() }
- * })
- */
-```
-
-### File Organization  
-- Soft limit: 500 lines per file
-- Components: ~200 lines
-- Functions: ~50 lines
-
-### Development
-- Use `rg` for searching (not grep/find)
-- Co-locate tests in __tests__ folders
-- Validate external data with Zod
-- Run `npm run lint` before committing to check JSDoc compliance
-
-### What to Avoid
-- Over-engineering for future needs (YAGNI)
-- Creating duplicate functionality
-- Files over 500 lines
-- Prop drilling beyond 2 levels
-- Undocumented functions or classes (enforced by ESLint)
-
-
-## Documentation Structure
-
-### Primary Documents
-
-For detailed information, see:
-- `/docs/ARCHITECTURE.MD` - Read for understanding overall system design
-- `/docs/SUPABASE_AUTH_RULES.md` - Reference when dealing with auth/database
-- `/docs/UI_PATTERNS.md` - Look at for component layout decisions
-- `/docs/STORAGE_PATTERNS.md` - Hybrid storage details
-- `/docs/ECS_IMPLEMENTATION.md` - Entity-Component-System guide, Check when creating/querying entities
-- `/docs/lib/REACT_GUIDELINES.md` - Consult for ALL React/Next.js decisions
-
-
-### When to Check REACT_GUIDELINES.md
-
-**ALWAYS consult `/docs/lib/REACT_GUIDELINES.md` when:**
-- Creating new components (Server vs Client decision)
-- Adding interactivity (needs 'use client'?)
-- Fetching data (Server Component vs Server Action)
-- Handling forms (Server Actions pattern)
-- Managing state (where does it belong?)
-- Implementing mutations (always use Server Actions)
-- Deciding on file location (which folder?)
-
-**Quick Decision References:**
-```
-Need onClick/onChange? → Check `/docs/lib/REACT_GUIDELINES.md` Client Components section
-Need to fetch data? → Check `/docs/lib/REACT_GUIDELINES.md` Server Components section  
-Need to save data? → Check `/docs/lib/REACT_GUIDELINES.md` Server Actions section
-Need a modal? → NO! Check `/docs/UI_PATTERNS.md` for alternatives
-```
-
-### Document Priority Order
-
-1. **For React/Component questions**: `/docs/lib/REACT_GUIDELINES.md` → `/docs/UI_PATTERNS.md`
-2. **For data operations**: `/docs/ECS_IMPLEMENTATION.md` → `/docs/lib/REACT_GUIDELINES.md` (Server Actions)
-3. **For auth issues**: `/docs/SUPABASE_AUTH_RULES.md`
-4. **For architecture questions**: `/docs/ARCHITECTURE.md` → `/CLAUDE.md`
-
-## Critical Rule
-If there's ANY doubt about Server vs Client Components, Server Actions, or React patterns:
-**STOP and read `/docs/lib/REACT_GUIDELINES.md` first**
 
 
 
-## Export System - REQUIRED
+## Current Implementation Status
 
-```typescript
-// Users MUST be able to export their data
+### ✅ Completed (Foundation Phase)
+1. Database schema with migrations (001-006)
+2. Supabase storage bucket with RLS policies
+3. Document upload Server Actions (uploadDocument, triggerProcessing)
+4. ECS implementation with full CRUD operations
+5. Development environment scripts (dev.sh, stop.sh, status.sh)
+6. Test infrastructure (Jest + React Testing Library)
+7. Processing state management (Zustand store)
+8. Basic app structure with Next.js 15
 
-async function exportDocument(documentId: string) {
-  // 1. Get files from storage
-  const markdown = await downloadFromStorage(`${userId}/${documentId}/content.md`)
-  
-  // 2. Get user data from database
-  const annotations = await ecs.query(['annotation'], userId, { document_id })
-  const flashcards = await ecs.query(['flashcard'], userId, { document_id })
-  
-  // 3. Create ZIP bundle
-  const zip = new JSZip()
-  zip.file('content.md', markdown)
-  zip.file('annotations.json', JSON.stringify(annotations))
-  zip.file('flashcards.json', JSON.stringify(flashcards))
-  
-  // 4. Save to storage for download
-  const blob = await zip.generateAsync({ type: 'blob' })
-  return uploadToStorage(`${userId}/${documentId}/export.zip`, blob)
-}
-```
+### 🚧 In Progress (Processing Pipeline)
+- Gemini Edge Function for document processing
+- Document viewer component
+- Processing dock UI component
+- Chunk storage and retrieval
 
-## State Management Rules
+### 📋 Next Priority (Reader & Annotations)
+- Text selection handler
+- Annotation system with ECS
+- Quick capture bar for flashcards
+- Right panel for connections
 
-```typescript
-// Client state - Use Zustand
-const useReaderStore = create((set) => ({
-  selectedText: null,
-  setSelectedText: (text) => set({ selectedText: text })
-}))
-
-// Server state - Use React Query
-const { data } = useQuery({
-  queryKey: ['chunks', documentId],
-  queryFn: () => getChunks(documentId),
-  staleTime: Infinity // Chunks never change
-})
-
-// NEVER use useState for server data
-❌ const [chunks, setChunks] = useState()
-✅ const { data: chunks } = useQuery()
-```
-
-## Performance Patterns
-
-```typescript
-// ✅ GOOD - Stream from storage
-const url = await getSignedUrl(path)
-const response = await fetch(url)
-const reader = response.body.getReader()
-
-// ❌ BAD - Store in database
-const { markdown_content } = await supabase
-  .from('documents')
-  .select('markdown_content') // NO!
-
-// ✅ GOOD - Query with pgvector
-const similar = await supabase.rpc('match_chunks', {
-  query_embedding: embedding
-})
-
-// ❌ BAD - Filter in memory
-const all = await getAllChunks()
-const similar = all.filter(...) // NO!
-```
-
-## Current Phase: Foundation (Weeks 1-2)
-
-### BUILD THESE FIRST
-1. ✅ Database schema (migrations)
-2. ✅ Supabase storage bucket setup
-3. ✅ Document upload to storage
-4. ✅ Gemini processing pipeline
-5. ✅ Basic markdown reader
-6. ✅ Simple ECS implementation
-
-### DO NOT BUILD YET
-- ❌ Complex UI components
-- ❌ Study system (can wait)
-- ❌ Synthesis features
-- ❌ Mobile responsive
-- ❌ Settings pages
-- ❌ User profiles
+### 🔮 Future Phases (Not Started)
+- Advanced study system with FSRS
+- Synthesis studio and knowledge graph
+- Deck canvas visualization
+- Export system (ZIP bundles)
+- Mobile responsive design
+- Real authentication (currently dev mode)
 
 ## Common Mistakes to Avoid
 
@@ -716,22 +856,58 @@ const similar = all.filter(...) // NO!
 5. **Complex state management** - Keep it simple
 6. **Premature optimization** - Build first, optimize later
 
-## Testing During Development
+- [ ] Never use modal dialogs - use panels/docks/overlays
+- [ ] Never store large text in database - use Storage
+- [ ] Never bypass ECS for user content
+- [ ] Never load entire documents in memory
+- [ ] Never block UI during processing
 
+## Testing Strategy
+
+### Current Test Setup
+- Jest + React Testing Library configured
+- Test files co-located in `__tests__` folders
+- Run with `npm test` or `npm run test:watch`
+
+### Testing Priorities
 ```typescript
-// Start with small files
+// ✅ DO test critical paths
+describe('Server Actions', () => {
+  it('uploadDocument creates record and storage entry', async () => {
+    // Test core functionality
+  })
+})
+
+describe('ECS Operations', () => {
+  it('createEntity handles component creation', async () => {
+    // Test data integrity
+  })
+})
+
+// ✅ DO test stores
+describe('ProcessingStore', () => {
+  it('tracks job status updates', () => {
+    // Test state management
+  })
+})
+
+// ❌ SKIP for now
+- Complex component integration tests
+- E2E browser tests
+- Edge case handling
+- Performance benchmarks
+```
+
+### Development Testing
+```typescript
+// Start with small test files
 - 5-10 page PDFs
 - Simple markdown documents
-- Academic papers (good for testing)
+- Academic papers (good for chunking tests)
 
-// Use console.log liberally
+// Use console.log for debugging
 console.log('Processing stage:', stage)
 console.log('Chunks created:', chunks.length)
-
-// Don't write tests yet
-- No unit tests until core works
-- No e2e tests until UI stable
-- Focus on user flow
 ```
 
 ## Questions to Ask Before Building
