@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rhizome V2 is a **document reader with integrated flashcard study system** and **AI-powered knowledge synthesis**. It processes PDFs and other documents to clean markdown, enables annotating and quick flashcard creation, and discovers connections between ideas across your reading.
 
+**ARCHON PROJECT ID**: a2232595-4e55-41d2-a041-1a4a8a4ff3c6
+
 ## Core Architecture Principles
 
 1. **ECS (Entity-Component-System)**: All data is entities with components for maximum flexibility
