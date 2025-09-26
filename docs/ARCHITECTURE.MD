@@ -26,8 +26,8 @@ Core principle: **Flow state preservation** - never interrupt reading or thinkin
     "queues": "Supabase Queue or pg_cron"
   },
   "ai": {
-    "processing": "Gemini 1.5 Pro (2M context)",
-    "embeddings": "Gemini text-embedding-004",
+    "processing": "Gemini 2.5 Flash",
+    "embeddings": "Gemini gemini-embedding-001",
     "extraction": "AI-first extraction (no pdf-parse)"
   },
   "frontend": {
@@ -284,7 +284,7 @@ async function processDocument(documentId: string, fileUrl: string) {
   
   // Send ENTIRE document to Gemini for extraction + processing
   const result = await gemini.generateContent({
-    model: 'gemini-1.5-pro', // 2M context window!
+    model: 'gemini-2.5-flash', // 1M context window!
     contents: [{
       parts: [
         {

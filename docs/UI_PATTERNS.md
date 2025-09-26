@@ -1,5 +1,583 @@
 # UI Patterns Guide - No Modals Philosophy
 
+
+## Shadcn/UI Components Foundation
+
+### Core Component Library
+
+Shadcn/UI is our primary component library, built on Radix UI primitives with Tailwind CSS styling. All base UI components should use shadcn/ui unless a specific Magic UI enhancement is needed.
+
+### Installation & Setup
+
+```bash
+# Initialize shadcn/ui (already done)
+npx shadcn@latest init
+
+# Add components as needed
+npx shadcn@latest add button
+npx shadcn@latest add card
+npx shadcn@latest add command
+npx shadcn@latest add dialog  # NO! We don't use modals
+npx shadcn@latest add sheet   # YES! For mobile drawers
+npx shadcn@latest add tabs
+npx shadcn@latest add scroll-area
+npx shadcn@latest add tooltip
+npx shadcn@latest add popover
+npx shadcn@latest add hover-card
+```
+
+### Component Usage Rules
+
+#### ✅ ALWAYS USE Shadcn/UI For:
+
+1. **Base UI Elements**
+```tsx
+// Always use shadcn/ui for standard components
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+```
+
+2. **Form Controls**
+```tsx
+// All form elements from shadcn/ui
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Select } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
+```
+
+3. **Layout Components**
+```tsx
+// Layout and structure
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { Sheet } from "@/components/ui/sheet"  // Mobile only!
+```
+
+4. **Feedback Components**
+```tsx
+// User feedback (non-blocking)
+import { Toast } from "@/components/ui/toast"
+import { Progress } from "@/components/ui/progress"
+import { Skeleton } from "@/components/ui/skeleton"
+```
+
+#### ❌ NEVER USE These Shadcn Components:
+
+```tsx
+// ❌ FORBIDDEN - These create modals
+import { Dialog } from "@/components/ui/dialog"        // NO MODALS!
+import { AlertDialog } from "@/components/ui/alert-dialog"  // NO MODALS!
+
+// Use these alternatives instead:
+// Dialog → Sheet (mobile) or inline panels
+// AlertDialog → Toast with action buttons or inline confirmation
+```
+
+### Shadcn/UI Component Patterns
+
+#### Pattern: Command Palette (Allowed Overlay)
+```tsx
+// ✅ Command is allowed - it's non-blocking
+import {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandShortcut,
+} from "@/components/ui/command"
+
+// This is acceptable because:
+// 1. Triggered by explicit keyboard shortcut (⌘K)
+// 2. Easily dismissed with ESC
+// 3. Doesn't block content permanently
+```
+
+#### Pattern: Contextual Popovers
+```tsx
+// ✅ Popovers for contextual actions
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+
+// Good for:
+// - Color pickers
+// - Date pickers  
+// - Small forms
+// - Quick settings
+```
+
+#### Pattern: Hover Cards for Information
+```tsx
+// ✅ Non-blocking information display
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
+
+// Perfect for:
+// - Connection previews
+// - User info cards
+// - Document metadata
+// - Definition tooltips
+```
+
+#### Pattern: Tabs for Organization
+```tsx
+// ✅ Tabs keep everything visible
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+export function RightPanel() {
+  return (
+    <Tabs defaultValue="connections" className="h-full">
+      <TabsList className="grid w-full grid-cols-3">
+        <TabsTrigger value="connections">Connections</TabsTrigger>
+        <TabsTrigger value="notes">Notes</TabsTrigger>
+        <TabsTrigger value="cards">Cards</TabsTrigger>
+      </TabsList>
+      <TabsContent value="connections">
+        {/* Content stays in context */}
+      </TabsContent>
+    </Tabs>
+  )
+}
+```
+
+#### Pattern: Progress Indicators
+```tsx
+// ✅ Visual progress without blocking
+import { Progress } from "@/components/ui/progress"
+
+export function ProcessingIndicator({ value }) {
+  return (
+    <div className="w-full space-y-2">
+      <Progress value={value} className="h-2" />
+      <p className="text-sm text-muted-foreground">
+        Processing: {value}%
+      </p>
+    </div>
+  )
+}
+```
+
+### Customizing Shadcn Components
+
+#### Adding Variants
+```tsx
+// Extend button with custom variants in components/ui/button.tsx
+const buttonVariants = cva(
+  "base-styles",
+  {
+    variants: {
+      variant: {
+        default: "default-styles",
+        destructive: "destructive-styles",
+        // Add custom variants
+        success: "bg-green-500 text-white hover:bg-green-600",
+        study: "bg-purple-500 text-white hover:bg-purple-600",
+      },
+    },
+  }
+)
+```
+
+#### Composition Over Modification
+```tsx
+// ✅ Good: Compose shadcn components
+export function StudyButton({ children, ...props }) {
+  return (
+    <Button
+      className="bg-gradient-to-r from-purple-500 to-pink-500"
+      {...props}
+    >
+      <Brain className="mr-2 h-4 w-4" />
+      {children}
+    </Button>
+  )
+}
+
+// ❌ Bad: Modifying core shadcn components directly
+// Don't edit files in components/ui/ after adding them
+```
+
+### Accessibility with Shadcn/UI
+
+```tsx
+// Shadcn components include ARIA attributes by default
+<Button
+  disabled={isLoading}
+  aria-label="Create flashcard from selection"
+  aria-busy={isLoading}
+>
+  {isLoading ? <Spinner /> : "Create Card"}
+</Button>
+
+// Tooltips for keyboard shortcuts
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Button>Study</Button>
+    </TooltipTrigger>
+    <TooltipContent>
+      <p>Start study session</p>
+      <CommandShortcut>⌘S</CommandShortcut>
+    </TooltipContent>
+  </Tooltip>
+</TooltipProvider>
+```
+
+### Form Handling with Shadcn/UI
+
+```tsx
+// Use shadcn form components with react-hook-form
+import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form"
+
+export function FlashcardForm() {
+  const form = useForm()
+  
+  return (
+    <Form {...form}>
+      <FormField
+        control={form.control}
+        name="question"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Question</FormLabel>
+            <FormControl>
+              <Textarea {...field} />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+    </Form>
+  )
+}
+```
+
+### Theming Shadcn/UI
+
+```css
+/* globals.css - Shadcn theme variables */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --primary: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
+  /* Custom colors for Rhizome */
+  --study: 271 81% 56%;      /* Purple for study mode */
+  --connection: 199 89% 48%;  /* Blue for connections */
+  --annotation: 43 96% 58%;   /* Yellow for highlights */
+}
+
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  /* Dark mode adjustments */
+}
+```
+
+### Component Priority Order
+
+1. **Shadcn/UI First**: Use for all standard UI needs
+2. **Magic UI Enhancement**: Add when extra visual appeal needed
+3. **Custom Components**: Build only when neither library provides solution
+
+### Decision Tree for Component Selection
+
+```
+Need a UI component?
+├─ Is it a basic UI element? → Use Shadcn/UI
+├─ Does it need special effects? → Consider Magic UI
+├─ Is it a modal/dialog? → STOP! Use alternative pattern
+├─ Is it mobile-specific? → Use Sheet from Shadcn/UI
+└─ Not covered? → Build custom following patterns
+```
+
+## Magic UI Components Integration
+
+### Installation & Setup
+
+Magic UI components are installed using the same CLI as shadcn/ui:
+
+```bash
+# Add specific Magic UI components
+pnpm dlx shadcn@latest add @magicui/[component-name]
+
+# Example:
+pnpm dlx shadcn@latest add @magicui/shimmer-button
+pnpm dlx shadcn@latest add @magicui/animated-beam
+pnpm dlx shadcn@latest add @magicui/text-animate
+```
+
+### Available Component Categories
+
+#### 1. Special Effects Components
+Use these to enhance visual appeal without blocking content:
+
+| Component | Use Case | Example Usage |
+|-----------|----------|---------------|
+| **Animated Beam** | Connection lines between elements | Showing relationships between chunks |
+| **Border Beam** | Animated borders | Highlighting active sections |
+| **Meteors** | Background effects | Empty state backgrounds |
+| **Particles** | Ambient animations | Reading environment enhancement |
+| **Confetti** | Success celebrations | Completing study sessions |
+| **Shine Border** | Subtle highlights | Selected cards/panels |
+| **Magic Card** | Interactive cards | Flashcard displays |
+
+#### 2. Text Animation Components
+For dynamic text displays that maintain readability:
+
+| Component | Use Case | When to Use |
+|-----------|----------|-------------|
+| **Text Animate** | Smooth text transitions | Loading states, titles |
+| **Number Ticker** | Animated counters | Study statistics |
+| **Hyper Text** | Hover effects | Interactive keywords |
+| **Scroll Based Velocity** | Speed-based effects | Document scrolling |
+| **Sparkles Text** | Emphasis without modals | Important notifications |
+| **Morphing Text** | Smooth transitions | Status changes |
+
+#### 3. Interactive Buttons
+Replace boring buttons with engaging alternatives:
+
+| Component | Use Case | Implementation |
+|-----------|----------|----------------|
+| **Shimmer Button** | Primary CTAs | Create flashcard, Start study |
+| **Rainbow Button** | Special actions | Export, Share |
+| **Ripple Button** | Feedback on click | Quick actions |
+| **Pulsating Button** | Attention-drawing | Due cards notification |
+
+#### 4. Background Patterns
+Non-intrusive visual enhancements:
+
+| Component | Use Case | Where to Apply |
+|-----------|----------|----------------|
+| **Dot Pattern** | Subtle backgrounds | Empty library states |
+| **Grid Pattern** | Structure indication | Canvas views |
+| **Flickering Grid** | Dynamic backgrounds | Loading states |
+| **Animated Grid Pattern** | Living backgrounds | Study environment |
+
+### Implementation Rules for Magic UI
+
+#### ✅ DO USE Magic UI Components When:
+
+1. **Enhancing Visual Feedback** without modals
+```tsx
+// Good: Visual celebration for completing study session
+import Confetti from "@/components/ui/confetti"
+
+function onStudyComplete() {
+  triggerConfetti() // Non-blocking celebration
+}
+```
+
+2. **Creating Engaging Empty States**
+```tsx
+// Good: Interactive empty library
+import { DotPattern } from "@/components/ui/dot-pattern"
+import { ShimmerButton } from "@/components/ui/shimmer-button"
+
+<div className="relative">
+  <DotPattern className="opacity-20" />
+  <ShimmerButton onClick={uploadDocument}>
+    Upload Your First Document
+  </ShimmerButton>
+</div>
+```
+
+3. **Showing Connections/Relationships**
+```tsx
+// Good: Visualizing document connections
+import { AnimatedBeam } from "@/components/ui/animated-beam"
+
+<AnimatedBeam 
+  from={documentRef}
+  to={relatedDocRef}
+  curvature={50}
+/>
+```
+
+4. **Indicating Progress/Status**
+```tsx
+// Good: Processing status with style
+import { BorderBeam } from "@/components/ui/border-beam"
+
+<div className="relative">
+  <ProcessingDock />
+  <BorderBeam duration={3} /> {/* Animated border */}
+</div>
+```
+
+#### ❌ DON'T USE Magic UI Components When:
+
+1. **It Would Distract from Reading**
+```tsx
+// Bad: Too many effects in reader
+<DocumentReader>
+  <Meteors /> {/* NO: Distracting */}
+  <Particles /> {/* NO: Overwhelming */}
+</DocumentReader>
+
+// Good: Subtle enhancement only
+<DocumentReader>
+  <HighlightWithShine /> {/* Subtle, purposeful */}
+</DocumentReader>
+```
+
+2. **Performance Would Suffer**
+```tsx
+// Bad: Heavy animations on mobile
+const isMobile = useMediaQuery('(max-width: 768px)')
+{isMobile && <ComplexAnimation />} // NO
+
+// Good: Adaptive to device
+{!isMobile && <AnimatedBeam />} // Desktop only
+```
+
+3. **Accessibility Would Be Compromised**
+```tsx
+// Bad: Essential info in animation only
+<MorphingText>{importantError}</MorphingText> // NO
+
+// Good: Animation enhances, doesn't replace
+<div>
+  <span className="sr-only">{message}</span>
+  <TextAnimate>{message}</TextAnimate>
+</div>
+```
+
+### Magic UI Pattern Examples
+
+#### Pattern: Enhanced Quick Capture
+```tsx
+import { ShimmerButton } from "@/components/ui/shimmer-button"
+import { SparklesText } from "@/components/ui/sparkles-text"
+
+export function EnhancedQuickCapture() {
+  return (
+    <motion.div className="quick-capture-bar">
+      <SparklesText>Create from Selection</SparklesText>
+      <div className="flex gap-2">
+        <ShimmerButton size="sm" onClick={createFlashcard}>
+          <Sparkles className="w-4 h-4 mr-1" />
+          Flashcard
+        </ShimmerButton>
+        <RippleButton size="sm" onClick={createNote}>
+          <MessageSquare className="w-4 h-4 mr-1" />
+          Note
+        </RippleButton>
+      </div>
+    </motion.div>
+  )
+}
+```
+
+#### Pattern: Animated Study Progress
+```tsx
+import { NumberTicker } from "@/components/ui/number-ticker"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
+
+export function StudyProgress({ stats }) {
+  return (
+    <div className="study-stats">
+      <NumberTicker value={stats.cardsStudied} />
+      <span>cards today</span>
+      
+      {/* Visual connection between related cards */}
+      <AnimatedBeam 
+        from={currentCardRef}
+        to={nextCardRef}
+        show={showingConnection}
+      />
+    </div>
+  )
+}
+```
+
+#### Pattern: Document Processing Feedback
+```tsx
+import { BorderBeam } from "@/components/ui/border-beam"
+import { TextAnimate } from "@/components/ui/text-animate"
+
+export function ProcessingFeedback({ status }) {
+  return (
+    <div className="processing-dock">
+      <BorderBeam duration={2} delay={0} />
+      <TextAnimate>
+        {status.message}
+      </TextAnimate>
+      {status.complete && <Confetti />}
+    </div>
+  )
+}
+```
+
+### Component Selection Matrix
+
+When choosing between standard shadcn/ui and Magic UI components:
+
+| Need | Standard Choice | Magic UI Enhancement | When to Use Magic |
+|------|----------------|---------------------|-------------------|
+| Button | Button | ShimmerButton, RainbowButton | Primary CTAs, special actions |
+| Text Display | <p>, <span> | TextAnimate, SparklesText | Titles, success messages |
+| Loading | Spinner | BorderBeam, Meteors | When not distracting |
+| Cards | Card | MagicCard | Interactive elements |
+| Connections | Lines/SVG | AnimatedBeam | Showing relationships |
+| Backgrounds | solid/gradient | DotPattern, GridPattern | Empty states, canvas views |
+| Success Feedback | Toast | Confetti | Major achievements |
+| Highlights | bg-color | ShineBorder | Selected states |
+
+### Performance Guidelines
+
+1. **Limit Concurrent Animations**: Max 2-3 Magic UI effects simultaneously
+2. **Disable on Mobile**: Heavy effects should be desktop-only
+3. **Use CSS Variables**: For theming Magic UI components
+4. **Lazy Load**: Import effects only when needed
+5. **Respect prefers-reduced-motion**: Disable or simplify for accessibility
+
+### Accessibility Considerations
+
+```tsx
+// Always provide non-animated alternatives
+const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+
+return (
+  <>
+    {prefersReducedMotion ? (
+      <Button>Create Flashcard</Button>
+    ) : (
+      <ShimmerButton>Create Flashcard</ShimmerButton>
+    )}
+  </>
+)
+```
+
+## Summary Rules
+
+1. **Never block the main content** - User can always read/interact
+2. **Persistent over temporary** - Docks/panels over modals
+3. **Contextual over global** - Show UI near relevant content
+4. **Collapsible everything** - Let users control their space
+5. **Keyboard accessible** - Every action has a shortcut
+6. **Mobile adaptive** - Panels become sheets on small screens
+7. **Smooth animations** - Use springs, avoid jarring transitions
+8. **Focus management** - Trap focus in overlays, return on dismiss
+9. **Magic UI Enhancement** - Use Magic UI to enhance, not replace, core functionality
+10. **Performance First** - Disable heavy effects on low-end devices
+11. **Accessibility Always** - Provide reduced-motion alternatives
+12. **Purposeful Effects** - Every animation should have a clear UX purpose
+
+
+This comprehensive guide ensures Claude Code will never use modals and always implements the correct non-blocking UI patterns. Each pattern includes complete implementation code that can be directly used.
+
+
 ## Core Principle: Flow State Preservation
 Never interrupt the user's reading or thinking with modals. Use persistent, non-blocking UI elements that enhance rather than obstruct.
 
@@ -1489,17 +2067,3 @@ export const useUIStore = create<UIStore>((set) => ({
 // ✅ Command palette
 <CommandPalette />
 ```
-
-## Summary Rules
-
-1. **Never block the main content** - User can always read/interact
-2. **Persistent over temporary** - Docks/panels over modals
-3. **Contextual over global** - Show UI near relevant content
-4. **Collapsible everything** - Let users control their space
-5. **Keyboard accessible** - Every action has a shortcut
-6. **Mobile adaptive** - Panels become sheets on small screens
-7. **Smooth animations** - Use springs, avoid jarring transitions
-8. **Focus management** - Trap focus in overlays, return on dismiss
-
-
-This comprehensive guide ensures Claude Code will never use modals and always implements the correct non-blocking UI patterns. Each pattern includes complete implementation code that can be directly used.

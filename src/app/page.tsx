@@ -1,14 +1,34 @@
+import { UploadZone } from '@/components/library/UploadZone'
+import { ProcessingDock } from '@/components/layout/ProcessingDock'
+
+/**
+ * Main library page with document upload and processing.
+ * @returns Home page component.
+ */
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm">
-        <h1 className="text-4xl font-bold mb-8 text-center">Rhizome V2</h1>
-        
-        <div className="text-center text-gray-500">
-          <p>Document Reader & Knowledge Synthesis</p>
-          <p className="mt-4 text-sm">Foundation Ready</p>
+    <>
+      <main className="container mx-auto p-8 pb-32">
+        <div className="max-w-3xl mx-auto space-y-8">
+          <div>
+            <h1 className="text-4xl font-bold mb-2">Rhizome V2</h1>
+            <p className="text-muted-foreground">
+              Document Reader & Knowledge Synthesis
+            </p>
+          </div>
+          
+          <UploadZone />
+          
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold">Your Documents</h2>
+            <p className="text-sm text-muted-foreground">
+              Upload a document to get started
+            </p>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+      
+      <ProcessingDock />
+    </>
   )
 }

@@ -1,31 +1,36 @@
 # Product Requirements & Plans: Document Upload to Storage
 
-**Version:** 1.0  
-**Date:** January 25, 2025  
-**Feature:** Document Upload to Storage System  
+**Version:** 2.0  
+**Date:** January 26, 2025  
+**Feature:** Document Upload to Storage with Cross-Document Connection Detection  
 **Author:** AI Development Team  
 **Status:** Ready for Implementation  
-**Confidence Level:** 8/10 (One-pass implementation success probability - complexity increased with connection detection)
+**Confidence Level:** 9/10 (One-pass implementation success probability - comprehensive Phase 8 specifications added)
 
 ---
 
 ## 1. Executive Summary
 
 ### Feature Overview
-A sophisticated document ingestion system for Rhizome V2 that accepts multiple file formats (PDF, TXT, Markdown, EPUB, YouTube transcripts), processes them through Gemini AI to create clean markdown versions, and provides a delightful upload experience with real-time progress tracking. The system implements a two-phase AI processing approach (quick metadata + full extraction) with background processing and beautiful preview cards. Post-processing includes automatic cross-document connection detection using semantic similarity, creating a knowledge synthesis engine that surfaces non-obvious relationships between documents.
+A sophisticated document ingestion and knowledge synthesis system for Rhizome V2 that accepts multiple file formats (PDF, TXT, Markdown, EPUB, YouTube transcripts), processes them through Gemini AI to create clean markdown versions, and provides a delightful upload experience with real-time progress tracking. The system implements a two-phase AI processing approach (quick metadata + full extraction) with background processing and beautiful preview cards. Post-processing includes automatic cross-document connection detection using pgvector similarity search and Gemini analysis, creating an intelligent knowledge network that surfaces non-obvious relationships between documents through elegant margin indicators, split-screen comparisons, and connection-aware flashcards.
 
 ### Business Value
 - **User Productivity**: Batch upload up to 10 documents simultaneously
-- **Knowledge Synthesis**: Clean markdown extraction enables cross-document connections
+- **Knowledge Synthesis**: Automatic discovery of connections across documents (supports, contradicts, extends, bridges)
+- **Enhanced Learning**: Connection-aware flashcards that test relationship understanding
+- **Non-Intrusive Discovery**: Margin indicators preserve reading flow while surfacing insights
 - **Data Portability**: User-owned content with export capability
 - **Delightful UX**: Real-time progress, preview cards, no modal interruptions
 
 ### Success Metrics
 - Upload success rate > 95%
 - Processing time < 2 minutes for average document (20 pages)
+- Connection detection < 30 seconds for 20-page document
+- Connection relevance > 80% (users find them meaningful)
 - User satisfaction with metadata extraction accuracy
 - Zero data loss during processing
-- Cost per document < $0.10 for AI processing
+- Cost per document < $0.15 for AI processing (includes connection detection)
+- Connection engagement rate > 30% (users interact with discovered connections)
 
 ---
 
@@ -46,6 +51,9 @@ A sophisticated document ingestion system for Rhizome V2 that accepts multiple f
 - Semantic chunking for knowledge synthesis
 - Clean markdown generation preserving formatting
 - YouTube transcript cleaning with optional timestamp preservation
+- Post-processing connection detection: pgvector similarity + Gemini analysis
+- Four connection types: supports, contradicts, extends, bridges
+- Importance scoring for high-value connection notifications
 
 #### User Experience
 - Preview cards with extracted/default metadata
@@ -53,6 +61,14 @@ A sophisticated document ingestion system for Rhizome V2 that accepts multiple f
 - AI enhancement button for metadata ("magic stars")
 - Background processing with visible progress dock
 - Delightful completion notifications with action buttons
+- Margin indicators for discovered connections (colored dots)
+- Hover preview cards showing connection details
+- Split-screen comparison mode for deep exploration
+- Connection sidebar for managing relationships
+- Manual connection creation via "clipboard" pattern
+- Connection-based flashcards for relationship learning
+- Activity feed on synthesis page
+- Real-time notifications for high-value discoveries
 
 ### Non-Functional Requirements
 
@@ -127,6 +143,18 @@ src/components/
 │   ├── ProcessingDock.tsx     // Bottom dock (collapsible)
 │   ├── ProgressBar.tsx        // Individual progress
 │   └── CompletionNotification.tsx
+├── connections/                // Phase 8 Connection Components
+│   ├── MarginIndicators.tsx   // Colored dots in margins
+│   ├── ConnectionPreview.tsx  // HoverCard preview
+│   ├── ConnectionSidebar.tsx  // Sheet with connection details
+│   ├── ComparisonView.tsx     // Split-screen comparison
+│   ├── ConnectionClipboard.tsx // Manual connection dialog
+│   └── ConnectionNotifications.tsx // Dropdown notifications
+├── synthesis/
+│   ├── ActivityFeed.tsx       // Connection activity timeline
+│   └── ConnectionFilters.tsx  // Filter by type/strength
+├── study/
+│   └── ConnectionFlashcard.tsx // Relationship-based cards
 └── ui/                        // Existing shadcn components
 
 // API Structure
@@ -134,12 +162,32 @@ src/app/api/
 ├── metadata/extract/route.ts  // Quick metadata extraction
 ├── process/document/route.ts  // Full processing trigger
 ├── youtube/transcript/route.ts // YouTube special handling
-└── upload/signed-url/route.ts // Secure upload URLs
+├── upload/signed-url/route.ts // Secure upload URLs
+├── connections/
+│   ├── create/route.ts        // Manual connection creation
+│   ├── [id]/
+│   │   ├── route.ts          // Update/dismiss connection
+│   │   └── comparison/route.ts // Get comparison data
+│   ├── clipboard/
+│   │   ├── start/route.ts    // Start manual connection
+│   │   └── complete/route.ts // Complete connection
+│   ├── feed/route.ts         // Activity feed
+│   └── search/route.ts       // Search connections
+├── notifications/
+│   ├── connections/route.ts  // Connection notifications
+│   └── [id]/read/route.ts    // Mark as read
+└── documents/
+    ├── [id]/
+    │   ├── settings/route.ts  // Connection settings
+    │   └── detect-connections/route.ts // Trigger detection
+    └── detection-status/route.ts // Batch status check
 
 // Edge Functions
 supabase/functions/
-└── process-document/
-    └── index.ts               // Gemini processing pipeline
+├── process-document/
+│   └── index.ts               // Gemini processing pipeline
+└── detect-connections/
+    └── index.ts               // Connection detection with pgvector + Gemini
 ```
 
 ### Database Schema Updates
@@ -158,7 +206,7 @@ CREATE TABLE processing_queue (
   document_id UUID REFERENCES documents ON DELETE CASCADE,
   user_id UUID REFERENCES auth.users NOT NULL,
   status TEXT DEFAULT 'pending', 
-  -- Status values: pending|metadata|processing|chunking|embedding|complete|failed
+  -- Status values: pending|metadata|processing|chunking|embedding|connections|complete|failed
   progress INTEGER DEFAULT 0, -- 0-100
   status_message TEXT,
   error_message TEXT,
@@ -167,6 +215,46 @@ CREATE TABLE processing_queue (
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Connection-related tables (Phase 8)
+CREATE TABLE connection_dismissals (
+  user_id UUID NOT NULL REFERENCES auth.users,
+  connection_id UUID NOT NULL,
+  dismissed_at TIMESTAMPTZ DEFAULT NOW(),
+  reason TEXT, -- 'not_relevant', 'incorrect', 'duplicate'
+  PRIMARY KEY (user_id, connection_id)
+);
+
+CREATE TABLE connection_clipboard (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users,
+  source_chunk_id UUID NOT NULL REFERENCES chunks,
+  source_text TEXT NOT NULL,
+  source_document_id UUID NOT NULL REFERENCES documents,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 minutes'
+);
+
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users,
+  type TEXT NOT NULL, -- 'connection_found', 'batch_complete'
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  data JSONB,
+  read BOOLEAN DEFAULT false,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE connection_activity (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users,
+  connection_id UUID NOT NULL,
+  action TEXT NOT NULL, -- 'created', 'modified', 'annotated'
+  metadata JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Indexes for performance
@@ -555,6 +643,199 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+```
+
+### Phase 3.5: Connection Detection System (5 days)
+
+#### 3.5.1 Connection Detection Backend
+```typescript
+// supabase/functions/detect-connections/index.ts
+// Runs after document processing as background job
+
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createClient } from '@supabase/supabase-js';
+
+const genAI = new GoogleGenerativeAI(Deno.env.get('GEMINI_API_KEY')!);
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+);
+
+serve(async (req) => {
+  const { documentId } = await req.json();
+  
+  // Process in background using EdgeRuntime.waitUntil
+  const detectionPromise = detectConnectionsAsync(documentId);
+  
+  return new Response(
+    JSON.stringify({ status: 'detecting', documentId }),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+});
+
+async function detectConnectionsAsync(documentId: string) {
+  try {
+    // Update status
+    await updateDetectionStatus(documentId, 'detecting', 'Searching for connections');
+    
+    // 1. Get chunks from new document
+    const { data: newChunks } = await supabase
+      .from('chunks')
+      .select('*')
+      .eq('document_id', documentId)
+      .order('chunk_index');
+    
+    let connectionsFound = 0;
+    const batchSize = 5; // Process in batches for efficiency
+    
+    for (let i = 0; i < newChunks.length; i += batchSize) {
+      const batch = newChunks.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(async (chunk) => {
+        // 2. Use pgvector for similarity search
+        const { data: similar } = await supabase.rpc('match_chunks', {
+          query_embedding: chunk.embedding,
+          match_threshold: 0.75,
+          match_count: 10,
+          exclude_document: documentId
+        });
+        
+        // 3. Analyze top matches with Gemini
+        for (const match of similar.slice(0, 5)) {
+          const connectionType = await analyzeConnectionType(
+            chunk.content,
+            match.content
+          );
+          
+          if (connectionType && connectionType !== 'none') {
+            // 4. Create connection entity using ECS pattern
+            await createConnectionEntity({
+              sourceChunkId: chunk.id,
+              targetChunkId: match.id,
+              sourceDocumentId: documentId,
+              targetDocumentId: match.document_id,
+              type: connectionType,
+              strength: match.similarity,
+              reasoning: await generateReasoning(chunk.content, match.content, connectionType)
+            });
+            
+            connectionsFound++;
+          }
+        }
+      }));
+      
+      // Update progress
+      const progress = Math.round((i / newChunks.length) * 100);
+      await updateDetectionStatus(
+        documentId,
+        'detecting',
+        `Found ${connectionsFound} connections`,
+        progress
+      );
+    }
+    
+    // 5. Complete and notify if high-value connections
+    await updateDetectionStatus(documentId, 'complete', `Detection complete: ${connectionsFound} connections found`, 100);
+    
+    if (connectionsFound > 0) {
+      await createNotification(documentId, connectionsFound);
+    }
+    
+  } catch (error) {
+    console.error('Connection detection failed:', error);
+    await updateDetectionStatus(documentId, 'failed', error.message);
+  }
+}
+
+async function analyzeConnectionType(source: string, target: string) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  
+  const result = await model.generateContent({
+    contents: [{
+      parts: [{
+        text: `Analyze the relationship between these passages:
+        
+        Passage A: "${source.substring(0, 500)}..."
+        Passage B: "${target.substring(0, 500)}..."
+        
+        Classify as ONE of:
+        - supports: B reinforces A's argument
+        - contradicts: B opposes A's claim
+        - extends: B builds upon A's idea
+        - bridges: A and B connect different domains
+        - none: No meaningful connection
+        
+        Return only the classification word.`
+      }]
+    }]
+  });
+  
+  return result.response.text().trim().toLowerCase();
+}
+```
+
+#### 3.5.2 Frontend Connection Components
+```typescript
+// components/connections/MarginIndicators.tsx
+// See brainstorming doc for complete implementation
+
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+
+const CONNECTION_COLORS = {
+  supports: 'bg-green-500',
+  contradicts: 'bg-red-500',
+  extends: 'bg-blue-500',
+  bridges: 'bg-amber-500'
+};
+
+interface MarginIndicatorProps {
+  connections: Connection[];
+  position: { top: number };
+  onConnectionClick: (id: string) => void;
+}
+
+export function MarginIndicator({ connections, position, onConnectionClick }: MarginIndicatorProps) {
+  return (
+    <div 
+      className="absolute left-2" 
+      style={{ top: position.top }}
+    >
+      {connections.slice(0, 5).map((conn, idx) => (
+        <HoverCard key={conn.id}>
+          <HoverCardTrigger asChild>
+            <button
+              onClick={() => onConnectionClick(conn.id)}
+              className={cn(
+                "w-2 h-2 rounded-full mb-1 transition-all hover:scale-150",
+                CONNECTION_COLORS[conn.type]
+              )}
+              style={{ marginTop: idx * 12 }}
+            />
+          </HoverCardTrigger>
+          <HoverCardContent className="w-80">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Badge variant={conn.type === 'contradicts' ? 'destructive' : 'default'}>
+                  {conn.type}
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  {Math.round(conn.strength * 100)}% match
+                </span>
+              </div>
+              <p className="text-sm">{conn.targetDocument.title}</p>
+              <p className="text-xs text-muted-foreground line-clamp-2">
+                {conn.targetChunk.preview}
+              </p>
+            </div>
+          </HoverCardContent>
+        </HoverCard>
+      ))}
+    </div>
+  );
 }
 ```
 
@@ -1084,6 +1365,106 @@ function extractVideoId(url: string): string | null {
 }
 ```
 
+### Phase 8: Connection Detection UI (15 days)
+
+#### Phase 8.1: Margin Indicators (2 days)
+```typescript
+// components/connections/MarginIndicators.tsx
+// Display connection dots in document margins
+
+- [ ] Create MarginIndicator component with colored dots
+- [ ] Implement color coding by connection type
+- [ ] Add hover detection and preview trigger
+- [ ] Handle multiple connections per chunk (max 5)
+- [ ] Responsive sizing for mobile
+```
+
+#### Phase 8.2: Connection Preview Cards (1.5 days)
+```typescript
+// components/connections/ConnectionPreview.tsx
+// HoverCard component for quick preview
+
+- [ ] Build ConnectionPreview hover card
+- [ ] Display type, source, strength, count
+- [ ] Position intelligently (avoid edges)
+- [ ] Add click handler to open sidebar
+- [ ] Mobile tap behavior
+```
+
+#### Phase 8.3: Connection Sidebar (2 days)
+```typescript
+// components/connections/ConnectionSidebar.tsx
+// Sheet component for detailed view
+
+- [ ] Create ConnectionSidebar using Sheet
+- [ ] Show full connection details
+- [ ] List all connections for selected chunk
+- [ ] Add "Compare" button for split-screen
+- [ ] Enable connection editing/dismissal
+- [ ] User notes on connections
+```
+
+#### Phase 8.4: Split-Screen Comparison (3 days)
+```typescript
+// components/connections/ComparisonView.tsx
+// ResizablePanel for side-by-side viewing
+
+- [ ] Build ComparisonView with two readers
+- [ ] Implement ResizablePanel with handle
+- [ ] Highlight connected passages
+- [ ] Optional scroll synchronization
+- [ ] Pin/unpin functionality
+- [ ] Annotation tools for both documents
+```
+
+#### Phase 8.5: Manual Connection Creation (2 days)
+```typescript
+// components/connections/ConnectionClipboard.tsx
+// Dialog for defining connection type
+
+- [ ] Implement ConnectionClipboard state management
+- [ ] "Start connection" context menu
+- [ ] Floating connection badge
+- [ ] Target selection UI
+- [ ] Connection type dialog with RadioGroup
+- [ ] Save manual connection via API
+```
+
+#### Phase 8.6: Connection Flashcards (1.5 days)
+```typescript
+// components/study/ConnectionFlashcard.tsx
+// Special cards for testing relationships
+
+- [ ] Create ConnectionFlashcard component
+- [ ] Generate relationship questions
+- [ ] Link flashcard to connection entity
+- [ ] Special styling for connection cards
+- [ ] Integration with study system
+```
+
+#### Phase 8.7: Notifications & Activity Feed (2 days)
+```typescript
+// components/connections/ConnectionNotifications.tsx
+// components/synthesis/ActivityFeed.tsx
+
+- [ ] Build ConnectionNotifications dropdown
+- [ ] Real-time notification system
+- [ ] Activity feed on synthesis page
+- [ ] Filtering by type/date/importance
+- [ ] Mark as read functionality
+```
+
+#### Phase 8.8: Document Settings & Privacy (1 day)
+```typescript
+// Document-level connection settings
+
+- [ ] Add privacy toggle to document settings
+- [ ] "Find connections now" button
+- [ ] Connection detection status display
+- [ ] Bulk enable/disable for library
+- [ ] Connection type preferences
+```
+
 ---
 
 ## 5. Integration Points
@@ -1103,6 +1484,36 @@ function extractVideoId(url: string): string | null {
 - **Library**: `youtube-transcript` npm package
 - **Fallbacks**: Manual transcript paste, external services
 - **Thumbnail Pattern**: `https://img.youtube.com/vi/{videoId}/maxresdefault.jpg`
+
+#### Connection Detection APIs (Phase 8)
+
+##### Connection Management Endpoints
+- `POST /api/connections/create` - Manual connection creation
+- `PATCH /api/connections/:id` - Modify existing connection
+- `DELETE /api/connections/:id/dismiss` - Hide connection
+- `GET /api/connections/:id/comparison` - Get split-screen data
+
+##### Connection Clipboard Flow
+- `POST /api/connections/clipboard/start` - Begin manual connection
+- `POST /api/connections/clipboard/complete` - Finish connection
+- `GET /api/connections/clipboard` - Current clipboard state
+- `DELETE /api/connections/clipboard` - Cancel in-progress
+
+##### Discovery & Activity
+- `GET /api/connections/feed` - Activity timeline with pagination
+- `GET /api/chunks/:id/connections` - Connections for specific chunk
+- `GET /api/connections/search` - Search by themes or content
+- `GET /api/connections/progress/:documentId` - SSE progress stream
+
+##### Notifications
+- `GET /api/notifications/connections` - Unread notifications
+- `POST /api/notifications/:id/read` - Mark as read
+- `POST /api/notifications/read-all` - Mark all read
+
+##### Document Settings
+- `PATCH /api/documents/:id/settings` - Connection preferences
+- `POST /api/documents/:id/detect-connections` - Trigger detection
+- `POST /api/documents/detection-status` - Batch status check
 
 ### Internal Systems
 
@@ -1314,29 +1725,63 @@ describe('Document Upload Flow', () => {
   - Thumbnail generation
   - Fallback handling
   
-- **Day 12**: Polish & Testing
-  - Integration testing
+- **Day 12**: Polish & Testing (Core Upload)
+  - Integration testing for upload/processing
   - Error handling
   - Performance optimization
   - Documentation
 
-- **Days 13-15**: Connection Detection Infrastructure
+- **Days 13-15**: Connection Detection Backend
   - pgvector similarity functions
+  - Edge Function for detection
+  - Gemini connection analysis
   - Batched processing implementation
   - Connection limits and thresholds
 
-### Sprint 4 (Week 4)
-- **Days 16-17**: Connection Analysis & ECS
-  - Gemini-powered type determination
-  - Connections as ECS entities
-  - Importance scoring algorithm
+### Sprint 4 (Week 4): Connection UI Foundation
+- **Days 16-17**: Margin Indicators & Preview Cards
+  - MarginIndicators component (Phase 8.1)
+  - ConnectionPreview hover cards (Phase 8.2)
+  - Color coding and positioning
   
-- **Day 18**: Connection Testing & Optimization
-  - Performance testing with large documents
-  - Threshold tuning
-  - Real-time notifications
+- **Days 18-19**: Connection Sidebar
+  - ConnectionSidebar with Sheet (Phase 8.3)
+  - Connection details and management
+  - Edit/dismiss functionality
 
-**Total: 18 days** (Original 12 days + 5 days for connections + 1 day buffer)
+- **Days 20-22**: Split-Screen Comparison
+  - ComparisonView with ResizablePanel (Phase 8.4)
+  - Synchronized scrolling option
+  - Highlight connected passages
+
+### Sprint 5 (Week 5): Connection Features
+- **Days 23-24**: Manual Connection Creation
+  - Connection clipboard pattern (Phase 8.5)
+  - Context menu integration
+  - Type selection dialog
+
+- **Days 25-26**: Connection Flashcards
+  - ConnectionFlashcard component (Phase 8.6)
+  - Relationship questions
+  - Study system integration
+
+### Sprint 6 (Week 6): Polish & Notifications
+- **Days 27-28**: Notifications & Activity Feed
+  - ConnectionNotifications dropdown (Phase 8.7)
+  - Activity feed for synthesis page
+  - Real-time updates
+
+- **Day 29**: Document Settings
+  - Privacy controls (Phase 8.8)
+  - Connection preferences
+  - Bulk operations
+
+- **Day 30**: Final Integration & Testing
+  - End-to-end connection flow testing
+  - Performance optimization
+  - Documentation updates
+
+**Total: 30 days** (12 days core + 3 days backend + 15 days UI)
 
 
 ---
@@ -1430,11 +1875,12 @@ This PRP provides comprehensive context for one-pass implementation success with
 ## Task Breakdown
 
 A detailed task breakdown has been generated for this feature and is available at:
-**📋 [`/docs/tasks/document-upload-storage.md`](/docs/tasks/document-upload-storage.md)**
+**📋 [`/docs/tasks/document-upload-storage-with-connections.md`](/docs/tasks/document-upload-storage-with-connections.md)**
 
 The task breakdown includes:
-- 18 granular development tasks (2-8 hours each)
+- 45+ granular development tasks (2-8 hours each)
+- Phase 8 connection detection tasks fully integrated
 - Clear dependencies and critical path analysis
 - Given-When-Then acceptance criteria for each task
 - Team structure and parallelization opportunities
-- Day-by-day implementation schedule
+- 30-day implementation schedule with 6 sprints

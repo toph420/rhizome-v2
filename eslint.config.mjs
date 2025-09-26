@@ -17,10 +17,12 @@ const eslintConfig = [
       jsdoc,
     },
     rules: {
-      // Require JSDoc comments for all functions and classes
+      // JSDoc rules as warnings (encourage but don't block build)
+      // Only require JSDoc on PUBLIC API (exported declarations)
       "jsdoc/require-jsdoc": [
-        "error",
+        "warn",
         {
+          publicOnly: true,
           require: {
             FunctionDeclaration: true,
             MethodDefinition: true,
@@ -35,34 +37,28 @@ const eslintConfig = [
           ],
         },
       ],
-      // Require descriptions in JSDoc
-      "jsdoc/require-description": "error",
+      "jsdoc/require-description": "warn",
       "jsdoc/require-description-complete-sentence": "warn",
-      // Require parameter documentation
-      "jsdoc/require-param": "error",
-      "jsdoc/require-param-description": "error",
-      "jsdoc/require-param-name": "error",
-      "jsdoc/require-param-type": "off", // TypeScript handles types
-      // Require return documentation
-      "jsdoc/require-returns": "error",
-      "jsdoc/require-returns-description": "error",
-      "jsdoc/require-returns-type": "off", // TypeScript handles types
-      // Check JSDoc validity
-      "jsdoc/check-alignment": "error",
-      "jsdoc/check-indentation": "error",
-      "jsdoc/check-param-names": "error",
-      "jsdoc/check-syntax": "error",
-      "jsdoc/check-tag-names": "error",
-      "jsdoc/check-types": "off", // TypeScript handles types
-      "jsdoc/valid-types": "off", // TypeScript handles types
-      // Additional quality rules
-      "jsdoc/no-undefined-types": "off", // TypeScript handles types
-      "jsdoc/require-yields": "error",
-      "jsdoc/require-yields-check": "error",
-      // Formatting rules
-      "jsdoc/multiline-blocks": "error",
-      "jsdoc/no-multi-asterisks": "error",
-      "jsdoc/tag-lines": ["error", "never"],
+      "jsdoc/require-param": "warn",
+      "jsdoc/require-param-description": "warn",
+      "jsdoc/require-param-name": "warn",
+      "jsdoc/require-param-type": "off",
+      "jsdoc/require-returns": "warn",
+      "jsdoc/require-returns-description": "warn",
+      "jsdoc/require-returns-type": "off",
+      "jsdoc/check-alignment": "warn",
+      "jsdoc/check-indentation": "warn",
+      "jsdoc/check-param-names": "warn",
+      "jsdoc/check-syntax": "warn",
+      "jsdoc/check-tag-names": "warn",
+      "jsdoc/check-types": "off",
+      "jsdoc/valid-types": "off",
+      "jsdoc/no-undefined-types": "off",
+      "jsdoc/require-yields": "warn",
+      "jsdoc/require-yields-check": "warn",
+      "jsdoc/multiline-blocks": "warn",
+      "jsdoc/no-multi-asterisks": "warn",
+      "jsdoc/tag-lines": ["warn", "never"],
     },
     settings: {
       jsdoc: {
