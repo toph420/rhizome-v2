@@ -1,0 +1,67 @@
+Test Document - Medium Size Plain Text
+
+Introduction
+============
+
+This is a medium-sized plain text document designed to test the Rhizome V2 processing system with non-markdown formats. This document should generate approximately 3-5 semantic chunks when processed.
+
+Background
+==========
+
+The document processing pipeline in Rhizome V2 is designed to handle multiple file formats including PDF, Markdown, and plain text files. The system extracts content, breaks it into semantic chunks, generates embeddings, and stores everything for later retrieval and synthesis.
+
+Technical Architecture
+======================
+
+Component 1: Document Upload
+The system accepts file uploads through a drag-and-drop interface. Files are stored in Supabase Storage with a standardized path structure: userId/documentId/source.ext
+
+Component 2: AI Processing
+Gemini 2.5-flash is used for two main operations:
+- Extraction: Converting PDFs and other formats to clean markdown
+- Chunking: Breaking documents into semantic units of 200-500 words
+
+Component 3: Embedding Generation
+Each chunk is converted to a 768-dimensional vector using Gemini's text-embedding-004 model. These embeddings enable semantic search across your document library.
+
+Component 4: Storage Strategy
+Hybrid storage approach:
+- Large immutable files (PDFs, markdown) → Supabase Storage
+- Queryable data (chunks, embeddings) → PostgreSQL with pgvector
+- User annotations and flashcards → ECS components table
+
+Use Cases
+=========
+
+Reading and Annotation
+Users can read documents in a clean markdown format, highlight passages, and add annotations. The system preserves reading position and supports quick flashcard creation from selected text.
+
+Study System
+Integrated spaced repetition using the FSRS algorithm. Flashcards are created directly from document content and reviewed in study sessions.
+
+Knowledge Synthesis
+The system automatically discovers connections between ideas across documents using vector similarity search. "Sparks" emerge when themes overlap between different sources.
+
+Performance Considerations
+==========================
+
+Document Size Limits
+- Small documents (<5 pages): Process in 30-60 seconds
+- Medium documents (5-20 pages): Process in 1-3 minutes
+- Large documents (20-50 pages): Process in 3-7 minutes
+- Very large documents (50+ pages): May timeout, consider chunking
+
+API Rate Limits
+Gemini API has rate limits that may affect bulk processing. The worker processes documents sequentially to avoid hitting these limits.
+
+Network Considerations
+Processing happens asynchronously in a background worker. Users can close the browser and check back later. Real-time progress updates are provided via Supabase Realtime.
+
+Conclusion
+==========
+
+This medium-sized test document demonstrates the system's ability to process plain text files. The content includes enough variety to create meaningful semantic chunks and test the embedding generation process.
+
+Expected processing time: 60-90 seconds
+Expected chunk count: 4-6 chunks
+Expected embedding dimension: 768
