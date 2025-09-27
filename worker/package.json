@@ -9,12 +9,17 @@
   },
   "dependencies": {
     "@google/genai": "^0.3.0",
+    "@mozilla/readability": "^0.6.0",
     "@supabase/supabase-js": "^2.45.0",
+    "axios": "^1.12.2",
     "dotenv": "^17.2.2",
+    "jsdom": "^27.0.0",
     "jsonrepair": "^3.13.1",
-    "tsx": "^4.7.0"
+    "tsx": "^4.7.0",
+    "youtube-transcript-plus": "^1.1.1"
   },
   "devDependencies": {
+    "@types/mozilla__readability": "^0.4.2",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   }

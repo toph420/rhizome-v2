@@ -197,6 +197,34 @@ userId/
 
 ## Document Processing - AI ONLY
 
+### Multi-Format Support
+
+Rhizome supports 6 input methods. Processing routes by `source_type`:
+
+- **`pdf`**: Gemini Files API (existing PDF processing)
+- **`youtube`**: youtube-transcript-plus library for transcript fetching
+- **`web_url`**: jsdom + Mozilla Readability for article extraction
+- **`markdown_asis`**: Heading-based chunking, no AI processing (fast)
+- **`markdown_clean`**: AI cleanup + semantic chunking
+- **`txt`**: Convert plain text to structured markdown with AI
+- **`paste`**: Generic text processing with optional timestamp detection
+
+### Processing Patterns
+
+**Worker Handler Routing**: See `worker/handlers/process-document.ts` for main routing logic by `source_type`.
+
+**Utility Functions**: See `worker/lib/` directory:
+- `youtube.ts` - Video ID extraction, transcript fetching, markdown formatting
+- `web-extraction.ts` - URL validation, Readability extraction, HTML sanitization
+- `markdown-chunking.ts` - Heading-based chunking, timestamp extraction
+
+**Error Handling**: All utility functions use prefixed error messages for UI routing:
+- `YOUTUBE_TRANSCRIPT_DISABLED` - Suggests manual paste
+- `YOUTUBE_RATE_LIMIT` - Transient error, retry
+- `WEB_PAYWALL` - Suggests archive.ph
+- `WEB_NOT_FOUND` - Permanent error (404)
+- `WEB_TIMEOUT` - Transient error, retry
+
 ### FORBIDDEN Libraries - DO NOT USE
 ```
 ❌ pdf-parse

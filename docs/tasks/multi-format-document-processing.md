@@ -1,6 +1,6 @@
 # Task Breakdown: Multi-Format Document Processing System
 
-**Source PRP**: `/Users/topher/Code/rhizome-v2/docs/prps/multi-format-document-processing.md`  
+**Source PRP**: `docs/prps/multi-format-document-processing.md`  
 **Feature Type**: Core Processing Pipeline Enhancement  
 **Complexity**: Medium (2 weeks, 80-100 hours)  
 **Impact**: High - Universal content ingestion platform
@@ -1472,7 +1472,7 @@ Replace existing UploadZone component with tabbed interface supporting file uplo
 
 #### Implementation Details
 
-**Component structure** (see PRP Task 4.2 for complete code):
+**Component structure** (see PRP Task 4.2 (`/Users/topher/Code/rhizome-v2/docs/prps/multi-format-document-processing.md`) for complete code):
 ```tsx
 <Tabs value={activeTab}>
   <TabsList>

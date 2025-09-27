@@ -1,6 +1,10 @@
 import { GoogleGenAI, Type } from '@google/genai'
-import { getUserFriendlyError } from '../lib/errors.js'
+import { getUserFriendlyError, classifyError } from '../lib/errors.js'
 import { jsonrepair } from 'jsonrepair'
+import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
+import { extractArticle, isValidUrl } from '../lib/web-extraction.js'
+import { simpleMarkdownChunking, extractTimestampsWithContext } from '../lib/markdown-chunking.js'
+import type { SourceType, TimestampContext } from '../types/multi-format.js'
 
 const STAGES = {
   DOWNLOAD: { name: 'download', percent: 10 },
@@ -15,6 +19,7 @@ interface ChunkData {
   themes: string[]
   importance_score: number
   summary: string
+  timestamps?: TimestampContext[]
 }
 
 interface ExtractionResponse {
@@ -50,37 +55,243 @@ export async function processDocumentHandler(supabase: any, job: any) {
     let chunks: ChunkData[]
 
     if (!completedStages.includes(STAGES.SAVE_MARKDOWN.name)) {
-      await updateProgress(supabase, job.id, STAGES.DOWNLOAD.percent, 'download', 'fetching', 'Retrieving file from storage')
-      
-      const { data: signedUrlData } = await supabase.storage
-        .from('documents')
-        .createSignedUrl(`${storagePath}/source.pdf`, 3600)
-      
-      const fileResponse = await fetch(signedUrlData.signedUrl)
-      const fileBuffer = await fileResponse.arrayBuffer()
-      
-      // Detect file type from response headers or content
-      const contentType = fileResponse.headers.get('content-type') || 'application/pdf'
-      const isTextFile = contentType.includes('text') || contentType.includes('markdown')
-      const isPDF = contentType.includes('pdf')
-      const fileSizeKB = Math.round(fileBuffer.byteLength / 1024)
-      const fileSizeMB = fileBuffer.byteLength / (1024 * 1024)
+      // Get source metadata from job input
+      const sourceType = (job.input_data.source_type as SourceType) || 'pdf'
+      const sourceUrl = job.input_data.source_url as string | undefined
+      const processingRequested = (job.input_data.processing_requested as boolean) ?? true
+      const pastedContent = job.input_data.pasted_content as string | undefined
 
-      await updateProgress(supabase, job.id, 12, 'download', 'complete', `Downloaded ${fileSizeKB} KB file`)
-      
-      if (isTextFile && !isPDF) {
-        // For text/markdown files, use content directly
-        await updateProgress(supabase, job.id, 22, 'extract', 'reading', 'Reading text file')
-        markdown = new TextDecoder().decode(fileBuffer)
+      // Route by source type
+      switch (sourceType) {
+        case 'youtube': {
+          await updateProgress(supabase, job.id, 10, 'download', 'fetching', 'Fetching YouTube transcript')
+          
+          if (!sourceUrl) {
+            throw new Error('Source URL required for YouTube processing')
+          }
+          
+          const videoId = extractVideoId(sourceUrl)
+          if (!videoId) {
+            throw new Error('YOUTUBE_INVALID_ID: Invalid YouTube URL format')
+          }
+          
+          const transcript = await fetchTranscriptWithRetry(videoId)
+          markdown = formatTranscriptToMarkdown(transcript, sourceUrl)
+          
+          await updateProgress(supabase, job.id, 30, 'extract', 'chunking', 'Creating semantic chunks')
+          chunks = await rechunkMarkdown(ai, markdown)
+          
+          // Extract timestamps from chunks for YouTube videos
+          for (const chunk of chunks) {
+            const timestamps = extractTimestampsWithContext(chunk.content)
+            if (timestamps.length > 0) {
+              // Store timestamps in chunk metadata (will be added to DB later)
+              ;(chunk as any).timestamps = timestamps
+            }
+          }
+          
+          await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks with timestamps`)
+          break
+        }
         
-        // Use Gemini for chunking only
-        await updateProgress(supabase, job.id, 25, 'extract', 'chunking', 'Breaking into semantic chunks')
-        chunks = await rechunkMarkdown(ai, markdown)
-        await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks`)
-      } else if (isPDF) {
-        try {
-          // Step 1: Upload to Files API
-          await updateProgress(supabase, job.id, 15, 'extract', 'uploading', `Uploading ${fileSizeKB} KB PDF to Gemini`)
+        case 'web_url': {
+          await updateProgress(supabase, job.id, 10, 'download', 'fetching', 'Fetching web article')
+          
+          if (!sourceUrl) {
+            throw new Error('Source URL required for web article processing')
+          }
+          
+          if (!isValidUrl(sourceUrl)) {
+            throw new Error('WEB_INVALID_URL: Invalid web URL format')
+          }
+          
+          const article = await extractArticle(sourceUrl)
+          
+          await updateProgress(supabase, job.id, 25, 'extract', 'cleaning', 'Cleaning article content with AI')
+          
+          // Convert article to markdown with Gemini
+          const articleResult = await ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{
+              parts: [{
+                text: `Convert this web article to clean, well-formatted markdown. Preserve structure but remove ads, navigation, and boilerplate.
+
+Title: ${article.title}
+Author: ${article.byline || 'Unknown'}
+
+Content:
+${article.textContent}`
+              }]
+            }]
+          })
+          
+          markdown = articleResult.text || ''
+          
+          await updateProgress(supabase, job.id, 40, 'extract', 'chunking', 'Creating semantic chunks')
+          chunks = await rechunkMarkdown(ai, markdown)
+          await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks`)
+          break
+        }
+        
+        case 'markdown_asis': {
+          await updateProgress(supabase, job.id, 10, 'download', 'reading', 'Reading markdown file')
+          
+          // Download file from storage
+          const { data: markdownBlob, error: markdownError } = await supabase.storage
+            .from('documents')
+            .download(`${storagePath}/source.md`)
+          
+          if (markdownError) throw markdownError
+          
+          markdown = await markdownBlob.text()
+          
+          await updateProgress(supabase, job.id, 30, 'extract', 'chunking', 'Chunking by headings (no AI)')
+          
+          // No AI processing - chunk by headings
+          chunks = simpleMarkdownChunking(markdown)
+          await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks`)
+          break
+        }
+        
+        case 'markdown_clean': {
+          await updateProgress(supabase, job.id, 10, 'download', 'reading', 'Reading markdown file')
+          
+          // Download file from storage
+          const { data: mdBlob, error: mdError } = await supabase.storage
+            .from('documents')
+            .download(`${storagePath}/source.md`)
+          
+          if (mdError) throw mdError
+          
+          const rawMarkdown = await mdBlob.text()
+          
+          await updateProgress(supabase, job.id, 25, 'extract', 'cleaning', 'Cleaning markdown with AI')
+          
+          // Clean markdown with Gemini
+          const cleanResult = await ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{
+              parts: [{
+                text: `Clean and improve this markdown formatting. Fix any issues with headings, lists, emphasis, etc. Preserve all content but enhance readability.
+
+${rawMarkdown}`
+              }]
+            }]
+          })
+          
+          markdown = cleanResult.text || ''
+          
+          await updateProgress(supabase, job.id, 40, 'extract', 'chunking', 'Creating semantic chunks')
+          chunks = await rechunkMarkdown(ai, markdown)
+          await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks`)
+          break
+        }
+        
+        case 'txt': {
+          await updateProgress(supabase, job.id, 10, 'download', 'reading', 'Reading text file')
+          
+          // Download file from storage
+          const { data: txtBlob, error: txtError } = await supabase.storage
+            .from('documents')
+            .download(`${storagePath}/source.txt`)
+          
+          if (txtError) throw txtError
+          
+          const textContent = await txtBlob.text()
+          
+          await updateProgress(supabase, job.id, 25, 'extract', 'formatting', 'Converting to markdown with AI')
+          
+          // Convert text to markdown with Gemini
+          const txtResult = await ai.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{
+              parts: [{
+                text: `Convert this plain text to well-formatted markdown. Add appropriate headings, lists, emphasis, and structure.
+
+${textContent}`
+              }]
+            }]
+          })
+          
+          markdown = txtResult.text || ''
+          
+          await updateProgress(supabase, job.id, 40, 'extract', 'chunking', 'Creating semantic chunks')
+          chunks = await rechunkMarkdown(ai, markdown)
+          await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks`)
+          break
+        }
+        
+        case 'paste': {
+          await updateProgress(supabase, job.id, 10, 'extract', 'processing', 'Processing pasted content')
+          
+          if (!pastedContent) {
+            throw new Error('Pasted content required for paste processing')
+          }
+          
+          // Check if it has timestamps (might be YouTube transcript)
+          const hasTimestamps = /\[\d{1,2}:\d{2}(?::\d{2})?\]/.test(pastedContent)
+          
+          if (hasTimestamps && sourceUrl) {
+            // Treat as YouTube transcript
+            markdown = pastedContent
+            
+            await updateProgress(supabase, job.id, 30, 'extract', 'chunking', 'Creating semantic chunks')
+            chunks = await rechunkMarkdown(ai, markdown)
+            
+            // Extract timestamps
+            for (const chunk of chunks) {
+              const timestamps = extractTimestampsWithContext(chunk.content)
+              if (timestamps.length > 0) {
+                chunk.timestamps = timestamps
+              }
+            }
+            
+            await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks with timestamps`)
+          } else {
+            // Generic text processing
+            await updateProgress(supabase, job.id, 25, 'extract', 'formatting', 'Converting to markdown with AI')
+            
+            const pasteResult = await ai.models.generateContent({
+              model: 'gemini-2.0-flash',
+              contents: [{
+                parts: [{
+                  text: `Convert this text to clean, well-formatted markdown. Add structure and formatting as appropriate.
+
+${pastedContent}`
+                }]
+              }]
+            })
+            
+            markdown = pasteResult.text || ''
+            
+            await updateProgress(supabase, job.id, 40, 'extract', 'chunking', 'Creating semantic chunks')
+            chunks = await rechunkMarkdown(ai, markdown)
+            await updateProgress(supabase, job.id, 45, 'extract', 'complete', `Created ${chunks.length} chunks`)
+          }
+          break
+        }
+        
+        case 'pdf':
+        default: {
+          // Existing PDF processing logic
+          await updateProgress(supabase, job.id, STAGES.DOWNLOAD.percent, 'download', 'fetching', 'Retrieving file from storage')
+          
+          const { data: signedUrlData } = await supabase.storage
+            .from('documents')
+            .createSignedUrl(`${storagePath}/source.pdf`, 3600)
+          
+          const fileResponse = await fetch(signedUrlData.signedUrl)
+          const fileBuffer = await fileResponse.arrayBuffer()
+          
+          const fileSizeKB = Math.round(fileBuffer.byteLength / 1024)
+          const fileSizeMB = fileBuffer.byteLength / (1024 * 1024)
+
+          await updateProgress(supabase, job.id, 12, 'download', 'complete', `Downloaded ${fileSizeKB} KB file`)
+          
+          // PDF processing with Gemini Files API
+          try {
+            // Step 1: Upload to Files API
+            await updateProgress(supabase, job.id, 15, 'extract', 'uploading', `Uploading ${fileSizeKB} KB PDF to Gemini`)
           
           const uploadStart = Date.now();
           // Convert ArrayBuffer to Blob for Files API
@@ -191,19 +402,16 @@ export async function processDocumentHandler(supabase: any, job: any) {
           markdown = extracted.markdown;
           chunks = extracted.chunks;
           
-          const markdownKB = Math.round(markdown.length / 1024);
-          await updateProgress(supabase, job.id, 40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB, took ${generateTime}s)`)
-          
-        } catch (error: any) {
-          // Convert to user-friendly error before throwing
-          const friendlyMessage = getUserFriendlyError(error);
-          throw new Error(friendlyMessage);
+            const markdownKB = Math.round(markdown.length / 1024);
+            await updateProgress(supabase, job.id, 40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB, took ${generateTime}s)`)
+            
+          } catch (error: any) {
+            // Convert to user-friendly error before throwing
+            const friendlyMessage = getUserFriendlyError(error);
+            throw new Error(friendlyMessage);
+          }
+          break
         }
-        
-        // Progress already updated in PDF processing block
-      } else {
-        // Unsupported file type
-        throw new Error(`Unsupported file type: ${contentType}. Only PDF, Markdown (.md), and plain text (.txt) files are supported.`)
       }
 
       await updateProgress(supabase, job.id, STAGES.SAVE_MARKDOWN.percent, 'save_markdown', 'uploading', 'Saving markdown to storage')
@@ -263,7 +471,7 @@ export async function processDocumentHandler(supabase: any, job: any) {
         throw new Error(`Invalid embedding response for chunk ${i}: Missing embedding.values`)
       }
 
-      await supabase.from('chunks').insert({
+      const chunkData: any = {
         document_id,
         content: chunk.content,
         embedding: embeddingVector,
@@ -271,7 +479,14 @@ export async function processDocumentHandler(supabase: any, job: any) {
         themes: chunk.themes,
         importance_score: chunk.importance_score,
         summary: chunk.summary
-      })
+      }
+
+      // Add timestamp data if present (YouTube videos)
+      if (chunk.timestamps) {
+        chunkData.timestamps = chunk.timestamps
+      }
+
+      await supabase.from('chunks').insert(chunkData)
 
       if (i % 5 === 0 || i === chunkCount - 1) {
         const embedPercent = STAGES.EMBED.percent + (i / chunkCount) * 49
@@ -315,17 +530,31 @@ export async function processDocumentHandler(supabase: any, job: any) {
       .eq('id', document_id)
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    const err = error instanceof Error ? error : new Error('Unknown error occurred')
+    const friendlyMessage = getUserFriendlyError(err)
+    const errorType = classifyError(err)
     
+    // Update job with error details
+    await supabase
+      .from('background_jobs')
+      .update({ 
+        status: 'failed',
+        error_message: friendlyMessage,
+        error_type: errorType,
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id)
+    
+    // Update document with error message
     await supabase
       .from('documents')
       .update({
         processing_status: 'failed',
-        processing_error: errorMessage
+        processing_error: friendlyMessage
       })
       .eq('id', document_id)
     
-    throw error
+    throw new Error(friendlyMessage)
   }
 }
 

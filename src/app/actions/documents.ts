@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
 
 /**
@@ -47,26 +46,69 @@ export async function uploadDocument(formData: FormData): Promise<{
   error?: string
 }> {
   try {
-    const file = formData.get('file') as File
-    if (!file) {
+    // Extract source metadata
+    const sourceType = formData.get('source_type') as string || 'pdf'
+    const sourceUrl = formData.get('source_url') as string | null
+    const processingRequested = formData.get('processing_requested') === 'true'
+    const pastedContent = formData.get('pasted_content') as string | null
+    
+    // Validate source type
+    const validSourceTypes = ['pdf', 'markdown_asis', 'markdown_clean', 'txt', 'youtube', 'web_url', 'paste']
+    if (!validSourceTypes.includes(sourceType)) {
+      return { success: false, error: 'Invalid source type' }
+    }
+    
+    // For URL-based sources, validate URL
+    if ((sourceType === 'youtube' || sourceType === 'web_url') && !sourceUrl) {
+      return { success: false, error: 'Source URL required for this type' }
+    }
+    
+    // For paste type, validate content
+    if (sourceType === 'paste' && !pastedContent) {
+      return { success: false, error: 'Content required for paste type' }
+    }
+    
+    // For file uploads, validate file exists and type
+    const file = formData.get('file') as File | null
+    if (!['youtube', 'web_url', 'paste'].includes(sourceType) && !file) {
       return { success: false, error: 'No file provided' }
     }
     
-    if (!file.type.includes('pdf') && !file.type.includes('text')) {
-      return { success: false, error: 'Only PDF and text files are supported' }
+    if (file && !file.type.includes('pdf') && !file.type.includes('text') && !file.type.includes('markdown')) {
+      return { success: false, error: 'Only PDF, text, and markdown files are supported' }
     }
     
     const user = await getCurrentUser()
     const supabase = getSupabaseClient()
     const documentId = crypto.randomUUID()
+    const baseStoragePath = `${user.id}/${documentId}`
     
-    const storagePath = `${user.id}/${documentId}/source.pdf`
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(storagePath, file)
+    // Upload file to storage if provided
+    if (file) {
+      // Determine file extension based on source type
+      let fileExtension = '.pdf'
+      if (sourceType === 'markdown_asis' || sourceType === 'markdown_clean') {
+        fileExtension = '.md'
+      } else if (sourceType === 'txt') {
+        fileExtension = '.txt'
+      }
+      
+      const storagePath = `${baseStoragePath}/source${fileExtension}`
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(storagePath, file)
+      
+      if (uploadError) {
+        return { success: false, error: uploadError.message }
+      }
+    }
     
-    if (uploadError) {
-      return { success: false, error: uploadError.message }
+    // Determine document title
+    let title = 'Untitled Document'
+    if (file) {
+      title = file.name.replace(/\.[^/.]+$/, '')
+    } else if (sourceUrl) {
+      title = sourceUrl.split('/').pop() || sourceUrl
     }
     
     const { error: dbError } = await supabase
@@ -74,17 +116,29 @@ export async function uploadDocument(formData: FormData): Promise<{
       .insert({
         id: documentId,
         user_id: user.id,
-        title: file.name.replace(/\.[^/.]+$/, ''),
-        storage_path: `${user.id}/${documentId}`,
+        title: title,
+        storage_path: baseStoragePath,
+        source_type: sourceType,
+        source_url: sourceUrl,
+        processing_requested: processingRequested,
         processing_status: 'pending'
       })
     
     if (dbError) {
-      await supabase.storage.from('documents').remove([storagePath])
+      // Clean up uploaded file if it exists
+      if (file) {
+        let fileExtension = '.pdf'
+        if (sourceType === 'markdown_asis' || sourceType === 'markdown_clean') {
+          fileExtension = '.md'
+        } else if (sourceType === 'txt') {
+          fileExtension = '.txt'
+        }
+        await supabase.storage.from('documents').remove([`${baseStoragePath}/source${fileExtension}`])
+      }
       return { success: false, error: dbError.message }
     }
     
-    // NEW: Create background job for processing
+    // Create background job for processing
     const { data: job, error: jobError } = await supabase
       .from('background_jobs')
       .insert({
@@ -94,7 +148,11 @@ export async function uploadDocument(formData: FormData): Promise<{
         entity_id: documentId,
         input_data: {
           document_id: documentId,
-          storage_path: `${user.id}/${documentId}`
+          storage_path: baseStoragePath,
+          source_type: sourceType,
+          source_url: sourceUrl,
+          processing_requested: processingRequested,
+          pasted_content: pastedContent
         }
       })
       .select()
@@ -102,7 +160,16 @@ export async function uploadDocument(formData: FormData): Promise<{
     
     if (jobError) {
       await supabase.from('documents').delete().eq('id', documentId)
-      await supabase.storage.from('documents').remove([storagePath])
+      // Clean up uploaded file if it exists
+      if (file) {
+        let fileExtension = '.pdf'
+        if (sourceType === 'markdown_asis' || sourceType === 'markdown_clean') {
+          fileExtension = '.md'
+        } else if (sourceType === 'txt') {
+          fileExtension = '.txt'
+        }
+        await supabase.storage.from('documents').remove([`${baseStoragePath}/source${fileExtension}`])
+      }
       return { success: false, error: jobError.message }
     }
     
