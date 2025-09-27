@@ -1,6 +1,7 @@
 # Gemini Document Processing
 
 > **SDK Version**: This document uses `@google/genai` (the new unified SDK)  
+> **Processing Method**: Files API for PDFs ([Documentation](https://ai.google.dev/gemini-api/docs/files))  
 > **Last Updated**: January 2025
 
 ## SDK Setup
@@ -27,13 +28,25 @@ const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY })
 
 ## Processing Pipeline
 
-### Complete Document Processing Flow
+### Complete Document Processing Flow (Files API)
+
+**Why Files API?** The Files API is superior to inline base64 for PDFs because:
+- ✅ Handles larger files without payload bloat
+- ✅ Server-side validation before processing
+- ✅ More reliable for complex documents
+- ✅ Cleaner code without base64 conversion
+- ✅ Better error messages via file state tracking
+
+**Reference:** [Gemini Files API Documentation](https://ai.google.dev/gemini-api/docs/files)
+
 ```typescript
-// supabase/functions/process-document/index.ts
-import { GoogleGenAI } from 'npm:@google/genai'
+// worker/handlers/process-document.ts
+import { GoogleGenAI } from '@google/genai'
 
 /**
- * Process a document: extract content, chunk, embed, and store.
+ * Process a document using Gemini Files API.
+ * Three-phase approach: Upload → Validate → Process
+ * 
  * @param documentId - Document UUID
  * @param storagePath - Storage path prefix (userId/documentId)
  */
@@ -43,38 +56,122 @@ export async function processDocument(
 ) {
   // Initialize Gemini SDK
   const ai = new GoogleGenAI({ 
-    apiKey: Deno.env.get('GOOGLE_AI_API_KEY') 
+    apiKey: process.env.GOOGLE_AI_API_KEY,
+    httpOptions: {
+      timeout: 600000 // 10 minutes for HTTP-level timeout
+    }
   })
   
-  // 1. Get PDF from storage and convert to base64
+  // ═══════════════════════════════════════════════════════════
+  // PHASE 1: UPLOAD TO FILES API
+  // ═══════════════════════════════════════════════════════════
+  
+  // 1. Get PDF from storage
   const { data: signedUrlData } = await supabase.storage
     .from('documents')
     .createSignedUrl(`${storagePath}/source.pdf`, 3600)
   
   const pdfResponse = await fetch(signedUrlData.signedUrl)
   const pdfBuffer = await pdfResponse.arrayBuffer()
-  const pdfBase64 = arrayBufferToBase64(pdfBuffer)
+  const fileSizeMB = pdfBuffer.byteLength / (1024 * 1024)
   
-  // 2. Extract markdown and semantic chunks from PDF
-  // CRITICAL: Use ai.models.generateContent (note .models namespace)
-  const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [{
-      parts: [
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: pdfBase64
-          }
-        },
-        { text: EXTRACTION_AND_CHUNKING_PROMPT }
-      ]
-    }],
-    config: {  // Note: config not generationConfig
-      responseMimeType: "application/json",
-      responseSchema: DOCUMENT_SCHEMA
-    }
+  // 2. Upload to Files API (no base64 conversion needed!)
+  await updateProgress(supabase, jobId, 15, 'extract', 'uploading', 
+    `Uploading ${fileSizeMB.toFixed(1)} MB PDF to Gemini`)
+  
+  const uploadStart = Date.now()
+  const pdfBlob = new Blob([pdfBuffer], { type: 'application/pdf' })
+  const uploadedFile = await ai.files.upload({
+    file: pdfBlob,
+    config: { mimeType: 'application/pdf' }
   })
+  const uploadTime = Math.round((Date.now() - uploadStart) / 1000)
+  
+  // ═══════════════════════════════════════════════════════════
+  // PHASE 2: VALIDATE FILE STATE
+  // ═══════════════════════════════════════════════════════════
+  
+  await updateProgress(supabase, jobId, 20, 'extract', 'validating', 
+    `Upload complete (${uploadTime}s), validating file...`)
+  
+  let fileState = await ai.files.get({ name: uploadedFile.name || '' })
+  let attempts = 0
+  const maxAttempts = 30 // 60 seconds max (2s per attempt)
+  
+  while (fileState.state === 'PROCESSING' && attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    fileState = await ai.files.get({ name: uploadedFile.name || '' })
+    attempts++
+    
+    if (attempts % 5 === 0) {
+      await updateProgress(supabase, jobId, 20, 'extract', 'validating', 
+        `Validating file... (${attempts * 2}s)`)
+    }
+  }
+  
+  if (fileState.state !== 'ACTIVE') {
+    throw new Error(`File validation failed. State: ${fileState.state}. ` +
+      `The file may be corrupted or in an unsupported format.`)
+  }
+  
+  // ═══════════════════════════════════════════════════════════
+  // PHASE 3: AI EXTRACTION & PROCESSING
+  // ═══════════════════════════════════════════════════════════
+  
+  const estimatedTime = fileSizeMB < 1 ? '1-2 min' : 
+                        fileSizeMB < 5 ? '2-5 min' : '5-10 min'
+  await updateProgress(supabase, jobId, 25, 'extract', 'analyzing', 
+    `AI analyzing document (~${estimatedTime})...`)
+  
+  // 3. Extract markdown and semantic chunks from uploaded file
+  // CRITICAL: Use fileData with URI reference, not inlineData
+  const generateStart = Date.now()
+  const GENERATION_TIMEOUT = 8 * 60 * 1000 // 8 minutes
+  
+  // Update progress every 30 seconds during generation
+  const progressInterval = setInterval(async () => {
+    const elapsed = Math.round((Date.now() - generateStart) / 1000)
+    const minutes = Math.floor(elapsed / 60)
+    const seconds = elapsed % 60
+    const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+    await updateProgress(supabase, jobId, 30, 'extract', 'analyzing', 
+      `Still analyzing... (${timeStr} elapsed)`)
+  }, 30000)
+  
+  let result
+  try {
+    const generationPromise = ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: [{
+        parts: [
+          { 
+            fileData: { 
+              fileUri: uploadedFile.uri || uploadedFile.name, 
+              mimeType: 'application/pdf' 
+            } 
+          },
+          { text: EXTRACTION_PROMPT }
+        ]
+      }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: EXTRACTION_SCHEMA
+      }
+    })
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => {
+        reject(new Error(`Analysis timeout after 8 minutes. ` +
+          `PDF may be too complex. Try splitting into smaller documents.`))
+      }, GENERATION_TIMEOUT)
+    )
+    
+    result = await Promise.race([generationPromise, timeoutPromise]) as any
+  } finally {
+    clearInterval(progressInterval)
+  }
+  
+  const generateTime = Math.round((Date.now() - generateStart) / 1000)
   
   // 3. Parse JSON response
   if (!result.text) {
@@ -93,11 +190,9 @@ export async function processDocument(
   const embeddings = await Promise.all(
     chunks.map(async (chunk, index) => {
       const embedResult = await ai.models.embedContent({
-        model: 'text-embedding-004',
-        contents: chunk.content,
-        config: {
-          outputDimensionality: 768
-        }
+        model: 'gemini-embedding-001',
+        content: chunk.content,
+        outputDimensionality: 768
       })
       
       // Extract embedding vector (note nested structure)
@@ -129,15 +224,28 @@ export async function processDocument(
 ### Helper Functions
 ```typescript
 /**
- * Convert ArrayBuffer to base64 string.
+ * Update job progress in database.
  */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return btoa(binary)
+async function updateProgress(
+  supabase: any,
+  jobId: string,
+  percent: number,
+  stage: string,
+  substage: string,
+  details: string
+) {
+  await supabase
+    .from('background_jobs')
+    .update({
+      progress: {
+        percent,
+        stage,
+        substage,
+        details,
+        updated_at: new Date().toISOString()
+      }
+    })
+    .eq('id', jobId)
 }
 ```
 
@@ -278,9 +386,9 @@ async function batchEmbed(
       const embeddings = await Promise.all(
         batch.map(async (text) => {
           const result = await ai.models.embedContent({
-            model: 'text-embedding-004',
-            contents: text,
-            config: { outputDimensionality: 768 }
+            model: 'gemini-embedding-001',
+            content: text,
+            outputDimensionality: 768
           })
           return result.embedding.values
         })
@@ -307,6 +415,75 @@ async function batchEmbed(
   
   return results
 }
+```
+
+## Files API vs Inline Data Comparison
+
+### When to Use Files API
+
+**Use Files API for:**
+- ✅ PDFs over 1MB
+- ✅ Complex multi-page documents
+- ✅ Production applications requiring reliability
+- ✅ When you need server-side validation
+- ✅ When timeout control is important
+
+**Use Inline Data for:**
+- Simple text files under 100KB
+- Quick prototyping and testing
+- When immediate processing is required
+
+### Key Differences
+
+| Feature | Files API | Inline Data (base64) |
+|---------|-----------|---------------------|
+| Upload | Separate upload step | Included in request |
+| Max Size | Much larger (exact limit varies) | ~10MB practical limit |
+| Processing | Server-side validation | Immediate processing |
+| Code | Two-phase (upload → reference) | Single-phase |
+| Payload | URI reference only | Full base64 string |
+| Timeout | Separate timeout per phase | Single timeout for all |
+| Error Messages | Detailed file state | Generic errors |
+
+### Code Comparison
+
+```typescript
+// ❌ OLD: Inline Data (Don't use for PDFs)
+const base64 = Buffer.from(pdfBuffer).toString('base64')
+const result = await ai.models.generateContent({
+  model: 'gemini-2.0-flash',
+  contents: [{
+    parts: [
+      { inlineData: { mimeType: 'application/pdf', data: base64 } },
+      { text: prompt }
+    ]
+  }]
+})
+
+// ✅ NEW: Files API (Use this for PDFs)
+const pdfBlob = new Blob([pdfBuffer], { type: 'application/pdf' })
+const uploadedFile = await ai.files.upload({
+  file: pdfBlob,
+  config: { mimeType: 'application/pdf' }
+})
+
+// Validate file state
+let fileState = await ai.files.get({ name: uploadedFile.name })
+while (fileState.state === 'PROCESSING') {
+  await new Promise(resolve => setTimeout(resolve, 2000))
+  fileState = await ai.files.get({ name: uploadedFile.name })
+}
+
+// Use file reference
+const result = await ai.models.generateContent({
+  model: 'gemini-2.0-flash',
+  contents: [{
+    parts: [
+      { fileData: { fileUri: uploadedFile.uri, mimeType: 'application/pdf' } },
+      { text: prompt }
+    ]
+  }]
+})
 ```
 
 ### Safety Settings Configuration
@@ -354,9 +531,9 @@ async function robustEmbedContent(ai: GoogleGenAI, text: string, retries = 3) {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const result = await ai.models.embedContent({
-        model: 'text-embedding-004',
-        contents: text,
-        config: { outputDimensionality: 768 }
+        model: 'gemini-embedding-001',
+        content: text,
+        outputDimensionality: 768
       })
       
       // Validate response
@@ -397,8 +574,9 @@ async function robustEmbedContent(ai: GoogleGenAI, text: string, retries = 3) {
 ### Embedding Models
 | Model | Dimensions | Languages | Status |
 |-------|------------|-----------|--------|
-| `text-embedding-004` | 768 | English-focused | Deprecating 2026-01-14 |
-| `gemini-embedding-001` | 768 | 100+ languages | Recommended |
+| `gemini-embedding-001` | 128-3072 (recommended: 768, 1536, 3072) | 100+ languages | Recommended (current) |
+| `embedding-001` | 768 | Limited | Deprecating Oct 2025 |
+| `embedding-gecko-001` | 768 | Limited | Deprecating Oct 2025 |
 
 ## Common Issues & Solutions
 

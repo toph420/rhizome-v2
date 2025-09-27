@@ -135,7 +135,6 @@ After successful validation:
 
 ## Step 8: Final Report
 
-
 Provide a summary including:
 - Total tasks created and completed
 - Any tasks remaining in review and why

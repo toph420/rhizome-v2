@@ -29,6 +29,49 @@ npm run migrate
 npm run dev
 ```
 
+## Running with Background Processing
+
+The application uses a background worker system for document processing to eliminate timeout limitations and enable processing of documents of any size.
+
+### Option 1: Integrated (Recommended)
+
+```bash
+npm run dev  # Starts Supabase + Edge Functions + Worker + Next.js
+```
+
+This starts all services in a single command with proper cleanup on exit.
+
+### Option 2: Separate Terminals
+
+**Terminal 1: Next.js + Supabase**
+```bash
+npm run dev:next
+```
+
+**Terminal 2: Background Worker**
+```bash
+# First time: Install worker dependencies
+cd worker && npm install && cd ..
+
+# Then start worker
+npm run worker
+```
+
+### Checking Worker Status
+
+- **Worker logs**: Visible in Terminal 2 (or integrated output)
+- **Database**: Check `background_jobs` table in Supabase Studio
+- **UI**: View real-time progress in ProcessingDock (bottom of screen)
+
+### Worker Features
+
+- **No Timeout Limits**: Process documents of any size (500+ pages, 2+ hour processing)
+- **Real-time Progress**: Live updates via Supabase Realtime
+- **Checkpoint System**: Resume from failure at save_markdown stage
+- **Progressive Availability**: Read markdown while embeddings generate
+- **Auto-retry**: Transient errors (rate limits, network) retry automatically
+- **Manual Retry**: Failed jobs can be retried via ProcessingDock UI
+
 ## Test Document
 Use a small PDF (5-10 pages) for initial testing.
 Academic papers work well for testing synthesis.
@@ -50,18 +93,22 @@ npm run dev
 ```
 
 ### Processing stuck
-Check Supabase Edge Function logs:
+Check background worker logs in Terminal 2, or restart the worker:
 ```bash
-npx supabase functions serve
+npm run worker
 ```
+
+Check `background_jobs` table for failed jobs with error messages.
 
 ### Embeddings not generating
 Verify Gemini API key and quota
 
 ## Key Files to Check
 
-- `lib/ecs/simple-ecs.ts` - ECS implementation
+- `lib/ecs/ecs.ts` - ECS implementation
 - `app/page.tsx` - Library/upload interface  
 - `app/read/[id]/page.tsx` - Document reader
 - `components/layout/processing-dock.tsx` - Processing status
-- `supabase/functions/process-document` - Gemini processing
+- `worker/handlers/process-document.ts` - Background document processing
+- `worker/index.ts` - Job polling and dispatch
+- `supabase/migrations/008_background_jobs.sql` - Job tracking table

@@ -8,6 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rhizome V2 is a **document reader with integrated flashcard study system** and **AI-powered knowledge synthesis**. It processes PDFs and other documents to clean markdown, enables annotating and quick flashcard creation, and discovers connections between ideas across your reading.
 
+## Project Context
+
+This is a greenfield application with no existing users or legacy code. Prioritize modern best practices, clean architecture, and optimal solutions without considering backward compatibility or migration paths.
+
 **ARCHON PROJECT ID**: a2232595-4e55-41d2-a041-1a4a8a4ff3c6
 
 ## Core Architecture Principles
@@ -30,7 +34,6 @@ Rhizome V2 is a **document reader with integrated flashcard study system** and *
   "zustand": "^5.0.0",
   "framer-motion": "^11.0.0",
   "@radix-ui/react-*": "latest",
-  "pdf-parse": "^1.1.1",
   "jszip": "^3.10.0"
 }
 ```
@@ -106,7 +109,7 @@ src/
 │   │   └── RightPanel.tsx      # Connections panel
 │   └── ui/                # shadcn/ui
 ├── lib/
-│   ├── ecs/              # simple-ecs.ts ONLY
+│   ├── ecs/              # ecs.ts ONLY
 │   ├── processing/        # Gemini integration
 │   ├── study/            # FSRS algorithm
 │   └── synthesis/        # Connection detection
@@ -205,6 +208,9 @@ userId/
 ```
 
 ### ALWAYS Use Gemini for Everything
+
+Refer to the Gemini Developer API docs when necessary: https://ai.google.dev/gemini-api/docs
+
 ```typescript
 // supabase/functions/process-document/index.ts
 import { GoogleGenAI } from 'npm:@google/genai'
@@ -252,15 +258,16 @@ async function processDocument(documentId: string, pdfUrl: string) {
   for (const chunk of chunks) {
     // CRITICAL: Use ai.models.embedContent (note .models namespace)
     const embedResult = await ai.models.embedContent({
-      model: 'text-embedding-004',
+      model: 'gemini-embedding-001',
       contents: chunk.content,
       config: {
         outputDimensionality: 768
       }
     })
     
-    // Extract embedding vector (note the nested structure)
-    const embedding = embedResult.embedding.values
+    // Extract embedding vector from API response
+    // API returns: { embeddings: [{ values: number[] }] }
+    const embedding = embedResult.embeddings[0].values
     
     await supabase.from('chunks').insert({
       document_id: documentId,

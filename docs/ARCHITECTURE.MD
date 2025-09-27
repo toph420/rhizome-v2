@@ -26,9 +26,10 @@ Core principle: **Flow state preservation** - never interrupt reading or thinkin
     "queues": "Supabase Queue or pg_cron"
   },
   "ai": {
-    "processing": "Gemini 2.5 Flash",
-    "embeddings": "Gemini gemini-embedding-001",
-    "extraction": "AI-first extraction (no pdf-parse)"
+    "processing": "Gemini 2.0 Flash (gemini-2.0-flash)",
+    "embeddings": "gemini-embedding-001 (768/1536/3072 dimensions)",
+    "extraction": "AI-first extraction (no pdf-parse)",
+    "sdk": "@google/genai v0.3+"
   },
   "frontend": {
     "framework": "Next.js 15 with App Router",
@@ -262,35 +263,74 @@ CREATE POLICY "Users can view own documents" ON documents
 
 ### Overview
 ```
-PDF/EPUB/Web → AI Extraction → Markdown → Chunk → Embed → Store
+PDF → Upload to Files API → Validate → AI Extraction → Markdown → Chunk → Embed → Store
 ```
+
+**Key Innovation**: Uses Gemini Files API ([docs](https://ai.google.dev/gemini-api/docs/files)) for reliable PDF processing with server-side validation.
 
 ### Detailed Pipeline (AI-First)
 
 ```typescript
 // supabase/functions/process-document/index.ts
+import { GoogleGenAI, Type } from 'npm:@google/genai'
 
 async function processDocument(documentId: string, fileUrl: string) {
   const userId = await getUserId()
   const storagePath = `${userId}/${documentId}`
   
   // ┌─────────────────────────────────────┐
-  // │ STAGE 1: AI EXTRACTION & PROCESSING │
+  // │ STAGE 1: UPLOAD TO FILES API        │
   // └─────────────────────────────────────┘
   
-  // Download file as base64
-  const fileBuffer = await downloadFile(fileUrl)
-  const fileBase64 = Buffer.from(fileBuffer).toString('base64')
+  // Initialize Google GenAI client
+  const ai = new GoogleGenAI({ 
+    apiKey: Deno.env.get('GOOGLE_AI_API_KEY') 
+  })
   
-  // Send ENTIRE document to Gemini for extraction + processing
-  const result = await gemini.generateContent({
-    model: 'gemini-2.5-flash', // 1M context window!
+  // Download file and prepare for upload
+  const fileResponse = await fetch(fileUrl)
+  const fileBuffer = await fileResponse.arrayBuffer()
+  const pdfBlob = new Blob([fileBuffer], { type: 'application/pdf' })
+  
+  // Upload to Gemini Files API (handles larger files better than inline data)
+  // Reference: https://ai.google.dev/gemini-api/docs/files
+  const uploadedFile = await ai.files.upload({
+    file: pdfBlob,
+    config: { mimeType: 'application/pdf' }
+  })
+  
+  // ┌─────────────────────────────────────┐
+  // │ STAGE 2: VALIDATE FILE STATE        │
+  // └─────────────────────────────────────┘
+  
+  // Poll file status until ready for processing
+  let fileState = await ai.files.get({ name: uploadedFile.name || '' })
+  let attempts = 0
+  const maxAttempts = 30 // 60 seconds max (2s per attempt)
+  
+  while (fileState.state === 'PROCESSING' && attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    fileState = await ai.files.get({ name: uploadedFile.name || '' })
+    attempts++
+  }
+  
+  if (fileState.state !== 'ACTIVE') {
+    throw new Error(`File validation failed: ${fileState.state}`)
+  }
+  
+  // ┌─────────────────────────────────────┐
+  // │ STAGE 3: AI EXTRACTION & PROCESSING │
+  // └─────────────────────────────────────┘
+  
+  // Send file reference to Gemini for extraction + processing
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.0-flash', // Fast model for document processing
     contents: [{
       parts: [
         {
-          inlineData: {
-            mimeType: detectMimeType(fileUrl),
-            data: fileBase64
+          fileData: {
+            fileUri: uploadedFile.uri || uploadedFile.name,
+            mimeType: 'application/pdf'
           }
         },
         {
@@ -298,32 +338,32 @@ async function processDocument(documentId: string, fileUrl: string) {
         }
       ]
     }],
-    generationConfig: {
+    config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: "object",
+        type: Type.OBJECT,
         properties: {
-          markdown: { type: "string" }, // Full document in perfect markdown
+          markdown: { type: Type.STRING }, // Full document in perfect markdown
           metadata: {
-            type: "object",
+            type: Type.OBJECT,
             properties: {
-              title: { type: "string" },
-              authors: { type: "array", items: { type: "string" } },
-              abstract: { type: "string" },
-              mainTopics: { type: "array", items: { type: "string" } }
+              title: { type: Type.STRING },
+              authors: { type: Type.ARRAY, items: { type: Type.STRING } },
+              abstract: { type: Type.STRING },
+              mainTopics: { type: Type.ARRAY, items: { type: Type.STRING } }
             }
           },
           chunks: {
-            type: "array",
+            type: Type.ARRAY,
             items: {
-              type: "object",
+              type: Type.OBJECT,
               properties: {
-                content: { type: "string" },
-                type: { type: "string" },
-                themes: { type: "array", items: { type: "string" } },
-                pageNumbers: { type: "array", items: { type: "integer" } },
-                importance: { type: "number" },
-                summary: { type: "string" }
+                content: { type: Type.STRING },
+                type: { type: Type.STRING },
+                themes: { type: Type.ARRAY, items: { type: Type.STRING } },
+                pageNumbers: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                importance: { type: Type.NUMBER },
+                summary: { type: Type.STRING }
               }
             }
           }
@@ -332,10 +372,11 @@ async function processDocument(documentId: string, fileUrl: string) {
     }
   })
   
-  const { markdown, metadata, chunks } = result
+  // Parse JSON response
+  const { markdown, metadata, chunks } = JSON.parse(result.text)
   
   // ┌─────────────────────────────────────┐
-  // │ STAGE 2: STORAGE                    │
+  // │ STAGE 4: STORAGE                    │
   // └─────────────────────────────────────┘
   
   // Save markdown to STORAGE (not database!)
@@ -354,20 +395,23 @@ async function processDocument(documentId: string, fileUrl: string) {
     .eq('id', documentId)
   
   // ┌─────────────────────────────────────┐
-  // │ STAGE 3: EMBEDDINGS                 │
+  // │ STAGE 5: EMBEDDINGS                 │
   // └─────────────────────────────────────┘
   
   const embeddings = await Promise.all(
-    chunks.map(chunk => 
-      gemini.embedContent({
-        model: 'text-embedding-004',
-        content: chunk.content
+    chunks.map(async (chunk) => {
+      const embedResult = await ai.models.embedContent({
+        model: 'gemini-embedding-001',
+        contents: chunk.content,
+        outputDimensionality: 768
       })
-    )
+      // Response structure: embedResult.embeddings contains the vector
+      return embedResult.embeddings
+    })
   )
   
   // ┌─────────────────────────────────────┐
-  // │ STAGE 4: DATABASE STORAGE           │
+  // │ STAGE 6: DATABASE STORAGE           │
   // └─────────────────────────────────────┘
   
   for (let i = 0; i < chunks.length; i++) {

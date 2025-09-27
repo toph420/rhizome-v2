@@ -25,9 +25,17 @@ FUNCTIONS_PID=$!
 # Give functions a moment to start
 sleep 2
 
+# Start background worker
+echo "🔄 Starting Background Worker..."
+(cd worker && npm run dev) &
+WORKER_PID=$!
+
+# Give worker a moment to start
+sleep 1
+
 # Start Next.js dev server on port 3000
 echo "🌐 Starting Next.js on port 3000..."
 PORT=3000 npm run dev:next
 
 # Cleanup on exit
-trap "echo '🛑 Stopping services...'; kill $FUNCTIONS_PID 2>/dev/null; npx supabase stop" EXIT
+trap "echo '🛑 Stopping services...'; kill $FUNCTIONS_PID $WORKER_PID 2>/dev/null; npx supabase stop" EXIT

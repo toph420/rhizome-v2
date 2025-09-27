@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { uploadDocument, estimateProcessingCost, triggerProcessing } from '@/app/actions/documents'
+import { uploadDocument, estimateProcessingCost } from '@/app/actions/documents'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Upload, FileText, DollarSign, Clock } from 'lucide-react'
@@ -43,10 +43,10 @@ export function UploadZone() {
     setIsDragging(false)
     
     const file = e.dataTransfer.files[0]
-    if (file && (file.type.includes('pdf') || file.type.includes('text'))) {
+    if (file && (file.type.includes('pdf') || file.type.includes('text') || file.name.endsWith('.md'))) {
       await handleFileSelect(file)
     } else {
-      setError('Please drop a PDF or text file')
+      setError('Please drop a PDF, Markdown, or text file')
     }
   }, [handleFileSelect])
 
@@ -79,16 +79,10 @@ export function UploadZone() {
       console.log('📤 Upload result:', result)
       
       if (result.success && result.documentId) {
-        console.log('🚀 Triggering processing for:', result.documentId)
-        const processResult = await triggerProcessing(result.documentId)
-        console.log('🚀 Processing result:', processResult)
-        
-        if (processResult.success) {
-          setSelectedFile(null)
-          setCostEstimate(null)
-        } else {
-          setError(processResult.error || 'Processing trigger failed')
-        }
+        // uploadDocument already creates the background job
+        console.log('✅ Document uploaded and job created:', result.jobId)
+        setSelectedFile(null)
+        setCostEstimate(null)
       } else {
         setError(result.error || 'Upload failed')
       }
@@ -121,12 +115,12 @@ export function UploadZone() {
           {!selectedFile ? (
             <>
               <div>
-                <p className="text-lg font-medium">Drop PDF or text file here</p>
+                <p className="text-lg font-medium">Drop PDF, Markdown, or text file here</p>
                 <p className="text-sm text-muted-foreground">or click to browse</p>
               </div>
               <input
                 type="file"
-                accept=".pdf,.txt"
+                accept=".pdf,.txt,.md"
                 onChange={handleFileInputChange}
                 className="hidden"
                 id="file-input"

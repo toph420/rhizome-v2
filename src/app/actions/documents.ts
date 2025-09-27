@@ -101,12 +101,12 @@ export async function uploadDocument(formData: FormData): Promise<{
       .single()
     
     if (jobError) {
-      console.error('Failed to create background job:', jobError)
-      // Don't fail the upload, just log the error
-      // The document can be manually re-processed later
+      await supabase.from('documents').delete().eq('id', documentId)
+      await supabase.storage.from('documents').remove([storagePath])
+      return { success: false, error: jobError.message }
     }
     
-    return { success: true, documentId, jobId: job?.id }
+    return { success: true, documentId, jobId: job.id }
   } catch (error) {
     return { success: false, error: (error as Error).message }
   }

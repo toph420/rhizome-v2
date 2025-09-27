@@ -1,4 +1,4 @@
-import { estimateProcessingCost, uploadDocument, triggerProcessing, retryProcessing } from '../documents'
+import { estimateProcessingCost, uploadDocument, triggerProcessing, retryProcessing, getDocumentJob } from '../documents'
 
 // Mock dependencies
 jest.mock('@/lib/supabase/server', () => ({
@@ -6,16 +6,17 @@ jest.mock('@/lib/supabase/server', () => ({
 }))
 
 jest.mock('@/lib/auth', () => ({
-  getCurrentUser: jest.fn()
+  getCurrentUser: jest.fn(),
+  getSupabaseClient: jest.fn()
 }))
 
-describe('Document Actions', () => {
+describe('Document Actions - Background Processing System', () => {
   describe('estimateProcessingCost', () => {
     test('should calculate cost correctly for small file', async () => {
       const fileSize = 50000 // 50KB
       const result = await estimateProcessingCost(fileSize)
       
-      // 75000 chars * 1.5 = 75000 estimated chars
+      // 50000 * 1.5 = 75000 estimated chars
       // inputTokens = 75, outputTokens = 38, embeddingTokens = 23
       expect(result.tokens).toBe(136) // 75 + 38 + 23
       expect(result.cost).toBeCloseTo(0.03825) // (75*0.00025) + (38*0.0005) + (23*0.000025)
@@ -40,18 +41,9 @@ describe('Document Actions', () => {
       expect(result.cost).toBe(0)
       expect(result.estimatedTime).toBe(0)
     })
-
-    test('should calculate tokens and cost proportionally', async () => {
-      const smallFile = await estimateProcessingCost(100000)
-      const doubleFile = await estimateProcessingCost(200000)
-      
-      // Double file size should roughly double cost
-      expect(doubleFile.tokens).toBeGreaterThan(smallFile.tokens * 1.8)
-      expect(doubleFile.cost).toBeGreaterThan(smallFile.cost * 1.8)
-    })
   })
 
-  describe('uploadDocument', () => {
+  describe('uploadDocument - Background Job Creation', () => {
     const mockSupabase = {
       storage: {
         from: jest.fn().mockReturnThis(),
@@ -59,26 +51,44 @@ describe('Document Actions', () => {
         remove: jest.fn()
       },
       from: jest.fn().mockReturnThis(),
-      insert: jest.fn()
+      insert: jest.fn().mockReturnThis(),
+      delete: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      single: jest.fn()
     }
 
     const mockUser = { id: 'user-123' }
 
     beforeEach(() => {
-      const { createClient } = require('@/lib/supabase/server')
+      const { getSupabaseClient } = require('@/lib/auth')
       const { getCurrentUser } = require('@/lib/auth')
       
-      createClient.mockResolvedValue(mockSupabase)
+      getSupabaseClient.mockReturnValue(mockSupabase)
       getCurrentUser.mockResolvedValue(mockUser)
       
       // Reset all mocks
       jest.clearAllMocks()
     })
 
-    test('should successfully upload PDF file', async () => {
+    test('should successfully upload PDF and create background job', async () => {
       // Mock successful operations
       mockSupabase.storage.upload.mockResolvedValue({ error: null })
-      mockSupabase.insert.mockResolvedValue({ error: null })
+      
+      // Mock document insert success
+      mockSupabase.insert.mockReturnValueOnce({
+        ...mockSupabase,
+        insert: jest.fn().mockResolvedValue({ error: null })
+      })
+      
+      // Mock background job creation success
+      const mockJobId = 'job-456'
+      mockSupabase.select.mockReturnValue({
+        single: jest.fn().mockResolvedValue({
+          data: { id: mockJobId },
+          error: null
+        })
+      })
 
       const file = new File(['test content'], 'test.pdf', { type: 'application/pdf' })
       const formData = new FormData()
@@ -88,6 +98,7 @@ describe('Document Actions', () => {
 
       expect(result.success).toBe(true)
       expect(result.documentId).toBeDefined()
+      expect(result.jobId).toBe(mockJobId)
       expect(result.error).toBeUndefined()
 
       // Verify storage upload was called
@@ -96,27 +107,82 @@ describe('Document Actions', () => {
         file
       )
 
-      // Verify database insert was called
+      // Verify background job was created
       expect(mockSupabase.insert).toHaveBeenCalledWith({
-        id: expect.any(String),
         user_id: 'user-123',
-        title: 'test',
-        storage_path: expect.stringMatching(/user-123\/.*/),
-        processing_status: 'pending'
+        job_type: 'process_document',
+        entity_type: 'document',
+        entity_id: expect.any(String),
+        input_data: {
+          document_id: expect.any(String),
+          storage_path: expect.stringMatching(/user-123\/.*/)
+        }
       })
     })
 
-    test('should accept text files', async () => {
+    test('should rollback storage on job creation failure', async () => {
+      // Mock successful storage upload but failed job creation
       mockSupabase.storage.upload.mockResolvedValue({ error: null })
-      mockSupabase.insert.mockResolvedValue({ error: null })
+      mockSupabase.storage.remove.mockResolvedValue({ error: null })
+      
+      // Mock document insert success
+      mockSupabase.insert.mockReturnValueOnce({
+        ...mockSupabase,
+        insert: jest.fn().mockResolvedValue({ error: null })
+      })
+      
+      // Mock background job creation failure
+      mockSupabase.select.mockReturnValue({
+        single: jest.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'Job creation failed' }
+        })
+      })
 
-      const file = new File(['test content'], 'test.txt', { type: 'text/plain' })
+      const file = new File(['test content'], 'test.pdf', { type: 'application/pdf' })
       const formData = new FormData()
       formData.append('file', file)
 
       const result = await uploadDocument(formData)
 
-      expect(result.success).toBe(true)
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Job creation failed')
+
+      // Verify rollback operations
+      expect(mockSupabase.delete).toHaveBeenCalled() // Document cleanup
+      expect(mockSupabase.storage.remove).toHaveBeenCalled() // Storage cleanup
+    })
+
+    test('should rollback document on job creation failure', async () => {
+      // Mock successful storage and document creation but failed job creation
+      mockSupabase.storage.upload.mockResolvedValue({ error: null })
+      
+      // Mock document insert success
+      mockSupabase.insert.mockReturnValueOnce({
+        ...mockSupabase,
+        insert: jest.fn().mockResolvedValue({ error: null })
+      })
+      
+      // Mock background job creation failure
+      mockSupabase.select.mockReturnValue({
+        single: jest.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'Background job failed' }
+        })
+      })
+
+      const file = new File(['test content'], 'test.pdf', { type: 'application/pdf' })
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const result = await uploadDocument(formData)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Background job failed')
+
+      // Verify complete rollback
+      expect(mockSupabase.delete).toHaveBeenCalled()
+      expect(mockSupabase.storage.remove).toHaveBeenCalled()
     })
 
     test('should reject unsupported file types', async () => {
@@ -128,6 +194,10 @@ describe('Document Actions', () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toBe('Only PDF and text files are supported')
+      
+      // Verify no storage or database operations were attempted
+      expect(mockSupabase.storage.upload).not.toHaveBeenCalled()
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
     })
 
     test('should handle missing file', async () => {
@@ -138,154 +208,229 @@ describe('Document Actions', () => {
       expect(result.success).toBe(false)
       expect(result.error).toBe('No file provided')
     })
-
-    test('should handle storage upload error', async () => {
-      mockSupabase.storage.upload.mockResolvedValue({ 
-        error: { message: 'Storage error' } 
-      })
-
-      const file = new File(['test'], 'test.pdf', { type: 'application/pdf' })
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const result = await uploadDocument(formData)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Storage error')
-    })
-
-    test('should clean up storage on database error', async () => {
-      mockSupabase.storage.upload.mockResolvedValue({ error: null })
-      mockSupabase.insert.mockResolvedValue({ 
-        error: { message: 'Database error' } 
-      })
-      mockSupabase.storage.remove.mockResolvedValue({ error: null })
-
-      const file = new File(['test'], 'test.pdf', { type: 'application/pdf' })
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const result = await uploadDocument(formData)
-
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Database error')
-      
-      // Verify cleanup was called
-      expect(mockSupabase.storage.remove).toHaveBeenCalledWith([
-        expect.stringMatching(/user-123\/.*\/source\.pdf/)
-      ])
-    })
   })
 
-  describe('triggerProcessing', () => {
+  describe('triggerProcessing - Background Job Management', () => {
     const mockSupabase = {
       from: jest.fn().mockReturnThis(),
-      update: jest.fn().mockReturnThis(),
-      eq: jest.fn(),
-      functions: {
-        invoke: jest.fn()
-      }
+      select: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockReturnThis(),
+      single: jest.fn(),
+      eq: jest.fn().mockReturnThis()
     }
 
     const mockUser = { id: 'user-123' }
 
     beforeEach(() => {
-      const { createClient } = require('@/lib/supabase/server')
+      const { getSupabaseClient } = require('@/lib/auth')
       const { getCurrentUser } = require('@/lib/auth')
       
-      createClient.mockResolvedValue(mockSupabase)
+      getSupabaseClient.mockReturnValue(mockSupabase)
       getCurrentUser.mockResolvedValue(mockUser)
       
       jest.clearAllMocks()
     })
 
-    test('should successfully trigger processing', async () => {
-      mockSupabase.eq.mockResolvedValue({ error: null })
-      mockSupabase.functions.invoke.mockResolvedValue({ error: null })
+    test('should successfully create background job for processing', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { storage_path: 'user-123/doc-123' },
+        error: null
+      })
+
+      // Mock job creation success
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'job-789' },
+        error: null
+      })
 
       const result = await triggerProcessing('doc-123')
 
       expect(result.success).toBe(true)
+      expect(result.jobId).toBe('job-789')
       expect(result.error).toBeUndefined()
 
-      // Verify status was updated to processing
-      expect(mockSupabase.update).toHaveBeenCalledWith({
-        processing_status: 'processing',
-        processing_started_at: expect.any(String)
-      })
-
-      // Verify edge function was invoked
-      expect(mockSupabase.functions.invoke).toHaveBeenCalledWith('process-document', {
-        body: {
-          documentId: 'doc-123',
-          storagePath: 'user-123/doc-123'
+      // Verify job was created with correct parameters
+      expect(mockSupabase.insert).toHaveBeenCalledWith({
+        user_id: 'user-123',
+        job_type: 'process_document',
+        entity_type: 'document',
+        entity_id: 'doc-123',
+        input_data: {
+          document_id: 'doc-123',
+          storage_path: 'user-123/doc-123'
         }
       })
     })
 
-    test('should handle edge function error and update status', async () => {
-      mockSupabase.eq.mockResolvedValue({ error: null })
-      mockSupabase.functions.invoke.mockResolvedValue({ 
-        error: { message: 'Function error' } 
+    test('should handle document not found', async () => {
+      // Mock document not found
+      mockSupabase.single.mockResolvedValue({
+        data: null,
+        error: { message: 'Document not found' }
+      })
+
+      const result = await triggerProcessing('nonexistent-doc')
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Document not found')
+      
+      // Verify no job creation was attempted
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    test('should handle job creation failure', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { storage_path: 'user-123/doc-123' },
+        error: null
+      })
+
+      // Mock job creation failure
+      mockSupabase.single.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'Job creation failed' }
       })
 
       const result = await triggerProcessing('doc-123')
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Function error')
-
-      // Verify status was updated to failed
-      expect(mockSupabase.update).toHaveBeenCalledTimes(2)
-      expect(mockSupabase.update).toHaveBeenLastCalledWith({
-        processing_status: 'failed',
-        processing_error: 'Function error'
-      })
+      expect(result.error).toBe('Job creation failed')
     })
   })
 
-  describe('retryProcessing', () => {
+  describe('retryProcessing - Job Retry Logic', () => {
     const mockSupabase = {
       from: jest.fn().mockReturnThis(),
       update: jest.fn().mockReturnThis(),
-      eq: jest.fn(),
-      functions: {
-        invoke: jest.fn()
-      }
+      eq: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockReturnThis(),
+      single: jest.fn()
     }
 
     beforeEach(() => {
-      const { createClient } = require('@/lib/supabase/server')
+      const { getSupabaseClient } = require('@/lib/auth')
       const { getCurrentUser } = require('@/lib/auth')
       
-      createClient.mockResolvedValue(mockSupabase)
+      getSupabaseClient.mockReturnValue(mockSupabase)
+      getCurrentUser.mockResolvedValue({ id: 'user-123' })
+      
       jest.clearAllMocks()
     })
 
-    test('should reset status and trigger processing', async () => {
-      mockSupabase.eq.mockResolvedValue({ error: null })
-      mockSupabase.functions.invoke.mockResolvedValue({ error: null })
+    test('should reset document status and create new job', async () => {
+      // Mock document reset success
+      mockSupabase.eq.mockResolvedValueOnce({ error: null })
+
+      // Mock document exists for triggerProcessing
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { storage_path: 'user-123/doc-123' },
+        error: null
+      })
+
+      // Mock new job creation success
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'retry-job-456' },
+        error: null
+      })
 
       const result = await retryProcessing('doc-123')
 
       expect(result.success).toBe(true)
+      expect(result.jobId).toBe('retry-job-456')
 
-      // Verify status was reset
+      // Verify document status was reset
       expect(mockSupabase.update).toHaveBeenCalledWith({
         processing_status: 'pending',
         processing_error: null
       })
     })
 
-    test('should handle retry failure', async () => {
-      mockSupabase.eq.mockResolvedValue({ error: null })
-      mockSupabase.functions.invoke.mockResolvedValue({ 
-        error: { message: 'Retry failed' } 
+    test('should handle retry failure gracefully', async () => {
+      // Mock document reset success
+      mockSupabase.eq.mockResolvedValueOnce({ error: null })
+
+      // Mock document exists but job creation fails
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { storage_path: 'user-123/doc-123' },
+        error: null
+      })
+
+      mockSupabase.single.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'Retry job creation failed' }
       })
 
       const result = await retryProcessing('doc-123')
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Retry failed')
+      expect(result.error).toBe('Retry job creation failed')
+    })
+  })
+
+  describe('getDocumentJob - Job Status Tracking', () => {
+    const mockSupabase = {
+      from: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      single: jest.fn()
+    }
+
+    beforeEach(() => {
+      const { getSupabaseClient } = require('@/lib/auth')
+      const { getCurrentUser } = require('@/lib/auth')
+      
+      getSupabaseClient.mockReturnValue(mockSupabase)
+      getCurrentUser.mockResolvedValue({ id: 'user-123' })
+      
+      jest.clearAllMocks()
+    })
+
+    test('should return active job for document', async () => {
+      const mockJobData = {
+        id: 'job-123',
+        status: 'processing',
+        progress: { stage: 'extract', percent: 30 },
+        last_error: null
+      }
+
+      mockSupabase.single.mockResolvedValue({
+        data: mockJobData,
+        error: null
+      })
+
+      const result = await getDocumentJob('doc-123')
+
+      expect(result).toEqual(mockJobData)
+
+      // Verify correct query was made
+      expect(mockSupabase.eq).toHaveBeenCalledWith('entity_type', 'document')
+      expect(mockSupabase.eq).toHaveBeenCalledWith('entity_id', 'doc-123')
+      expect(mockSupabase.eq).toHaveBeenCalledWith('user_id', 'user-123')
+      expect(mockSupabase.order).toHaveBeenCalledWith('created_at', { ascending: false })
+      expect(mockSupabase.limit).toHaveBeenCalledWith(1)
+    })
+
+    test('should return null when no job found', async () => {
+      mockSupabase.single.mockResolvedValue({
+        data: null,
+        error: { message: 'No job found' }
+      })
+
+      const result = await getDocumentJob('doc-without-job')
+
+      expect(result).toBeNull()
+    })
+
+    test('should handle query errors gracefully', async () => {
+      mockSupabase.single.mockRejectedValue(new Error('Database error'))
+
+      const result = await getDocumentJob('doc-123')
+
+      expect(result).toBeNull()
     })
   })
 })

@@ -1,4 +1,5 @@
 import { UploadZone } from '@/components/library/UploadZone'
+import { DocumentList } from '@/components/library/DocumentList'
 import { ProcessingDock } from '@/components/layout/ProcessingDock'
 
 /**
@@ -21,9 +22,7 @@ export default function Home() {
           
           <div className="space-y-4">
             <h2 className="text-2xl font-semibold">Your Documents</h2>
-            <p className="text-sm text-muted-foreground">
-              Upload a document to get started
-            </p>
+            <DocumentList />
           </div>
         </div>
       </main>
