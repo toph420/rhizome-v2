@@ -34,9 +34,16 @@ This is a greenfield application with no existing users or legacy code. Prioriti
   "zustand": "^5.0.0",
   "framer-motion": "^11.0.0",
   "@radix-ui/react-*": "latest",
-  "jszip": "^3.10.0"
+  "jszip": "^3.10.0",
+  "@google/genai": "latest",
+  "ai": "^4.0.0",
+  "@ai-sdk/google": "^1.0.0"
 }
 ```
+
+**AI SDKs**:
+- `@google/genai` - Native Gemini SDK for document processing (Files API)
+- `ai` + `@ai-sdk/google` - Vercel AI SDK for embeddings and future features
 
 ## Core Database Schema
 
@@ -235,9 +242,39 @@ Rhizome supports 6 input methods. Processing routes by `source_type`:
 ❌ Any PDF extraction library
 ```
 
-### ALWAYS Use Gemini for Everything
+### Hybrid AI SDK Strategy
+
+**IMPORTANT**: Rhizome uses a **hybrid approach** with two AI SDKs:
+
+1. **Native Gemini SDK (`@google/genai`)**: Document processing with Files API
+2. **Vercel AI SDK (`ai` + `@ai-sdk/google`)**: Embeddings and future interactive features
+
+**Decision Rationale**: Vercel AI SDK lacks Files API support (15MB base64 limit), but provides excellent embeddings API and provider flexibility for future features.
+
+**See**: `docs/brainstorming/2025-09-27-hybrid-ai-sdk-strategy.md` for complete decision context.
+
+#### When to Use Native Gemini SDK
+
+**Use `@google/genai` for**:
+- ✅ Document processing (PDFs, large files)
+- ✅ Files API uploads (>15MB files)
+- ✅ Background worker processing pipeline
+
+**Why**: Files API required for large PDFs, proven reliability.
 
 Refer to the Gemini Developer API docs when necessary: https://ai.google.dev/gemini-api/docs
+
+#### When to Use Vercel AI SDK
+
+**Use `ai` + `@ai-sdk/google` for**:
+- ✅ ALL embeddings generation (`embedMany`)
+- ✅ Future interactive features (chat, flashcards, synthesis)
+- ✅ Streaming responses to users
+- ✅ Provider flexibility (easy Claude/GPT-4 switching)
+
+**Why**: Cleaner API, better DX, future-proofing.
+
+Refer to the Vercel AI SDK docs: https://ai-sdk.dev/docs
 
 ```typescript
 // supabase/functions/process-document/index.ts
@@ -283,27 +320,26 @@ async function processDocument(documentId: string, pdfUrl: string) {
     .upload(`${storagePath}/content.md`, markdown)
   
   // 6. Generate embeddings and save chunks to DATABASE
-  for (const chunk of chunks) {
-    // CRITICAL: Use ai.models.embedContent (note .models namespace)
-    const embedResult = await ai.models.embedContent({
-      model: 'gemini-embedding-001',
-      contents: chunk.content,
-      config: {
-        outputDimensionality: 768
-      }
-    })
-    
-    // Extract embedding vector from API response
-    // API returns: { embeddings: [{ values: number[] }] }
-    const embedding = embedResult.embeddings[0].values
-    
-    await supabase.from('chunks').insert({
-      document_id: documentId,
-      content: chunk.content,
-      embedding: embedding,
-      themes: chunk.themes
-    })
-  }
+  // Use Vercel AI SDK for embeddings (cleaner API)
+  import { google } from '@ai-sdk/google'
+  import { embedMany } from 'ai'
+  
+  const { embeddings } = await embedMany({
+    model: google.textEmbeddingModel('gemini-embedding-001', {
+      outputDimensionality: 768
+    }),
+    values: chunks.map(c => c.content)
+  })
+  
+  // Store chunks with embeddings
+  const chunksToInsert = chunks.map((chunk, index) => ({
+    document_id: documentId,
+    content: chunk.content,
+    embedding: embeddings[index], // Direct access, no nested structure
+    themes: chunk.themes
+  }))
+  
+  await supabase.from('chunks').insert(chunksToInsert)
 }
 
 const EXTRACTION_AND_CHUNKING_PROMPT = `
@@ -336,13 +372,17 @@ const result = await ai.models.generateContent({  // Note .models namespace
 result.text  // Direct text access
 JSON.parse(result.text)  // For JSON responses
 
-// Embeddings
-const embedResult = await ai.models.embedContent({  // Note .models namespace
-  model: 'text-embedding-004',
-  contents: 'text to embed',
-  config: { outputDimensionality: 768 }
+// Embeddings - Use Vercel AI SDK
+import { google } from '@ai-sdk/google'
+import { embedMany } from 'ai'
+
+const { embeddings } = await embedMany({
+  model: google.textEmbeddingModel('gemini-embedding-001', {
+    outputDimensionality: 768
+  }),
+  values: ['text to embed', 'another text']
 })
-const vector = embedResult.embedding.values  // Note nested structure
+const vectors = embeddings  // Direct access: number[][]
 ```
 
 ## Document Reader Pattern
@@ -467,12 +507,6 @@ const { data } = await supabase.rpc('match_chunks', {
   query_embedding: embedding,
   match_threshold: 0.8
 })
-
-// Process PDF to Markdown
-import pdfParse from 'pdf-parse'
-const dataBuffer = await file.arrayBuffer()
-const data = await pdfParse(Buffer.from(dataBuffer))
-const markdown = data.text // Clean this up with your logic
 ```
 
 ## Essential Commands
@@ -778,7 +812,7 @@ npx supabase init
 ### 📋 Week 2: AI Processing Pipeline
 - [ ] Gemini extraction (PDF → Markdown)
 - [ ] Semantic chunking with Gemini
-- [ ] Embedding generation (Gemini text-embedding-004)
+- [ ] Embedding generation (Vercel AI SDK with gemini-embedding-001)
 - [ ] Store markdown in Storage, chunks in DB
 - [ ] Processing status updates in dock
 - [ ] Document metadata extraction
@@ -802,12 +836,22 @@ npx supabase init
 This timeline better reflects your AI-first architecture and focuses on getting the core flow working: Upload → Process → Read → Annotate → Study. The synthesis features (sparks, threads) can come in phase 2 after the MVP is solid.
 
 ### 🔮 Future Enhancements
+
+**AI-Powered Features** (Use Vercel AI SDK):
+- Document Chat - Interactive Q&A with streaming responses
+- Flashcard Generation - AI-powered card creation from selections
+- Synthesis Insights - Cross-document connection discovery
+- Connection Explanations - Why documents relate to each other
+
+**System Features**:
 - FSRS algorithm implementation
 - Advanced synthesis studio
 - Export system
 - Real authentication (currently dev mode)
 - Mobile experience
 - Collaboration features
+
+**Note**: When building AI-powered features, default to Vercel AI SDK (`ai` + `@ai-sdk/google`) for streaming, provider flexibility, and better DX. Continue using Gemini as primary model.
 
 ### Next Action
 1. Create the Next.js app
