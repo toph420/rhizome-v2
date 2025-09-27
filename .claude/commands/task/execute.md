@@ -61,7 +61,7 @@ Implement a specific development task using the detailed task specification.
 ## Task Execution Best Practices
 
 - Stay strictly within task boundaries - no additional features
-- Reference existing patterns extensively before writing new code
+- **Reference existing patterns extensively before writing new code**
 - Test incrementally as you build each component
 - Follow the exact file structure specified in task document
 - Verify dependencies are satisfied before starting
