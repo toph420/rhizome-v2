@@ -4,6 +4,7 @@ import { jsonrepair } from 'jsonrepair'
 import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
 import { extractArticle, isValidUrl } from '../lib/web-extraction.js'
 import { simpleMarkdownChunking, extractTimestampsWithContext } from '../lib/markdown-chunking.js'
+import { generateEmbeddings } from '../lib/embeddings.js'
 import type { SourceType, TimestampContext } from '../types/multi-format.js'
 
 const STAGES = {
@@ -448,58 +449,65 @@ ${pastedContent}`
 
     await updateProgress(supabase, job.id, STAGES.EMBED.percent, 'embed', 'starting', `Generating embeddings for ${chunks.length} chunks`)
     
-    const chunkCount = chunks.length
-    for (let i = 0; i < chunkCount; i++) {
-      const chunk = chunks[i]
+    try {
+      // Generate all embeddings in batches using Vercel AI SDK
+      const chunkContents = chunks.map(c => c.content)
+      const embeddings = await generateEmbeddings(chunkContents)
       
-      // Rate limiting: Add delay every 10 requests to avoid API quota issues
-      if (i > 0 && i % 10 === 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000))
+      // Insert chunks with embeddings into database
+      const chunkCount = chunks.length
+      for (let i = 0; i < chunkCount; i++) {
+        const chunk = chunks[i]
+        const embedding = embeddings[i]  // Direct access - no .values needed!
+        
+        const chunkData: any = {
+          document_id,
+          content: chunk.content,
+          embedding,  // Direct assignment (was: embeddingVector)
+          chunk_index: i,
+          themes: chunk.themes,
+          importance_score: chunk.importance_score,
+          summary: chunk.summary
+        }
+        
+        // Add timestamp data if present (YouTube videos)
+        if (chunk.timestamps) {
+          chunkData.timestamps = chunk.timestamps
+        }
+        
+        await supabase.from('chunks').insert(chunkData)
+        
+        // Progress updates every 5 chunks (UNCHANGED)
+        if (i % 5 === 0 || i === chunkCount - 1) {
+          const embedPercent = STAGES.EMBED.percent + (i / chunkCount) * 49
+          const progressPercent = Math.floor((i / chunkCount) * 100)
+          await updateProgress(
+            supabase,
+            job.id,
+            Math.floor(embedPercent),
+            'embed',
+            'inserting',
+            `Saving chunk ${i + 1}/${chunkCount} (${progressPercent}%)`
+          )
+        }
       }
       
-      const embedResult = await ai.models.embedContent({
-        model: 'gemini-embedding-001',
-        contents: chunk.content,
-        config: { outputDimensionality: 768 }
-      })
-
-      // Extract embedding vector from API response
-      // API returns: { embeddings: [{ values: number[] }] }
-      const embeddingVector = embedResult.embeddings?.[0]?.values
+    } catch (error) {
+      // Error handling pattern (UNCHANGED)
+      const err = error instanceof Error ? error : new Error('Unknown error')
+      const friendlyMessage = getUserFriendlyError(err)
       
-      if (!embeddingVector || !Array.isArray(embeddingVector)) {
-        throw new Error(`Invalid embedding response for chunk ${i}: Missing embedding.values`)
-      }
-
-      const chunkData: any = {
-        document_id,
-        content: chunk.content,
-        embedding: embeddingVector,
-        chunk_index: i,
-        themes: chunk.themes,
-        importance_score: chunk.importance_score,
-        summary: chunk.summary
-      }
-
-      // Add timestamp data if present (YouTube videos)
-      if (chunk.timestamps) {
-        chunkData.timestamps = chunk.timestamps
-      }
-
-      await supabase.from('chunks').insert(chunkData)
-
-      if (i % 5 === 0 || i === chunkCount - 1) {
-        const embedPercent = STAGES.EMBED.percent + (i / chunkCount) * 49
-        const progressPercent = Math.floor((i / chunkCount) * 100)
-        await updateProgress(
-          supabase, 
-          job.id, 
-          Math.floor(embedPercent), 
-          'embed',
-          'embedding',
-          `Processing chunk ${i + 1}/${chunkCount} (${progressPercent}%)`
-        )
-      }
+      await supabase
+        .from('background_jobs')
+        .update({
+          status: 'failed',
+          error_message: friendlyMessage,
+          error_type: 'embedding_error',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', job.id)
+      
+      throw error
     }
 
     // Update job to completed status WITH final progress in single operation

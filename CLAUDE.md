@@ -251,220 +251,124 @@ Rhizome supports 6 input methods. Processing routes by `source_type`:
 
 **Decision Rationale**: Vercel AI SDK lacks Files API support (15MB base64 limit), but provides excellent embeddings API and provider flexibility for future features.
 
-**See**: `docs/brainstorming/2025-09-27-hybrid-ai-sdk-strategy.md` for complete decision context.
+**Migration Status**: ✅ **Complete** (Sep 27, 2025)
+- Embeddings migrated to Vercel AI SDK (`worker/lib/embeddings.ts`)
+- Document processing remains on Native Gemini SDK
+- All tests passing, production-ready
 
-#### When to Use Native Gemini SDK
+**See**: 
+- `docs/AI_DOCUMENTATION.md` - Comprehensive AI architecture guide
+- `docs/brainstorming/2025-09-27-hybrid-ai-sdk-strategy.md` - Decision context
 
-**Use `@google/genai` for**:
-- ✅ Document processing (PDFs, large files)
-- ✅ Files API uploads (>15MB files)
-- ✅ Background worker processing pipeline
+#### SDK Usage Guidelines
 
-**Why**: Files API required for large PDFs, proven reliability.
+**Native Gemini SDK** (`@google/genai`):
+- Document processing with Files API (>15MB PDFs)
+- Background worker pipeline
+- See: `docs/GEMINI_PROCESSING.md`
 
-Refer to the Gemini Developer API docs when necessary: https://ai.google.dev/gemini-api/docs
+**Vercel AI SDK** (`ai` + `@ai-sdk/google`):
+- ALL embeddings generation (use `worker/lib/embeddings.ts`)
+- Future interactive features (chat, flashcards, synthesis)
+- Streaming responses and provider flexibility
+- See: `docs/AI_DOCUMENTATION.md`
 
-#### When to Use Vercel AI SDK
+**Quick References**:
+- Gemini API Docs: https://ai.google.dev/gemini-api/docs
+- Vercel AI SDK Docs: https://ai-sdk.dev/docs
 
-**Use `ai` + `@ai-sdk/google` for**:
-- ✅ ALL embeddings generation (`embedMany`)
-- ✅ Future interactive features (chat, flashcards, synthesis)
-- ✅ Streaming responses to users
-- ✅ Provider flexibility (easy Claude/GPT-4 switching)
+### Document Processing Flow
 
-**Why**: Cleaner API, better DX, future-proofing.
+**High-Level Pipeline**:
+1. **Upload** → File to Supabase Storage
+2. **Process** → Native Gemini SDK (Files API) extracts markdown + chunks
+3. **Embed** → Vercel AI SDK (`worker/lib/embeddings.ts`) generates vectors
+4. **Store** → Markdown in Storage, chunks+embeddings in PostgreSQL
 
-Refer to the Vercel AI SDK docs: https://ai-sdk.dev/docs
+**Implementation Details**:
+- **Native SDK Patterns**: See `docs/GEMINI_PROCESSING.md`
+- **Embeddings Module**: See `worker/lib/embeddings.ts`
+- **Handler Routing**: See `worker/handlers/process-document.ts`
 
-```typescript
-// supabase/functions/process-document/index.ts
-import { GoogleGenAI } from 'npm:@google/genai'
-
-async function processDocument(documentId: string, pdfUrl: string) {
-  // 1. Initialize Google GenAI (NEW SDK)
-  const ai = new GoogleGenAI({ apiKey: Deno.env.get('GOOGLE_AI_API_KEY') })
-  
-  // 2. Convert PDF to base64
-  const pdfResponse = await fetch(pdfUrl)
-  const pdfBuffer = await pdfResponse.arrayBuffer()
-  const pdfBase64 = Buffer.from(pdfBuffer).toString('base64')
-  
-  // 3. Send to Gemini - IT HANDLES EVERYTHING
-  // CRITICAL: Use ai.models.generateContent (note .models namespace)
-  const result = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',  // Updated model name
-    contents: [{
-      parts: [
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: pdfBase64
-          }
-        },
-        { text: EXTRACTION_AND_CHUNKING_PROMPT }
-      ]
-    }],
-    config: {  // Changed from generationConfig to config
-      responseMimeType: "application/json",
-      responseSchema: DOCUMENT_SCHEMA
-    }
-  })
-  
-  // 4. Parse response (result.text contains JSON string)
-  const { markdown, chunks } = JSON.parse(result.text)
-  
-  // 5. Save markdown to STORAGE (not database!)
-  const storagePath = `${userId}/${documentId}`
-  await supabase.storage
-    .from('documents')
-    .upload(`${storagePath}/content.md`, markdown)
-  
-  // 6. Generate embeddings and save chunks to DATABASE
-  // Use Vercel AI SDK for embeddings (cleaner API)
-  import { google } from '@ai-sdk/google'
-  import { embedMany } from 'ai'
-  
-  const { embeddings } = await embedMany({
-    model: google.textEmbeddingModel('gemini-embedding-001', {
-      outputDimensionality: 768
-    }),
-    values: chunks.map(c => c.content)
-  })
-  
-  // Store chunks with embeddings
-  const chunksToInsert = chunks.map((chunk, index) => ({
-    document_id: documentId,
-    content: chunk.content,
-    embedding: embeddings[index], // Direct access, no nested structure
-    themes: chunk.themes
-  }))
-  
-  await supabase.from('chunks').insert(chunksToInsert)
-}
-
-const EXTRACTION_AND_CHUNKING_PROMPT = `
-Extract this PDF to perfect markdown preserving all formatting.
-Then break into semantic chunks (complete thoughts).
-Return JSON with full markdown and chunk array.
-`
-```
-
-### Key API Changes (@google/genai)
-```typescript
-// ❌ OLD SDK (@google/generative-ai) - DEPRECATED
-import { GoogleGenerativeAI } from '@google/generative-ai'
-const genAI = new GoogleGenerativeAI(apiKey)
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' })
-const result = await model.generateContent(...)
-
-// ✅ NEW SDK (@google/genai) - USE THIS
-import { GoogleGenAI } from 'npm:@google/genai'  // Deno
-// OR: import { GoogleGenAI } from '@google/genai'  // Node.js
-
-const ai = new GoogleGenAI({ apiKey })
-const result = await ai.models.generateContent({  // Note .models namespace
-  model: 'gemini-2.5-flash',
-  contents: 'Your prompt',
-  config: { /* options */ }  // Note: config not generationConfig
-})
-
-// Response structure
-result.text  // Direct text access
-JSON.parse(result.text)  // For JSON responses
-
-// Embeddings - Use Vercel AI SDK
-import { google } from '@ai-sdk/google'
-import { embedMany } from 'ai'
-
-const { embeddings } = await embedMany({
-  model: google.textEmbeddingModel('gemini-embedding-001', {
-    outputDimensionality: 768
-  }),
-  values: ['text to embed', 'another text']
-})
-const vectors = embeddings  // Direct access: number[][]
-```
+**Key Points**:
+- Native SDK: `ai.models.generateContent()` with Files API
+- Vercel SDK: `embedMany()` with `providerOptions`
+- Storage: Markdown files (large, immutable)
+- Database: Chunks + embeddings (queryable with pgvector)
 
 ## Document Reader Pattern
 
+**Key Pattern**: Stream markdown from Storage, query chunks from Database
+
+**Implementation**: See `src/app/read/[id]/page.tsx`
+
+**Steps**:
+1. Get document metadata (storage path)
+2. Create signed URL for markdown file
+3. Query chunks from database
+4. Render with DocumentViewer + RightPanel
+
+**CRITICAL**: Never load full markdown into database. Always stream from Storage.
+
+
+## UI Patterns & Component Library
+
+### ShadCN/UI - Primary Component Library
+
+**All UI components MUST use ShadCN/UI** as the base component library. ShadCN provides accessible, well-tested components built on Radix UI primitives with Tailwind CSS styling.
+
+#### Installation
+```bash
+# Add components as needed
+npx shadcn@latest add button
+npx shadcn@latest add card
+npx shadcn@latest add tabs
+npx shadcn@latest add scroll-area
+```
+
+#### Component Usage Rules
+
+**✅ ALWAYS USE:**
+- Base UI elements (Button, Card, Input, Textarea)
+- Form controls (Select, Switch, Checkbox, Radio)
+- Layout components (ScrollArea, Separator, Tabs)
+- Feedback components (Toast, Progress, Skeleton)
+- Popovers and HoverCards (non-blocking)
+- Command Palette (⌘K - allowed overlay)
+
+**❌ NEVER USE:**
+- `Dialog` - Creates modals (FORBIDDEN)
+- `AlertDialog` - Creates modals (FORBIDDEN)
+- Use `Sheet` for mobile drawers only
+- Use inline panels and docks instead
+
+### Using the shadcn-ui-builder Agent
+
+When implementing UI components, **use the shadcn-ui-builder agent** for guidance:
+
 ```typescript
-// app/read/[id]/page.tsx
+// The agent provides:
+// 1. Implementation plans (not direct code)
+// 2. ShadCN component selection
+// 3. Layout pattern recommendations
+// 4. Accessibility requirements
+// 5. Step-by-step guidance
 
-export default async function ReaderPage({ params }) {
-  const { id: documentId } = params
-  
-  // 1. Get storage path (NOT content)
-  const { data: doc } = await supabase
-    .from('documents')
-    .select('storage_path, title')
-    .eq('id', documentId)
-    .single()
-  
-  // 2. Get signed URL for markdown
-  const { data: { signedUrl } } = await supabase.storage
-    .from('documents')
-    .createSignedUrl(`${doc.storage_path}/content.md`, 3600)
-  
-  // 3. Get chunks from DATABASE
-  const { data: chunks } = await supabase
-    .from('chunks')
-    .select('*')
-    .eq('document_id', documentId)
-    .order('chunk_index')
-  
-  return (
-    <div className="grid grid-cols-[1fr,400px]">
-      <DocumentReader 
-        markdownUrl={signedUrl}  // Stream from storage
-        chunks={chunks}           // From database
-      />
-      <RightPanel documentId={documentId} />
-    </div>
-  )
-}
+// YOU (main agent) execute the plan
 ```
 
+**When to invoke shadcn-ui-builder:**
+- Creating new UI components
+- Refactoring components to use ShadCN
+- Implementing complex layouts (docks, panels, split screens)
+- Ensuring accessibility compliance
+- Following the no-modal architecture
 
-## UI Components Pattern
-
-```typescript
-// NO MODALS - Use these patterns instead:
-
-// Bottom Dock (Processing, Tasks)
-<div className="fixed bottom-0 left-0 right-0 border-t bg-background">
-  <ProcessingDock />
-</div>
-
-// Right Panel (Connections, Notes)
-<div className="fixed right-0 top-0 bottom-0 w-96 border-l">
-  <RightPanel />
-</div>
-
-// Quick Capture (Appears on text selection)
-<div className="fixed bottom-20 left-1/2 -translate-x-1/2">
-  <QuickCapture />
-</div>
-
-// Split Screen (Study mode)
-<div className="grid grid-cols-2 h-screen">
-  <DocumentReader />
-  <StudyPanel />
-</div>
-```
-
-
-## UI Patterns - NO EXCEPTIONS
-
-### Layout Structure
-```tsx
-<div className="h-screen flex flex-col">
-  <MainContent />        {/* Never blocked by UI */}
-  <RightPanel />        {/* Connections, notes */}
-  <ProcessingDock />    {/* Bottom, collapsible */}
-  <QuickCaptureBar />   {/* Appears on selection */}
-  <CommandPalette />    {/* ⌘K activated */}
-</div>
-```
+**Agent workflow:**
+1. Ask shadcn-ui-builder for implementation plan
+2. Receive structured guidance (component analysis, ShadCN patterns, steps)
+3. Execute the implementation based on plan
+4. Verify against no-modal architecture
 
 ### Component Naming Convention
 - `*Dock` - Bottom panels (ProcessingDock)
@@ -473,19 +377,46 @@ export default async function ReaderPage({ params }) {
 - `*Overlay` - Floating overlays (StudyOverlay)
 - `*Canvas` - Spatial views (DeckCanvas)
 
-### NEVER Use Modals
-```typescript
-// ❌ WRONG - NEVER DO THIS
-<Modal>
-  <CreateFlashcard />
-</Modal>
+### Layout Patterns
 
-// ✅ RIGHT - Use these patterns
-<QuickCaptureBar />     // Inline creation
-<ProcessingDock />      // Status updates
-<Sheet />               // Side drawer if needed
-<CommandPalette />      // Quick actions
+**Standard patterns (see `docs/UI_PATTERNS.md` for full implementations):**
+
+```tsx
+// Bottom Dock: fixed bottom-0 left-0 right-0 border-t
+// Right Panel: fixed right-0 top-0 bottom-0 w-96 border-l
+// Quick Capture: fixed bottom-20 left-1/2 -translate-x-1/2
+// Split Screen: grid grid-cols-2 h-screen
+// Reader Layout: grid grid-cols-[1fr,400px]
 ```
+
+### NO MODALS - Critical Rule
+
+```typescript
+// ❌ FORBIDDEN
+<Dialog>...</Dialog>
+<Modal>...</Modal>
+<AlertDialog>...</AlertDialog>
+
+// ✅ USE INSTEAD
+<ProcessingDock />      // Bottom dock for status
+<RightPanel />          // Side panel for details
+<QuickCaptureBar />     // Inline forms
+<Sheet />               // Mobile-only drawer
+<CommandPalette />      // ⌘K overlay (allowed)
+<Toast />               // Non-blocking notifications
+```
+
+### Comprehensive Documentation
+
+**For complete implementation details, see `docs/UI_PATTERNS.md`:**
+- Full ShadCN component usage guide
+- Magic UI integration (animations, effects)
+- Complete code examples for all patterns
+- Annotation layer implementation
+- Virtual scrolling with annotations
+- Mobile responsiveness
+- Accessibility guidelines
+- Animation patterns with Framer Motion
 
 
 ## Common Operations

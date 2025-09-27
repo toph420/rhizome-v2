@@ -2,7 +2,24 @@
 
 > **SDK Version**: This document uses `@google/genai` (the new unified SDK)  
 > **Processing Method**: Files API for PDFs ([Documentation](https://ai.google.dev/gemini-api/docs/files))  
-> **Last Updated**: January 2025
+> **Architecture Note**: Hybrid approach - Native Gemini SDK for document processing, Vercel AI SDK for embeddings  
+> **Last Updated**: September 27, 2025
+
+## 🏗️ Hybrid Architecture Context
+
+Rhizome V2 uses **two AI SDKs strategically**:
+
+1. **Native Gemini SDK** (`@google/genai`) - This document
+   - Document processing with Files API
+   - Handles large PDFs (>15MB)
+   - Production-critical pipeline
+
+2. **Vercel AI SDK** (`ai` + `@ai-sdk/google`) - See `AI_DOCUMENTATION.md`
+   - Embeddings generation (`worker/lib/embeddings.ts`)
+   - Future interactive features (chat, flashcards, synthesis)
+   - Provider flexibility
+
+**Why Hybrid?** Vercel AI SDK lacks Files API support, limiting PDF processing to ~15MB via base64. Native SDK provides reliable large file processing. **See**: `docs/AI_DOCUMENTATION.md` for complete architecture guide.
 
 ## SDK Setup
 
@@ -186,23 +203,17 @@ export async function processDocument(
     .upload(`${storagePath}/content.md`, markdown, { upsert: true })
   
   // 5. Generate embeddings for each chunk
-  // CRITICAL: Use ai.models.embedContent (note .models namespace)
-  const embeddings = await Promise.all(
-    chunks.map(async (chunk, index) => {
-      const embedResult = await ai.models.embedContent({
-        model: 'gemini-embedding-001',
-        content: chunk.content,
-        outputDimensionality: 768
-      })
-      
-      // Extract embedding vector (note nested structure)
-      if (!embedResult.embedding?.values) {
-        throw new Error(`Invalid embedding for chunk ${index}`)
-      }
-      
-      return embedResult.embedding.values
-    })
-  )
+  // ⚠️ NOTE: This example shows conceptual flow
+  // ✅ ACTUAL IMPLEMENTATION: Use worker/lib/embeddings.ts (Vercel AI SDK)
+  //    See docs/AI_DOCUMENTATION.md for hybrid architecture rationale
+  import { generateEmbeddings } from './lib/embeddings.js'
+  
+  const chunkContents = chunks.map(c => c.content)
+  const embeddings = await generateEmbeddings(chunkContents)
+  
+  // Vercel AI SDK returns direct number[][] (no nested .values structure)
+  // Batch processing: 100 chunks per API call vs 1 at a time
+  // Built-in validation, rate limiting, and retry logic
   
   // 6. Store chunks in database
   const chunksToInsert = chunks.map((chunk, index) => ({
@@ -367,10 +378,18 @@ console.log(response.text)
 ```
 
 ### Batch Embedding Generation
+
+> **⚠️ DEPRECATED PATTERN**: This shows Native Gemini SDK approach for reference only.  
+> **✅ CURRENT IMPLEMENTATION**: Use `worker/lib/embeddings.ts` (Vercel AI SDK)  
+> See `docs/AI_DOCUMENTATION.md` for hybrid architecture details.
+
 ```typescript
 /**
  * Generate embeddings for multiple texts efficiently.
  * Handles rate limits with exponential backoff.
+ * 
+ * NOTE: This is a reference implementation using Native Gemini SDK.
+ * Production code uses Vercel AI SDK wrapper in worker/lib/embeddings.ts
  */
 async function batchEmbed(
   ai: GoogleGenAI,
@@ -526,7 +545,12 @@ const response = await ai.models.generateContent({
 5. **Model Selection**: Use `gemini-2.5-flash` for speed, `gemini-2.5-pro` for quality
 
 ### Error Handling Patterns
+
+> **⚠️ REFERENCE ONLY**: Native Gemini SDK pattern shown below.  
+> **✅ PRODUCTION**: Error handling built into `worker/lib/embeddings.ts`
+
 ```typescript
+// Reference implementation (Native SDK)
 async function robustEmbedContent(ai: GoogleGenAI, text: string, retries = 3) {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
