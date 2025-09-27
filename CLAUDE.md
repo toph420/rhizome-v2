@@ -936,12 +936,40 @@ GEMINI_API_KEY=<your Google AI Studio key>
 4. **Creating type services** - NO. Use ECS
 5. **Complex state management** - Keep it simple
 6. **Premature optimization** - Build first, optimize later
+7. **Committing dependencies** - NEVER commit node_modules or dist/
+
+### Git Hygiene (CRITICAL)
+
+**Prevention system in place**:
+- ✅ `.gitignore` uses `node_modules/` glob (catches ALL locations)
+- ✅ `worker/.gitignore` provides defense-in-depth
+- ✅ Pre-commit hook blocks node_modules and files >5MB
+- ✅ All `dist/` and `build/` directories ignored
+
+**If you see untracked node_modules**:
+```bash
+# Verify gitignore is working
+git check-ignore -v worker/node_modules/some-file
+
+# If not ignored, add to .gitignore immediately
+echo "problematic-dir/" >> .gitignore
+
+# Never use: git add . (too dangerous)
+# Always stage specific files: git add src/specific-file.ts
+```
+
+**Bypass pre-commit hook ONLY if absolutely necessary**:
+```bash
+git commit --no-verify -m "message"  # Use sparingly!
+```
 
 - [ ] Never use modal dialogs - use panels/docks/overlays
 - [ ] Never store large text in database - use Storage
 - [ ] Never bypass ECS for user content
 - [ ] Never load entire documents in memory
 - [ ] Never block UI during processing
+- [ ] Never commit node_modules, dist, or build directories
+- [ ] Never use `git add .` in subdirectories with dependencies
 
 ## Testing Strategy
 
