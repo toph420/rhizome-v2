@@ -8,9 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rhizome V2 is a **document reader with integrated flashcard study system** and **AI-powered knowledge synthesis**. It processes PDFs and other documents to clean markdown, enables annotating and quick flashcard creation, and discovers connections between ideas across your reading.
 
+**READ FIRST**: `docs/APP_VISION.md`
+
 ## Project Context
 
-This is a greenfield application with no existing users or legacy code. Prioritize modern best practices, clean architecture, and optimal solutions without considering backward compatibility or migration paths.
+This is a greenfield application with no existing users or legacy code. Prioritize modern best practices, clean architecture, and optimal solutions without considering backward compatibility or migration paths. This is an app for me, myself, and I, so lets make this as cool as posible and not worry about other people.
 
 **ARCHON PROJECT ID**: a2232595-4e55-41d2-a041-1a4a8a4ff3c6
 

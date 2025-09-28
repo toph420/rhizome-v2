@@ -6,6 +6,7 @@ A **beautiful document reader** with integrated **flashcard study system** and *
 
 Core principle: **Flow state preservation** - never interrupt reading or thinking with modals or context switches.
 
+
 ## Core Principles
 
 1. **No Modals** - Use docks, panels, and overlays that don't block the main content
@@ -29,7 +30,9 @@ Core principle: **Flow state preservation** - never interrupt reading or thinkin
     "processing": "Gemini 2.0 Flash (gemini-2.0-flash)",
     "embeddings": "gemini-embedding-001 (768/1536/3072 dimensions)",
     "extraction": "AI-first extraction (no pdf-parse)",
-    "sdk": "@google/genai v0.3+"
+    "sdk": "@google/genai v0.3+",
+    "ai": "^4.0.0",
+    "@ai-sdk/google": "^1.0.0"
   },
   "frontend": {
     "framework": "Next.js 15 with App Router",
