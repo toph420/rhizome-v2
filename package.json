@@ -15,7 +15,8 @@
     "lint": "eslint",
     "docs": "typedoc --out docs/api src/lib",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "benchmark:annotations": "tsx scripts/benchmark-annotations.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.17",
