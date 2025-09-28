@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -78,7 +79,7 @@ export function DocumentList() {
     }
   }, [userId])
 
-  async function loadDocuments(supabase: any, userId: string) {
+  async function loadDocuments(supabase: SupabaseClient, userId: string) {
     setLoading(true)
     const { data } = await supabase
       .from('documents')

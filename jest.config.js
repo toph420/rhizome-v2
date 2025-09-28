@@ -4,7 +4,9 @@ const config = {
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/src/test-setup.ts'],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1'
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^@google/genai$': '<rootDir>/__mocks__/@google/genai.ts',
+    '^(\\.{1,2}/.*)\\.js$': '$1'
   },
   testMatch: [
     '**/__tests__/**/*.(ts|tsx)',
@@ -16,7 +18,7 @@ const config = {
     '!src/test-setup.ts'
   ],
   transformIgnorePatterns: [
-    'node_modules/(?!(.*\\.mjs$))'
+    'node_modules/(?!(@google/genai|.*\\.mjs$))'
   ]
 }
 

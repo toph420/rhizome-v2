@@ -61,7 +61,9 @@ describe('Document Actions - Background Processing System', () => {
     const mockUser = { id: 'user-123' }
 
     beforeEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getSupabaseClient } = require('@/lib/auth')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getCurrentUser } = require('@/lib/auth')
       
       getSupabaseClient.mockReturnValue(mockSupabase)
@@ -222,7 +224,9 @@ describe('Document Actions - Background Processing System', () => {
     const mockUser = { id: 'user-123' }
 
     beforeEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getSupabaseClient } = require('@/lib/auth')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getCurrentUser } = require('@/lib/auth')
       
       getSupabaseClient.mockReturnValue(mockSupabase)
@@ -310,7 +314,9 @@ describe('Document Actions - Background Processing System', () => {
     }
 
     beforeEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getSupabaseClient } = require('@/lib/auth')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getCurrentUser } = require('@/lib/auth')
       
       getSupabaseClient.mockReturnValue(mockSupabase)
@@ -380,7 +386,9 @@ describe('Document Actions - Background Processing System', () => {
     }
 
     beforeEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getSupabaseClient } = require('@/lib/auth')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getCurrentUser } = require('@/lib/auth')
       
       getSupabaseClient.mockReturnValue(mockSupabase)

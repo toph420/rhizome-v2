@@ -53,15 +53,6 @@ async function processNextJob() {
   }
   
   const job = jobs && jobs.length > 0 ? jobs[0] : null
-  const error = null
-
-  if (error) {
-    // PGRST116 is "no rows returned" - not an actual error
-    if (error.code !== 'PGRST116') {
-      console.error('Error fetching job:', error)
-    }
-    return
-  }
 
   if (!job) {
     return

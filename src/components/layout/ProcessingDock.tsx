@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { SupabaseClient } from '@supabase/supabase-js'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, type LucideIcon } from 'lucide-react'
 
-const STAGE_LABELS: Record<string, { icon: any; label: string; substages?: Record<string, string> }> = {
+const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?: Record<string, string> }> = {
   download: { 
     icon: Download, 
     label: '📥 Downloading',
@@ -154,7 +155,7 @@ export function ProcessingDock() {
     }
   }, [userId])
   
-  async function loadInitialJobs(supabase: any, userId: string) {
+  async function loadInitialJobs(supabase: SupabaseClient, userId: string) {
     const { data } = await supabase
       .from('background_jobs')
       .select('*')

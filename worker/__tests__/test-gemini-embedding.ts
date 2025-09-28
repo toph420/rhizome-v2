@@ -25,15 +25,15 @@ async function testEmbedding() {
   console.log('Full result:', JSON.stringify(result, null, 2))
   console.log('\nResult keys:', Object.keys(result))
   
-  if (result.embedding) {
-    console.log('Embedding keys:', Object.keys(result.embedding))
-    console.log('Embedding type:', typeof result.embedding)
-    console.log('Is array?:', Array.isArray(result.embedding))
+  if (result.embeddings?.[0]) {
+    console.log('Embedding keys:', Object.keys(result.embeddings[0]))
+    console.log('Embedding type:', typeof result.embeddings)
+    console.log('Is array?:', Array.isArray(result.embeddings))
     
-    if (result.embedding.values) {
+    if (result.embeddings[0].values) {
       console.log('✅ Has .values property')
-      console.log('Vector length:', result.embedding.values.length)
-      console.log('First few values:', result.embedding.values.slice(0, 5))
+      console.log('Vector length:', result.embeddings[0].values.length)
+      console.log('First few values:', result.embeddings[0].values.slice(0, 5))
     }
   }
 }

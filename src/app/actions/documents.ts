@@ -3,6 +3,15 @@
 import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
 
 /**
+ * Job progress structure for tracking processing stages.
+ */
+interface JobProgress {
+  stage?: string
+  percent?: number
+  stage_data?: Record<string, unknown>
+}
+
+/**
  * Estimates processing cost for a document.
  * @param fileSize - Size of file in bytes.
  * @returns Estimated tokens, cost, and processing time.
@@ -79,6 +88,10 @@ export async function uploadDocument(formData: FormData): Promise<{
     }
     
     const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Authentication required' }
+    }
+    
     const supabase = getSupabaseClient()
     const documentId = crypto.randomUUID()
     const baseStoragePath = `${user.id}/${documentId}`
@@ -194,6 +207,9 @@ export async function triggerProcessing(documentId: string): Promise<{
     console.log('🚀 triggerProcessing START for:', documentId)
     const supabase = getSupabaseClient()
     const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Authentication required' }
+    }
     
     // Get document storage path
     const { data: doc, error: docError } = await supabase
@@ -272,12 +288,15 @@ export async function retryProcessing(documentId: string): Promise<{
 export async function getDocumentJob(documentId: string): Promise<{
   id: string
   status: string
-  progress: Record<string, any>
+  progress: JobProgress
   last_error: string | null
 } | null> {
   try {
     const supabase = getSupabaseClient()
     const user = await getCurrentUser()
+    if (!user) {
+      return null
+    }
     
     const { data, error } = await supabase
       .from('background_jobs')
@@ -291,7 +310,7 @@ export async function getDocumentJob(documentId: string): Promise<{
     
     if (error) return null
     return data
-  } catch (error) {
+  } catch {
     return null
   }
 }
