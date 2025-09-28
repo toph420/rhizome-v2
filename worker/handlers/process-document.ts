@@ -400,7 +400,9 @@ ${pastedContent}`
               }],
               config: {
                 responseMimeType: 'application/json',
-                responseSchema: EXTRACTION_SCHEMA
+                responseSchema: EXTRACTION_SCHEMA,
+                maxOutputTokens: 8192, // Actual maximum for Gemini 2.0 Flash
+                temperature: 0.1, // Lower temperature for more consistent extraction
               }
             });
             
@@ -426,20 +428,25 @@ ${pastedContent}`
           try {
             extracted = JSON.parse(result.text);
           } catch (parseError: any) {
-            // Try to repair common JSON issues
+            
+            // Try to repair common JSON issues with our enhanced repair function
             try {
-              // Attempt to fix unescaped quotes and newlines
               const repairedJson = repairCommonJsonIssues(result.text);
               extracted = JSON.parse(repairedJson);
-              console.warn('⚠️ JSON repair was needed (unescaped characters detected)');
-            } catch (repairError) {
-              // If repair fails, provide detailed error
+            } catch (repairError: any) {
+              // If repair fails, provide detailed error with suggestions
               const errorPos = parseError.message.match(/position (\d+)/)?.[1];
               const context = errorPos ? result.text.substring(Math.max(0, parseInt(errorPos) - 100), Math.min(result.text.length, parseInt(errorPos) + 100)) : '';
+              
               throw new Error(
-                `AI generated invalid JSON response. This usually happens with complex PDFs containing special characters. ` +
-                `Error: ${parseError.message}. ` +
-                (context ? `Context: ...${context}...` : '')
+                `Unable to process this PDF due to complex formatting issues.\n\n` +
+                `Technical details: ${parseError.message}\n` +
+                (context ? `Context: ...${context}...\n\n` : '') +
+                `Suggestions to resolve:\n` +
+                `1. Try uploading a smaller section of the PDF (split into parts)\n` +
+                `2. Convert the PDF to plain text first using an external tool\n` +
+                `3. If the PDF contains tables or complex layouts, consider extracting text content only\n` +
+                `4. Remove special characters or non-standard formatting from the source document`
               );
             }
           }
@@ -452,8 +459,8 @@ ${pastedContent}`
           markdown = extracted.markdown;
           chunks = extracted.chunks;
           
-            const markdownKB = Math.round(markdown.length / 1024);
-            await updateProgress(supabase, job.id, 40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB, took ${generateTime}s)`)
+          const markdownKB = Math.round(markdown.length / 1024);
+          await updateProgress(supabase, job.id, 40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB, took ${generateTime}s)`)
             
           } catch (error: any) {
             // Convert to user-friendly error before throwing
@@ -862,50 +869,136 @@ ${markdown}` }
 
 /**
  * Attempts to repair common JSON formatting issues from LLM responses.
- * Uses the jsonrepair library for robust handling of malformed JSON.
+ * Uses multiple strategies including manual fixes and the jsonrepair library.
  */
 function repairCommonJsonIssues(jsonString: string): string {
   try {
-    // First, try to extract JSON if it's wrapped in markdown code blocks
-    const codeBlockMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)```/);
+    let workingString = jsonString;
+    
+    // Step 1: Extract JSON if wrapped in markdown code blocks
+    const codeBlockMatch = workingString.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (codeBlockMatch) {
-      jsonString = codeBlockMatch[1].trim();
+      workingString = codeBlockMatch[1].trim();
     }
     
-    // Remove any leading/trailing whitespace
-    jsonString = jsonString.trim();
+    // Step 2: Remove any leading/trailing whitespace and BOM
+    workingString = workingString.trim().replace(/^\uFEFF/, '');
     
-    // If it starts with text before the JSON, try to extract just the JSON
-    const jsonStartMatch = jsonString.match(/^[^{]*({[\s\S]*})\s*$/);
+    // Step 3: If it starts with text before the JSON, extract just the JSON
+    const jsonStartMatch = workingString.match(/^[^{]*({[\s\S]*})\s*$/);
     if (jsonStartMatch) {
-      jsonString = jsonStartMatch[1];
+      workingString = jsonStartMatch[1];
     }
     
-    // Use jsonrepair library to fix common issues:
-    // - Unescaped quotes
+    // Step 4: Aggressive preprocessing for common LLM issues
+    // Fix unescaped quotes in string values (but be careful not to break already escaped ones)
+    // This regex looks for quotes that aren't already escaped and are within string contexts
+    workingString = workingString
+      // First, protect already properly escaped quotes
+      .replace(/\\"/g, '\u0000ESCAPED_QUOTE\u0000')
+      // Fix unescaped quotes within string values (between : and , or })
+      .replace(/:(\s*)"([^"]*)"([^"]*)"([^"]*)",/g, (match, ws, p1, p2, p3) => {
+        // This handles cases like: "content": "He said "hello" to me",
+        const fixed = `:${ws}"${p1}\\"${p2}\\"${p3}",`;
+        console.warn(`Fixed unescaped quotes: ${match.substring(0, 50)}... → ${fixed.substring(0, 50)}...`);
+        return fixed;
+      })
+      // Restore protected escaped quotes
+      .replace(/\u0000ESCAPED_QUOTE\u0000/g, '\\"');
+    
+    // Step 5: Fix common newline issues in string values
+    // Replace actual newlines within string values with \n
+    // This is tricky - we need to identify string boundaries
+    workingString = workingString.replace(/"([^"]*[\r\n]+[^"]*)"/g, (match, content) => {
+      const fixed = '"' + content.replace(/\r?\n/g, '\\n') + '"';
+      if (fixed !== match) {
+        console.warn(`Fixed unescaped newlines in string`);
+      }
+      return fixed;
+    });
+    
+    // Step 6: Remove any control characters except those in valid escape sequences
+    workingString = workingString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    
+    // Step 7: Use jsonrepair library for comprehensive repair
+    // This handles:
     // - Missing commas
-    // - Trailing commas
+    // - Trailing commas  
     // - Comments
     // - Single quotes instead of double quotes
     // - Unquoted keys
-    // - And many more LLM-specific issues
-    return jsonrepair(jsonString);
-  } catch (error) {
-    // If repair fails, return original
+    // - Truncated JSON
+    // - And many more edge cases
+    const repaired = jsonrepair(workingString);
+    
+    // Step 8: Validate that repair worked by attempting parse
+    JSON.parse(repaired); // This will throw if still invalid
+    
+    return repaired;
+    
+  } catch (error: any) {
+    console.error('JSON repair failed:', error.message);
+    
+    // Last resort: Try to extract just the markdown and chunks manually
+    // This is a fallback for severely broken JSON
+    try {
+      // Try to extract markdown content between quotes
+      const markdownMatch = jsonString.match(/"markdown"\s*:\s*"([^"]+(?:\\.[^"]+)*)"/);
+      const chunksMatch = jsonString.match(/"chunks"\s*:\s*\[([\s\S]*?)\]/);
+      
+      if (markdownMatch && chunksMatch) {
+        console.warn('Attempting manual extraction of markdown and chunks...');
+        
+        // Build a minimal valid JSON structure
+        const minimalJson = {
+          markdown: markdownMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+          chunks: [] as any[]
+        };
+        
+        // Try to extract individual chunks
+        const chunkPattern = /\{\s*"content"\s*:\s*"([^"]+(?:\\.[^"]+)*)"/g;
+        let chunkMatch;
+        while ((chunkMatch = chunkPattern.exec(chunksMatch[1])) !== null) {
+          minimalJson.chunks.push({
+            content: chunkMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+            themes: [],
+            importance_score: 0.5,
+            summary: 'Extracted from malformed JSON'
+          });
+        }
+        
+        if (minimalJson.chunks.length > 0) {
+          console.warn(`Manually extracted ${minimalJson.chunks.length} chunks from malformed JSON`);
+          return JSON.stringify(minimalJson);
+        }
+      }
+    } catch (manualError) {
+      console.error('Manual extraction also failed:', manualError);
+    }
+    
+    // If all repair attempts fail, return original
     return jsonString;
   }
 }
 
 const EXTRACTION_PROMPT = `
-Extract this PDF to perfect markdown preserving all formatting.
-Then break into semantic chunks (complete thoughts, 200-500 words each).
-For each chunk, identify 1-3 themes and estimate importance (0-1 scale).
+Extract the ENTIRE PDF document to perfect markdown, preserving ALL content and formatting.
+Process EVERY page from beginning to end - do not skip or truncate any sections.
 
-IMPORTANT: Return ONLY valid JSON. Ensure all strings are properly escaped.
-All quotes within strings must be escaped with backslash.
-All newlines within strings must be escaped as \\n.
+Requirements:
+1. Extract ALL text from EVERY page of the document
+2. Preserve all headings, paragraphs, lists, and formatting
+3. After extracting the COMPLETE markdown, break it into semantic chunks (200-500 words each)
+4. For each chunk, identify 1-3 themes and estimate importance (0-1 scale)
+5. Include a brief summary for each chunk
 
-Return JSON with full markdown and chunk array.
+CRITICAL: 
+- Extract the COMPLETE document - do not stop early or omit content
+- Return ONLY valid JSON with properly escaped strings
+- Escape all quotes with backslash (\\")
+- Escape all newlines as \\n
+
+The markdown field must contain the FULL document text, and chunks should cover ALL content.
 `
 
 const EXTRACTION_SCHEMA = {

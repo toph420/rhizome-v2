@@ -1,6 +1,6 @@
 import { fetchTranscript } from 'youtube-transcript-plus'
-import type { TranscriptSegment } from '../types/multi-format'
-import { ERROR_PREFIXES } from '../types/multi-format'
+import type { TranscriptSegment } from '../types/multi-format.js'
+import { ERROR_PREFIXES } from '../types/multi-format.js'
 
 /**
  * Extracts the 11-character video ID from various YouTube URL formats.
