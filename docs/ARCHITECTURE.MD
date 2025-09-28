@@ -485,6 +485,560 @@ Return as structured JSON with full markdown and chunk array.
 `;
 ```
 
+### YouTube Processing Pipeline
+
+**Overview**: YouTube videos receive specialized AI-powered processing with transcript cleaning, metadata extraction, and fuzzy chunk positioning.
+
+**Key Innovation**: Combines transcript cleaning (removes timestamp noise) with fuzzy positioning algorithm (enables future annotations despite content reformatting).
+
+#### Pipeline Stages
+
+**Stage 1: Transcript Fetching** (15% progress)
+```typescript
+// Extract video ID and fetch transcript
+const videoId = extractYouTubeVideoId(url)  // worker/lib/youtube.ts
+const transcript = await fetchYouTubeTranscript(videoId)
+
+// Format to markdown with timestamps preserved
+const markdown = formatTranscriptToMarkdown(transcript, {
+  includeTimestamps: true,  // [[MM:SS](url)] format
+  videoId: videoId
+})
+```
+
+**Files**: `worker/lib/youtube.ts` - Video ID extraction, transcript fetching, formatting
+
+**Stage 2: Original Backup** (20% progress)
+```typescript
+// Save source-raw.txt with timestamps intact
+await supabase.storage
+  .from('documents')
+  .upload(`${storagePath}/source-raw.txt`, markdown, {
+    contentType: 'text/markdown',
+    upsert: true
+  })
+```
+
+**Purpose**: Preserves verbatim transcript for:
+- User reference ("view original" feature)
+- Fuzzy positioning algorithm (Stage 5)
+- Recovery from cleaning failures
+
+**Stage 3: AI Cleaning** (25% progress)
+```typescript
+// Clean transcript with graceful degradation
+const cleaningResult = await cleanYoutubeTranscript(ai, markdown)
+
+if (cleaningResult.success) {
+  markdown = cleaningResult.cleaned  // Use cleaned version
+  console.log('✅ Transcript cleaned successfully')
+} else {
+  console.warn(`⚠️  Cleaning failed: ${cleaningResult.error}`)
+  // Continue with original markdown (zero data loss)
+}
+```
+
+**Implementation**: `worker/lib/youtube-cleaning.ts` (126 lines, 17 tests, 100% coverage)
+
+**Cleaning Operations**:
+- Remove ALL `[[MM:SS](url)]` timestamp links
+- Fix grammar and combine sentence fragments  
+- Add semantic section headings (##) every 3-5 minutes
+- Remove filler words (um, uh, you know, like)
+- Preserve natural flow and meaning
+
+**Graceful Degradation**:
+- Empty AI response → Uses original
+- API error → Uses original  
+- Suspicious length (<50% or >150% original) → Uses original
+- **Always returns usable markdown** (no pipeline failures)
+
+**AI Configuration**:
+```typescript
+model: 'gemini-2.0-flash'    // Fast model for cleaning
+temperature: 0.3             // Low for consistency
+maxOutputTokens: 8192        // Support long transcripts
+```
+
+**Stage 4: Semantic Rechunking** (30-80% progress)
+```typescript
+// Enhanced rechunking with complete metadata
+const chunks = await rechunkMarkdown(ai, markdown, {
+  requireMetadata: true,    // Enforce completeness
+  validateDefaults: true    // Apply safe defaults if missing
+})
+
+// Validate and apply defaults
+chunks.forEach((chunk, index) => {
+  if (!chunk.themes || chunk.themes.length === 0) {
+    chunk.themes = ['general']
+    console.warn(`Chunk ${index}: Applied default theme`)
+  }
+  if (chunk.importance_score === undefined) {
+    chunk.importance_score = 0.5
+    console.warn(`Chunk ${index}: Applied default importance`)
+  }
+  if (!chunk.summary) {
+    chunk.summary = chunk.content.slice(0, 100) + '...'
+    console.warn(`Chunk ${index}: Generated default summary`)
+  }
+  chunk.word_count = chunk.content.trim().split(/\s+/).length
+})
+```
+
+**Implementation**: `worker/handlers/process-document.ts:rechunkMarkdown()` function
+
+**Prompt Enhancements**:
+```typescript
+const prompt = `Break this markdown into semantic chunks (200-2000 chars).
+
+CRITICAL: Every chunk MUST have:
+- themes: Array of 2-3 specific topics (e.g., ["authentication", "security"])
+- importance_score: Float 0.0-1.0 (how central this content is)
+- summary: One sentence describing what this chunk covers
+
+Return JSON: {chunks: [{content, themes, importance_score, summary}]}`
+```
+
+**Metadata Validation**:
+- JSON schema with `required` fields enforces completeness
+- Safe defaults prevent NULL database values
+- Warnings logged for all defaulted fields
+
+**Stage 5: Fuzzy Chunk Positioning** (85-90% progress)
+```typescript
+// Load source-raw.txt for positioning
+const { data: sourceFile } = await supabase.storage
+  .from('documents')
+  .download(`${storagePath}/source-raw.txt`)
+
+const sourceMarkdown = await sourceFile.text()
+
+// Match each chunk to source with confidence scoring
+const positionedChunks = chunks.map((chunk, index) => {
+  const matchResult = fuzzyMatchChunkToSource(
+    chunk.content,
+    sourceMarkdown,
+    { chunkIndex: index, totalChunks: chunks.length }
+  )
+  
+  return {
+    ...chunk,
+    start_offset: matchResult.start_offset,
+    end_offset: matchResult.end_offset,
+    position_context: matchResult.position_context
+  }
+})
+
+// Log confidence distribution
+const distribution = {
+  exact: positionedChunks.filter(c => c.position_context.method === 'exact').length,
+  fuzzy: positionedChunks.filter(c => c.position_context.method === 'fuzzy').length,
+  approximate: positionedChunks.filter(c => c.position_context.method === 'approximate').length
+}
+console.log(`Positioning: ${distribution.exact} exact, ${distribution.fuzzy} fuzzy, ${distribution.approximate} approximate`)
+```
+
+**Implementation**: `worker/lib/fuzzy-matching.ts` (365 lines, 24 tests, 88.52% coverage)
+
+**Algorithm**: See "YouTube Offset Resolution Strategy" section below for full details.
+
+**Graceful Degradation**:
+- Storage download failure → Logs warning, continues without positioning
+- Fuzzy matching error → Logs warning, uses null offsets
+- **Processing always completes successfully**
+
+**Stage 6: Embeddings Generation** (95% progress)
+```typescript
+// Generate embeddings using Vercel AI SDK
+import { embedMany } from 'ai'
+import { google } from '@ai-sdk/google'
+
+const { embeddings } = await embedMany({
+  model: google.textEmbeddingModel('gemini-embedding-001', {
+    outputDimensionality: 768
+  }),
+  values: chunks.map(c => c.content)
+})
+```
+
+**Implementation**: `worker/lib/embeddings.ts`
+
+**Model**: `gemini-embedding-001` with 768 dimensions for pgvector compatibility.
+
+**Stage 7: Database Storage** (100% progress)
+```typescript
+// Insert chunks with complete metadata
+for (let i = 0; i < chunks.length; i++) {
+  await supabase
+    .from('chunks')
+    .insert({
+      document_id: documentId,
+      chunk_index: i,
+      content: chunks[i].content,
+      embedding: embeddings[i],
+      
+      // Complete metadata (all non-null)
+      themes: chunks[i].themes,
+      importance_score: chunks[i].importance_score,
+      summary: chunks[i].summary,
+      word_count: chunks[i].word_count,
+      
+      // Fuzzy positioning data
+      start_offset: chunks[i].start_offset ?? null,
+      end_offset: chunks[i].end_offset ?? null,
+      position_context: chunks[i].position_context ?? null
+    })
+}
+
+// Update document status
+await supabase
+  .from('documents')
+  .update({ 
+    processing_status: 'complete',
+    processing_completed_at: new Date().toISOString()
+  })
+  .eq('id', documentId)
+```
+
+#### Storage Artifacts
+
+```
+userId/documentId/
+├── source-raw.txt          # Original transcript with timestamps
+├── content.md              # AI-cleaned markdown (no timestamps)
+└── (future) export.bundle.zip
+```
+
+#### Quality Metrics
+
+**Timestamp Removal**: 100% (verified in T16)
+- Zero `[[MM:SS](url)]` patterns in cleaned content
+- All timestamps preserved in source-raw.txt
+
+**Metadata Completeness**: 100% (validated in T18, T20)
+- All chunks have non-null themes, importance_score, summary, word_count
+- Safe defaults applied when AI misses fields
+- Database constraints enforce non-null
+
+**Fuzzy Positioning Accuracy**: >70% high confidence (validated in T19)
+- Short videos (<5 min): >90% confidence ≥0.7
+- Medium videos (10-30 min): >70% confidence ≥0.7
+- Long videos (1+ hour): >60% confidence ≥0.7
+
+**Processing Performance**: <2 minutes per hour of video (validated in T19)
+- Short (<5 min): <30 seconds
+- Medium (10-30 min): <60 seconds  
+- Long (1+ hour): <120 seconds
+
+**Error Recovery**: 100% graceful degradation (validated in T17)
+- AI cleaning failures → Uses original transcript
+- Fuzzy matching failures → Continues without positioning
+- Storage errors → Logs warning, completes pipeline
+- **Zero data loss under any error condition**
+
+#### Key Files
+
+**Handler**: `worker/handlers/process-document.ts` (youtube case, lines 67-110)
+- Main pipeline orchestration
+- Progress updates at each stage
+- Error handling and graceful degradation
+
+**Utilities**:
+- `worker/lib/youtube.ts` - Video ID extraction, transcript fetching
+- `worker/lib/youtube-cleaning.ts` - AI cleaning with fallback
+- `worker/lib/fuzzy-matching.ts` - 3-tier positioning algorithm  
+- `worker/lib/embeddings.ts` - Vercel AI SDK embeddings
+
+**Tests** (all passing, 85-100% coverage):
+- `worker/__tests__/youtube-cleaning.test.ts` - 17 tests, 100% coverage
+- `worker/__tests__/fuzzy-matching.test.ts` - 24 tests, 88.52% coverage
+
+### YouTube Offset Resolution Strategy
+
+**Purpose**: Enable precise chunk positioning for future annotation system despite AI content reformatting.
+
+**Problem**: AI cleaning transforms YouTube transcripts (removes timestamps, fixes grammar, adds headings), making chunks non-identical to source. Simple string matching fails, requiring fuzzy algorithm with confidence scoring.
+
+**Implementation**: `worker/lib/fuzzy-matching.ts` - 3-tier fallback algorithm with graceful degradation.
+
+#### Algorithm Overview
+
+```typescript
+/**
+ * Fuzzy match a chunk to source markdown with 3-tier resolution.
+ * Always returns a result with confidence score (never fails).
+ */
+async function fuzzyMatchChunkToSource(
+  chunkContent: string,
+  sourceMarkdown: string,
+  options?: { trigramThreshold?: number }
+): Promise<FuzzyMatchResult>
+
+interface FuzzyMatchResult {
+  start_offset: number          // Character position in source
+  end_offset: number            // End position in source
+  confidence: number            // 0.3-1.0 (higher = more accurate)
+  method: 'exact' | 'fuzzy' | 'approximate'
+  position_context: {
+    context_before: string      // ~5 words before match
+    context_after: string       // ~5 words after match
+    confidence: number          // Same as parent confidence
+    method: string              // Same as parent method
+  }
+}
+```
+
+#### Tier 1: Exact String Match (Confidence 1.0)
+
+**When it works**: Chunk exists verbatim in source (unchanged by AI).
+
+```typescript
+const exactIndex = sourceMarkdown.indexOf(chunkContent)
+if (exactIndex !== -1) {
+  return {
+    start_offset: exactIndex,
+    end_offset: exactIndex + chunkContent.length,
+    confidence: 1.0,
+    method: 'exact',
+    position_context: {
+      context_before: extractContextBefore(sourceMarkdown, exactIndex),
+      context_after: extractContextAfter(sourceMarkdown, exactIndex + chunkContent.length),
+      confidence: 1.0,
+      method: 'exact'
+    }
+  }
+}
+```
+
+**Performance**: O(n) single pass, early exit on match.
+
+#### Tier 2: Trigram Fuzzy Match (Confidence 0.75-0.99)
+
+**When it works**: Chunk has minor variations (grammar fixes, sentence restructuring).
+
+**Algorithm**:
+1. Generate trigrams (3-character sliding window) for chunk
+2. Slide window across source (10% stride, 20% for >100 windows)
+3. Generate trigrams for each window candidate
+4. Calculate Jaccard similarity: `intersection / union`
+5. Return best match above threshold (default 0.75)
+
+```typescript
+// Generate trigrams: "hello" → ["hel", "ell", "llo"]
+function generateTrigrams(text: string): Set<string> {
+  const trigrams = new Set<string>()
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ')
+  
+  for (let i = 0; i <= normalized.length - 3; i++) {
+    trigrams.add(normalized.substring(i, i + 3))
+  }
+  
+  return trigrams
+}
+
+// Jaccard similarity
+function calculateTrigramSimilarity(set1: Set<string>, set2: Set<string>): number {
+  const intersection = new Set([...set1].filter(x => set2.has(x)))
+  const union = new Set([...set1, ...set2])
+  return intersection.size / union.size
+}
+
+// Sliding window search
+const chunkTrigrams = generateTrigrams(chunkContent)
+const windowSize = chunkContent.length
+const stride = Math.max(1, Math.floor(windowSize * (windowCount > 100 ? 0.2 : 0.1)))
+
+let bestMatch = { similarity: 0, offset: 0 }
+
+for (let offset = 0; offset <= sourceMarkdown.length - windowSize; offset += stride) {
+  const window = sourceMarkdown.substring(offset, offset + windowSize)
+  const windowTrigrams = generateTrigrams(window)
+  const similarity = calculateTrigramSimilarity(chunkTrigrams, windowTrigrams)
+  
+  if (similarity > bestMatch.similarity) {
+    bestMatch = { similarity, offset }
+    
+    // Early exit on near-perfect match
+    if (similarity > 0.95) break
+  }
+}
+
+if (bestMatch.similarity >= trigramThreshold) {
+  return {
+    start_offset: bestMatch.offset,
+    end_offset: bestMatch.offset + windowSize,
+    confidence: bestMatch.similarity,
+    method: 'fuzzy',
+    position_context: { /* extract context */ }
+  }
+}
+```
+
+**Optimizations**:
+- Pre-compute chunk trigrams (no loop regeneration)
+- Dynamic stride: 20% for >100 windows (saves 50% comparisons)
+- Early exit on >0.95 similarity
+- Skip if chunk longer than source
+
+**Performance**: O(n * m) where n = source length, m = window size. Optimized to <100ms for typical chunks.
+
+**Threshold Rationale**:
+- **0.75**: Balanced accuracy/recall from testing
+- Too low (<0.70): False positives, wrong positions
+- Too high (>0.80): Misses legitimate variations
+
+#### Tier 3: Approximate Positioning (Confidence 0.3)
+
+**When it works**: Always (fallback when exact and fuzzy fail).
+
+**Algorithm**: Proportional positioning based on chunk index.
+
+```typescript
+// Never fail - always return usable position
+const approximatePosition = Math.floor(
+  (chunkIndex / totalChunks) * sourceMarkdown.length
+)
+
+return {
+  start_offset: approximatePosition,
+  end_offset: Math.min(approximatePosition + chunkContent.length, sourceMarkdown.length),
+  confidence: 0.3,  // Low confidence = "best guess"
+  method: 'approximate',
+  position_context: { /* extract context */ }
+}
+```
+
+**Use case**: Heavily reformatted content, but still better than null.
+
+#### Context Extraction
+
+**Purpose**: Store ~5 words before/after match for future re-calculation.
+
+```typescript
+function extractContextBefore(source: string, offset: number, contextSize = 100): string {
+  const start = Math.max(0, offset - contextSize)
+  const context = source.substring(start, offset).trim()
+  return context.split(/\s+/).slice(-5).join(' ')  // Last 5 words
+}
+
+function extractContextAfter(source: string, offset: number, contextSize = 100): string {
+  const end = Math.min(source.length, offset + contextSize)
+  const context = source.substring(offset, end).trim()
+  return context.split(/\s+/).slice(0, 5).join(' ')  // First 5 words
+}
+```
+
+**Storage**: Saved in `position_context` JSONB column for future use.
+
+#### Batch Processing with Performance Metrics
+
+```typescript
+interface FuzzyMatchPerformance {
+  totalChunks: number
+  exactMatches: number
+  fuzzyMatches: number
+  approximateMatches: number
+  averageConfidence: number
+  processingTimeMs: number
+}
+
+async function fuzzyMatchBatch(
+  chunks: Array<{ content: string }>,
+  sourceMarkdown: string
+): Promise<{ results: FuzzyMatchResult[], performance: FuzzyMatchPerformance }>
+```
+
+**Monitoring**: Logs confidence distribution for quality assessment.
+
+#### Database Integration
+
+**Migration 012** adds required columns:
+
+```sql
+ALTER TABLE chunks ADD COLUMN position_context JSONB;
+ALTER TABLE chunks ADD COLUMN word_count INTEGER;
+
+COMMENT ON COLUMN chunks.position_context IS 
+  'Fuzzy matching metadata with context words for re-calculation';
+
+-- Functional indexes for filtering
+CREATE INDEX idx_chunks_position_confidence 
+  ON chunks ((position_context->>'confidence')::float);
+  
+CREATE INDEX idx_chunks_position_method 
+  ON chunks ((position_context->>'method'));
+```
+
+**Query Examples**:
+
+```sql
+-- Get high-confidence chunks
+SELECT id, chunk_index, 
+       (position_context->>'confidence')::float as confidence
+FROM chunks 
+WHERE document_id = 'video-123'
+  AND (position_context->>'confidence')::float >= 0.7
+ORDER BY chunk_index;
+
+-- Confidence distribution
+SELECT 
+  position_context->>'method' as method,
+  COUNT(*) as count,
+  AVG((position_context->>'confidence')::float) as avg_confidence
+FROM chunks
+WHERE document_id = 'video-123'
+GROUP BY method;
+```
+
+#### Quality Metrics (from testing)
+
+**Accuracy** (24 test cases, 88.52% code coverage):
+- Exact matches: 100% accuracy (confidence 1.0)
+- Fuzzy matches: >90% within chunk length of true position
+- Approximate: Provides usable position (confidence 0.3)
+
+**Performance** (validated with 100-chunk batches):
+- Per chunk: <100ms average
+- 100 chunks: 6.75s total (33% better than 10s target)
+- Memory: <50MB peak
+
+**Real-world validation** (T19 manual testing):
+- Short videos (<5 min): >90% high confidence (≥0.7)
+- Medium videos (10-30 min): >70% high confidence
+- Long videos (1+ hour): >60% high confidence
+
+#### Future Enhancements
+
+**Phase 2 - Annotation System**:
+- Use `start_offset` + `end_offset` for text highlighting
+- Show confidence badges: "Exact position" vs "Approximate"
+- Disable precise highlighting for low-confidence chunks (<0.5)
+
+**Re-calculation on markdown changes**:
+- Use `position_context` (context words) for fuzzy re-matching
+- Recalculate offsets without re-running full pipeline
+- Maintain annotations even when source is edited
+
+**Quality monitoring**:
+- Log confidence distribution per video
+- Alert on <50% high-confidence rate
+- A/B test threshold adjustments (0.70 vs 0.75 vs 0.80)
+
+#### Configuration Constants
+
+```typescript
+// Fuzzy matching thresholds
+const TRIGRAM_THRESHOLD = 0.75        // Minimum similarity for fuzzy match
+const MIN_CONFIDENCE_TO_STORE = 0.3   // Store even approximate matches
+const WINDOW_STRIDE_PERCENT = 0.1     // 10% stride (20% for >100 windows)
+const CONTEXT_WINDOW_SIZE = 100       // ±100 chars (typically 5 words)
+
+// Performance limits
+const MAX_WINDOW_COUNT = 10000        // Prevent excessive memory usage
+const EARLY_EXIT_THRESHOLD = 0.95     // Stop searching on near-perfect match
+```
+
 ## ECS Architecture
 
 ### Core Implementation

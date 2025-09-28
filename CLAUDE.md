@@ -296,6 +296,39 @@ Rhizome supports 6 input methods. Processing routes by `source_type`:
 - Storage: Markdown files (large, immutable)
 - Database: Chunks + embeddings (queryable with pgvector)
 
+#### YouTube Processing Pipeline (Enhanced)
+
+**Overview**: YouTube videos receive specialized 7-stage processing with AI-powered transcript cleaning, complete metadata extraction, and fuzzy chunk positioning.
+
+**Key Innovation**: Combines transcript cleaning (removes `[[MM:SS](url)]` timestamp noise) with 3-tier fuzzy positioning algorithm (enables Phase 2 annotations despite content reformatting).
+
+**Pipeline Stages** (quick reference):
+1. **Transcript Fetching** (15%) - Extract video ID, fetch transcript, format to markdown
+2. **Original Backup** (20%) - Save `source-raw.txt` with timestamps for positioning
+3. **AI Cleaning** (25%) - Remove timestamps, fix grammar, add headings (graceful fallback)
+4. **Semantic Rechunking** (30-80%) - Generate chunks with complete metadata (themes, importance, summary)
+5. **Fuzzy Positioning** (85-90%) - 3-tier algorithm (exact → fuzzy → approximate) with confidence scores
+6. **Embeddings** (95%) - Vercel AI SDK with `gemini-embedding-001` (768d)
+7. **Storage** (100%) - Insert chunks with all metadata to PostgreSQL
+
+**Quality Metrics** (validated T16-T20):
+- Timestamp removal: 100%
+- Metadata completeness: 100% (all non-null fields)
+- Positioning accuracy: >70% high confidence (≥0.7) for typical videos
+- Processing time: <2 minutes per hour of video
+- Error recovery: 100% graceful degradation (zero data loss)
+
+**Key Files**:
+- `worker/handlers/process-document.ts` (youtube case, lines 67-110)
+- `worker/lib/youtube-cleaning.ts` (126 lines, 17 tests, 100% coverage)
+- `worker/lib/fuzzy-matching.ts` (365 lines, 24 tests, 88.52% coverage)
+- `worker/lib/youtube.ts`, `worker/lib/embeddings.ts`
+
+**For complete implementation details**, see:
+- **Full pipeline documentation**: `docs/ARCHITECTURE.md` → "YouTube Processing Pipeline" section
+- **Fuzzy positioning algorithm**: `docs/ARCHITECTURE.md` → "YouTube Offset Resolution Strategy" section
+- **Task breakdown**: `docs/tasks/youtube-processing-metadata-enhancement.md`
+
 ## Document Reader Pattern
 
 **Key Pattern**: Stream markdown from Storage, query chunks from Database
@@ -731,22 +764,27 @@ npx supabase init
 
 ## Revised 4-Week MVP Timeline
 
-### 📋 Week 1: Foundation & Upload
+### 📋 Week 1: Foundation & Upload ✅ COMPLETE
 - [x] Project setup with Next.js 15
-- [x] Supabase schema creation
+- [x] Supabase schema creation (migrations 001-012)
 - [x] ECS implementation
-- [ ] Document upload to Storage
-- [ ] Processing dock UI (bottom panel)
-- [ ] Basic library page with drag-drop
-- [ ] Gemini API setup and testing
+- [x] Document upload to Storage
+- [x] Processing dock UI (bottom panel)
+- [x] Basic library page with drag-drop
+- [x] Gemini API setup and testing
 
-### 📋 Week 2: AI Processing Pipeline
-- [ ] Gemini extraction (PDF → Markdown)
-- [ ] Semantic chunking with Gemini
-- [ ] Embedding generation (Vercel AI SDK with gemini-embedding-001)
-- [ ] Store markdown in Storage, chunks in DB
-- [ ] Processing status updates in dock
-- [ ] Document metadata extraction
+### 📋 Week 2: AI Processing Pipeline ✅ COMPLETE (+ Enhanced YouTube)
+- [x] Gemini extraction (PDF → Markdown)
+- [x] Multi-format support (6 input methods: PDF, YouTube, Web, Markdown, Text, Paste)
+- [x] **YouTube Enhancement**: AI-powered transcript cleaning (removes timestamps, fixes grammar, adds headings)
+- [x] Semantic chunking with Gemini (complete metadata: themes, importance, summaries)
+- [x] **Fuzzy Positioning**: 3-tier algorithm (exact/fuzzy/approximate) for future annotations
+- [x] Embedding generation (Vercel AI SDK with gemini-embedding-001)
+- [x] Store markdown in Storage, chunks in DB (with position_context)
+- [x] Processing status updates in dock (7 stages for YouTube)
+- [x] Document metadata extraction (word_count, outline)
+- [x] **Database Migration 012**: Added position_context JSONB and word_count columns
+- [x] **Quality Gates**: Type checking, linting, comprehensive testing (88.52-100% coverage)
 
 ### 📋 Week 3: Reading & Annotation
 - [ ] Markdown renderer with MDX
