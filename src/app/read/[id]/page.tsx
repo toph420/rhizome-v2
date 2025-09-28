@@ -3,11 +3,20 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
 import { getDocumentJob } from '@/app/actions/documents'
+import { getAnnotations } from '@/app/actions/annotations'
+import { DocumentViewer } from '@/components/reader/DocumentViewer'
+import { RightPanel } from '@/components/sidebar/RightPanel'
 
 interface ReaderPageProps {
   params: Promise<{ id: string }>
 }
 
+/**
+ * Reader page component for viewing documents with annotations.
+ * @param root0 - Component props.
+ * @param root0.params - Route parameters.
+ * @returns Reader page JSX.
+ */
 export default async function ReaderPage({ params }: ReaderPageProps) {
   const { id } = await params
   const supabase = await createClient()
@@ -63,6 +72,39 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     const signedUrl = data.signedUrl
     const job = await getDocumentJob(id)
     
+    // Query chunks ordered by index
+    const { data: chunks, error: chunksError } = await supabase
+      .from('chunks')
+      .select('id, content, chunk_index, position_context, start_offset, end_offset')
+      .eq('document_id', id)
+      .order('chunk_index', { ascending: true })
+    
+    if (chunksError) {
+      console.error('Failed to load chunks:', chunksError)
+      return (
+        <div className="p-8 text-center">
+          <p className="text-destructive">Failed to load document chunks</p>
+          <p className="text-sm text-muted-foreground mt-2">
+            {chunksError.message}
+          </p>
+        </div>
+      )
+    }
+    
+    if (!chunks || chunks.length === 0) {
+      return (
+        <div className="p-8 text-center">
+          <p className="text-muted-foreground">
+            Document has no chunks. Processing may still be in progress.
+          </p>
+        </div>
+      )
+    }
+    
+    // Query annotations for this document
+    const annotationsResult = await getAnnotations(id)
+    const annotations = annotationsResult.success ? annotationsResult.data : []
+    
     return (
       <div className="flex flex-col h-screen">
         {!doc.embeddings_available && job && (
@@ -81,25 +123,17 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           </div>
         )}
         
-        <div className="flex-1 overflow-auto p-8">
-          <div className="max-w-4xl mx-auto">
-            <h1 className="text-3xl font-bold mb-6">{doc.title}</h1>
-            
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground mb-4">
-                  Document reader with markdown content from: {signedUrl}
-                </p>
-                <div className="prose prose-sm max-w-none">
-                  <p className="italic">
-                    Full markdown rendering will be implemented in the reader component.
-                    The signed URL above provides access to the processed markdown content.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <div className="flex-1 overflow-auto">
+          <DocumentViewer
+            documentId={id}
+            markdownUrl={signedUrl}
+            chunks={chunks}
+            annotations={annotations}
+          />
         </div>
+        
+        {/* Right panel with connections and annotations */}
+        <RightPanel documentId={id} />
       </div>
     )
   }
