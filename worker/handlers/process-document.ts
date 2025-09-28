@@ -5,6 +5,8 @@ import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } 
 import { extractArticle, isValidUrl } from '../lib/web-extraction.js'
 import { simpleMarkdownChunking, extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
+import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
+import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
 import type { SourceType, TimestampContext } from '../types/multi-format.js'
 
 const STAGES = {
@@ -21,6 +23,14 @@ interface ChunkData {
   importance_score: number
   summary: string
   timestamps?: TimestampContext[]
+  start_offset?: number
+  end_offset?: number
+  position_context?: {
+    confidence: number
+    method: 'exact' | 'fuzzy' | 'approximate'
+    context_before: string
+    context_after: string
+  }
 }
 
 interface ExtractionResponse {
@@ -54,17 +64,22 @@ export async function processDocumentHandler(supabase: any, job: any) {
     const completedStages = job.progress?.completed_stages || []
     let markdown: string
     let chunks: ChunkData[]
+    
+    // Get source metadata from job input (needed for fuzzy matching later)
+    const sourceType = (job.input_data.source_type as SourceType) || 'pdf'
 
     if (!completedStages.includes(STAGES.SAVE_MARKDOWN.name)) {
-      // Get source metadata from job input
-      const sourceType = (job.input_data.source_type as SourceType) || 'pdf'
+      // Source metadata already extracted above
       const sourceUrl = job.input_data.source_url as string | undefined
       const processingRequested = (job.input_data.processing_requested as boolean) ?? true
       const pastedContent = job.input_data.pasted_content as string | undefined
 
+      console.log('🔍 DEBUG: sourceType =', sourceType, 'input_data:', JSON.stringify(job.input_data, null, 2))
+
       // Route by source type
       switch (sourceType) {
         case 'youtube': {
+          console.log('🎬 DEBUG: YouTube case triggered!')
           await updateProgress(supabase, job.id, 10, 'download', 'fetching', 'Fetching YouTube transcript')
           
           if (!sourceUrl) {
@@ -77,7 +92,41 @@ export async function processDocumentHandler(supabase: any, job: any) {
           }
           
           const transcript = await fetchTranscriptWithRetry(videoId)
-          markdown = formatTranscriptToMarkdown(transcript, sourceUrl)
+          const rawMarkdown = formatTranscriptToMarkdown(transcript, sourceUrl)
+          
+          // Save original transcript with timestamps as source-raw.md
+          await updateProgress(supabase, job.id, 15, 'download', 'saving', 'Saving original transcript')
+          console.log('💾 DEBUG: Saving source-raw.md to:', `${storagePath}/source-raw.md`)
+          const rawBlob = new Blob([rawMarkdown], { type: 'text/markdown' })
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('documents')
+            .upload(`${storagePath}/source-raw.md`, rawBlob, { 
+              contentType: 'text/markdown',
+              upsert: true 
+            })
+          
+          if (uploadError) {
+            console.error('❌ Failed to save source-raw.md:', uploadError)
+            throw new Error(`Failed to save original transcript: ${uploadError.message}`)
+          }
+          console.log('✅ source-raw.md saved successfully:', uploadData)
+          
+          // Clean transcript with AI (removes timestamps, improves readability)
+          await updateProgress(supabase, job.id, 20, 'extract', 'cleaning', 'Cleaning transcript with AI')
+          console.log('🧹 DEBUG: Calling cleanYoutubeTranscript, markdown length:', rawMarkdown.length)
+          const cleaningResult = await cleanYoutubeTranscript(ai, rawMarkdown)
+          
+          console.log('✨ DEBUG: Cleaning result:', { success: cleaningResult.success, cleanedLength: cleaningResult.cleaned.length, error: cleaningResult.error })
+          
+          if (cleaningResult.success) {
+            markdown = cleaningResult.cleaned
+            await updateProgress(supabase, job.id, 25, 'extract', 'cleaned', 'Transcript cleaned successfully')
+          } else {
+            // Graceful degradation: use original markdown
+            markdown = rawMarkdown
+            console.warn(`AI cleaning failed for ${videoId}, using original transcript:`, cleaningResult.error)
+            await updateProgress(supabase, job.id, 25, 'extract', 'warning', `Cleaning failed: ${cleaningResult.error}. Using original transcript.`)
+          }
           
           await updateProgress(supabase, job.id, 30, 'extract', 'chunking', 'Creating semantic chunks')
           chunks = await rechunkMarkdown(ai, markdown)
@@ -447,6 +496,77 @@ ${pastedContent}`
       chunks = await rechunkMarkdown(ai, markdown)
     }
 
+    // Fuzzy match chunks to source for YouTube videos only
+    if (sourceType === 'youtube') {
+      try {
+        await updateProgress(supabase, job.id, 52, 'position', 'loading', 'Loading original transcript for positioning')
+        
+        // Load source-raw.md (original transcript with timestamps)
+        const { data: sourceBlob, error: sourceError } = await supabase.storage
+          .from('documents')
+          .download(`${storagePath}/source-raw.md`)
+        
+        if (sourceError) {
+          console.warn(`Failed to load source-raw.md for fuzzy matching: ${sourceError.message}. Continuing without position data.`)
+        } else {
+          const sourceMarkdown = await sourceBlob.text()
+          
+          await updateProgress(supabase, job.id, 55, 'position', 'matching', 'Calculating chunk positions in source')
+          
+          // Track confidence distribution for monitoring
+          let exactCount = 0
+          let fuzzyCount = 0
+          let approximateCount = 0
+          
+          // Match each chunk to find its position in source
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i]
+            const matchResult = fuzzyMatchChunkToSource(chunk.content, sourceMarkdown, i, chunks.length)
+            
+            // Store position data on chunk object
+            chunk.start_offset = matchResult.startOffset
+            chunk.end_offset = matchResult.endOffset
+            chunk.position_context = {
+              confidence: matchResult.confidence,
+              method: matchResult.method,
+              context_before: matchResult.contextBefore,
+              context_after: matchResult.contextAfter
+            }
+            
+            // Update confidence distribution counters
+            if (matchResult.method === 'exact') exactCount++
+            else if (matchResult.method === 'fuzzy') fuzzyCount++
+            else approximateCount++
+            
+            // Progress update every 10 chunks
+            if (i % 10 === 0 || i === chunks.length - 1) {
+              const progress = Math.floor((i / chunks.length) * 100)
+              await updateProgress(
+                supabase,
+                job.id,
+                55 + Math.floor(progress * 0.1), // 55-65%
+                'position',
+                'matching',
+                `Positioned ${i + 1}/${chunks.length} chunks (${progress}%)`
+              )
+            }
+          }
+          
+          // Log confidence distribution for monitoring
+          console.log(`📊 Fuzzy matching complete for ${chunks.length} chunks:`)
+          console.log(`   Exact matches: ${exactCount} (${Math.round(exactCount / chunks.length * 100)}%)`)
+          console.log(`   Fuzzy matches: ${fuzzyCount} (${Math.round(fuzzyCount / chunks.length * 100)}%)`)
+          console.log(`   Approximate matches: ${approximateCount} (${Math.round(approximateCount / chunks.length * 100)}%)`)
+          
+          await updateProgress(supabase, job.id, 65, 'position', 'complete', `Positioned ${chunks.length} chunks (${exactCount} exact, ${fuzzyCount} fuzzy, ${approximateCount} approximate)`)
+        }
+      } catch (error) {
+        // Graceful degradation: Log error but continue processing without position data
+        console.error(`Fuzzy matching failed:`, error)
+        console.warn(`Continuing without position data. Chunks will be saved without start_offset/end_offset/position_context.`)
+      }
+    }
+
     await updateProgress(supabase, job.id, STAGES.EMBED.percent, 'embed', 'starting', `Generating embeddings for ${chunks.length} chunks`)
     
     try {
@@ -460,6 +580,9 @@ ${pastedContent}`
         const chunk = chunks[i]
         const embedding = embeddings[i]  // Direct access - no .values needed!
         
+        // Calculate word count using whitespace split
+        const wordCount = chunk.content.trim().split(/\s+/).length
+        
         const chunkData: any = {
           document_id,
           content: chunk.content,
@@ -467,7 +590,12 @@ ${pastedContent}`
           chunk_index: i,
           themes: chunk.themes,
           importance_score: chunk.importance_score,
-          summary: chunk.summary
+          summary: chunk.summary,
+          word_count: wordCount,
+          // Position data from fuzzy matching (YouTube only)
+          start_offset: chunk.start_offset ?? null,
+          end_offset: chunk.end_offset ?? null,
+          position_context: chunk.position_context ?? null
         }
         
         // Add timestamp data if present (YouTube videos)
@@ -595,7 +723,17 @@ async function rechunkMarkdown(ai: GoogleGenAI, markdown: string): Promise<Chunk
     model: 'gemini-2.0-flash',
     contents: [{
       parts: [
-        { text: `Break this markdown document into semantic chunks:\n\n${markdown}` }
+        { text: `Break this markdown document into semantic chunks (complete thoughts, 200-2000 characters).
+
+CRITICAL: Every chunk MUST have:
+- content: The actual chunk text (STRING, required)
+- themes: Array of 2-3 specific topics covered (e.g., ["authentication", "security"]) (ARRAY of STRINGS, required)
+- importance_score: Float 0.0-1.0 representing how central this content is to the document (NUMBER, required)
+- summary: One sentence describing what this chunk covers (STRING, required)
+
+Return JSON with this exact structure: {chunks: [{content, themes, importance_score, summary}]}
+
+${markdown}` }
       ]
     }],
     config: {
@@ -612,10 +750,12 @@ async function rechunkMarkdown(ai: GoogleGenAI, markdown: string): Promise<Chunk
                 themes: { type: Type.ARRAY, items: { type: Type.STRING }},
                 importance_score: { type: Type.NUMBER },
                 summary: { type: Type.STRING }
-              }
+              },
+              required: ['content', 'themes', 'importance_score', 'summary']
             }
           }
-        }
+        },
+        required: ['chunks']
       }
     }
   })
@@ -629,13 +769,91 @@ async function rechunkMarkdown(ai: GoogleGenAI, markdown: string): Promise<Chunk
     if (!response.chunks || !Array.isArray(response.chunks)) {
       throw new Error('Invalid chunking response structure');
     }
-    return response.chunks;
+    
+    // Validation loop: Ensure all chunks have complete metadata
+    const validatedChunks = response.chunks.map((chunk: any, index: number) => {
+      let hasWarnings = false
+      
+      // Validate and default themes
+      if (!chunk.themes || !Array.isArray(chunk.themes) || chunk.themes.length === 0) {
+        console.warn(`⚠️  Chunk ${index}: Missing or empty themes, defaulting to ['general']`)
+        chunk.themes = ['general']
+        hasWarnings = true
+      }
+      
+      // Validate and default importance_score
+      if (typeof chunk.importance_score !== 'number' || chunk.importance_score < 0 || chunk.importance_score > 1) {
+        console.warn(`⚠️  Chunk ${index}: Invalid importance_score (${chunk.importance_score}), defaulting to 0.5`)
+        chunk.importance_score = 0.5
+        hasWarnings = true
+      }
+      
+      // Validate and default summary
+      if (!chunk.summary || typeof chunk.summary !== 'string' || chunk.summary.trim() === '') {
+        const fallbackSummary = chunk.content.slice(0, 100) + '...'
+        console.warn(`⚠️  Chunk ${index}: Missing summary, using content preview: "${fallbackSummary}"`)
+        chunk.summary = fallbackSummary
+        hasWarnings = true
+      }
+      
+      // Ensure content exists (critical field)
+      if (!chunk.content || typeof chunk.content !== 'string') {
+        throw new Error(`Chunk ${index}: Missing or invalid content field`)
+      }
+      
+      if (hasWarnings) {
+        console.warn(`⚠️  Chunk ${index} had missing metadata - safe defaults applied`)
+      }
+      
+      return chunk
+    })
+    
+    return validatedChunks;
   } catch (parseError: any) {
     // Try to repair and retry once
     try {
       const repairedJson = repairCommonJsonIssues(result.text);
       const response = JSON.parse(repairedJson);
-      return response.chunks;
+      
+      // Apply same validation to repaired JSON
+      if (!response.chunks || !Array.isArray(response.chunks)) {
+        throw new Error('Invalid chunking response structure after repair');
+      }
+      
+      const validatedChunks = response.chunks.map((chunk: any, index: number) => {
+        let hasWarnings = false
+        
+        if (!chunk.themes || !Array.isArray(chunk.themes) || chunk.themes.length === 0) {
+          console.warn(`⚠️  Chunk ${index}: Missing or empty themes, defaulting to ['general']`)
+          chunk.themes = ['general']
+          hasWarnings = true
+        }
+        
+        if (typeof chunk.importance_score !== 'number' || chunk.importance_score < 0 || chunk.importance_score > 1) {
+          console.warn(`⚠️  Chunk ${index}: Invalid importance_score (${chunk.importance_score}), defaulting to 0.5`)
+          chunk.importance_score = 0.5
+          hasWarnings = true
+        }
+        
+        if (!chunk.summary || typeof chunk.summary !== 'string' || chunk.summary.trim() === '') {
+          const fallbackSummary = chunk.content.slice(0, 100) + '...'
+          console.warn(`⚠️  Chunk ${index}: Missing summary, using content preview: "${fallbackSummary}"`)
+          chunk.summary = fallbackSummary
+          hasWarnings = true
+        }
+        
+        if (!chunk.content || typeof chunk.content !== 'string') {
+          throw new Error(`Chunk ${index}: Missing or invalid content field`)
+        }
+        
+        if (hasWarnings) {
+          console.warn(`⚠️  Chunk ${index} had missing metadata - safe defaults applied`)
+        }
+        
+        return chunk
+      })
+      
+      return validatedChunks;
     } catch (repairError) {
       throw new Error(`Failed to parse chunking response: ${parseError.message}`);
     }
