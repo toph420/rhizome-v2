@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
+import { Loader2 } from 'lucide-react'
 import { createAnnotation } from '@/app/actions/annotations'
 import { extractContext } from '@/lib/annotations/text-range'
 import type { TextSelection } from '@/types/annotations'
@@ -49,12 +50,9 @@ const COLOR_OPTIONS = [
   },
 ] as const
 
-type ColorOption = (typeof COLOR_OPTIONS)[number]
-
 /**
  * Quick capture panel for creating annotations inline.
  * Positioned near text selection with color buttons and optional note.
- * 
  * @param props - Component props.
  * @param props.selection - Text selection data from Range API.
  * @param props.documentId - Document identifier for annotation linking.
@@ -71,14 +69,14 @@ export function QuickCapturePanel({
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [selectedColor, setSelectedColor] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
   const noteRef = useRef<HTMLTextAreaElement>(null)
 
-  async function handleColorSelect(color: string) {
+  const handleColorSelect = useCallback(async (color: string) => {
+    if (saving) return // Prevent double-submit
     setSelectedColor(color)
-    await saveAnnotation(color)
-  }
 
-  async function saveAnnotation(color: string) {
+    // saveAnnotation logic inline to avoid nested async functions
     setSaving(true)
 
     try {
@@ -101,27 +99,47 @@ export function QuickCapturePanel({
       })
 
       if (result.success) {
-        toast.success('Annotation saved', {
-          description: `Highlighted in ${color}`,
+        toast.success('Highlight saved', {
+          description: `${color.charAt(0).toUpperCase() + color.slice(1)} highlight created`,
           duration: 2000,
         })
+        setRetryCount(0) // Reset retry count on success
         onClose()
       } else {
-        toast.error('Failed to save annotation', {
-          description: result.error || 'Unknown error',
-          duration: 4000,
+        // Server-side validation error
+        console.error('Server validation error:', result.error)
+        toast.error('Failed to save highlight', {
+          description: result.error || 'Please try again',
+          action: retryCount < 3 ? {
+            label: 'Retry',
+            onClick: () => {
+              setRetryCount(retryCount + 1)
+              void handleColorSelect(color)
+            },
+          } : undefined,
+          duration: 5000,
         })
       }
     } catch (error) {
+      // Network error or unexpected exception
       console.error('Failed to save annotation:', error)
-      toast.error('Error', {
-        description: 'Failed to save annotation',
-        duration: 4000,
+      
+      toast.error('Network error', {
+        description: 'Could not reach server. Check your connection.',
+        action: retryCount < 3 ? {
+          label: 'Retry',
+          onClick: () => {
+            setRetryCount(retryCount + 1)
+            void handleColorSelect(color)
+          },
+        } : undefined,
+        duration: 5000,
       })
     } finally {
       setSaving(false)
     }
-  }
+  }, [saving, chunkContent, selection, documentId, note, retryCount, onClose])
+
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -134,7 +152,7 @@ export function QuickCapturePanel({
       )
       if (colorOption) {
         e.preventDefault()
-        handleColorSelect(colorOption.color)
+        void handleColorSelect(colorOption.color)
       }
     }
 
@@ -169,7 +187,11 @@ export function QuickCapturePanel({
                 title={`${option.label} (${option.key})`}
                 aria-label={`Highlight ${option.label}`}
               >
-                {option.key.toUpperCase()}
+                {saving && selectedColor === option.color ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  option.key.toUpperCase()
+                )}
               </Button>
             ))}
           </div>
@@ -199,7 +221,14 @@ export function QuickCapturePanel({
               }
               disabled={saving}
             >
-              {saving ? 'Saving...' : 'Save with Note'}
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save with Note'
+              )}
             </Button>
           </div>
         </div>
