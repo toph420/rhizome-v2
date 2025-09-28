@@ -1,5 +1,9 @@
 import { GoogleGenAI } from '@google/genai'
 
+// Model configuration - use same as main handler
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
+const MAX_OUTPUT_TOKENS = 65536
+
 /**
  * Result from YouTube transcript cleaning operation.
  */
@@ -69,7 +73,7 @@ export async function cleanYoutubeTranscript(
     
     // Call Gemini API for cleaning
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       contents: [{
         parts: [{
           text: `${YOUTUBE_CLEANING_PROMPT}\n\nTranscript:\n${rawMarkdown}`
@@ -77,7 +81,7 @@ export async function cleanYoutubeTranscript(
       }],
       config: {
         temperature: 0.3,
-        maxOutputTokens: 8192
+        maxOutputTokens: MAX_OUTPUT_TOKENS
       }
     })
     

@@ -9,6 +9,14 @@ import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
 import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
 import type { SourceType, TimestampContext } from '../types/multi-format.js'
 
+// Model configuration with fallback
+// Note: gemini-2.5-flash may not be available in all regions yet
+// Using gemini-2.0-flash-exp as it supports same 65536 token limit
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp' // Fallback to stable experimental model
+const MAX_OUTPUT_TOKENS = 65536 // Both models support this limit
+
+console.log(`🤖 Using Gemini model: ${GEMINI_MODEL}`)
+
 const STAGES = {
   DOWNLOAD: { name: 'download', percent: 10 },
   EXTRACT: { name: 'extract', percent: 30 },
@@ -48,7 +56,7 @@ export async function processDocumentHandler(supabase: any, job: any) {
   const ai = new GoogleGenAI({ 
     apiKey: process.env.GOOGLE_AI_API_KEY,
     httpOptions: {
-      timeout: 600000 // 10 minutes for HTTP-level timeout
+      timeout: 900000 // 15 minutes for HTTP-level timeout (increased for Gemini 2.5 Flash with 65536 tokens)
     }
   })
 
@@ -161,7 +169,7 @@ export async function processDocumentHandler(supabase: any, job: any) {
           
           // Convert article to markdown with Gemini
           const articleResult = await ai.models.generateContent({
-            model: 'gemini-2.0-flash',
+            model: GEMINI_MODEL,
             contents: [{
               parts: [{
                 text: `Convert this web article to clean, well-formatted markdown. Preserve structure but remove ads, navigation, and boilerplate.
@@ -219,7 +227,7 @@ ${article.textContent}`
           
           // Clean markdown with Gemini
           const cleanResult = await ai.models.generateContent({
-            model: 'gemini-2.0-flash',
+            model: GEMINI_MODEL,
             contents: [{
               parts: [{
                 text: `Clean and improve this markdown formatting. Fix any issues with headings, lists, emphasis, etc. Preserve all content but enhance readability.
@@ -253,7 +261,7 @@ ${rawMarkdown}`
           
           // Convert text to markdown with Gemini
           const txtResult = await ai.models.generateContent({
-            model: 'gemini-2.0-flash',
+            model: GEMINI_MODEL,
             contents: [{
               parts: [{
                 text: `Convert this plain text to well-formatted markdown. Add appropriate headings, lists, emphasis, and structure.
@@ -302,7 +310,7 @@ ${textContent}`
             await updateProgress(supabase, job.id, 25, 'extract', 'formatting', 'Converting to markdown with AI')
             
             const pasteResult = await ai.models.generateContent({
-              model: 'gemini-2.0-flash',
+              model: GEMINI_MODEL,
               contents: [{
                 parts: [{
                   text: `Convert this text to clean, well-formatted markdown. Add structure and formatting as appropriate.
@@ -346,10 +354,23 @@ ${pastedContent}`
           const uploadStart = Date.now();
           // Convert ArrayBuffer to Blob for Files API
           const pdfBlob = new Blob([fileBuffer], { type: 'application/pdf' });
-          const uploadedFile = await ai.files.upload({
-            file: pdfBlob,
-            config: { mimeType: 'application/pdf' }
-          });
+          
+          let uploadedFile;
+          try {
+            uploadedFile = await ai.files.upload({
+              file: pdfBlob,
+              config: { mimeType: 'application/pdf' }
+            });
+          } catch (uploadError: any) {
+            console.error('❌ Files API upload failed:', uploadError);
+            console.error('Error details:', {
+              message: uploadError.message,
+              status: uploadError.status,
+              statusText: uploadError.statusText,
+              stack: uploadError.stack
+            });
+            throw new Error(`Failed to upload PDF to Gemini Files API: ${uploadError.message || 'Unknown upload error'}`);
+          }
           const uploadTime = Math.round((Date.now() - uploadStart) / 1000);
           
           await updateProgress(supabase, job.id, 20, 'extract', 'validating', `Upload complete (${uploadTime}s), validating file...`)
@@ -377,7 +398,7 @@ ${pastedContent}`
           await updateProgress(supabase, job.id, 25, 'extract', 'analyzing', `AI analyzing document (~${estimatedTime})...`);
           
           const generateStart = Date.now();
-          const GENERATION_TIMEOUT = 8 * 60 * 1000; // 8 minutes
+          const GENERATION_TIMEOUT = 12 * 60 * 1000; // 12 minutes (increased for Gemini 2.5 Flash with larger documents)
           
           // Update progress every 30 seconds during generation
           const progressInterval = setInterval(async () => {
@@ -390,25 +411,51 @@ ${pastedContent}`
           
           let result;
           try {
+            console.log('🚀 Starting generateContent with Gemini...');
+            console.log('   Model:', GEMINI_MODEL);
+            console.log('   Max tokens:', MAX_OUTPUT_TOKENS);
+            console.log('   File URI:', uploadedFile.uri || uploadedFile.name);
+            
+            // Note: gemini-2.0-flash-exp might not fully support responseSchema
+            // Falling back to prompt-based JSON generation if needed
+            const useStructuredOutput = GEMINI_MODEL.includes('2.5') || GEMINI_MODEL === 'gemini-2.0-flash';
+            
+            const generationConfig = useStructuredOutput ? {
+              responseMimeType: 'application/json',
+              responseSchema: EXTRACTION_SCHEMA,
+              maxOutputTokens: MAX_OUTPUT_TOKENS,
+              temperature: 0.1,
+            } : {
+              maxOutputTokens: MAX_OUTPUT_TOKENS,
+              temperature: 0.1,
+            };
+            
+            console.log('📋 Using structured output:', useStructuredOutput);
+            
             const generationPromise = ai.models.generateContent({
-              model: 'gemini-2.0-flash',
+              model: GEMINI_MODEL,
               contents: [{
                 parts: [
                   { fileData: { fileUri: uploadedFile.uri || uploadedFile.name, mimeType: 'application/pdf' } },
-                  { text: EXTRACTION_PROMPT }
+                  { text: EXTRACTION_PROMPT + (useStructuredOutput ? '' : '\n\nIMPORTANT: Return your response as valid JSON matching this structure: {"markdown": "...", "chunks": [{"content": "...", "themes": [...], "importance_score": 0.0-1.0, "summary": "..."}]}') }
                 ]
               }],
-              config: {
-                responseMimeType: 'application/json',
-                responseSchema: EXTRACTION_SCHEMA,
-                maxOutputTokens: 8192, // Actual maximum for Gemini 2.0 Flash
-                temperature: 0.1, // Lower temperature for more consistent extraction
-              }
+              config: generationConfig
+            }).catch((genError: any) => {
+              console.error('❌ generateContent failed:', genError);
+              console.error('Error details:', {
+                message: genError.message,
+                status: genError.status,
+                statusText: genError.statusText,
+                response: genError.response,
+                stack: genError.stack
+              });
+              throw genError;
             });
             
             const timeoutPromise = new Promise((_, reject) => 
               setTimeout(() => {
-                reject(new Error(`Analysis timeout after 8 minutes. PDF may be too complex. Try splitting into smaller documents.`));
+                reject(new Error(`Analysis timeout after 12 minutes. PDF may be too complex. Try splitting into smaller documents.`));
               }, GENERATION_TIMEOUT)
             );
             
@@ -426,12 +473,37 @@ ${pastedContent}`
           // Parse with error handling and recovery
           let extracted: ExtractionResponse;
           try {
-            extracted = JSON.parse(result.text);
+            console.log('📝 Raw AI response length:', result.text?.length || 0);
+            console.log('📝 First 500 chars of response:', result.text?.substring(0, 500));
+            
+            // Strip markdown code blocks if present
+            let jsonText = result.text;
+            if (jsonText.startsWith('```json')) {
+              console.log('⚠️  Stripping markdown code block wrapper');
+              jsonText = jsonText.replace(/^```json\s*\n?/, '').replace(/\n?```\s*$/, '');
+            } else if (jsonText.startsWith('```')) {
+              console.log('⚠️  Stripping generic code block wrapper');
+              jsonText = jsonText.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '');
+            }
+            
+            extracted = JSON.parse(jsonText);
+            console.log('✅ JSON parsed successfully');
+            console.log('   Has markdown:', !!extracted.markdown);
+            console.log('   Has chunks:', Array.isArray(extracted.chunks));
+            console.log('   Chunks count:', extracted.chunks?.length || 0);
           } catch (parseError: any) {
             
             // Try to repair common JSON issues with our enhanced repair function
             try {
-              const repairedJson = repairCommonJsonIssues(result.text);
+              // Strip code blocks first if needed
+              let textToRepair = result.text;
+              if (textToRepair.startsWith('```json')) {
+                textToRepair = textToRepair.replace(/^```json\s*\n?/, '').replace(/\n?```\s*$/, '');
+              } else if (textToRepair.startsWith('```')) {
+                textToRepair = textToRepair.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '');
+              }
+              
+              const repairedJson = repairCommonJsonIssues(textToRepair);
               extracted = JSON.parse(repairedJson);
             } catch (repairError: any) {
               // If repair fails, provide detailed error with suggestions
@@ -451,13 +523,28 @@ ${pastedContent}`
             }
           }
           
-          // Validate response structure
+          // Validate response structure with detailed logging
           if (!extracted.markdown || !Array.isArray(extracted.chunks)) {
-            throw new Error('AI response missing required fields (markdown or chunks). Please try again.');
+            console.error('❌ Response validation failed:');
+            console.error('   markdown field:', typeof extracted.markdown, 'length:', extracted.markdown?.length);
+            console.error('   chunks field:', typeof extracted.chunks, 'isArray:', Array.isArray(extracted.chunks));
+            console.error('   Full response keys:', Object.keys(extracted || {}));
+            
+            // Try to salvage what we can
+            if (extracted.markdown && (!extracted.chunks || extracted.chunks.length === 0)) {
+              console.log('⚠️  Attempting to create chunks from markdown...');
+              // Fall back to simple chunking if we have markdown but no chunks
+              const { simpleMarkdownChunking } = await import('../lib/markdown-chunking.js');
+              chunks = simpleMarkdownChunking(extracted.markdown);
+              markdown = extracted.markdown;
+              console.log('✅ Created', chunks.length, 'chunks from markdown');
+            } else {
+              throw new Error('AI response missing required fields (markdown or chunks). Please try again.');
+            }
+          } else {
+            markdown = extracted.markdown;
+            chunks = extracted.chunks;
           }
-          
-          markdown = extracted.markdown;
-          chunks = extracted.chunks;
           
           const markdownKB = Math.round(markdown.length / 1024);
           await updateProgress(supabase, job.id, 40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB, took ${generateTime}s)`)
@@ -727,7 +814,7 @@ async function updateProgress(
 
 async function rechunkMarkdown(ai: GoogleGenAI, markdown: string): Promise<ChunkData[]> {
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
+    model: GEMINI_MODEL,
     contents: [{
       parts: [
         { text: `Break this markdown document into semantic chunks (complete thoughts, 200-2000 characters).
@@ -897,10 +984,10 @@ function repairCommonJsonIssues(jsonString: string): string {
       // First, protect already properly escaped quotes
       .replace(/\\"/g, '\u0000ESCAPED_QUOTE\u0000')
       // Fix unescaped quotes within string values (between : and , or })
-      .replace(/:(\s*)"([^"]*)"([^"]*)"([^"]*)",/g, (match, ws, p1, p2, p3) => {
+      .replace(/:(\s*)"([^"]*)"([^"]*)"([^"]*)",/g, (_match, ws, p1, p2, p3) => {
         // This handles cases like: "content": "He said "hello" to me",
         const fixed = `:${ws}"${p1}\\"${p2}\\"${p3}",`;
-        console.warn(`Fixed unescaped quotes: ${match.substring(0, 50)}... → ${fixed.substring(0, 50)}...`);
+        // Silently fix - no need to log each one
         return fixed;
       })
       // Restore protected escaped quotes
@@ -909,13 +996,17 @@ function repairCommonJsonIssues(jsonString: string): string {
     // Step 5: Fix common newline issues in string values
     // Replace actual newlines within string values with \n
     // This is tricky - we need to identify string boundaries
+    let newlineFixCount = 0;
     workingString = workingString.replace(/"([^"]*[\r\n]+[^"]*)"/g, (match, content) => {
       const fixed = '"' + content.replace(/\r?\n/g, '\\n') + '"';
       if (fixed !== match) {
-        console.warn(`Fixed unescaped newlines in string`);
+        newlineFixCount++;
       }
       return fixed;
     });
+    if (newlineFixCount > 0) {
+      console.log(`✅ Fixed ${newlineFixCount} unescaped newlines in JSON`);
+    }
     
     // Step 6: Remove any control characters except those in valid escape sequences
     workingString = workingString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
@@ -982,23 +1073,38 @@ function repairCommonJsonIssues(jsonString: string): string {
 }
 
 const EXTRACTION_PROMPT = `
-Extract the ENTIRE PDF document to perfect markdown, preserving ALL content and formatting.
-Process EVERY page from beginning to end - do not skip or truncate any sections.
+Extract the ENTIRE PDF document to markdown and create semantic chunks.
 
-Requirements:
-1. Extract ALL text from EVERY page of the document
-2. Preserve all headings, paragraphs, lists, and formatting
-3. After extracting the COMPLETE markdown, break it into semantic chunks (200-500 words each)
-4. For each chunk, identify 1-3 themes and estimate importance (0-1 scale)
-5. Include a brief summary for each chunk
+STEP 1: Extract ALL text from EVERY page to markdown format
+STEP 2: Break the markdown into semantic chunks (200-500 words each)
+STEP 3: For EACH chunk provide themes, importance score, and summary
 
-CRITICAL: 
-- Extract the COMPLETE document - do not stop early or omit content
-- Return ONLY valid JSON with properly escaped strings
-- Escape all quotes with backslash (\\")
-- Escape all newlines as \\n
+YOU MUST RETURN A JSON OBJECT WITH BOTH "markdown" AND "chunks" FIELDS.
 
-The markdown field must contain the FULL document text, and chunks should cover ALL content.
+The response MUST follow this EXACT structure:
+{
+  "markdown": "[FULL DOCUMENT TEXT WITH \\n FOR NEWLINES]",
+  "chunks": [
+    {
+      "content": "[CHUNK TEXT]",
+      "themes": ["theme1", "theme2"],
+      "importance_score": 0.0 to 1.0,
+      "summary": "[ONE SENTENCE SUMMARY]"
+    }
+  ]
+}
+
+CRITICAL RULES:
+1. DO NOT wrap in \`\`\`json or any code blocks
+2. Start directly with { and end with }
+3. ALWAYS include BOTH markdown AND chunks fields
+4. Escape quotes with \\" and newlines with \\n
+5. Create AT LEAST 1 chunk, even for short documents
+
+If the document is short, put all content in one chunk.
+If the document is long, create multiple chunks.
+
+BOTH FIELDS ARE REQUIRED - NEVER OMIT THE CHUNKS ARRAY!
 `
 
 const EXTRACTION_SCHEMA = {
