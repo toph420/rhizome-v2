@@ -1,0 +1,272 @@
+{
+  "description": "Ground truth annotations for metadata quality validation",
+  "version": "1.0.0",
+  "created": "2025-01-29",
+  "thresholds": {
+    "targetCompleteness": 90,
+    "targetPrecision": 85,
+    "targetRecall": 85,
+    "targetF1Score": 85,
+    "maxExtractionTime": 400
+  },
+  "testDocuments": [
+    {
+      "id": "tech-doc-001",
+      "category": "technical_documentation",
+      "content": "# React Hooks API Reference\n\nReact Hooks provide a way to use state and lifecycle features in functional components. The useState hook manages local component state, while useEffect handles side effects.\n\n## Common Hooks\n\n1. useState - State management\n2. useEffect - Side effects\n3. useContext - Context API access\n\nExample:\n```javascript\nconst [count, setCount] = useState(0);\n```",
+      "expectedMetadata": {
+        "structural": {
+          "headingLevel": 1,
+          "listItems": 3,
+          "hasCodeBlock": true,
+          "isTable": false,
+          "confidence": 0.95
+        },
+        "emotional": {
+          "sentiment": 0.2,
+          "emotions": ["neutral", "informative"],
+          "intensity": 0.1,
+          "confidence": 0.85
+        },
+        "conceptual": {
+          "concepts": ["React", "Hooks", "useState", "useEffect", "functional components"],
+          "entities": ["React", "API"],
+          "relationships": ["useState-manages-state", "useEffect-handles-side-effects"],
+          "abstractionLevel": 0.7,
+          "confidence": 0.9
+        },
+        "methods": {
+          "signatures": ["useState(0)"],
+          "languages": ["javascript"],
+          "namingConvention": "camelCase",
+          "confidence": 0.9
+        },
+        "narrative": {
+          "sentenceRhythm": 0.6,
+          "paragraphStructure": "explanatory",
+          "style": "technical",
+          "confidence": 0.8
+        },
+        "references": {
+          "citations": [],
+          "links": [],
+          "confidence": 0.95
+        },
+        "domain": {
+          "field": "software_engineering",
+          "technicality": 0.8,
+          "specialization": "frontend_development",
+          "confidence": 0.9
+        }
+      },
+      "requiredFields": [
+        "structural.headingLevel",
+        "structural.hasCodeBlock",
+        "conceptual.concepts",
+        "methods.languages",
+        "domain.field"
+      ],
+      "optionalFields": [
+        "emotional.emotions",
+        "narrative.style",
+        "references.citations"
+      ]
+    },
+    {
+      "id": "narrative-001",
+      "category": "narrative_content",
+      "content": "The sun dipped below the horizon, painting the sky in brilliant hues of orange and purple. Sarah stood at the edge of the cliff, her heart racing with anticipation. Tomorrow would change everything. The letter in her pocket felt heavy with possibility, a door to a future she had only dreamed about. As the first stars appeared, she made her decision.",
+      "expectedMetadata": {
+        "structural": {
+          "headingLevel": 0,
+          "listItems": 0,
+          "hasCodeBlock": false,
+          "isTable": false,
+          "confidence": 0.95
+        },
+        "emotional": {
+          "sentiment": 0.6,
+          "emotions": ["anticipation", "hope", "determination"],
+          "intensity": 0.7,
+          "confidence": 0.85
+        },
+        "conceptual": {
+          "concepts": ["decision", "future", "change", "possibility"],
+          "entities": ["Sarah"],
+          "relationships": ["letter-represents-opportunity"],
+          "abstractionLevel": 0.3,
+          "confidence": 0.8
+        },
+        "narrative": {
+          "sentenceRhythm": 0.8,
+          "paragraphStructure": "descriptive",
+          "style": "literary",
+          "confidence": 0.9
+        },
+        "domain": {
+          "field": "creative_writing",
+          "technicality": 0.1,
+          "specialization": "fiction",
+          "confidence": 0.85
+        }
+      },
+      "requiredFields": [
+        "emotional.sentiment",
+        "emotional.emotions",
+        "narrative.style",
+        "conceptual.concepts"
+      ],
+      "optionalFields": [
+        "structural.headingLevel",
+        "methods.signatures"
+      ]
+    },
+    {
+      "id": "academic-001",
+      "category": "academic_paper",
+      "content": "## Abstract\n\nThis study investigates the correlation between sleep quality and academic performance among university students (n=500). Results indicate a significant positive correlation (r=0.68, p<0.001) between hours of sleep and GPA. Students averaging 7-9 hours showed 23% higher performance metrics compared to those with <6 hours. These findings suggest institutional policies should prioritize student well-being.",
+      "expectedMetadata": {
+        "structural": {
+          "headingLevel": 2,
+          "listItems": 0,
+          "hasCodeBlock": false,
+          "isTable": false,
+          "confidence": 0.95
+        },
+        "emotional": {
+          "sentiment": 0.1,
+          "emotions": ["neutral", "analytical"],
+          "intensity": 0.1,
+          "confidence": 0.8
+        },
+        "conceptual": {
+          "concepts": ["sleep quality", "academic performance", "correlation", "GPA", "student well-being"],
+          "entities": ["university students"],
+          "relationships": ["sleep-correlates-performance"],
+          "abstractionLevel": 0.8,
+          "confidence": 0.9
+        },
+        "narrative": {
+          "sentenceRhythm": 0.5,
+          "paragraphStructure": "analytical",
+          "style": "academic",
+          "confidence": 0.9
+        },
+        "references": {
+          "citations": ["n=500", "r=0.68", "p<0.001"],
+          "links": [],
+          "confidence": 0.85
+        },
+        "domain": {
+          "field": "psychology",
+          "technicality": 0.7,
+          "specialization": "educational_psychology",
+          "confidence": 0.9
+        }
+      },
+      "requiredFields": [
+        "structural.headingLevel",
+        "conceptual.concepts",
+        "references.citations",
+        "domain.field",
+        "narrative.style"
+      ],
+      "optionalFields": [
+        "emotional.intensity",
+        "methods.signatures"
+      ]
+    },
+    {
+      "id": "code-doc-001",
+      "category": "code_documentation",
+      "content": "```python\ndef calculate_fibonacci(n: int) -> int:\n    \"\"\"Calculate the nth Fibonacci number using dynamic programming.\n    \n    Time Complexity: O(n)\n    Space Complexity: O(1)\n    \"\"\"\n    if n <= 1:\n        return n\n    \n    prev, curr = 0, 1\n    for _ in range(2, n + 1):\n        prev, curr = curr, prev + curr\n    \n    return curr\n```",
+      "expectedMetadata": {
+        "structural": {
+          "headingLevel": 0,
+          "listItems": 0,
+          "hasCodeBlock": true,
+          "isTable": false,
+          "confidence": 0.95
+        },
+        "conceptual": {
+          "concepts": ["Fibonacci", "dynamic programming", "algorithm", "optimization"],
+          "entities": [],
+          "relationships": ["function-implements-algorithm"],
+          "abstractionLevel": 0.6,
+          "confidence": 0.85
+        },
+        "methods": {
+          "signatures": ["calculate_fibonacci(n: int) -> int"],
+          "languages": ["python"],
+          "namingConvention": "snake_case",
+          "confidence": 0.95
+        },
+        "domain": {
+          "field": "computer_science",
+          "technicality": 0.8,
+          "specialization": "algorithms",
+          "confidence": 0.9
+        }
+      },
+      "requiredFields": [
+        "structural.hasCodeBlock",
+        "methods.signatures",
+        "methods.languages",
+        "conceptual.concepts"
+      ],
+      "optionalFields": [
+        "emotional.sentiment",
+        "narrative.style"
+      ]
+    },
+    {
+      "id": "youtube-001",
+      "category": "youtube_transcript",
+      "content": "Welcome back to the channel! Today we're diving deep into machine learning fundamentals. But before we start, make sure to hit that subscribe button and ring the notification bell. So, machine learning is essentially teaching computers to learn from data without being explicitly programmed. We have three main types: supervised, unsupervised, and reinforcement learning.",
+      "expectedMetadata": {
+        "structural": {
+          "headingLevel": 0,
+          "listItems": 3,
+          "hasCodeBlock": false,
+          "isTable": false,
+          "confidence": 0.85
+        },
+        "emotional": {
+          "sentiment": 0.7,
+          "emotions": ["enthusiastic", "engaging"],
+          "intensity": 0.6,
+          "confidence": 0.8
+        },
+        "conceptual": {
+          "concepts": ["machine learning", "supervised learning", "unsupervised learning", "reinforcement learning"],
+          "entities": [],
+          "relationships": ["types-of-machine-learning"],
+          "abstractionLevel": 0.5,
+          "confidence": 0.85
+        },
+        "narrative": {
+          "sentenceRhythm": 0.7,
+          "paragraphStructure": "conversational",
+          "style": "educational_casual",
+          "confidence": 0.85
+        },
+        "domain": {
+          "field": "artificial_intelligence",
+          "technicality": 0.5,
+          "specialization": "machine_learning",
+          "confidence": 0.9
+        }
+      },
+      "requiredFields": [
+        "emotional.sentiment",
+        "conceptual.concepts",
+        "narrative.style",
+        "domain.field"
+      ],
+      "optionalFields": [
+        "structural.listItems",
+        "references.links"
+      ]
+    }
+  ]
+}

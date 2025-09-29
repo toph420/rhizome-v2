@@ -3,6 +3,8 @@
  * Defines common interfaces used across all source processors.
  */
 
+import type { ChunkMetadata, PartialChunkMetadata } from './metadata.js'
+
 /**
  * Result from document processing operation.
  * Contains extracted content and metadata from any source type.
@@ -43,6 +45,8 @@ export interface ProcessedChunk {
   positionContext?: PositionContext
   /** YouTube timestamps if applicable */
   timestamps?: Array<{ time: number; context_before: string; context_after: string }>
+  /** Rich metadata extracted for 7-engine collision detection */
+  metadata?: ChunkMetadata | PartialChunkMetadata
 }
 
 /**
@@ -116,6 +120,8 @@ export interface ProcessingOptions {
   maxChunks?: number
   /** Target chunk size in tokens */
   targetChunkSize?: number
+  /** Skip metadata extraction for chunks */
+  skipMetadataExtraction?: boolean
   /** Enable position tracking */
   trackPositions?: boolean
   /** Custom retry attempts */

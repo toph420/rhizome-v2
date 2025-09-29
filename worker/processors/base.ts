@@ -8,10 +8,13 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import type { 
   ProcessResult, 
   ProgressUpdate, 
-  ProcessingOptions 
+  ProcessingOptions,
+  ProcessedChunk
 } from '../types/processor.js'
 import { classifyError, getUserFriendlyError } from '../lib/errors.js'
 import { batchInsertChunks, calculateOptimalBatchSize } from '../lib/batch-operations.js'
+import { extractMetadata } from '../lib/metadata-extractor.js'
+import type { ChunkMetadata, PartialChunkMetadata } from '../types/metadata.js'
 
 /**
  * Background job interface from database.
@@ -181,8 +184,87 @@ export abstract class SourceProcessor {
   }
 
   /**
+   * Extracts metadata for a chunk using the metadata extraction pipeline.
+   * Can be overridden by specific processors for custom behavior.
+   * 
+   * @param chunk - The chunk to extract metadata for
+   * @param index - The chunk index in the document
+   * @returns Extracted metadata or partial metadata on failure
+   */
+  protected async extractChunkMetadata(
+    chunk: ProcessedChunk,
+    index: number
+  ): Promise<ChunkMetadata | PartialChunkMetadata> {
+    try {
+      // Extract metadata using the pipeline
+      const metadata = await extractMetadata(chunk.content, {
+        skipMethods: !(chunk.content.includes('```') || chunk.content.includes('function') || chunk.content.includes('class'))
+      })
+      
+      return metadata
+    } catch (error) {
+      console.warn(`[${this.constructor.name}] Metadata extraction failed for chunk ${index}:`, error)
+      // Return partial metadata on failure
+      return {
+        quality: {
+          completeness: 0,
+          extractedFields: 0,
+          totalFields: 7,
+          extractedAt: new Date().toISOString(),
+          extractionTime: 0,
+          extractorVersions: {},
+          errors: [{
+            field: 'all',
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }]
+        }
+      }
+    }
+  }
+
+  /**
+   * Enriches chunks with metadata before storage.
+   * Processes chunks in batches for efficiency.
+   * 
+   * @param chunks - Array of chunks to enrich
+   * @returns Array of chunks with metadata
+   */
+  protected async enrichChunksWithMetadata(
+    chunks: ProcessedChunk[]
+  ): Promise<Array<ProcessedChunk & { metadata?: ChunkMetadata | PartialChunkMetadata }>> {
+    console.log(`[${this.constructor.name}] Extracting metadata for ${chunks.length} chunks`)
+    
+    const enrichedChunks = await Promise.all(
+      chunks.map(async (chunk, index) => {
+        // Skip metadata extraction if disabled
+        if (this.options.skipMetadataExtraction) {
+          return chunk
+        }
+        
+        const metadata = await this.extractChunkMetadata(chunk, index)
+        return {
+          ...chunk,
+          metadata
+        }
+      })
+    )
+    
+    // Log metadata extraction success rate
+    const successCount = enrichedChunks.filter(
+      c => c.metadata && c.metadata.quality.completeness > 0.5
+    ).length
+    console.log(
+      `[${this.constructor.name}] Metadata extraction complete: ` +
+      `${successCount}/${chunks.length} chunks with >50% completeness`
+    )
+    
+    return enrichedChunks
+  }
+
+  /**
    * Inserts chunks into database using batch operations.
    * Reduces database calls by 50x through intelligent batching.
+   * Now includes metadata extraction before insertion.
    * 
    * @param chunks - Array of chunks to insert
    * @param onProgress - Optional progress callback
@@ -192,11 +274,31 @@ export abstract class SourceProcessor {
     chunks: Array<Record<string, any>>,
     onProgress?: (completed: number, total: number) => Promise<void>
   ): Promise<number> {
-    const batchSize = calculateOptimalBatchSize(chunks, 10)
+    // Extract metadata for chunks if they don't already have it
+    let enrichedChunks = chunks
+    if (!chunks[0]?.metadata && !this.options.skipMetadataExtraction) {
+      await this.updateProgress(
+        45, 
+        'metadata', 
+        'extracting', 
+        `Extracting metadata for ${chunks.length} chunks`
+      )
+      
+      enrichedChunks = await this.enrichChunksWithMetadata(chunks as ProcessedChunk[])
+      
+      await this.updateProgress(
+        50, 
+        'metadata', 
+        'complete', 
+        'Metadata extraction complete'
+      )
+    }
+    
+    const batchSize = calculateOptimalBatchSize(enrichedChunks, 10)
     
     const result = await batchInsertChunks(
       this.supabase,
-      chunks,
+      enrichedChunks,
       {
         batchSize,
         onProgress: onProgress || (async (done, total) => {
