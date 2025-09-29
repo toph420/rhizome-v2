@@ -1,261 +1,194 @@
-# Upload & Processing Workflow Documentation
+# Upload Processing Workflow
+
+> **Last Updated**: January 29, 2025  
+> **Status**: Architecture refactored to enforce single responsibility principle
 
 ## Overview
 
-This document serves as the source of truth for the document upload and processing workflow in Rhizome V2. It maps the complete flow from user interaction through background processing to final storage.
+The document processing system follows a clear separation of concerns where:
+- **Processors** only transform data (extraction, markdown conversion, chunking)
+- **Handlers** orchestrate all I/O operations (storage, embeddings, database)
 
-## Source Type Mapping
+## Architecture Principles
 
-### Frontend → Backend Mapping
+### Single Responsibility Principle
 
-| User Interface | Frontend Value | Backend Expected | Processor Class | Status |
-|---------------|---------------|------------------|-----------------|--------|
-| PDF Upload | `pdf` | `pdf` | `PDFProcessor` | ✅ Working |
-| YouTube URL | `youtube` | `youtube` | `YouTubeProcessor` | ✅ Working* |
-| Web Article URL | `web` | `web_url` | `WebProcessor` | ❌ **MISMATCH** |
-| Markdown (As-Is) | `markdown_asis` | `markdown_asis` | `MarkdownAsIsProcessor` | ✅ Working |
-| Markdown (Clean) | `markdown_clean` | `markdown_clean` | `MarkdownCleanProcessor` | ✅ Working |
-| Text File | `txt` | `txt` | `TextProcessor` | ✅ Working |
-| Paste Content | `paste` | `paste` | `PasteProcessor` | ✅ Working |
+Each component has one clear responsibility:
 
-**Critical Issue**: Frontend sends `web` but backend expects `web_url`, causing "Invalid source type" error.
+1. **Processors** (`worker/processors/*.ts`)
+   - Extract content from source format
+   - Convert to clean markdown
+   - Create semantic chunks
+   - Extract metadata
+   - **NO** storage operations
+   - **NO** database operations
+   - **NO** embedding generation
 
-## Complete Processing Flow
+2. **Handler** (`worker/handlers/process-document.ts`)
+   - Orchestrate the entire workflow
+   - Call appropriate processor based on source type
+   - Save markdown to Supabase storage
+   - Generate embeddings for chunks
+   - Insert chunks with embeddings to database
+   - Update document availability flags
 
-### Stage 1: User Upload (Frontend)
+## Processing Flow
 
-1. **User selects upload method** in `UploadZone.tsx`:
-   - File tab: PDF, Markdown, Text
-   - URL tab: YouTube, Web Article
-   - Paste tab: Direct content
+```mermaid
+graph TD
+    A[Document Upload] --> B[Create Background Job]
+    B --> C[Handler Picks Up Job]
+    C --> D[Route to Processor]
+    
+    D --> E[Processor Transforms Data]
+    E --> F[Returns ProcessResult]
+    
+    F --> G[Handler Saves Markdown]
+    G --> H[Handler Generates Embeddings]
+    H --> I[Handler Saves Chunks to DB]
+    I --> J[Handler Updates Flags]
+    J --> K[Document Available in Reader]
+```
 
-2. **Frontend determines source type**:
-   ```typescript
-   // File upload
-   if (file.name.endsWith('.pdf')) → 'pdf'
-   if (file.name.endsWith('.md')) → 'markdown_asis' or 'markdown_clean'
-   if (file.name.endsWith('.txt')) → 'txt'
-   
-   // URL detection
-   if (url.includes('youtube.com') || url.includes('youtu.be')) → 'youtube' 
-   else if (url.startsWith('http')) → 'web' ❌ (should be 'web_url')
-   
-   // Paste
-   Always → 'paste'
-   ```
+## Processor Pattern
 
-3. **Server Action** (`uploadDocument` in `src/app/actions/documents.ts`):
-   - Creates document record in database
-   - Uploads source file to Supabase Storage (if file upload)
-   - Creates background job with `source_type` in `input_data`
-
-### Stage 2: Background Processing (Worker)
-
-1. **Job Pickup** (`worker/index.ts`):
-   - Polls `background_jobs` table every 5 seconds
-   - Finds pending jobs or failed jobs ready for retry
-   - Marks job as `processing`
-
-2. **Handler Routing** (`worker/handlers/process-document.ts`):
-   - Extracts `source_type` from job input data
-   - Validates source type against allowed list
-   - Creates processor via `ProcessorRouter`
-
-3. **Processor Execution** (`worker/processors/`):
-   - Each processor transforms content to markdown
-   - Creates chunks with metadata
-   - Returns `ProcessResult` with:
-     - `markdown`: Clean content
-     - `chunks`: Array of processed chunks
-     - `metadata`: Document metadata
-     - `wordCount`: Total words
-     - `outline`: Document structure
-
-### Stage 3: Storage & Database Operations
-
-#### Current State (BROKEN)
-
-**Problem**: Inconsistent behavior across processors:
-
-| Processor | Current Behavior | Issue |
-|-----------|-----------------|-------|
-| PDFProcessor | Saves markdown to storage, generates embeddings, inserts chunks | Violates separation of concerns |
-| YouTubeProcessor | Saves source-raw.md to wrong path, returns other data | Wrong storage path, incomplete |
-| Others | Return data only | Handler doesn't save returned data |
-
-**Result**: No processor sets `markdown_available` or `embeddings_available` flags.
-
-#### Correct Architecture (TO BE IMPLEMENTED)
-
-**Handler should orchestrate all storage/DB operations**:
+All processors follow this pattern:
 
 ```typescript
-// After processor.process() returns result:
-
-1. Save markdown to storage:
-   - Path: `${userId}/${documentId}/content.md`
-   
-2. Generate embeddings:
-   - Use result.chunks to generate embeddings
-   
-3. Insert chunks with embeddings to database:
-   - Table: `chunks`
-   - Include all metadata from processor
-   
-4. Update document record:
-   - Set `markdown_available = true`
-   - Set `embeddings_available = true`
-   - Set `processing_status = 'completed'`
-   - Clear `processing_error`
+class ExampleProcessor extends SourceProcessor {
+  async process(): Promise<ProcessResult> {
+    // 1. Extract content from source
+    const content = await this.extractContent()
+    
+    // 2. Convert to markdown
+    const markdown = await this.convertToMarkdown(content)
+    
+    // 3. Create chunks for search
+    const chunks = await this.createChunks(markdown)
+    
+    // 4. Extract metadata
+    const metadata = this.extractMetadata(content)
+    
+    // 5. Return complete result (NO I/O operations)
+    return {
+      markdown,
+      chunks,
+      metadata,
+      wordCount: /* calculate */,
+      outline: /* extract */
+    }
+  }
+}
 ```
 
-## Storage Paths
+## Handler Responsibilities
 
-### Correct Path Structure
+The handler (`process-document.ts`) performs these operations after the processor returns:
+
+```typescript
+// 1. Call processor
+const result = await processor.process()
+
+// 2. Save markdown to storage
+const markdownPath = `${userId}/${documentId}/content.md`
+await supabase.storage.from('documents').upload(markdownPath, result.markdown)
+
+// 3. Generate embeddings
+const embeddings = await generateEmbeddings(result.chunks)
+
+// 4. Save chunks with embeddings
+await supabase.from('chunks').insert(
+  result.chunks.map((chunk, i) => ({
+    ...chunk,
+    document_id,
+    embedding: embeddings[i]
+  }))
+)
+
+// 5. Update document flags
+await updateDocumentStatus(
+  supabase,
+  document_id,
+  'completed',
+  true, // markdown_available
+  true  // embeddings_available
+)
 ```
-documents/ (Supabase Storage bucket)
-├── {userId}/
-│   └── {documentId}/
-│       ├── source.pdf         # Original upload (if PDF)
-│       ├── source.md          # Original upload (if Markdown)
-│       ├── source.txt         # Original upload (if Text)
-│       ├── content.md         # Processed markdown (ALL types)
-│       └── source-raw.md      # Original transcript (YouTube only)
-```
 
-### Current Issues
-- YouTubeProcessor saves `source-raw.md` to root instead of `${userId}/${documentId}/`
-- PDFProcessor saves correctly but shouldn't be saving at all
-- Other processors don't save anything (handler should do it)
+## Supported Source Types
 
-## Database Schema
+| Source Type | Processor | Input Method |
+|-------------|-----------|--------------|
+| `pdf` | PDFProcessor | File upload |
+| `youtube` | YouTubeProcessor | URL paste |
+| `web_url` | WebProcessor | URL paste |
+| `markdown_asis` | MarkdownProcessor | File upload (preserve) |
+| `markdown_clean` | MarkdownProcessor | File upload (AI clean) |
+| `txt` | TextProcessor | File upload |
+| `paste` | PasteProcessor | Direct paste |
 
-### Key Tables
+## Database Flags
 
-**documents**
-- `id`: UUID
-- `user_id`: UUID
-- `title`: String
-- `storage_path`: String (base path like `userId/docId`)
-- `source_type`: String (must match backend expectations)
-- `source_url`: String (optional)
-- `processing_status`: pending | processing | completed | failed
-- `processing_error`: String (error message if failed)
-- `markdown_available`: Boolean (**CRITICAL** - not being set)
-- `embeddings_available`: Boolean (**CRITICAL** - not being set)
+The `documents` table has two critical flags that must be set for documents to appear in the reader:
 
-**chunks**
-- `id`: UUID
-- `document_id`: UUID
-- `content`: Text
-- `embedding`: Vector (768 dimensions)
-- `chunk_index`: Integer
-- `themes`: Array
-- `importance_score`: Float
-- `summary`: Text
-- `position_context`: JSONB
+- `markdown_available`: Set to `true` when markdown is saved to storage
+- `embeddings_available`: Set to `true` when chunks with embeddings are saved
 
-**background_jobs**
-- `id`: UUID
-- `job_type`: String (always 'process_document')
-- `status`: pending | processing | completed | failed
-- `input_data`: JSONB (contains document_id, source_type, etc.)
-- `progress`: JSONB (stage info and percentage)
+Both flags are set by the handler after successful processing.
 
-## Error Scenarios & Recovery
+## Error Handling
 
-### Current Errors
+Each stage has specific error handling:
 
-1. **"Invalid source type"** - Web articles
-   - Cause: Frontend sends 'web', backend expects 'web_url'
-   - Fix: Update frontend to send 'web_url'
-
-2. **Documents process but don't appear**
-   - Cause: `markdown_available` flag not set
-   - Fix: Handler must set flags after processing
-
-3. **YouTube source-raw.md in wrong location**
-   - Cause: Processor uses wrong path
-   - Fix: Use full path with userId/docId
-
-### Recovery Mechanisms
-
-- **Automatic retry**: Failed jobs retry with exponential backoff
-- **Manual retry**: User can trigger via UI
-- **Stale job recovery**: Jobs stuck >10 minutes are reprocessed
-- **Error messages**: User-friendly errors stored in `processing_error`
-
-## Implementation Priority
-
-### Phase 1: Critical Fixes (Immediate)
-1. ✅ Fix frontend to send 'web_url' instead of 'web'
-2. ✅ Update handler to save markdown and set database flags
-3. ✅ Fix YouTubeProcessor storage path
-
-### Phase 2: Architecture Cleanup (Next Sprint)
-1. Remove storage/DB operations from PDFProcessor
-2. Ensure all processors only return data
-3. Centralize all orchestration in handler
-
-### Phase 3: Testing & Validation (After Fixes)
-1. Test all 7 document types
-2. Verify storage paths are correct
-3. Confirm flags are set properly
-4. Check reader displays documents
-
-## Testing Checklist
-
-After implementation, verify:
-
-- [ ] PDF upload → processes → appears in reader
-- [ ] YouTube URL → processes → appears with clean markdown
-- [ ] Web article URL → processes → appears with extracted content
-- [ ] Markdown (as-is) → processes → appears unchanged
-- [ ] Markdown (clean) → processes → appears enhanced
-- [ ] Text file → processes → appears formatted
-- [ ] Paste content → processes → appears structured
-
-For each type, check:
-- [ ] Storage path is `userId/docId/content.md`
-- [ ] Database has `markdown_available = true`
-- [ ] Database has `embeddings_available = true`
-- [ ] Chunks have embedding vectors
-- [ ] Document appears in reader without "Processing" message
-
-## Code References
-
-- Frontend upload: `src/components/library/UploadZone.tsx:14-230`
-- Server action: `src/app/actions/documents.ts:50-193`
-- Handler routing: `worker/handlers/process-document.ts:50-68`
-- Processor router: `worker/processors/router.ts:26-69`
-- Processor base: `worker/processors/base.ts`
-
-## Migration for Existing Documents
-
-For documents already processed but missing flags:
-
-```sql
--- Fix completed documents missing flags
-UPDATE documents 
-SET 
-  markdown_available = true,
-  embeddings_available = true
-WHERE 
-  processing_status = 'completed'
-  AND (markdown_available = false OR embeddings_available = false);
-```
+1. **Processor Errors**: Caught by handler, status set to 'error'
+2. **Storage Errors**: Retry logic, fallback to error status
+3. **Embedding Errors**: Retry with smaller batches, log failures
+4. **Database Errors**: Transaction rollback, preserve document state
 
 ## Monitoring
 
-Key metrics to track:
-- Processing success rate by source type
-- Average processing time per type
-- Storage usage patterns
-- Failed job reasons
+Key metrics to monitor:
 
-## Future Improvements
+- Processing time per document type
+- Storage upload success rate  
+- Embedding generation time
+- Database insertion performance
+- Flag consistency (completed docs with flags=true)
 
-1. **Unified source type enum**: Share between frontend and backend
-2. **Progress streaming**: Real-time updates via WebSocket
-3. **Partial processing**: Resume interrupted jobs
-4. **Batch processing**: Handle multiple documents efficiently
+## Migration History
+
+- **Migration 017**: Fixed existing documents with incorrect flags
+- Phase 1: Emergency fixes to restore functionality
+- Phase 2: Architecture cleanup to enforce patterns
+
+## Development Guidelines
+
+When creating new processors:
+
+1. Extend `SourceProcessor` base class
+2. Implement only the `process()` method
+3. Return complete `ProcessResult`
+4. Do NOT perform any I/O operations
+5. Follow existing processor patterns
+
+## Testing
+
+Run tests with:
+
+```bash
+# Worker tests
+cd worker && npm test
+
+# Integration tests
+cd worker && npm run test:integration
+
+# Main app tests
+npm test
+```
+
+## Common Issues
+
+1. **Documents not appearing**: Check both availability flags
+2. **Processing stuck**: Check background_jobs table
+3. **Storage errors**: Verify Supabase storage permissions
+4. **Embedding failures**: Check Gemini API quota
