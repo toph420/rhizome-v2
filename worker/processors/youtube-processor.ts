@@ -53,15 +53,8 @@ export class YouTubeProcessor extends SourceProcessor {
       
       const rawMarkdown = formatTranscriptToMarkdown(transcript, sourceUrl)
       
-      // Stage 2: Save original transcript (15-20%)
-      await this.updateProgress(15, 'download', 'saving', 'Saving original transcript')
-      const storagePath = this.getStoragePath()
-      console.log('💾 DEBUG: Saving source-raw.md to:', `${storagePath}/source-raw.md`)
-      
-      const rawBlob = new Blob([rawMarkdown], { type: 'text/markdown' })
-      await this.uploadToStorage('source-raw.md', rawBlob, 'text/markdown')
-      
-      await this.updateProgress(20, 'download', 'complete', 'Original transcript saved')
+      // Stage 2: Prepare for AI cleaning (15-20%)
+      await this.updateProgress(20, 'download', 'complete', 'Transcript fetched successfully')
       
       // Stage 3: AI cleaning (20-25%)
       await this.updateProgress(20, 'extract', 'cleaning', 'Cleaning transcript with AI')

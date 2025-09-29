@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai'
 import { getUserFriendlyError, classifyError } from '../lib/errors.js'
 import { ProcessorRouter } from '../processors/index.js'
+import { generateEmbeddings } from '../lib/embeddings.js'
 import type { SourceType } from '../types/multi-format.js'
 import type { ProcessResult } from '../types/processor.js'
 
@@ -85,11 +86,49 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     console.log(`   - Word count: ${result.wordCount || 'unknown'}`)
     console.log(`   - Outline sections: ${result.outline?.length || 0}`)
     
-    // Note: The processor handles saving markdown to storage and chunks to database
-    // using the base class methods uploadToStorage() and insertChunksBatch()
+    // Handler saves markdown to storage
+    const userId = doc.user_id
+    const markdownPath = `${userId}/${document_id}/content.md`
     
-    // Update document status to completed
-    await updateDocumentStatus(supabase, document_id, 'completed')
+    // Upload markdown to storage
+    console.log(`💾 Saving markdown to storage: ${markdownPath}`)
+    const { error: uploadError } = await supabase.storage
+      .from('documents')
+      .upload(markdownPath, result.markdown, {
+        contentType: 'text/markdown',
+        upsert: true
+      })
+    
+    if (uploadError) {
+      throw new Error(`Failed to save markdown: ${uploadError.message}`)
+    }
+    console.log(`✅ Markdown saved to storage`)
+    
+    // Generate embeddings for chunks
+    console.log(`🔢 Generating embeddings for ${result.chunks.length} chunks`)
+    const chunkTexts = result.chunks.map(chunk => chunk.text)
+    const embeddings = await generateEmbeddings(chunkTexts)
+    console.log(`✅ Generated ${embeddings.length} embeddings`)
+    
+    // Insert chunks with embeddings to database
+    console.log(`💾 Saving chunks with embeddings to database`)
+    const chunksWithEmbeddings = result.chunks.map((chunk, i) => ({
+      ...chunk,
+      document_id,
+      embedding: embeddings[i]
+    }))
+    
+    const { error: chunkError } = await supabase
+      .from('chunks')
+      .insert(chunksWithEmbeddings)
+    
+    if (chunkError) {
+      throw new Error(`Failed to save chunks: ${chunkError.message}`)
+    }
+    console.log(`✅ Saved ${chunksWithEmbeddings.length} chunks to database`)
+    
+    // Update document status to completed with availability flags
+    await updateDocumentStatus(supabase, document_id, 'completed', true, true)
     
     // Final progress update
     await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Processing completed successfully')
@@ -119,7 +158,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     const userMessage = getUserFriendlyError(error)
     
     // Update document status
-    await updateDocumentStatus(supabase, document_id, 'failed', userMessage)
+    await updateDocumentStatus(supabase, document_id, 'failed', false, false, userMessage)
     
     // Update job with error details
     await updateProgress(
@@ -162,16 +201,22 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
  * @param supabase - Supabase client
  * @param documentId - Document ID to update
  * @param status - New processing status
+ * @param markdownAvailable - Whether markdown content is available in storage
+ * @param embeddingsAvailable - Whether chunk embeddings have been generated
  * @param errorMessage - Optional error message if failed
  */
 async function updateDocumentStatus(
   supabase: any, 
   documentId: string, 
   status: string, 
+  markdownAvailable: boolean = false,
+  embeddingsAvailable: boolean = false,
   errorMessage?: string
 ) {
   const updateData: any = {
-    processing_status: status
+    processing_status: status,
+    markdown_available: markdownAvailable,
+    embeddings_available: embeddingsAvailable
   }
   
   if (errorMessage) {

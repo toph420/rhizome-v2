@@ -161,44 +161,20 @@ export class PDFProcessor extends SourceProcessor {
     const wordCount = markdown.split(/\s+/).filter(word => word.length > 0).length
     const outline = this.extractOutline(markdown)
     
-    // Stage 6: Save markdown to storage
-    await this.updateProgress(60, 'save_markdown', 'uploading', 'Saving processed markdown')
-    const basePath = this.getStoragePath()
-    await this.uploadToStorage(
-      `${basePath}/content.md`,
-      markdown,
-      'text/markdown'
-    )
-    await this.updateProgress(70, 'save_markdown', 'complete', 'Markdown saved to storage')
+    // Stage 6: Prepare final result
+    await this.updateProgress(90, 'finalize', 'complete', 'Processing complete')
     
-    // Stage 7: Generate embeddings
-    await this.updateProgress(75, 'embed', 'starting', 'Generating embeddings')
-    const { generateEmbeddings } = await import('../lib/embeddings.js')
-    
-    // Extract just the content strings for embedding generation
-    const chunkContents = chunks.map(chunk => chunk.content)
-    const embeddings = await generateEmbeddings(chunkContents)
-    
-    // Combine chunks with their embeddings for database insertion
-    const chunksForDb = chunks.map((chunk, index) => ({
-      document_id: this.job.document_id,
-      content: chunk.content,
-      embedding: embeddings[index],
-      chunk_index: index,
-      themes: chunk.themes,
-      importance_score: chunk.importance || 0.5,
-      summary: chunk.summary
-    }))
-    
-    await this.updateProgress(85, 'embed', 'embedding', `Generated embeddings for ${chunks.length} chunks`)
-    
-    // Stage 8: Insert chunks to database (base class handles metadata extraction & batch insertion)
-    await this.insertChunksBatch(chunksForDb)
-    await this.updateProgress(95, 'embed', 'complete', 'Chunks saved to database')
-    
+    // Return complete ProcessResult for handler to save
     return {
       markdown,
-      chunks: chunksForDb,
+      chunks: chunks.map((chunk, index) => ({
+        document_id: this.job.document_id,
+        content: chunk.content,
+        chunk_index: index,
+        themes: chunk.themes,
+        importance_score: chunk.importance || 0.5,
+        summary: chunk.summary
+      })),
       metadata: {
         sourceUrl: this.job.metadata?.source_url
       },

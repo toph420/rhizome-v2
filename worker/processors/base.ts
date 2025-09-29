@@ -85,6 +85,17 @@ export abstract class SourceProcessor {
    * Abstract method to process document from source.
    * Must be implemented by each source-specific processor.
    * 
+   * IMPORTANT: Processors should ONLY transform data. They must NOT:
+   * - Upload files to storage (use handler instead)
+   * - Insert chunks to database (use handler instead)  
+   * - Generate embeddings (use handler instead)
+   * 
+   * Processors should focus solely on:
+   * - Extracting content from source format
+   * - Converting to markdown
+   * - Creating chunks for semantic search
+   * - Extracting metadata
+   * 
    * @returns Processed document result with markdown and chunks
    */
   abstract process(): Promise<ProcessResult>
@@ -259,74 +270,6 @@ export abstract class SourceProcessor {
     return enrichedChunks
   }
 
-  /**
-   * Inserts chunks into database using batch operations.
-   * Reduces database calls by 50x through intelligent batching.
-   * Now includes metadata extraction before insertion.
-   * 
-   * @param chunks - Array of chunks to insert
-   * @param onProgress - Optional progress callback
-   * @returns Number of successfully inserted chunks
-   */
-  protected async insertChunksBatch(
-    chunks: Array<Record<string, any>>,
-    onProgress?: (completed: number, total: number) => Promise<void>
-  ): Promise<number> {
-    // Extract metadata for chunks if they don't already have it
-    let enrichedChunks = chunks
-    if (!chunks[0]?.metadata && !this.options.skipMetadataExtraction) {
-      await this.updateProgress(
-        45, 
-        'metadata', 
-        'extracting', 
-        `Extracting metadata for ${chunks.length} chunks`
-      )
-      
-      enrichedChunks = await this.enrichChunksWithMetadata(chunks as ProcessedChunk[])
-      
-      await this.updateProgress(
-        50, 
-        'metadata', 
-        'complete', 
-        'Metadata extraction complete'
-      )
-    }
-    
-    const batchSize = calculateOptimalBatchSize(enrichedChunks, 10)
-    
-    const result = await batchInsertChunks(
-      this.supabase,
-      enrichedChunks,
-      {
-        batchSize,
-        onProgress: onProgress || (async (done, total) => {
-          // Update job progress during batch insert
-          const percent = Math.floor((done / total) * 100)
-          await this.updateProgress(
-            50 + Math.floor(percent * 0.45), // 50-95% range for chunk insertion
-            'store',
-            'inserting',
-            `Inserted ${done}/${total} chunks`
-          )
-        })
-      }
-    )
-    
-    if (result.failed.length > 0) {
-      console.error(
-        `[${this.constructor.name}] Failed to insert ${result.failed.length} chunks. ` +
-        `First error: ${result.failed[0].error.message}`
-      )
-    }
-    
-    console.log(
-      `[${this.constructor.name}] Batch insert complete: ` +
-      `${result.inserted.length}/${chunks.length} chunks in ${result.dbCalls} DB calls ` +
-      `(${(result.totalTime / 1000).toFixed(1)}s)`
-    )
-    
-    return result.inserted.length
-  }
 
   /**
    * Gets storage path for document files.
@@ -357,35 +300,4 @@ export abstract class SourceProcessor {
     return data.text()
   }
 
-  /**
-   * Uploads content to Supabase storage.
-   * 
-   * @param path - Storage path for file
-   * @param content - File content to upload
-   * @param contentType - MIME type of content
-   * @returns Upload result data
-   * @throws Error if upload fails
-   */
-  protected async uploadToStorage(
-    path: string,
-    content: string | Blob,
-    contentType: string = 'text/plain'
-  ): Promise<any> {
-    const blob = typeof content === 'string' 
-      ? new Blob([content], { type: contentType })
-      : content
-
-    const { data, error } = await this.supabase.storage
-      .from('documents')
-      .upload(path, blob, {
-        contentType,
-        upsert: true
-      })
-
-    if (error) {
-      throw new Error(`Failed to upload to ${path}: ${error.message}`)
-    }
-
-    return data
-  }
 }
