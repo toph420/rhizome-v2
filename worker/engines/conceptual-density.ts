@@ -27,7 +27,7 @@ interface ConceptOverlap {
 }
 
 export class ConceptualDensityEngine extends BaseEngine {
-  readonly type: EngineType = 'conceptual_density';
+  readonly type: EngineType = EngineType.CONCEPTUAL_DENSITY;
   
   // Configuration thresholds
   private readonly MIN_DENSITY = 2.0;        // Min concepts per 100 words

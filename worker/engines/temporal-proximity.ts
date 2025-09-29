@@ -41,7 +41,7 @@ export interface TemporalProximityConfig {
  * Analyzes temporal relationships between chunks based on timestamps and time patterns
  */
 export class TemporalProximityEngine extends BaseEngine {
-  readonly type: EngineType = 'temporal_proximity';
+  readonly type: EngineType = EngineType.TEMPORAL_PROXIMITY;
   private config: TemporalProximityConfig;
 
   constructor(config: TemporalProximityConfig = {}) {

@@ -55,14 +55,15 @@ export interface CollisionResult {
 /**
  * Types of collision detection engines.
  */
-export type EngineType = 
-  | 'semantic_similarity'
-  | 'structural_pattern'
-  | 'temporal_proximity'
-  | 'conceptual_density'
-  | 'emotional_resonance'
-  | 'citation_network'
-  | 'contradiction_detection';
+export enum EngineType {
+  SEMANTIC_SIMILARITY = 'semantic_similarity',
+  STRUCTURAL_PATTERN = 'structural_pattern',
+  TEMPORAL_PROXIMITY = 'temporal_proximity',
+  CONCEPTUAL_DENSITY = 'conceptual_density',
+  EMOTIONAL_RESONANCE = 'emotional_resonance',
+  CITATION_NETWORK = 'citation_network',
+  CONTRADICTION_DETECTION = 'contradiction_detection'
+}
 
 /**
  * Configuration for engine execution.
@@ -262,24 +263,14 @@ export interface OrchestratorConfig {
   };
 }
 
-/**
- * Performance monitoring interface.
- */
-export interface PerformanceMonitor {
-  startTimer(label: string): void;
-  endTimer(label: string): number;
-  getMetrics(): Map<string, number>;
-  reset(): void;
-}
-
 // Validation schemas
 export const CollisionResultSchema = z.object({
   sourceChunkId: z.string(),
   targetChunkId: z.string(),
   engineType: z.nativeEnum(EngineType),
   score: z.number().min(0).max(1),
-  confidence: z.number().min(0).max(1),
-  explanation: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  explanation: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 

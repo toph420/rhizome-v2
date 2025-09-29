@@ -44,7 +44,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
   }
 
   getEngineType(): EngineType {
-    return 'semantic_similarity';
+    return EngineType.SEMANTIC_SIMILARITY;
   }
 
   /**
@@ -159,7 +159,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
       results.push({
         sourceChunkId: sourceChunk.id,
         targetChunkId: match.id,
-        engineType: 'semantic_similarity',
+        engineType: EngineType.SEMANTIC_SIMILARITY,
         score: finalScore,
         confidence,
         metadata: {

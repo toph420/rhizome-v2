@@ -45,7 +45,7 @@ const COMPLEMENTARY_PAIRS = [
 ];
 
 export class EmotionalResonanceEngine extends BaseEngine {
-  readonly type: EngineType = 'emotional_resonance';
+  readonly type: EngineType = EngineType.EMOTIONAL_RESONANCE;
   
   // Configuration thresholds
   private readonly MIN_RESONANCE = 0.3;      // Minimum resonance score

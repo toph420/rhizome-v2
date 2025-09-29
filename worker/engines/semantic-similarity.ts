@@ -32,7 +32,7 @@ export interface SemanticSimilarityConfig {
  * Uses pgvector for efficient cosine similarity searches across chunk embeddings
  */
 export class SemanticSimilarityEngine extends BaseEngine {
-  readonly type: EngineType = 'semantic_similarity';
+  readonly type: EngineType = EngineType.SEMANTIC_SIMILARITY;
   private vectorClient: VectorSearchClient;
   private config: SemanticSimilarityConfig;
 

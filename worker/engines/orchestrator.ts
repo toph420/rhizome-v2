@@ -12,40 +12,13 @@ import {
   EngineType,
   CollisionResult,
   WeightConfig,
-  DEFAULT_WEIGHTS,
-  PerformanceMonitor,
+  ChunkWithMetadata,
 } from './types';
 
-/**
- * Simple performance monitor implementation.
- */
-class SimplePerformanceMonitor implements PerformanceMonitor {
-  private timers = new Map<string, number>();
-  private metrics = new Map<string, number>();
-  
-  startTimer(label: string): void {
-    this.timers.set(label, performance.now());
-  }
-  
-  endTimer(label: string): number {
-    const start = this.timers.get(label);
-    if (!start) return 0;
-    
-    const duration = performance.now() - start;
-    this.metrics.set(label, duration);
-    this.timers.delete(label);
-    return duration;
-  }
-  
-  getMetrics(): Map<string, number> {
-    return new Map(this.metrics);
-  }
-  
-  reset(): void {
-    this.timers.clear();
-    this.metrics.clear();
-  }
-}
+import { ScoringSystem, createScoringSystem } from './scoring';
+import { DEFAULT_WEIGHTS } from '../lib/weight-config';
+import { PerformanceMonitor } from '../lib/performance-monitor';
+import { CollisionCacheManager } from '../lib/cache-manager';
 
 /**
  * Main orchestrator for collision detection system.
@@ -54,7 +27,9 @@ class SimplePerformanceMonitor implements PerformanceMonitor {
 export class CollisionOrchestrator {
   private engines = new Map<EngineType, CollisionEngine>();
   private config: OrchestratorConfig;
-  private performanceMonitor = new SimplePerformanceMonitor();
+  private performanceMonitor: PerformanceMonitor;
+  private cacheManager: CollisionCacheManager;
+  private scoringSystem: ScoringSystem;
   
   constructor(config?: Partial<OrchestratorConfig>) {
     this.config = {
@@ -62,7 +37,15 @@ export class CollisionOrchestrator {
       maxConcurrency: 7,
       globalTimeout: 5000, // 5 seconds default
       weights: DEFAULT_WEIGHTS,
-      enabledEngines: Object.values(EngineType),
+      enabledEngines: [
+        EngineType.SEMANTIC_SIMILARITY,
+        EngineType.STRUCTURAL_PATTERN,
+        EngineType.TEMPORAL_PROXIMITY,
+        EngineType.CONCEPTUAL_DENSITY,
+        EngineType.EMOTIONAL_RESONANCE,
+        EngineType.CITATION_NETWORK,
+        EngineType.CONTRADICTION_DETECTION,
+      ],
       cache: {
         enabled: true,
         ttl: 300000, // 5 minutes
@@ -70,6 +53,15 @@ export class CollisionOrchestrator {
       },
       ...config,
     };
+    
+    // Initialize performance monitor
+    this.performanceMonitor = new PerformanceMonitor(true);
+    
+    // Initialize cache manager with config
+    this.cacheManager = new CollisionCacheManager(this.config.cache);
+    
+    // Initialize scoring system with configured weights
+    this.scoringSystem = createScoringSystem(this.config.weights);
   }
   
   /**
@@ -100,6 +92,20 @@ export class CollisionOrchestrator {
     this.performanceMonitor.startTimer('total');
     
     try {
+      // Create cache key for this input
+      const cacheKey = this.cacheManager.createKey(
+        input.sourceChunk.id,
+        input.targetChunks?.map((c: ChunkWithMetadata) => c.id) || [],
+        input.config
+      );
+      
+      // Check cache first
+      const cached = this.cacheManager.get<AggregatedResults>('orchestrator', cacheKey);
+      if (cached) {
+        console.log('[Orchestrator] Cache hit - returning cached results');
+        return cached;
+      }
+      
       // Get enabled engines that can process this input
       const applicableEngines = this.getApplicableEngines(input);
       
@@ -118,11 +124,20 @@ export class CollisionOrchestrator {
       // Aggregate results
       const aggregated = this.aggregateResults(engineResults);
       
-      // Apply weighted scoring
-      const scored = this.applyWeightedScoring(aggregated);
+      // Apply weighted scoring using the scoring system
+      const scored = this.scoringSystem.applyWeightedScoring(aggregated);
       
       const totalTime = this.performanceMonitor.endTimer('total');
       console.log(`[Orchestrator] Total execution time: ${totalTime.toFixed(2)}ms`);
+      
+      // Cache the results
+      this.cacheManager.set('orchestrator', cacheKey, scored);
+      
+      // Log performance summary if needed
+      if (process.env.LOG_PERFORMANCE === 'true') {
+        this.performanceMonitor.logSummary('[Orchestrator]');
+        this.cacheManager.logStats('[Orchestrator]');
+      }
       
       return scored;
       
@@ -224,20 +239,39 @@ export class CollisionOrchestrator {
   ): Promise<EngineResult> {
     const timeoutMs = input.config?.timeout || this.config.globalTimeout || 5000;
     
+    // Create cache key for this engine and input
+    const cacheKey = this.cacheManager.createKey(
+      input.sourceChunk.id,
+      input.targetChunks?.map((c: ChunkWithMetadata) => c.id).slice(0, 10) || [], // Limit key size
+      input.config
+    );
+    
+    // Check engine-specific cache
+    const cached = this.cacheManager.get<EngineResult>(engine.type, cacheKey);
+    if (cached) {
+      console.log(`[Orchestrator] Cache hit for engine ${engine.type}`);
+      return cached;
+    }
+    
     this.performanceMonitor.startTimer(engine.type);
     
-    return Promise.race([
+    const result = await Promise.race([
       // Engine detection
       (async () => {
         try {
           const collisions = await engine.detect(input);
           const executionTime = this.performanceMonitor.endTimer(engine.type);
           
-          return {
+          const engineResult = {
             engineType: engine.type,
             collisions,
             executionTime,
           };
+          
+          // Cache the engine result
+          this.cacheManager.set(engine.type, cacheKey, engineResult);
+          
+          return engineResult;
         } catch (error) {
           throw error;
         }
@@ -250,6 +284,8 @@ export class CollisionOrchestrator {
         }, timeoutMs);
       }),
     ]);
+    
+    return result;
   }
   
   /**
@@ -286,81 +322,12 @@ export class CollisionOrchestrator {
       weightedScores: new Map(),
       topConnections: [],
       metrics: {
-        totalExecutionTime: this.performanceMonitor.getMetrics().get('total') || 0,
+        totalExecutionTime: this.performanceMonitor.getMetricsByLabel('total')[0] || 0,
         engineMetrics,
       },
     };
   }
   
-  /**
-   * Applies weighted scoring to aggregated results.
-   */
-  private applyWeightedScoring(results: AggregatedResults): AggregatedResults {
-    const weights = this.config.weights || DEFAULT_WEIGHTS;
-    const weightedScores = new Map<string, number>();
-    
-    // Calculate weighted scores for each target chunk
-    for (const [targetId, collisions] of results.groupedByTarget) {
-      const score = this.calculateWeightedScore(collisions, weights);
-      weightedScores.set(targetId, score);
-    }
-    
-    // Create top connections list
-    const topConnections = Array.from(weightedScores.entries())
-      .map(([targetId, score]) => {
-        const collisions = results.groupedByTarget.get(targetId) || [];
-        return {
-          targetChunkId: targetId,
-          totalScore: score,
-          engines: [...new Set(collisions.map(c => c.engineType))],
-          explanations: collisions.map(c => c.explanation),
-        };
-      })
-      .sort((a, b) => b.totalScore - a.totalScore);
-    
-    return {
-      ...results,
-      weightedScores,
-      topConnections,
-    };
-  }
-  
-  /**
-   * Calculates weighted score for a set of collisions.
-   */
-  private calculateWeightedScore(
-    collisions: CollisionResult[],
-    weights: WeightConfig
-  ): number {
-    // Group collisions by engine type
-    const byEngine = new Map<EngineType, CollisionResult[]>();
-    
-    for (const collision of collisions) {
-      const existing = byEngine.get(collision.engineType) || [];
-      existing.push(collision);
-      byEngine.set(collision.engineType, existing);
-    }
-    
-    // Calculate weighted sum
-    let totalScore = 0;
-    
-    for (const [engineType, engineCollisions] of byEngine) {
-      const weight = weights.weights[engineType] || 0;
-      
-      // Get best score from this engine
-      const bestScore = Math.max(...engineCollisions.map(c => c.score));
-      
-      // Apply weight
-      totalScore += bestScore * weight;
-    }
-    
-    // Apply normalization if needed
-    if (weights.normalizationMethod === 'sigmoid') {
-      totalScore = 1 / (1 + Math.exp(-totalScore));
-    }
-    
-    return totalScore;
-  }
   
   /**
    * Creates an empty result structure.
@@ -383,6 +350,7 @@ export class CollisionOrchestrator {
    */
   updateWeights(weights: WeightConfig): void {
     this.config.weights = weights;
+    this.scoringSystem.updateWeights(weights);
   }
   
   /**
@@ -402,5 +370,20 @@ export class CollisionOrchestrator {
     
     await Promise.all(cleanupPromises);
     this.performanceMonitor.reset();
+    this.cacheManager.clearAll();
+  }
+  
+  /**
+   * Gets performance metrics.
+   */
+  getPerformanceMetrics() {
+    return this.performanceMonitor.generateReport();
+  }
+  
+  /**
+   * Gets cache statistics.
+   */
+  getCacheStats() {
+    return this.cacheManager.getAllStats();
   }
 }

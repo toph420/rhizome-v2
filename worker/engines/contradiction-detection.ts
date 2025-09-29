@@ -62,7 +62,7 @@ const ANTONYM_PAIRS = [
 ];
 
 export class ContradictionDetectionEngine extends BaseEngine {
-  readonly type: EngineType = 'contradiction_detection';
+  readonly type: EngineType = EngineType.CONTRADICTION_DETECTION;
   
   // Configuration thresholds
   private readonly MIN_CONTRADICTION = 0.4;    // Minimum contradiction strength

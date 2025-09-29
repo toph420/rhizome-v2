@@ -34,7 +34,7 @@ export interface StructuralPatternConfig {
  * Analyzes and compares document structure patterns to find similarly organized content
  */
 export class StructuralPatternEngine extends BaseEngine {
-  readonly type: EngineType = 'structural_pattern';
+  readonly type: EngineType = EngineType.STRUCTURAL_PATTERN;
   private config: StructuralPatternConfig;
 
   constructor(config: StructuralPatternConfig = {}) {

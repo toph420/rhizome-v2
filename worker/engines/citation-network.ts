@@ -52,7 +52,7 @@ const CITATION_PATTERNS = [
 ];
 
 export class CitationNetworkEngine extends BaseEngine {
-  readonly type: EngineType = 'citation_network';
+  readonly type: EngineType = EngineType.CITATION_NETWORK;
   
   // Configuration thresholds
   private readonly MIN_CITATIONS = 1;          // Minimum citations to consider
