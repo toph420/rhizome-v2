@@ -5,7 +5,28 @@
   "scripts": {
     "start": "tsx index.ts",
     "build": "tsc",
-    "dev": "tsx watch index.ts"
+    "dev": "tsx watch index.ts",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
+    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration",
+    "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest __tests__",
+    "test:validate": "tsx tests/integration/run-validation.ts",
+    "test:full-validation": "npm run build && npm run lint && npm run test:integration && npm run test:validate",
+    "test:all-sources": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts",
+    "test:backwards-compatibility": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'backwards'",
+    "test:youtube-videos": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'YouTube'",
+    "test:web-articles": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'Web'",
+    "test:text-processing": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'Text'",
+    "test:retry-scenarios": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'retry'",
+    "test:database-batching": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'Batch'",
+    "test:cache-metrics": "NODE_OPTIONS='--experimental-vm-modules' jest tests/integration/processor-integration.test.ts -t 'Cache'",
+    "lint": "eslint . --ext .ts,.tsx",
+    "benchmark:all": "node benchmarks/run-all.cjs",
+    "benchmark:pdf": "node benchmarks/pdf-benchmark.cjs",
+    "benchmark:batch": "node benchmarks/batch-operations-benchmark.cjs",
+    "benchmark:cache": "node benchmarks/cache-benchmark.cjs",
+    "benchmark:report": "node benchmarks/run-all.cjs 5 --verbose",
+    "benchmark:markdown": "node benchmarks/markdown-benchmark.cjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.17",
@@ -18,11 +39,19 @@
     "jsdom": "^27.0.0",
     "jsonrepair": "^3.13.1",
     "tsx": "^4.7.0",
-    "youtube-transcript-plus": "^1.1.1"
+    "youtube-transcript-plus": "^1.1.1",
+    "chalk": "^5.3.0"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.0",
     "@types/mozilla__readability": "^0.4.2",
     "@types/node": "^20.0.0",
+    "eslint": "^8.50.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^29.5.0",
+    "prettier": "^3.0.0",
+    "ts-jest": "^29.1.0",
     "typescript": "^5.0.0"
   }
 }
