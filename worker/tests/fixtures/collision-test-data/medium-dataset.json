@@ -1,0 +1,368 @@
+{
+  "name": "Medium Dataset",
+  "description": "Standard dataset for comprehensive testing with 25 chunks",
+  "sourceChunk": {
+    "id": "source-medium-1",
+    "content": "Climate change represents one of the most significant challenges facing humanity in the 21st century, requiring immediate action and global cooperation",
+    "embedding": [],
+    "metadata": {
+      "themes": ["climate change", "global challenge", "cooperation", "urgency"],
+      "key_concepts": ["climate crisis", "global cooperation", "immediate action"],
+      "emotional_tone": {
+        "sentiment": "urgent",
+        "emotions": ["concerned", "determined"]
+      },
+      "structural_type": "thesis",
+      "importance_score": 0.95,
+      "timestamp": "2024-01-20T08:00:00Z",
+      "word_count": 21
+    }
+  },
+  "candidateChunks": [
+    {
+      "id": "medium-candidate-1",
+      "content": "Rising global temperatures are causing unprecedented melting of polar ice caps",
+      "embedding": [],
+      "metadata": {
+        "themes": ["global warming", "ice caps", "temperature rise"],
+        "key_concepts": ["temperature rise", "polar melting"],
+        "emotional_tone": { "sentiment": "alarming", "emotions": ["worried"] },
+        "structural_type": "evidence",
+        "importance_score": 0.85,
+        "timestamp": "2024-01-20T08:30:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-2",
+      "content": "Renewable energy sources offer hope for reducing carbon emissions significantly",
+      "embedding": [],
+      "metadata": {
+        "themes": ["renewable energy", "carbon reduction", "solutions"],
+        "key_concepts": ["renewable energy", "carbon emissions"],
+        "emotional_tone": { "sentiment": "hopeful", "emotions": ["optimistic"] },
+        "structural_type": "solution",
+        "importance_score": 0.8,
+        "timestamp": "2024-01-20T09:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-3",
+      "content": "Climate change is a natural cycle unrelated to human activities",
+      "embedding": [],
+      "metadata": {
+        "themes": ["climate denial", "natural cycles"],
+        "key_concepts": ["natural climate cycles", "human impact denial"],
+        "emotional_tone": { "sentiment": "dismissive", "emotions": ["skeptical"] },
+        "structural_type": "contradiction",
+        "importance_score": 0.7,
+        "timestamp": "2024-01-19T15:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-4",
+      "content": "Deforestation in the Amazon contributes significantly to global carbon levels",
+      "embedding": [],
+      "metadata": {
+        "themes": ["deforestation", "Amazon", "carbon emissions"],
+        "key_concepts": ["Amazon deforestation", "carbon impact"],
+        "emotional_tone": { "sentiment": "critical", "emotions": ["concerned"] },
+        "structural_type": "cause",
+        "importance_score": 0.82,
+        "timestamp": "2024-01-20T08:15:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-5",
+      "content": "The Paris Agreement sets ambitious targets for limiting global temperature rise",
+      "embedding": [],
+      "metadata": {
+        "themes": ["Paris Agreement", "climate policy", "temperature targets"],
+        "key_concepts": ["Paris Agreement", "temperature limits"],
+        "emotional_tone": { "sentiment": "formal", "emotions": ["hopeful"] },
+        "structural_type": "policy",
+        "importance_score": 0.88,
+        "timestamp": "2024-01-20T10:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-6",
+      "content": "Extreme weather events are becoming more frequent and destructive worldwide",
+      "embedding": [],
+      "metadata": {
+        "themes": ["extreme weather", "climate impact", "global phenomena"],
+        "key_concepts": ["extreme weather", "increasing frequency"],
+        "emotional_tone": { "sentiment": "alarming", "emotions": ["fearful"] },
+        "structural_type": "evidence",
+        "importance_score": 0.86,
+        "timestamp": "2024-01-20T08:45:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-7",
+      "content": "Electric vehicles are rapidly replacing traditional combustion engines",
+      "embedding": [],
+      "metadata": {
+        "themes": ["electric vehicles", "transportation", "technology shift"],
+        "key_concepts": ["EVs", "combustion engine replacement"],
+        "emotional_tone": { "sentiment": "positive", "emotions": ["excited"] },
+        "structural_type": "trend",
+        "importance_score": 0.75,
+        "timestamp": "2024-01-20T11:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-8",
+      "content": "Sea levels are projected to rise by several meters this century",
+      "embedding": [],
+      "metadata": {
+        "themes": ["sea level rise", "climate projections", "coastal impact"],
+        "key_concepts": ["sea level", "century projections"],
+        "emotional_tone": { "sentiment": "dire", "emotions": ["anxious"] },
+        "structural_type": "prediction",
+        "importance_score": 0.87,
+        "timestamp": "2024-01-20T08:20:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-9",
+      "content": "Carbon capture technology could reverse atmospheric CO2 accumulation",
+      "embedding": [],
+      "metadata": {
+        "themes": ["carbon capture", "technology", "CO2 reduction"],
+        "key_concepts": ["carbon capture", "CO2 reversal"],
+        "emotional_tone": { "sentiment": "hopeful", "emotions": ["optimistic"] },
+        "structural_type": "innovation",
+        "importance_score": 0.78,
+        "timestamp": "2024-01-20T12:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-10",
+      "content": "Agricultural practices must adapt to changing climate patterns globally",
+      "embedding": [],
+      "metadata": {
+        "themes": ["agriculture", "adaptation", "climate impact"],
+        "key_concepts": ["agricultural adaptation", "climate patterns"],
+        "emotional_tone": { "sentiment": "pragmatic", "emotions": ["determined"] },
+        "structural_type": "requirement",
+        "importance_score": 0.81,
+        "timestamp": "2024-01-20T09:30:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-11",
+      "content": "Coral reefs are bleaching at unprecedented rates due to ocean warming",
+      "embedding": [],
+      "metadata": {
+        "themes": ["coral bleaching", "ocean warming", "marine crisis"],
+        "key_concepts": ["coral reefs", "ocean temperature"],
+        "emotional_tone": { "sentiment": "tragic", "emotions": ["sad", "urgent"] },
+        "structural_type": "consequence",
+        "importance_score": 0.84,
+        "timestamp": "2024-01-20T08:25:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-12",
+      "content": "Wind and solar power costs have dropped below fossil fuel alternatives",
+      "embedding": [],
+      "metadata": {
+        "themes": ["renewable energy", "cost efficiency", "energy transition"],
+        "key_concepts": ["wind power", "solar power", "cost reduction"],
+        "emotional_tone": { "sentiment": "encouraging", "emotions": ["hopeful"] },
+        "structural_type": "economic",
+        "importance_score": 0.79,
+        "timestamp": "2024-01-20T10:30:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-13",
+      "content": "Climate refugees will number in the hundreds of millions by 2050",
+      "embedding": [],
+      "metadata": {
+        "themes": ["climate migration", "refugees", "future crisis"],
+        "key_concepts": ["climate refugees", "mass migration"],
+        "emotional_tone": { "sentiment": "grave", "emotions": ["worried", "empathetic"] },
+        "structural_type": "projection",
+        "importance_score": 0.89,
+        "timestamp": "2024-01-20T08:35:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-14",
+      "content": "Green hydrogen technology promises carbon-neutral industrial processes",
+      "embedding": [],
+      "metadata": {
+        "themes": ["hydrogen", "industry", "carbon neutral"],
+        "key_concepts": ["green hydrogen", "industrial decarbonization"],
+        "emotional_tone": { "sentiment": "promising", "emotions": ["excited"] },
+        "structural_type": "technology",
+        "importance_score": 0.77,
+        "timestamp": "2024-01-20T13:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-15",
+      "content": "Permafrost thawing releases massive amounts of trapped greenhouse gases",
+      "embedding": [],
+      "metadata": {
+        "themes": ["permafrost", "greenhouse gases", "feedback loop"],
+        "key_concepts": ["permafrost thaw", "methane release"],
+        "emotional_tone": { "sentiment": "alarming", "emotions": ["fearful"] },
+        "structural_type": "mechanism",
+        "importance_score": 0.86,
+        "timestamp": "2024-01-20T08:40:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-16",
+      "content": "Corporate sustainability commitments are transforming business practices globally",
+      "embedding": [],
+      "metadata": {
+        "themes": ["corporate responsibility", "sustainability", "business transformation"],
+        "key_concepts": ["ESG", "corporate sustainability"],
+        "emotional_tone": { "sentiment": "positive", "emotions": ["encouraged"] },
+        "structural_type": "trend",
+        "importance_score": 0.74,
+        "timestamp": "2024-01-20T11:30:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-17",
+      "content": "Ocean acidification threatens entire marine food chains",
+      "embedding": [],
+      "metadata": {
+        "themes": ["ocean chemistry", "marine life", "ecosystem collapse"],
+        "key_concepts": ["ocean acidification", "food chain disruption"],
+        "emotional_tone": { "sentiment": "dire", "emotions": ["deeply concerned"] },
+        "structural_type": "threat",
+        "importance_score": 0.85,
+        "timestamp": "2024-01-20T08:50:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-18",
+      "content": "Reforestation initiatives could absorb gigatons of atmospheric carbon",
+      "embedding": [],
+      "metadata": {
+        "themes": ["reforestation", "carbon sequestration", "nature-based solutions"],
+        "key_concepts": ["tree planting", "carbon absorption"],
+        "emotional_tone": { "sentiment": "hopeful", "emotions": ["inspired"] },
+        "structural_type": "solution",
+        "importance_score": 0.8,
+        "timestamp": "2024-01-20T12:30:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-19",
+      "content": "Arctic warming occurs at twice the global average rate",
+      "embedding": [],
+      "metadata": {
+        "themes": ["Arctic", "accelerated warming", "polar amplification"],
+        "key_concepts": ["Arctic amplification", "polar warming"],
+        "emotional_tone": { "sentiment": "concerning", "emotions": ["worried"] },
+        "structural_type": "phenomenon",
+        "importance_score": 0.83,
+        "timestamp": "2024-01-20T08:55:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-20",
+      "content": "Climate tipping points could trigger irreversible environmental changes",
+      "embedding": [],
+      "metadata": {
+        "themes": ["tipping points", "irreversibility", "cascade effects"],
+        "key_concepts": ["climate tipping points", "cascading failures"],
+        "emotional_tone": { "sentiment": "urgent", "emotions": ["anxious", "determined"] },
+        "structural_type": "warning",
+        "importance_score": 0.92,
+        "timestamp": "2024-01-20T09:15:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-21",
+      "content": "Circular economy models reduce waste and resource consumption dramatically",
+      "embedding": [],
+      "metadata": {
+        "themes": ["circular economy", "waste reduction", "sustainability"],
+        "key_concepts": ["circular economy", "resource efficiency"],
+        "emotional_tone": { "sentiment": "positive", "emotions": ["hopeful"] },
+        "structural_type": "framework",
+        "importance_score": 0.76,
+        "timestamp": "2024-01-20T14:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-22",
+      "content": "Biodiversity loss accelerates as habitats disappear",
+      "embedding": [],
+      "metadata": {
+        "themes": ["biodiversity", "habitat loss", "extinction"],
+        "key_concepts": ["biodiversity crisis", "habitat destruction"],
+        "emotional_tone": { "sentiment": "tragic", "emotions": ["sad", "urgent"] },
+        "structural_type": "crisis",
+        "importance_score": 0.88,
+        "timestamp": "2024-01-20T09:05:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-23",
+      "content": "Nuclear fusion could provide unlimited clean energy within decades",
+      "embedding": [],
+      "metadata": {
+        "themes": ["nuclear fusion", "clean energy", "future technology"],
+        "key_concepts": ["fusion energy", "unlimited power"],
+        "emotional_tone": { "sentiment": "optimistic", "emotions": ["excited"] },
+        "structural_type": "breakthrough",
+        "importance_score": 0.73,
+        "timestamp": "2024-01-20T15:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-24",
+      "content": "Geoengineering proposals include reflecting sunlight to cool the planet",
+      "embedding": [],
+      "metadata": {
+        "themes": ["geoengineering", "solar radiation", "climate intervention"],
+        "key_concepts": ["solar geoengineering", "planetary cooling"],
+        "emotional_tone": { "sentiment": "controversial", "emotions": ["uncertain"] },
+        "structural_type": "proposal",
+        "importance_score": 0.71,
+        "timestamp": "2024-01-20T16:00:00Z"
+      }
+    },
+    {
+      "id": "medium-candidate-25",
+      "content": "Youth climate movements are driving political action worldwide",
+      "embedding": [],
+      "metadata": {
+        "themes": ["activism", "youth movement", "political change"],
+        "key_concepts": ["climate activism", "youth leadership"],
+        "emotional_tone": { "sentiment": "inspiring", "emotions": ["motivated", "proud"] },
+        "structural_type": "movement",
+        "importance_score": 0.72,
+        "timestamp": "2024-01-20T17:00:00Z"
+      }
+    }
+  ],
+  "expectedConnections": [
+    {
+      "sourceId": "source-medium-1",
+      "targetId": "medium-candidate-1",
+      "expectedEngines": ["semantic-similarity", "structural-pattern"],
+      "minExpectedScore": 0.8
+    },
+    {
+      "sourceId": "source-medium-1",
+      "targetId": "medium-candidate-3",
+      "expectedEngines": ["contradiction-detection"],
+      "minExpectedScore": 0.7
+    },
+    {
+      "sourceId": "source-medium-1",
+      "targetId": "medium-candidate-20",
+      "expectedEngines": ["emotional-resonance", "conceptual-density"],
+      "minExpectedScore": 0.85
+    }
+  ]
+}

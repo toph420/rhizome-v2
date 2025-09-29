@@ -343,7 +343,22 @@ export function ProcessingDock() {
                     )}
                     
                     {job.status === 'completed' && (
-                      <p className="text-xs text-green-600">Processing complete</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-green-600">Processing complete</p>
+                        {job.input_data.document_id && (
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => window.open(`/read/${job.input_data.document_id}`, '_blank')}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              Read
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                   

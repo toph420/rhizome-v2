@@ -112,14 +112,12 @@ export abstract class SourceProcessor {
         .from('background_jobs')
         .update({
           status: 'processing',
-          metadata: {
-            ...this.job.metadata,
-            progress_percent: percent,
-            current_stage: stage,
-            current_substage: substage,
-            stage_details: details,
-            ...additionalData,
-            updated_at: new Date().toISOString()
+          progress: {
+            percent: percent,
+            stage: stage,
+            substage: substage,
+            details: details,
+            ...additionalData
           }
         })
         .eq('id', this.job.id)
@@ -336,8 +334,8 @@ export abstract class SourceProcessor {
    * @returns Storage path in format "userId/documentId"
    */
   protected getStoragePath(): string {
-    const metadata = this.job.metadata || {}
-    return metadata.storage_path || `dev-user-123/${this.job.document_id}`
+    const inputData = this.job.input_data || {}
+    return inputData.storage_path || `dev-user-123/${this.job.document_id}`
   }
 
   /**

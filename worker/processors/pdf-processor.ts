@@ -19,38 +19,37 @@ const MAX_OUTPUT_TOKENS = 65536
  * Instructs Gemini to extract full text and create semantic chunks.
  */
 const EXTRACTION_PROMPT = `
-Extract the ENTIRE PDF document to markdown and create semantic chunks.
+You are a PDF extraction assistant. Your task is to:
+1. Extract ALL text from this PDF document and convert it to clean markdown format
+2. Break the content into logical chunks for semantic search (200-500 words each)
+3. Return the result as JSON
 
-STEP 1: Extract ALL text from EVERY page to markdown format
-STEP 2: Break the markdown into semantic chunks (200-500 words each)
-STEP 3: For EACH chunk provide themes, importance score, and summary
+IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text.
+Do not summarize or skip any content. The markdown field should contain the COMPLETE document text.
 
-YOU MUST RETURN A JSON OBJECT WITH BOTH "markdown" AND "chunks" FIELDS.
+For the chunks, break the document at natural boundaries like:
+- Section headings
+- Topic changes  
+- Paragraph groups that discuss the same concept
 
-The response MUST follow this EXACT structure:
+Return JSON in this exact format:
 {
-  "markdown": "[FULL DOCUMENT TEXT WITH \\n FOR NEWLINES]",
+  "markdown": "The complete document text in markdown format with proper headings, lists, etc",
   "chunks": [
     {
-      "content": "[CHUNK TEXT]",
-      "themes": ["theme1", "theme2"],
-      "importance_score": 0.0 to 1.0,
-      "summary": "[ONE SENTENCE SUMMARY]"
+      "content": "A logical section of the document (200-500 words)",
+      "themes": ["main topic 1", "main topic 2"],
+      "importance_score": 0.7,
+      "summary": "One sentence describing this chunk"
     }
   ]
 }
 
-CRITICAL RULES:
-1. DO NOT wrap in \`\`\`json or any code blocks
-2. Start directly with { and end with }
-3. ALWAYS include BOTH markdown AND chunks fields
-4. Escape quotes with \\" and newlines with \\n
-5. Create AT LEAST 1 chunk, even for short documents
-
-If the document is short, put all content in one chunk.
-If the document is long, create multiple chunks.
-
-BOTH FIELDS ARE REQUIRED - NEVER OMIT THE CHUNKS ARRAY!
+Rules:
+- The markdown field MUST contain the FULL document text
+- Each chunk should be a meaningful unit of content
+- importance_score is 0.0 to 1.0 (higher = more important)
+- Return valid JSON without any markdown code blocks
 `
 
 /**
@@ -162,12 +161,44 @@ export class PDFProcessor extends SourceProcessor {
     const wordCount = markdown.split(/\s+/).filter(word => word.length > 0).length
     const outline = this.extractOutline(markdown)
     
+    // Stage 6: Save markdown to storage
+    await this.updateProgress(60, 'save_markdown', 'uploading', 'Saving processed markdown')
+    const basePath = this.getStoragePath()
+    await this.uploadToStorage(
+      `${basePath}/content.md`,
+      markdown,
+      'text/markdown'
+    )
+    await this.updateProgress(70, 'save_markdown', 'complete', 'Markdown saved to storage')
+    
+    // Stage 7: Generate embeddings
+    await this.updateProgress(75, 'embed', 'starting', 'Generating embeddings')
+    const { generateEmbeddings } = await import('../lib/embeddings.js')
+    
+    // Extract just the content strings for embedding generation
+    const chunkContents = chunks.map(chunk => chunk.content)
+    const embeddings = await generateEmbeddings(chunkContents)
+    
+    // Combine chunks with their embeddings for database insertion
+    const chunksForDb = chunks.map((chunk, index) => ({
+      document_id: this.job.document_id,
+      content: chunk.content,
+      embedding: embeddings[index],
+      chunk_index: index,
+      themes: chunk.themes,
+      importance_score: chunk.importance || 0.5,
+      summary: chunk.summary
+    }))
+    
+    await this.updateProgress(85, 'embed', 'embedding', `Generated embeddings for ${chunks.length} chunks`)
+    
+    // Stage 8: Insert chunks to database (base class handles metadata extraction & batch insertion)
+    await this.insertChunksBatch(chunksForDb)
+    await this.updateProgress(95, 'embed', 'complete', 'Chunks saved to database')
+    
     return {
       markdown,
-      chunks: chunks.map((chunk, index) => ({
-        ...chunk,
-        chunkIndex: index
-      })),
+      chunks: chunksForDb,
       metadata: {
         sourceUrl: this.job.metadata?.source_url
       },
@@ -223,7 +254,8 @@ export class PDFProcessor extends SourceProcessor {
     
     try {
       // Determine if model supports structured output
-      const useStructuredOutput = GEMINI_MODEL.includes('2.5') || GEMINI_MODEL === 'gemini-2.0-flash'
+      // gemini-2.0-flash-exp and gemini-2.0-flash both support structured output
+      const useStructuredOutput = GEMINI_MODEL.includes('2.5') || GEMINI_MODEL.includes('gemini-2.0-flash')
       
       const generationConfig = useStructuredOutput ? {
         responseMimeType: 'application/json',

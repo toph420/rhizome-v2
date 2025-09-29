@@ -32,7 +32,9 @@
     "benchmark:batch": "node benchmarks/batch-operations-benchmark.cjs",
     "benchmark:cache": "node benchmarks/cache-benchmark.cjs",
     "benchmark:report": "node benchmarks/run-all.cjs 5 --verbose",
-    "benchmark:markdown": "node benchmarks/markdown-benchmark.cjs"
+    "benchmark:markdown": "node benchmarks/markdown-benchmark.cjs",
+    "benchmark:semantic-engine": "tsx benchmarks/semantic-engine-benchmark.ts",
+    "validate:semantic-accuracy": "tsx tests/validation/semantic-accuracy.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.17",

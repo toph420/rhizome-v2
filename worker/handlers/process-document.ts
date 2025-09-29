@@ -85,6 +85,9 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     console.log(`   - Word count: ${result.wordCount || 'unknown'}`)
     console.log(`   - Outline sections: ${result.outline?.length || 0}`)
     
+    // Note: The processor handles saving markdown to storage and chunks to database
+    // using the base class methods uploadToStorage() and insertChunksBatch()
+    
     // Update document status to completed
     await updateDocumentStatus(supabase, document_id, 'completed')
     
@@ -168,8 +171,7 @@ async function updateDocumentStatus(
   errorMessage?: string
 ) {
   const updateData: any = {
-    processing_status: status,
-    updated_at: new Date().toISOString()
+    processing_status: status
   }
   
   if (errorMessage) {
@@ -208,13 +210,11 @@ async function updateProgress(
     .from('background_jobs')
     .update({
       progress: {
-        percentage,
+        percent: percentage,
         stage,
-        message: message || `${stage}: ${percentage}%`,
-        updated_at: new Date().toISOString()
+        details: message || `${stage}: ${percentage}%`
       },
-      status,
-      updated_at: new Date().toISOString()
+      status
     })
     .eq('id', jobId)
     

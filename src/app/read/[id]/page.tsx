@@ -42,6 +42,70 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     )
   }
   
+  // Check processing status first
+  if (doc.processing_status === 'failed') {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Processing Failed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-destructive mb-4">
+              Document processing failed. Please try uploading the document again.
+            </p>
+            {doc.processing_stage && (
+              <p className="text-sm text-muted-foreground">
+                Failed at stage: {doc.processing_stage}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Check if processing is still in progress
+  if (doc.processing_status === 'processing' || doc.processing_status === 'pending') {
+    const job = await getDocumentJob(id)
+    
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Processing Document</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              
+              {job && (
+                <div className="text-center w-full">
+                  <p className="text-sm font-medium mb-2">
+                    {job.progress?.stage || 'Pending'}
+                  </p>
+                  <p className="text-2xl font-bold mb-2">
+                    {job.progress?.percent || 0}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Status: {job.status}
+                  </p>
+                </div>
+              )}
+              
+              {!job && (
+                <p className="text-sm text-muted-foreground">
+                  Initializing processing...
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Processing is complete - check if markdown is available
   if (doc.markdown_available) {
     // Use admin client to bypass RLS for signed URL creation
     const adminClient = createAdminClient()
@@ -138,38 +202,20 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     )
   }
   
-  const job = await getDocumentJob(id)
-  
+  // Processing complete but no markdown available - could be an error state
   return (
     <div className="flex items-center justify-center h-screen">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Processing Document</CardTitle>
+          <CardTitle>Document Not Available</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            
-            {job && (
-              <div className="text-center w-full">
-                <p className="text-sm font-medium mb-2">
-                  {job.progress?.stage || 'Pending'}
-                </p>
-                <p className="text-2xl font-bold mb-2">
-                  {job.progress?.percent || 0}%
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Status: {job.status}
-                </p>
-              </div>
-            )}
-            
-            {!job && (
-              <p className="text-sm text-muted-foreground">
-                Initializing processing...
-              </p>
-            )}
-          </div>
+          <p className="text-muted-foreground mb-4">
+            The document has been processed but the content is not available for viewing.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Status: {doc.processing_status || 'Unknown'}
+          </p>
         </CardContent>
       </Card>
     </div>

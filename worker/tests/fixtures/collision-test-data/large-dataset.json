@@ -1,0 +1,139 @@
+{
+  "name": "Large Dataset",
+  "description": "Performance testing dataset with 100+ chunks for load testing",
+  "sourceChunk": {
+    "id": "source-large-1",
+    "content": "Quantum computing represents a paradigm shift in computational capability, leveraging quantum mechanical phenomena to solve problems intractable for classical computers",
+    "embedding": [],
+    "metadata": {
+      "themes": ["quantum computing", "paradigm shift", "computational power", "quantum mechanics"],
+      "key_concepts": ["quantum computing", "quantum supremacy", "computational paradigm"],
+      "emotional_tone": {
+        "sentiment": "revolutionary",
+        "emotions": ["excited", "transformative"]
+      },
+      "structural_type": "thesis",
+      "importance_score": 0.95,
+      "timestamp": "2024-01-25T10:00:00Z",
+      "word_count": 20
+    }
+  },
+  "candidateChunks": [],
+  "generateCandidates": {
+    "count": 120,
+    "templates": [
+      {
+        "contentPattern": "Quantum algorithms like Shor's algorithm can factor large numbers exponentially faster than classical methods",
+        "themeVariations": ["quantum algorithms", "Shor's algorithm", "factorization", "exponential speedup"],
+        "structuralType": "example",
+        "sentimentRange": ["positive", "technical"]
+      },
+      {
+        "contentPattern": "Quantum entanglement enables instantaneous correlation between particles regardless of distance",
+        "themeVariations": ["entanglement", "quantum correlation", "spooky action", "Bell states"],
+        "structuralType": "phenomenon",
+        "sentimentRange": ["mysterious", "fascinating"]
+      },
+      {
+        "contentPattern": "Classical computers will always outperform quantum computers for most everyday tasks",
+        "themeVariations": ["classical superiority", "practical computing", "quantum limitations"],
+        "structuralType": "contradiction",
+        "sentimentRange": ["skeptical", "pragmatic"]
+      },
+      {
+        "contentPattern": "Superconducting qubits require temperatures near absolute zero to maintain coherence",
+        "themeVariations": ["superconducting qubits", "cryogenics", "quantum coherence", "temperature requirements"],
+        "structuralType": "technical",
+        "sentimentRange": ["challenging", "precise"]
+      },
+      {
+        "contentPattern": "Quantum error correction requires thousands of physical qubits for each logical qubit",
+        "themeVariations": ["error correction", "logical qubits", "fault tolerance", "overhead"],
+        "structuralType": "challenge",
+        "sentimentRange": ["difficult", "complex"]
+      },
+      {
+        "contentPattern": "IBM's quantum processors have achieved quantum volume exceeding 1000",
+        "themeVariations": ["IBM quantum", "quantum volume", "benchmark", "progress"],
+        "structuralType": "achievement",
+        "sentimentRange": ["impressive", "milestone"]
+      },
+      {
+        "contentPattern": "Quantum cryptography provides theoretically unbreakable security through quantum key distribution",
+        "themeVariations": ["quantum cryptography", "QKD", "information security", "unbreakable encryption"],
+        "structuralType": "application",
+        "sentimentRange": ["secure", "revolutionary"]
+      },
+      {
+        "contentPattern": "Decoherence remains the primary obstacle to scaling quantum computers",
+        "themeVariations": ["decoherence", "quantum noise", "scaling challenge", "environmental interference"],
+        "structuralType": "problem",
+        "sentimentRange": ["challenging", "limiting"]
+      },
+      {
+        "contentPattern": "Quantum simulators can model molecular interactions for drug discovery",
+        "themeVariations": ["quantum simulation", "drug discovery", "molecular modeling", "pharmaceutical"],
+        "structuralType": "application",
+        "sentimentRange": ["promising", "beneficial"]
+      },
+      {
+        "contentPattern": "Topological qubits promise more stable quantum computation through anyonic braiding",
+        "themeVariations": ["topological qubits", "anyons", "braiding", "stability"],
+        "structuralType": "innovation",
+        "sentimentRange": ["advanced", "theoretical"]
+      },
+      {
+        "contentPattern": "Quantum machine learning algorithms show exponential advantages for certain problems",
+        "themeVariations": ["quantum ML", "HHL algorithm", "quantum speedup", "machine learning"],
+        "structuralType": "capability",
+        "sentimentRange": ["powerful", "transformative"]
+      },
+      {
+        "contentPattern": "The quantum internet will enable distributed quantum computing across the globe",
+        "themeVariations": ["quantum internet", "distributed computing", "quantum networks", "global infrastructure"],
+        "structuralType": "vision",
+        "sentimentRange": ["futuristic", "ambitious"]
+      }
+    ],
+    "embeddingStrategy": "random_gaussian",
+    "timestampRange": {
+      "start": "2024-01-25T08:00:00Z",
+      "end": "2024-01-25T18:00:00Z"
+    },
+    "importanceScoreRange": [0.5, 0.95],
+    "wordCountRange": [10, 25]
+  },
+  "expectedPerformance": {
+    "maxProcessingTime": 5000,
+    "minDetectedCollisions": 50,
+    "requiredEngines": [
+      "semantic-similarity",
+      "structural-pattern",
+      "temporal-proximity",
+      "conceptual-density",
+      "emotional-resonance",
+      "citation-network",
+      "contradiction-detection"
+    ]
+  },
+  "stressTestScenarios": [
+    {
+      "name": "Concurrent Processing",
+      "description": "Test multiple collision detections running simultaneously",
+      "concurrentRequests": 5,
+      "expectedMaxTime": 7000
+    },
+    {
+      "name": "Memory Efficiency",
+      "description": "Monitor memory usage with large datasets",
+      "memoryLimit": "512MB",
+      "gcMonitoring": true
+    },
+    {
+      "name": "Cache Performance",
+      "description": "Test cache hit rates with repeated queries",
+      "cacheWarmupRuns": 3,
+      "expectedCacheHitRate": 0.8
+    }
+  ]
+}
