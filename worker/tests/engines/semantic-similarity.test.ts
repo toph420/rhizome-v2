@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { SemanticSimilarityEngine, createSemanticSimilarityEngine } from '../../engines/semantic-similarity';
-import { ChunkData } from '../../engines/types';
+import { ChunkData, EngineType } from '../../engines/types';
 import { VectorSearchClient } from '../../lib/vector-search';
 
 // Mock the vector search client
@@ -433,7 +433,7 @@ describe('SemanticSimilarityEngine', () => {
 
   describe('Engine Type', () => {
     it('should return correct engine type', () => {
-      expect(engine.getEngineType()).toBe('semantic_similarity');
+      expect(engine.getEngineType()).toBe(EngineType.SEMANTIC_SIMILARITY);
     });
   });
 });
