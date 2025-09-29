@@ -1,5 +1,10 @@
 # Rhizome V2 Architecture - Final
 
+> **Implementation Note**: This document describes the complete system architecture. 
+> - **Sections 1-10** (Lines 1-2198): ✅ **IMPLEMENTED** - These features are built and working
+> - **Section 11** (Lines 2199-2214): 📋 **FUTURE** - Roadmap items not yet started
+> - For current status details, see `docs/IMPLEMENTATION_STATUS.md`
+
 ## Vision
 
 A **beautiful document reader** with integrated **flashcard study system** and **AI-powered knowledge synthesis**. Built for deep reading, effective learning, and discovering unexpected connections between ideas.
@@ -262,7 +267,9 @@ CREATE POLICY "Users can view own documents" ON documents
 -- ... similar policies for all tables
 ```
 
-## Document Processing Pipeline
+## Document Processing Pipeline [✅ IMPLEMENTED]
+
+> **Status**: Complete with all 6 input formats working. Test coverage: 88-100%
 
 ### Overview
 ```
@@ -1042,7 +1049,9 @@ const MAX_WINDOW_COUNT = 10000        // Prevent excessive memory usage
 const EARLY_EXIT_THRESHOLD = 0.95     // Stop searching on near-perfect match
 ```
 
-## ECS Architecture
+## ECS Architecture [✅ IMPLEMENTED]
+
+> **Status**: Fully implemented in `src/lib/ecs/ecs.ts`. Test coverage: 97%
 
 ### Core Implementation
 
@@ -1158,7 +1167,9 @@ type ComponentTypes = {
 }
 ```
 
-## Annotation Layer
+## Annotation Layer [📋 PLANNED - NOT IMPLEMENTED]
+
+> **Status**: Design complete, implementation not started. See PRP: `docs/prps/document-reader-annotation-system.md`
 
 ### Overview
 Annotations are visual highlights and notes overlaid on the document without modifying the source markdown. They persist across document updates and are shareable/exportable.
@@ -1264,7 +1275,9 @@ async function createFlashcardFromAnnotation(annotationId: string) {
 }
 ```
 
-## Study System
+## Study System [📋 PLANNED - NOT IMPLEMENTED]
+
+> **Status**: FSRS algorithm chosen, UI designs complete, implementation not started
 
 ### Core Components
 
