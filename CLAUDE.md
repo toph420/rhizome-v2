@@ -908,6 +908,37 @@ GEMINI_API_KEY=<your Google AI Studio key>
 5. **Complex state management** - Keep it simple
 6. **Premature optimization** - Build first, optimize later
 7. **Committing dependencies** - NEVER commit node_modules or dist/
+8. **Creating files in wrong directories** - ALWAYS verify path first
+
+### File Path Verification (CRITICAL)
+
+**ALWAYS verify your working directory before creating/moving files:**
+
+```bash
+# Before ANY file operations:
+pwd  # Check current directory FIRST
+
+# Common correct paths:
+# /Users/topher/Code/rhizome-v2           - Project root
+# /Users/topher/Code/rhizome-v2/worker    - Worker module
+# /Users/topher/Code/rhizome-v2/src       - Main app source
+
+# WRONG paths to avoid:
+# /Users/topher/Code/rhizome-v2/worker/worker  - Double nesting!
+# /Users/topher/Code/rhizome-v2/tests         - Should be in worker/tests
+```
+
+**Rules for file creation:**
+- Worker-specific files → `/worker/` directory (tests, scripts, processors)
+- App-specific files → `/src/` directory (components, pages, stores)  
+- Shared docs → `/docs/` at project root
+- Database migrations → `/supabase/migrations/`
+
+**Before using Write or Edit tools:**
+1. Run `pwd` to confirm location
+2. Use absolute paths when uncertain
+3. Verify parent directories exist
+4. Check for duplicate nested directories (worker/worker is WRONG)
 
 ### Git Hygiene (CRITICAL)
 
