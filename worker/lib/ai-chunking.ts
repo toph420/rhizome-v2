@@ -30,6 +30,62 @@ export interface ChunkData {
 }
 
 /**
+ * Calculates character offsets for AI-generated chunks by finding their content in the original markdown.
+ * Uses fuzzy matching when exact matching fails.
+ * 
+ * @param chunks - Array of AI-generated chunks
+ * @param originalMarkdown - Original markdown content
+ * @returns Chunks with calculated start_offset and end_offset
+ */
+function calculateOffsetsForAIChunks(chunks: ChunkData[], originalMarkdown: string): ChunkData[] {
+  let lastOffset = 0
+  
+  return chunks.map((chunk, index) => {
+    const chunkContent = chunk.content.trim()
+    let startOffset = -1
+    let endOffset = -1
+    
+    // Try exact match first, starting from last offset to maintain sequence
+    const exactMatch = originalMarkdown.indexOf(chunkContent, lastOffset)
+    
+    if (exactMatch !== -1) {
+      startOffset = exactMatch
+      endOffset = exactMatch + chunkContent.length
+      lastOffset = endOffset
+    } else {
+      // Fallback: Try finding a substantial substring (first 100 chars)
+      const searchSubstring = chunkContent.slice(0, 100)
+      const substringMatch = originalMarkdown.indexOf(searchSubstring, lastOffset)
+      
+      if (substringMatch !== -1) {
+        startOffset = substringMatch
+        // Estimate end position based on chunk content length
+        endOffset = Math.min(startOffset + chunkContent.length, originalMarkdown.length)
+        lastOffset = endOffset
+      } else {
+        // Final fallback: Position estimation based on chunk sequence
+        const avgChunkSize = Math.floor(originalMarkdown.length / chunks.length)
+        startOffset = Math.max(lastOffset, index * avgChunkSize)
+        endOffset = Math.min(startOffset + chunkContent.length, originalMarkdown.length)
+        lastOffset = endOffset
+        
+        console.warn(`⚠️  Chunk ${index}: Using position estimation for offset calculation`)
+      }
+    }
+    
+    return {
+      ...chunk,
+      start_offset: startOffset,
+      end_offset: endOffset,
+      position_context: {
+        confidence: exactMatch !== -1 ? 0.95 : (substringMatch !== -1 ? 0.75 : 0.5),
+        method: exactMatch !== -1 ? 'exact_match' : (substringMatch !== -1 ? 'substring_match' : 'position_estimate')
+      }
+    }
+  })
+}
+
+/**
  * Rechunks markdown content using AI for semantic understanding.
  * Creates intelligent chunks with complete thoughts and metadata.
  * 
@@ -141,7 +197,12 @@ ${markdown}` }
     })
     
     console.log(`✅ Validated ${validatedChunks.length} chunks from AI response`)
-    return validatedChunks
+    
+    // Calculate offsets for AI-generated chunks
+    const chunksWithOffsets = calculateOffsetsForAIChunks(validatedChunks, markdown)
+    console.log(`✅ Calculated offsets for ${chunksWithOffsets.length} chunks`)
+    
+    return chunksWithOffsets
     
   } catch (error: any) {
     console.error('Failed to parse AI chunking response:', error)

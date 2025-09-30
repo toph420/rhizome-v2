@@ -260,7 +260,12 @@ export class PDFProcessor extends SourceProcessor {
         content: chunk.content,
         themes: chunk.themes,
         importance: chunk.importance_score,
-        summary: chunk.summary
+        summary: chunk.summary,
+        start_offset: chunk.start_offset,
+        end_offset: chunk.end_offset,
+        chunk_index: chunk.chunk_index,
+        word_count: chunk.word_count,
+        heading_path: chunk.heading_path
       }))
     }
   }

@@ -431,6 +431,15 @@ npm run dev:next             # Next.js on port 3000
 8. **Never commit node_modules** - Check .gitignore in both root and worker/
 9. **Never modify worker deps without testing** - Worker has strict ESM requirements
 
+### PDF Offset Behavior
+
+**Important Note on PDF Chunk Offsets:**
+- PDF chunks' `start_offset` and `end_offset` refer to character positions in the **generated markdown**, not the original PDF
+- This is because PDF processing involves AI transformation: `PDF → Gemini Files API → Markdown → Chunking`
+- Offsets are useful for navigating within the stored markdown content
+- For linking back to PDF pages, use `chunk_index` and content matching instead
+- Other formats (markdown, text, paste) have offsets that directly correspond to the original source
+
 ## Testing Guidelines
 
 ### Testing Philosophy

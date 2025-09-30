@@ -152,9 +152,9 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         summary: enhancedSummary,
         
         // Ensure required fields are present with proper names
-        chunk_index: chunk.chunk_index || i,
-        start_offset: chunk.start_offset || null,
-        end_offset: chunk.end_offset || null,
+        chunk_index: chunk.chunk_index ?? i,
+        start_offset: chunk.start_offset ?? null,
+        end_offset: chunk.end_offset ?? null,
         word_count: chunk.word_count || chunk.content.split(/\s+/).filter(w => w.length > 0).length,
         importance_score: chunk.importance_score || 0.5,
         
