@@ -1,0 +1,60 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 3 AM UTC
+    - cron: '0 3 * * *'
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install worker dependencies
+        run: cd worker && npm ci
+
+      - name: Run npm audit for main app
+        run: npm audit --audit-level moderate
+
+      - name: Run npm audit for worker module
+        run: cd worker && npm audit --audit-level moderate
+
+      - name: Run ESLint security rules
+        run: |
+          npm run lint
+          cd worker && npm run lint
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Simple grep for common secret patterns
+          if grep -r -E "(api_key|secret_key|password|token)" --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" src/ worker/ --exclude-dir=node_modules 2>/dev/null | grep -v "process.env" | grep -v "TODO" | grep -v "example" | head -10; then
+            echo "Warning: Potential hardcoded secrets found"
+            # Don't fail the build, just warn
+          fi
+
+      - name: TypeScript strict mode check
+        run: |
+          npx tsc --noEmit --strict
+          cd worker && npx tsc --noEmit --strict
+
+      - name: Check for TODO security items
+        run: |
+          if grep -r -i "TODO.*security\|TODO.*auth\|TODO.*permission" --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" src/ worker/ 2>/dev/null; then
+            echo "Warning: Security-related TODOs found - please address before production"
+          fi

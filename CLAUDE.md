@@ -8,10 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rhizome V2 is an **AI-first document processing system** with **7-engine collision detection** for discovering connections between ideas. It transforms documents into structured knowledge through clean markdown, semantic chunking, and aggressive connection synthesis.
 
+**This is a GREENFIELD APP, we are NOT CONCERNED ABOUT BACKWARD COMPATIBILITY!!**
+
 **Core Vision**: Build a personal knowledge tool that actively discovers non-obvious connections across all your reading materials.
 
 **Key Documents**:
 - `docs/APP_VISION.md` - Core philosophy and vision
+- `docs/USER_FLOW.md` - Core philosophy and vision
 - `docs/IMPLEMENTATION_STATUS.md` - Current feature status
 - `docs/ARCHITECTURE.md` - System architecture (first 1000 lines = implemented)
 
@@ -19,7 +22,9 @@ Rhizome V2 is an **AI-first document processing system** with **7-engine collisi
 
 **ARCHON PROJECT ID**: a2232595-4e55-41d2-a041-1a4a8a4ff3c6
 
-This is a personal tool optimized for aggressive connection detection and knowledge synthesis. Not designed for multi-user or enterprise use.
+This is a personal tool optimized for aggressive connection detection and knowledge synthesis. Not designed for multi-user or enterprise use. 
+
+
 
 ## Core Architecture
 
@@ -156,25 +161,41 @@ npm install
 cd worker && npm install
 
 # Start all services
-npm run dev
+npm run dev                    # Runs ./scripts/dev.sh - starts Supabase, Edge Functions, Worker, Next.js
+npm run stop                   # Runs ./scripts/stop.sh - stops all services
+npm run status                 # Check service status
 
-# Run tests
-npm test
-cd worker && npm test
+# Individual service control
+npm run dev:next               # Next.js only (port 3000)
+npm run dev:worker             # Worker module only
+cd worker && npm run dev       # Worker with hot reload
 
 # Database operations
-npx supabase db reset          # Reset with migrations
+npx supabase start             # Start Supabase stack
+npx supabase stop              # Stop Supabase stack
+npx supabase db reset          # Reset with migrations + seed
 npx supabase migration new <name>  # Create migration
+npx supabase db diff --schema public  # Generate migration from schema changes
 ```
 
 ### Environment Variables
 ```bash
-# .env.local
+# .env.local (main app)
 NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<from supabase start>
 SUPABASE_SERVICE_ROLE_KEY=<from supabase start>
 GOOGLE_AI_API_KEY=<your Gemini API key>
 GEMINI_MODEL=gemini-2.0-flash-exp  # Or gemini-1.5-pro
+
+# worker/.env (worker module)
+SUPABASE_URL=http://localhost:54321
+SUPABASE_SERVICE_ROLE_KEY=<same as above>
+GOOGLE_AI_API_KEY=<same as above>
+GEMINI_MODEL=gemini-2.0-flash-exp
+
+# Local development ports (from supabase/config.toml)
+# API: 54321, DB: 54322, Studio: 54323, Inbucket: 54324
+# Next.js: 3000, Edge Functions: 54321/functions/v1
 ```
 
 ## Code Examples
@@ -305,6 +326,21 @@ export async function createAnnotation(data: AnnotationData) {
 
 ## Development Guidelines
 
+### Dual-Module Architecture
+This project uses a **dual-module architecture** with distinct testing and dependency management:
+
+**Main App** (`/`) - Next.js 15 with React 19
+- Frontend components and pages
+- Server Actions for database mutations
+- ECS system for entity management
+- Jest + jsdom for testing UI logic
+
+**Worker Module** (`/worker/`) - Node.js background processing
+- Document processors (PDF, YouTube, Web, etc.)
+- 7-engine collision detection system
+- Gemini AI integration and embeddings
+- Jest + node environment for integration testing
+
 ### File Organization
 ```
 src/
@@ -322,11 +358,18 @@ src/
 │   └── supabase/         # Database clients
 └── stores/               # Zustand stores (client state)
 
-worker/                   # Document processing module
-├── processors/           # Format-specific processors
+worker/                   # Document processing module (separate Node.js app)
+├── processors/           # Format-specific processors (pdf, youtube, web, etc.)
 ├── engines/             # 7 collision detection engines
-├── lib/                 # Utilities (cache, monitoring)
-└── tests/               # Comprehensive test suite
+├── handlers/            # Background job handlers
+├── lib/                 # Utilities (cache, monitoring, gemini client)
+├── tests/               # Comprehensive test suite with validation
+└── benchmarks/          # Performance measurement tools
+
+scripts/                 # Development automation
+├── dev.sh              # Start all services (Supabase + Worker + Next.js)
+├── stop.sh             # Stop all services
+└── benchmark-*.ts      # Performance testing scripts
 ```
 
 ### Testing Priorities
@@ -345,15 +388,127 @@ describe('Collision Detection', () => {
 })
 ```
 
+### Development Workflow Patterns
+
+#### Working with Worker Module
+```bash
+# Always test worker changes locally first
+cd worker && npm run test:integration
+
+# For processor changes, test specific source types
+cd worker && npm run test:youtube-videos  # Test YouTube changes
+cd worker && npm run test:web-articles    # Test web scraping changes
+
+# For engine changes, validate semantic accuracy
+cd worker && npm run validate:semantic-accuracy
+
+# Before committing, run full validation
+cd worker && npm run test:full-validation
+```
+
+#### Service Management
+```bash
+# Use scripts for coordinated service management
+npm run dev      # Starts: Supabase → Edge Functions → Worker → Next.js
+npm run stop     # Stops all services gracefully
+
+# For individual debugging, run services separately
+npx supabase start
+cd worker && npm run dev     # Worker with hot reload
+npm run dev:next             # Next.js on port 3000
+```
+
 ### Common Pitfalls to Avoid
 
 1. **Never use modals** - Always use docks/panels/overlays
-2. **Never store markdown in DB** - Use Supabase Storage
+2. **Never store markdown in DB** - Use Supabase Storage  
 3. **Never parse PDFs directly** - Use Gemini Files API
 4. **Never create service classes** - Use ECS for entities
 5. **Never mix storage patterns** - Files OR database, not both
 6. **Never skip error handling** - Especially for AI operations
-7. **Never commit node_modules** - Check .gitignore
+7. **Never test without mocks in CI** - Use `validate:metadata` not `validate:metadata:real`
+8. **Never commit node_modules** - Check .gitignore in both root and worker/
+9. **Never modify worker deps without testing** - Worker has strict ESM requirements
+
+## Testing Guidelines
+
+### Testing Philosophy
+- **Pragmatic Coverage**: Target 70% on critical paths rather than 100% everywhere
+- **Test What Matters**: Focus on user journeys and critical functionality
+- **Use Test Factories**: Consistent test data generation via `tests/factories/`
+
+### Quick Test Commands
+```bash
+# Main app tests
+npm test                       # Run all main app tests
+npm run test:watch             # Run tests in watch mode
+npm test -- ecs.test.ts        # Run specific test file
+npm run test:e2e               # Playwright E2E tests
+npm run test:e2e:ui            # Playwright with UI mode
+npm run test:e2e:debug         # Playwright debug mode
+
+# Worker module tests (cd worker && ...)
+npm test                       # All worker tests
+npm run test:watch             # Worker tests in watch mode
+npm run test:unit              # Unit tests only (__tests__ directory)
+npm run test:integration       # Integration tests only (tests/integration)
+
+# Specialized worker testing
+npm run test:all-sources       # Test all 6 document processor types
+npm run test:youtube-videos    # YouTube processing tests
+npm run test:web-articles      # Web article processing tests
+npm run test:text-processing   # Text/paste processing tests
+npm run test:retry-scenarios   # Error recovery and retry logic
+npm run test:database-batching # Database batch operations
+npm run test:cache-metrics     # Cache performance tests
+npm run test:backwards-compatibility  # Backwards compatibility tests
+
+# Validation and benchmarking
+npm run test:validate          # Integration validation suite
+npm run test:full-validation   # Build + lint + integration + validation
+npm run validate:metadata      # Metadata extraction validation
+npm run validate:metadata:real # Use real AI (not mocks)
+npm run validate:semantic-accuracy  # Semantic engine accuracy tests
+
+# Benchmarking
+npm run benchmark:all          # All performance benchmarks
+npm run benchmark:pdf          # PDF processing benchmarks
+npm run benchmark:semantic-engine  # Semantic similarity benchmarks
+npm run benchmark:cache        # Cache performance benchmarks
+npm run benchmark:report       # Detailed benchmark report
+```
+
+### Test Structure
+```
+tests/
+├── factories/     # Test data generators (documents, chunks, entities)
+├── fixtures/      # Static test files
+├── mocks/         # MSW handlers for API mocking
+└── e2e/          # Playwright E2E tests (future)
+
+src/lib/ecs/__tests__/    # ECS unit tests
+worker/tests/             # Worker module tests
+```
+
+### Using Test Factories
+```typescript
+import { factories } from '@/tests/factories'
+
+// Create test data
+const doc = factories.document.createProcessed()
+const chunks = factories.chunk.createMany(10, 'doc-id')
+const flashcard = factories.entity.createFlashcard()
+
+// Reset between tests
+beforeEach(() => {
+  factories.document.reset()
+})
+```
+
+### Testing Documentation
+- **Main Guide**: `docs/testing/README.md` - Single source of truth
+- **Patterns**: `docs/testing/patterns.md` - Code examples
+- **Status**: Phase 1 implementation complete (foundation & documentation)
 
 ## Monitoring & Performance
 
