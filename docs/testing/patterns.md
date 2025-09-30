@@ -1,116 +1,329 @@
 # Testing Patterns & Examples
 
-> Practical code examples for common testing scenarios in Rhizome V2
+> **Code examples for common testing scenarios in Rhizome V2**  
+> Updated for development-friendly testing strategy
 
 ## Table of Contents
-1. [Unit Test Patterns](#unit-test-patterns)
-2. [Integration Test Patterns](#integration-test-patterns)
-3. [E2E Test Patterns](#e2e-test-patterns)
-4. [Mocking Patterns](#mocking-patterns)
-5. [Async Testing Patterns](#async-testing-patterns)
-6. [Error Testing Patterns](#error-testing-patterns)
+1. [Test Category Patterns](#test-category-patterns)
+2. [Unit Test Patterns](#unit-test-patterns)
+3. [Integration Test Patterns](#integration-test-patterns)
+4. [E2E Test Patterns](#e2e-test-patterns)
+5. [Mocking Patterns](#mocking-patterns)
+6. [Async Testing Patterns](#async-testing-patterns)
+7. [Error Testing Patterns](#error-testing-patterns)
+8. [Performance Testing Patterns](#performance-testing-patterns)
+
+## Test Category Patterns
+
+### 🔴 Critical Test Examples
+
+#### E2E User Journey (tests/critical/upload-process-flow.test.ts)
+```typescript
+import { test, expect } from '@playwright/test'
+
+test('Complete document upload and processing workflow', async ({ page }) => {
+  // Navigate to upload page
+  await page.goto('/upload')
+  
+  // Upload document
+  await page.setInputFiles('input[type="file"]', 'tests/fixtures/sample.pdf')
+  
+  // Wait for processing to complete
+  await expect(page.locator('[data-testid="processing-status"]'))
+    .toHaveText('completed', { timeout: 60000 })
+  
+  // Navigate to reader
+  await page.click('[data-testid="read-document"]')
+  await expect(page).toHaveURL(/\/read\//)
+  
+  // Verify document content is displayed
+  await expect(page.locator('[data-testid="document-content"]'))
+    .toBeVisible()
+  
+  // Verify collision detection is working
+  await expect(page.locator('[data-testid="connections-panel"]'))
+    .toContainText('connections found')
+})
+```
+
+#### Integration Smoke Test (tests/critical/system-connectivity.test.ts)
+```typescript
+import { supabase } from '@/lib/supabase'
+import { processDocument } from '@/worker/handlers/process-document'
+
+describe('System Connectivity', () => {
+  test('Database connection works', async () => {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('count(*)')
+      .single()
+    
+    expect(error).toBeNull()
+    expect(data).toBeDefined()
+  })
+  
+  test('Document processing pipeline works', async () => {
+    const testDoc = {
+      id: 'test-doc',
+      user_id: 'test-user',
+      source_type: 'text',
+      content: 'Test content for processing'
+    }
+    
+    const result = await processDocument(testDoc)
+    
+    expect(result.status).toBe('completed')
+    expect(result.chunks.length).toBeGreaterThan(0)
+    expect(result.embeddingsGenerated).toBe(true)
+  })
+})
+```
+
+### 🟡 Stable Test Examples
+
+#### API Contract Test (tests/stable/document-crud.test.ts)
+```typescript
+import { createDocument, getDocument, updateDocument } from '@/app/actions/documents'
+import { factories } from '@/tests/factories'
+
+describe('Document CRUD Operations', () => {
+  test('createDocument returns valid document ID', async () => {
+    const documentData = factories.document.createFormData()
+    
+    const result = await createDocument(documentData)
+    
+    expect(result.success).toBe(true)
+    expect(result.documentId).toMatch(/^[a-z0-9-]+$/)
+  })
+  
+  test('getDocument returns complete document data', async () => {
+    const doc = factories.document.createProcessed()
+    
+    const result = await getDocument(doc.id)
+    
+    expect(result).toMatchObject({
+      id: doc.id,
+      title: expect.any(String),
+      processing_status: 'completed',
+      chunks: expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.any(String),
+          metadata: expect.any(Object)
+        })
+      ])
+    })
+  })
+})
+```
+
+#### System Integration Test (tests/stable/background-jobs.test.ts)
+```typescript
+import { supabase } from '@/lib/supabase'
+import { processBackgroundJobs } from '@/worker/job-processor'
+
+describe('Background Job Processing', () => {
+  test('processes document upload job successfully', async () => {
+    // Create job
+    const { data: job } = await supabase
+      .from('background_jobs')
+      .insert({
+        job_type: 'process-document',
+        input_data: { document_id: 'test-doc' },
+        status: 'pending'
+      })
+      .select()
+      .single()
+    
+    // Process jobs
+    await processBackgroundJobs()
+    
+    // Verify job completion
+    const { data: updatedJob } = await supabase
+      .from('background_jobs')
+      .select()
+      .eq('id', job.id)
+      .single()
+    
+    expect(updatedJob.status).toBe('completed')
+    expect(updatedJob.completed_at).toBeDefined()
+  })
+})
+```
+
+### 🟢 Flexible Test Examples
+
+#### Component Test (tests/flexible/upload-zone.test.tsx)
+```typescript
+import { render, screen, fireEvent } from '@testing-library/react'
+import { UploadZone } from '@/components/library/UploadZone'
+
+describe('UploadZone Component', () => {
+  test('shows drag state when file is dragged over', () => {
+    render(<UploadZone onFileSelect={() => {}} />)
+    
+    const dropZone = screen.getByRole('button')
+    
+    fireEvent.dragEnter(dropZone)
+    
+    expect(screen.getByText('Drop files here')).toBeVisible()
+    expect(dropZone).toHaveClass('drag-active')
+  })
+  
+  test('calls onFileSelect when file is dropped', () => {
+    const onFileSelect = jest.fn()
+    render(<UploadZone onFileSelect={onFileSelect} />)
+    
+    const file = new File(['content'], 'test.pdf', { type: 'application/pdf' })
+    const dropZone = screen.getByRole('button')
+    
+    fireEvent.drop(dropZone, {
+      dataTransfer: { files: [file] }
+    })
+    
+    expect(onFileSelect).toHaveBeenCalledWith(file)
+  })
+})
+```
+
+#### Utility Function Test (tests/flexible/chunk-utilities.test.ts)
+```typescript
+import { chunkMarkdown, calculateChunkScore } from '@/lib/chunk-utilities'
+
+describe('Chunk Utilities', () => {
+  test('chunkMarkdown splits content by headers', () => {
+    const markdown = `
+# Header 1
+Content 1
+
+## Header 2
+Content 2
+
+### Header 3
+Content 3
+    `
+    
+    const chunks = chunkMarkdown(markdown)
+    
+    expect(chunks).toHaveLength(3)
+    expect(chunks[0]).toMatchObject({
+      content: expect.stringContaining('Header 1'),
+      level: 1
+    })
+  })
+  
+  test('calculateChunkScore returns normalized score', () => {
+    const chunk = {
+      wordCount: 150,
+      importanceScore: 0.8,
+      themes: ['technology', 'innovation']
+    }
+    
+    const score = calculateChunkScore(chunk)
+    
+    expect(score).toBeGreaterThanOrEqual(0)
+    expect(score).toBeLessThanOrEqual(1)
+  })
+})
+```
+
+### 🔵 Experimental Test Examples
+
+#### Feature Spike Test (tests/experimental/ai-summarization.test.ts)
+```typescript
+// NOTE: Experimental feature - not included in CI
+import { generateAISummary } from '@/lib/experimental/ai-summarization'
+
+describe('AI Summarization (Experimental)', () => {
+  test('generates coherent summary for document', async () => {
+    const document = {
+      content: 'Long document content...',
+      chunks: [/* chunk data */]
+    }
+    
+    const summary = await generateAISummary(document)
+    
+    // Basic validation for experimental feature
+    expect(summary).toBeDefined()
+    expect(summary.length).toBeGreaterThan(10)
+    expect(summary.length).toBeLessThan(500)
+  })
+})
+```
 
 ## Unit Test Patterns
 
 ### Testing Pure Functions
 
 ```typescript
-// processors/markdown-chunker.test.ts
+// worker/processors/markdown-chunker.test.ts
 import { chunkMarkdown } from '../markdown-chunker'
 
-describe('chunkMarkdown', () => {
-  it('splits content at heading boundaries', () => {
-    const markdown = '# Title\nContent\n## Section\nMore content'
-    const chunks = chunkMarkdown(markdown)
+describe('Markdown Chunker', () => {
+  test('preserves code blocks during chunking', () => {
+    const markdown = `
+# Introduction
 
-    expect(chunks).toHaveLength(2)
-    expect(chunks[0].content).toContain('Title')
-    expect(chunks[1].content).toContain('Section')
-  })
+Here's some code:
 
-  it('handles code blocks without splitting', () => {
-    const markdown = '```js\nconst long = "code";\n```'
-    const chunks = chunkMarkdown(markdown, { maxSize: 10 })
+\`\`\`javascript
+function hello() {
+  console.log('world')
+}
+\`\`\`
 
-    expect(chunks).toHaveLength(1) // Not split despite size
+## Next Section
+More content here.
+    `
+    
+    const chunks = chunkMarkdown(markdown, { maxChunkSize: 200 })
+    
+    expect(chunks[0].content).toContain('```javascript')
+    expect(chunks[0].content).toContain('function hello()')
     expect(chunks[0].content).toContain('```')
   })
 })
 ```
 
-### Testing Classes
+### Testing Classes and Objects
 
 ```typescript
-// processors/pdf-processor.test.ts
-import { PDFProcessor } from '../pdf-processor'
+// src/lib/ecs/__tests__/ecs.test.ts
+import { ecs } from '../ecs'
 import { factories } from '@/tests/factories'
 
-describe('PDFProcessor', () => {
-  let processor: PDFProcessor
-
+describe('ECS System', () => {
   beforeEach(() => {
-    processor = new PDFProcessor()
+    factories.entity.reset()
   })
-
-  describe('transform', () => {
-    it('extracts text from PDF buffer', async () => {
-      const pdfBuffer = factories.TestFiles.pdf()
-      const metadata = { source_type: 'pdf' as const, fileName: 'test.pdf' }
-
-      const result = await processor.transform(pdfBuffer, metadata)
-
-      expect(result.markdown).toBeDefined()
-      expect(result.chunks).toHaveLength(greaterThan(0))
-      expect(result.metadata.source_type).toBe('pdf')
-    })
-
-    it('handles corrupted PDFs gracefully', async () => {
-      const badBuffer = Buffer.from('not a pdf')
-      const metadata = { source_type: 'pdf' as const }
-
-      await expect(processor.transform(badBuffer, metadata))
-        .rejects.toThrow('Invalid PDF')
-    })
+  
+  test('createEntity generates unique ID', async () => {
+    const userId = 'test-user'
+    const components = { flashcard: { question: 'Q?', answer: 'A.' } }
+    
+    const entityId1 = await ecs.createEntity(userId, components)
+    const entityId2 = await ecs.createEntity(userId, components)
+    
+    expect(entityId1).not.toBe(entityId2)
+    expect(typeof entityId1).toBe('string')
+    expect(entityId1.length).toBeGreaterThan(10)
   })
-})
-```
-
-### Testing React Components
-
-```typescript
-// components/reader/DocumentViewer.test.tsx
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { DocumentViewer } from '../DocumentViewer'
-import { factories } from '@/tests/factories'
-
-describe('DocumentViewer', () => {
-  it('renders markdown content', () => {
-    const doc = factories.document.createProcessed({
-      content: '# Test Document'
+  
+  test('query returns entities with specified components', async () => {
+    const userId = 'test-user'
+    
+    // Create entities with different components
+    await ecs.createEntity(userId, { 
+      flashcard: { question: 'Q1', answer: 'A1' },
+      study: { due: new Date(), ease: 2.5 }
     })
-
-    render(<DocumentViewer document={doc} />)
-
-    expect(screen.getByRole('heading', { level: 1 }))
-      .toHaveTextContent('Test Document')
-  })
-
-  it('handles text selection for annotations', async () => {
-    const onSelect = jest.fn()
-    const doc = factories.document.create()
-
-    render(<DocumentViewer document={doc} onTextSelect={onSelect} />)
-
-    const text = screen.getByText(/test content/i)
-    await userEvent.selectText(text)
-
-    expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.any(String),
-        range: expect.any(Object)
-      })
-    )
+    await ecs.createEntity(userId, { 
+      annotation: { text: 'Note', range: { start: 0, end: 10 } }
+    })
+    
+    const flashcards = await ecs.query(['flashcard', 'study'], userId)
+    
+    expect(flashcards).toHaveLength(1)
+    expect(flashcards[0].components.flashcard.question).toBe('Q1')
   })
 })
 ```
@@ -120,107 +333,100 @@ describe('DocumentViewer', () => {
 ### Testing Database Operations
 
 ```typescript
-// lib/ecs/__tests__/ecs-integration.test.ts
-import { ecs } from '../ecs'
-import { createClient } from '@supabase/supabase-js'
-import { factories } from '@/tests/factories'
+// tests/integration/database/embeddings.test.ts
+import { supabase } from '@/lib/supabase'
+import { generateEmbeddings } from '@/worker/lib/embeddings'
 
-describe('ECS Integration', () => {
-  let supabase: ReturnType<typeof createClient>
-  let testUserId: string
-
-  beforeAll(() => {
-    supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
-  })
-
-  beforeEach(async () => {
-    const user = factories.user.create()
-    testUserId = user.id
-
-    // Setup test user
-    await supabase.from('users').insert(user)
-  })
-
-  afterEach(async () => {
-    // Cleanup
-    await supabase.from('entities')
-      .delete()
-      .eq('user_id', testUserId)
-  })
-
-  it('creates and retrieves entities with components', async () => {
-    // Create entity
-    const entityId = await ecs.createEntity(testUserId, {
-      flashcard: { question: 'Q1', answer: 'A1' },
-      study: { ease: 2.5, due: new Date() }
+describe('Embeddings Integration', () => {
+  test('stores and retrieves embeddings correctly', async () => {
+    const chunk = {
+      id: 'test-chunk',
+      content: 'Test content for embedding',
+      document_id: 'test-doc'
+    }
+    
+    // Generate embedding
+    const embedding = await generateEmbeddings(chunk.content)
+    
+    // Store in database
+    await supabase.from('chunks').upsert({
+      ...chunk,
+      embedding: embedding
     })
-
-    // Retrieve entity
-    const entities = await ecs.query(
-      ['flashcard', 'study'],
-      testUserId
-    )
-
-    expect(entities).toHaveLength(1)
-    expect(entities[0].id).toBe(entityId)
-    expect(entities[0].flashcard.question).toBe('Q1')
+    
+    // Retrieve and verify
+    const { data } = await supabase
+      .from('chunks')
+      .select('embedding')
+      .eq('id', chunk.id)
+      .single()
+    
+    expect(data.embedding).toHaveLength(768) // Gemini embedding dimension
+    expect(data.embedding[0]).toBeTypeOf('number')
+  })
+  
+  test('similarity search returns relevant chunks', async () => {
+    const queryEmbedding = await generateEmbeddings('machine learning')
+    
+    const { data } = await supabase.rpc('match_chunks', {
+      query_embedding: queryEmbedding,
+      match_threshold: 0.7,
+      match_count: 5
+    })
+    
+    expect(data).toBeInstanceOf(Array)
+    data.forEach(chunk => {
+      expect(chunk).toMatchObject({
+        id: expect.any(String),
+        content: expect.any(String),
+        similarity: expect.any(Number)
+      })
+      expect(chunk.similarity).toBeGreaterThan(0.7)
+    })
   })
 })
 ```
 
-### Testing API Endpoints
+### Testing Worker Processes
 
 ```typescript
-// app/api/documents/__tests__/upload.test.ts
-import { POST } from '../upload/route'
-import { factories } from '@/tests/factories'
+// worker/tests/integration/processor-integration.test.ts
+import { processDocument } from '../handlers/process-document'
+import { factories } from '../tests/factories'
 
-describe('POST /api/documents/upload', () => {
-  it('processes uploaded document', async () => {
-    const formData = new FormData()
-    const file = factories.createMockFile(
-      'Test content',
-      'test.pdf',
-      'application/pdf'
-    )
-    formData.append('file', file)
-
-    const request = new Request('http://localhost/api/documents/upload', {
-      method: 'POST',
-      body: formData
+describe('Document Processor Integration', () => {
+  test('processes PDF end-to-end', async () => {
+    const document = factories.document.createPDF({
+      storage_path: 'test-files/sample.pdf'
     })
-
-    const response = await POST(request)
-    const data = await response.json()
-
-    expect(response.status).toBe(200)
-    expect(data.documentId).toBeDefined()
-    expect(data.status).toBe('processing')
+    
+    const result = await processDocument(document)
+    
+    expect(result).toMatchObject({
+      status: 'completed',
+      markdown: expect.stringContaining('#'),
+      chunks: expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.any(String),
+          metadata: expect.objectContaining({
+            wordCount: expect.any(Number),
+            importanceScore: expect.any(Number)
+          })
+        })
+      ]),
+      embeddingsGenerated: true
+    })
   })
-
-  it('validates file types', async () => {
-    const formData = new FormData()
-    const file = factories.createMockFile(
-      'Bad content',
-      'test.exe',
-      'application/x-msdownload'
-    )
-    formData.append('file', file)
-
-    const request = new Request('http://localhost/api/documents/upload', {
-      method: 'POST',
-      body: formData
+  
+  test('handles processing errors gracefully', async () => {
+    const document = factories.document.create({
+      storage_path: 'nonexistent-file.pdf'
     })
-
-    const response = await POST(request)
-
-    expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({
-      error: expect.stringContaining('Invalid file type')
-    })
+    
+    const result = await processDocument(document)
+    
+    expect(result.status).toBe('failed')
+    expect(result.error).toContain('File not found')
   })
 })
 ```
@@ -230,230 +436,201 @@ describe('POST /api/documents/upload', () => {
 ### Page Object Model
 
 ```typescript
-// tests/e2e/page-objects/LibraryPage.ts
-export class LibraryPage extends BasePage {
-  readonly selectors = {
-    documentCard: '[data-testid="document-card"]',
-    readButton: '[data-testid="read-button"]',
-    emptyState: '[data-testid="library-empty"]'
-  }
+// tests/e2e/page-objects/DocumentReaderPage.ts
+import { Page, Locator } from '@playwright/test'
 
-  async navigate(): Promise<void> {
-    await this.goto('/')
-    await this.waitForLibraryLoaded()
+export class DocumentReaderPage {
+  readonly page: Page
+  readonly documentContent: Locator
+  readonly connectionsPanel: Locator
+  readonly annotationButton: Locator
+  
+  constructor(page: Page) {
+    this.page = page
+    this.documentContent = page.locator('[data-testid="document-content"]')
+    this.connectionsPanel = page.locator('[data-testid="connections-panel"]')
+    this.annotationButton = page.locator('[data-testid="create-annotation"]')
   }
-
-  async waitForLibraryLoaded(): Promise<void> {
-    await Promise.race([
-      this.waitForVisible(this.selectors.documentCard),
-      this.waitForVisible(this.selectors.emptyState)
-    ])
+  
+  async navigateToDocument(documentId: string) {
+    await this.page.goto(`/read/${documentId}`)
   }
-
-  async openDocumentInReader(title: string): Promise<void> {
-    const card = await this.getDocumentByTitle(title)
-    if (!card) {
-      throw new Error(`Document not found: ${title}`)
-    }
-    
-    await this.readDocument(card)
-    await this.waitForUrl(/\/read\//)
+  
+  async selectText(text: string) {
+    await this.documentContent.locator(`text=${text}`).first().dblclick()
   }
+  
+  async createAnnotation(note: string) {
+    await this.annotationButton.click()
+    await this.page.fill('[data-testid="annotation-input"]', note)
+    await this.page.click('[data-testid="save-annotation"]')
   }
-
-  async getDocumentId() {
-    const element = await this.page.locator('[data-testid="document-id"]')
-    return element.getAttribute('data-value')
+  
+  async getConnections() {
+    return await this.connectionsPanel
+      .locator('[data-testid="connection-item"]')
+      .all()
   }
 }
-
-// tests/e2e/upload.spec.ts
-import { test, expect } from '@playwright/test'
-import { UploadPage } from './pages/UploadPage'
-
-test('complete upload flow', async ({ page }) => {
-  const uploadPage = new UploadPage(page)
-
-  await uploadPage.goto()
-  await uploadPage.uploadFile('tests/fixtures/sample.pdf')
-  await uploadPage.waitForProcessing()
-
-  const docId = await uploadPage.getDocumentId()
-  expect(docId).toBeTruthy()
-
-  // Navigate to reader
-  await page.goto(`/read/${docId}`)
-  await expect(page.locator('[data-testid="document-viewer"]')).toBeVisible()
-})
 ```
 
-### Testing User Flows
+### Complete User Journeys
 
 ```typescript
-// tests/e2e/annotation-flow.spec.ts
-test('create and save annotation', async ({ page }) => {
-  // Setup: Navigate to document
-  await page.goto('/read/test-doc-001')
+// tests/e2e/journeys/annotation-creation.spec.ts
+import { test, expect } from '@playwright/test'
+import { DocumentReaderPage } from '../page-objects/DocumentReaderPage'
 
-  // Select text
-  const content = page.locator('[data-testid="document-content"]')
-  await content.evaluate(el => {
-    const range = document.createRange()
-    const textNode = el.firstChild
-    range.setStart(textNode, 0)
-    range.setEnd(textNode, 20)
-
-    const selection = window.getSelection()
-    selection.removeAllRanges()
-    selection.addRange(range)
-  })
-
-  // Create annotation
-  await page.click('[data-testid="create-annotation"]')
-  await page.fill('[data-testid="annotation-note"]', 'Important point')
-  await page.click('[data-testid="save-annotation"]')
-
-  // Verify annotation saved
+test('User creates and views annotation', async ({ page }) => {
+  const readerPage = new DocumentReaderPage(page)
+  
+  // Navigate to processed document
+  await readerPage.navigateToDocument('test-document-id')
+  
+  // Select text and create annotation
+  await readerPage.selectText('important concept')
+  await readerPage.createAnnotation('This is a key insight about the topic')
+  
+  // Verify annotation appears
   await expect(page.locator('[data-testid="annotation-marker"]')).toBeVisible()
-  await expect(page.locator('[data-testid="annotation-list"]')).toContainText('Important point')
+  
+  // Verify annotation in sidebar
+  await expect(page.locator('[data-testid="annotations-list"]'))
+    .toContainText('This is a key insight')
+  
+  // Verify annotation persists after reload
+  await page.reload()
+  await expect(page.locator('[data-testid="annotation-marker"]')).toBeVisible()
 })
 ```
 
 ## Mocking Patterns
 
-### Mocking External APIs
-
-```typescript
-// tests/mocks/gemini.ts
-export function mockGeminiAPI() {
-  return {
-    generateContent: jest.fn().mockResolvedValue({
-      response: {
-        text: () => '# Processed Document\n\nContent here'
-      }
-    }),
-    generateEmbedding: jest.fn().mockResolvedValue({
-      embedding: Array(768).fill(0).map(() => Math.random())
-    })
-  }
-}
-
-// In test file
-jest.mock('@google/genai', () => ({
-  GoogleGenerativeAI: jest.fn(() => mockGeminiAPI())
-}))
-```
-
-### Mocking Supabase
+### Supabase Client Mocking
 
 ```typescript
 // tests/mocks/supabase.ts
-export function mockSupabaseClient() {
-  const mockFrom = (table: string) => ({
-    select: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockResolvedValue({ data: [], error: null }),
-    update: jest.fn().mockResolvedValue({ data: [], error: null }),
-    delete: jest.fn().mockResolvedValue({ data: [], error: null }),
-    eq: jest.fn().mockReturnThis(),
-    single: jest.fn().mockResolvedValue({ data: {}, error: null })
+export function createMockSupabaseClient() {
+  const mockFrom = jest.fn()
+  const mockSelect = jest.fn()
+  const mockInsert = jest.fn()
+  const mockUpdate = jest.fn()
+  const mockDelete = jest.fn()
+  const mockEq = jest.fn()
+  const mockSingle = jest.fn()
+  
+  // Create chainable mock
+  const createChainableMock = () => ({
+    select: mockSelect.mockReturnThis(),
+    insert: mockInsert.mockReturnThis(),
+    update: mockUpdate.mockReturnThis(),
+    delete: mockDelete.mockReturnThis(),
+    eq: mockEq.mockReturnThis(),
+    single: mockSingle.mockResolvedValue({ data: {}, error: null })
   })
-
+  
+  mockFrom.mockReturnValue(createChainableMock())
+  
   return {
     from: mockFrom,
     storage: {
-      from: (bucket: string) => ({
-        upload: jest.fn().mockResolvedValue({
-          data: { path: 'test/path' },
-          error: null
-        }),
-        download: jest.fn().mockResolvedValue({
-          data: Buffer.from('test'),
-          error: null
-        })
-      })
+      from: jest.fn(() => ({
+        upload: jest.fn().mockResolvedValue({ data: {}, error: null }),
+        download: jest.fn().mockResolvedValue({ data: new Blob(), error: null })
+      }))
     },
-    auth: {
-      getUser: jest.fn().mockResolvedValue({
-        data: { user: { id: 'test-user' } },
-        error: null
-      })
-    }
+    rpc: jest.fn().mockResolvedValue({ data: [], error: null })
   }
 }
+```
+
+### External API Mocking
+
+```typescript
+// worker/tests/mocks/gemini.ts
+export const mockGeminiClient = {
+  generateContent: jest.fn(),
+  generateEmbedding: jest.fn()
+}
+
+export function mockGeminiSuccess(response: any) {
+  mockGeminiClient.generateContent.mockResolvedValue({
+    response: { text: () => JSON.stringify(response) }
+  })
+}
+
+export function mockGeminiError(message: string) {
+  mockGeminiClient.generateContent.mockRejectedValue(
+    new Error(message)
+  )
+}
+
+// Usage in tests
+beforeEach(() => {
+  jest.clearAllMocks()
+  mockGeminiSuccess({
+    markdown: '# Processed Content',
+    chunks: [{ content: 'Test chunk', metadata: {} }]
+  })
+})
 ```
 
 ## Async Testing Patterns
 
-### Testing with Promises
+### Testing Promises and Async Operations
 
 ```typescript
-describe('Async Operations', () => {
-  it('waits for processing to complete', async () => {
-    const doc = factories.document.create()
-    const processPromise = processDocument(doc)
-
-    // Check initial state
-    expect(doc.processing_status).toBe('processing')
-
+describe('Async Document Processing', () => {
+  test('waits for processing completion', async () => {
+    const document = factories.document.create()
+    
+    // Start async operation
+    const processingPromise = processDocument(document)
+    
+    // Assert intermediate state
+    expect(document.processing_status).toBe('processing')
+    
     // Wait for completion
-    const result = await processPromise
-
-    // Check final state
-    expect(result.success).toBe(true)
-    expect(doc.processing_status).toBe('completed')
+    const result = await processingPromise
+    
+    // Assert final state
+    expect(result.status).toBe('completed')
+    expect(result.processingTime).toBeGreaterThan(0)
   })
-
-  it('handles concurrent operations', async () => {
-    const docs = factories.document.createMany(3)
-
-    const results = await Promise.all(
-      docs.map(doc => processDocument(doc))
-    )
-
-    expect(results).toHaveLength(3)
+  
+  test('handles concurrent processing requests', async () => {
+    const documents = factories.document.createMany(3)
+    
+    // Start all processes concurrently
+    const promises = documents.map(doc => processDocument(doc))
+    
+    // Wait for all to complete
+    const results = await Promise.all(promises)
+    
+    // Verify all succeeded
     results.forEach(result => {
-      expect(result.success).toBe(true)
+      expect(result.status).toBe('completed')
     })
   })
 })
 ```
 
-### Testing with Timers
+### Testing with Timeouts
 
 ```typescript
-describe('Timer-based Operations', () => {
-  beforeEach(() => {
-    jest.useFakeTimers()
-  })
-
-  afterEach(() => {
-    jest.useRealTimers()
-  })
-
-  it('retries with exponential backoff', async () => {
-    const operation = jest.fn()
-      .mockRejectedValueOnce(new Error('Fail 1'))
-      .mockRejectedValueOnce(new Error('Fail 2'))
-      .mockResolvedValueOnce('Success')
-
-    const promise = retryWithBackoff(operation)
-
-    // First attempt immediately
-    expect(operation).toHaveBeenCalledTimes(1)
-
-    // Second attempt after 1s
-    jest.advanceTimersByTime(1000)
-    await Promise.resolve() // Let microtasks run
-    expect(operation).toHaveBeenCalledTimes(2)
-
-    // Third attempt after 2s
-    jest.advanceTimersByTime(2000)
-    await Promise.resolve()
-    expect(operation).toHaveBeenCalledTimes(3)
-
-    const result = await promise
-    expect(result).toBe('Success')
-  })
+describe('Processing Timeouts', () => {
+  test('respects processing timeout', async () => {
+    const document = factories.document.create()
+    
+    // Mock slow processing
+    jest.spyOn(Date, 'now')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(30000) // 30 seconds later
+    
+    await expect(
+      processDocument(document, { timeout: 10000 })
+    ).rejects.toThrow('Processing timeout')
+  }, 35000) // Extend Jest timeout
 })
 ```
 
@@ -462,95 +639,120 @@ describe('Timer-based Operations', () => {
 ### Testing Error Boundaries
 
 ```typescript
+// tests/integration/error-handling.test.ts
 describe('Error Handling', () => {
-  it('recovers from processing errors', async () => {
-    const doc = factories.document.create()
-    const error = new Error('Processing failed')
-
-    mockGeminiAPI.generateContent.mockRejectedValueOnce(error)
-
-    const result = await processDocument(doc)
-
-    expect(result.success).toBe(false)
-    expect(result.error).toBe(error.message)
-    expect(doc.processing_status).toBe('failed')
-    expect(doc.error_message).toContain('Processing failed')
-  })
-
-  it('validates input before processing', async () => {
-    const invalidDoc = { id: null } // Missing required fields
-
-    await expect(processDocument(invalidDoc as any))
-      .rejects.toThrow('Invalid document')
-  })
-
-  it('handles network timeouts', async () => {
-    const doc = factories.document.create()
-
-    mockGeminiAPI.generateContent.mockImplementation(() =>
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout')), 5000)
-      )
+  test('handles database connection failures', async () => {
+    // Mock database failure
+    const supabase = createMockSupabaseClient()
+    supabase.from().select.mockRejectedValue(
+      new Error('Connection timeout')
     )
-
-    await expect(processDocument(doc, { timeout: 1000 }))
-      .rejects.toThrow('Timeout')
+    
+    const result = await getDocuments('user-id')
+    
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Connection timeout')
+  })
+  
+  test('handles malformed API responses', async () => {
+    mockGeminiClient.generateContent.mockResolvedValue({
+      response: { text: () => 'Invalid JSON {' }
+    })
+    
+    await expect(processDocument(document))
+      .rejects
+      .toThrow('Invalid response format')
   })
 })
 ```
 
-### Testing Validation
+### Testing User Input Validation
 
 ```typescript
 describe('Input Validation', () => {
-  it('validates required fields', () => {
-    const validate = (input: any) => {
-      if (!input.id) throw new Error('ID required')
-      if (!input.title) throw new Error('Title required')
-      return true
-    }
-
-    expect(() => validate({})).toThrow('ID required')
-    expect(() => validate({ id: '1' })).toThrow('Title required')
-    expect(validate({ id: '1', title: 'Test' })).toBe(true)
+  test('rejects invalid file types', async () => {
+    const invalidFile = new File(['content'], 'test.exe', {
+      type: 'application/x-msdownload'
+    })
+    
+    await expect(validateFileUpload(invalidFile))
+      .rejects
+      .toThrow('Unsupported file type')
   })
-
-  it('sanitizes user input', () => {
-    const input = '<script>alert("XSS")</script>Hello'
-    const sanitized = sanitizeInput(input)
-
-    expect(sanitized).toBe('Hello')
-    expect(sanitized).not.toContain('<script>')
+  
+  test('rejects oversized files', async () => {
+    const oversizedFile = new File(['x'.repeat(100_000_000)], 'huge.pdf', {
+      type: 'application/pdf'
+    })
+    
+    await expect(validateFileUpload(oversizedFile))
+      .rejects
+      .toThrow('File too large')
   })
 })
 ```
 
 ## Performance Testing Patterns
 
+### Testing Response Times
+
 ```typescript
-describe('Performance', () => {
-  it('processes documents within time limit', async () => {
-    const doc = factories.document.create()
-    const start = performance.now()
-
-    await processDocument(doc)
-
-    const duration = performance.now() - start
-    expect(duration).toBeLessThan(5000) // 5 seconds max
+// worker/tests/performance/processing-speed.test.ts
+describe('Processing Performance', () => {
+  test('processes small documents under 30 seconds', async () => {
+    const document = factories.document.create({
+      size: 'small' // < 10 pages
+    })
+    
+    const startTime = performance.now()
+    await processDocument(document)
+    const endTime = performance.now()
+    
+    const processingTime = endTime - startTime
+    expect(processingTime).toBeLessThan(30000) // 30 seconds
   })
-
-  it('handles large documents efficiently', async () => {
-    const largeContent = 'x'.repeat(1_000_000) // 1MB
-    const doc = factories.document.create({ content: largeContent })
-
-    const memBefore = process.memoryUsage().heapUsed
-
-    await processDocument(doc)
-
-    const memAfter = process.memoryUsage().heapUsed
-    const memIncrease = memAfter - memBefore
-
-    expect(memIncrease).toBeLessThan(50_000_000) // <50MB increase
+  
+  test('handles batch processing efficiently', async () => {
+    const documents = factories.document.createMany(5)
+    
+    const startTime = performance.now()
+    await Promise.all(documents.map(processDocument))
+    const endTime = performance.now()
+    
+    const averageTime = (endTime - startTime) / documents.length
+    expect(averageTime).toBeLessThan(60000) // 1 minute per doc
   })
 })
 ```
+
+### Testing Memory Usage
+
+```typescript
+describe('Memory Management', () => {
+  test('cleans up resources after processing', async () => {
+    const initialMemory = process.memoryUsage().heapUsed
+    
+    // Process large document
+    const largeDocument = factories.document.createLarge()
+    await processDocument(largeDocument)
+    
+    // Force garbage collection (if available)
+    if (global.gc) {
+      global.gc()
+    }
+    
+    const finalMemory = process.memoryUsage().heapUsed
+    const memoryIncrease = finalMemory - initialMemory
+    
+    // Memory increase should be reasonable
+    expect(memoryIncrease).toBeLessThan(100_000_000) // 100MB
+  })
+})
+```
+
+---
+
+**See Also**:
+- [README.md](./README.md) - Primary testing guide
+- [development-workflow.md](./development-workflow.md) - Testing strategy and workflows
+- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) - Common issues and solutions

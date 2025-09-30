@@ -159,43 +159,27 @@ async function extractEntities(content: string): Promise<ConceptItem[]> {
   
   for (const match of matches) {
     const entity = match[1]
-    // Filter out common sentence starters
-    if (entity.length > 2 && !/^(The|This|That|These|Those|It|He|She|They)$/.test(entity)) {
+    // Filter out common sentence starters and generic words
+    if (entity.length > 2 && !/^(The|This|That|These|Those|It|He|She|They|Written|By|For|From|With|And|Or|But|In|On|At|To)$/.test(entity)) {
       entityCounts.set(entity, (entityCounts.get(entity) || 0) + 1)
     }
   }
   
-  // Check for specific entity types
-  const patterns = {
-    person: /\b(Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)?\s*[A-Z][a-z]+\s+[A-Z][a-z]+/g,
-    organization: /\b(Inc\.|Corp\.|LLC|Ltd\.|Company|Organization|Institute|University)\b/gi,
-    location: /\b(Street|St\.|Avenue|Ave\.|Road|Rd\.|City|State|Country)\b/gi,
-    date: /\b(\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|January|February|March|April|May|June|July|August|September|October|November|December)\b/gi
-  }
-  
-  for (const [type, pattern] of Object.entries(patterns)) {
-    const typeMatches = content.match(pattern) || []
-    if (typeMatches.length > 0) {
-      entities.push({
-        text: `${type}_entities`,
-        importance: 0.3,
-        frequency: typeMatches.length,
-        category: 'entity'
-      })
-    }
-  }
-  
-  // Convert entity counts to ConceptItems
+  // Convert entity counts to ConceptItems (only real entities, not meta-labels)
   for (const [entity, count] of entityCounts.entries()) {
     if (count > 0) {
       entities.push({
         text: entity,
-        importance: count / 10, // Scale importance
+        importance: Math.min(0.8, count / 10), // Scale importance, cap at 0.8
         frequency: count,
         category: 'entity'
       })
     }
   }
+  
+  // Remove the problematic meta-entity creation that was adding noise
+  // The old code added things like "person_entities", "date_entities" etc.
+  // Instead, we now only return actual entity text found in the content
   
   return entities
 }
@@ -462,18 +446,54 @@ function formatEntities(entities: ExtendedConceptItem[]): ConceptualMetadata['en
   }
   
   for (const entity of entities) {
+    // Skip meta-entities and focus on actual entity text
+    if (entity.text.endsWith('_entities') || entity.text.length < 3) {
+      continue
+    }
+    
+    const text = entity.text
+    
+    // Simple heuristics for entity classification
     if (entity.metadata?.entityType === 'person') {
-      formatted.people.push(entity.text)
+      formatted.people.push(text)
     } else if (entity.metadata?.entityType === 'organization') {
-      formatted.organizations.push(entity.text)
+      formatted.organizations.push(text)
     } else if (entity.metadata?.entityType === 'location') {
-      formatted.locations.push(entity.text)
-    } else if (entity.text.match(/^[A-Z]{2,}$/) || entity.text.includes('-')) {
-      formatted.technologies.push(entity.text)
+      formatted.locations.push(text)
+    } else if (entity.metadata?.entityType === 'technology') {
+      formatted.technologies.push(text)
     } else {
-      formatted.other.push(entity.text)
+      // Smart classification based on patterns
+      if (text.match(/^[A-Z]{2,}$/) && text.length <= 5) {
+        // Acronyms likely to be organizations or technologies
+        formatted.technologies.push(text)
+      } else if (text.includes('-') || text.match(/[a-z]+[A-Z]/)) {
+        // Hyphenated or camelCase terms likely technologies
+        formatted.technologies.push(text)
+      } else if (text.split(' ').length === 2 && text.match(/^[A-Z][a-z]+ [A-Z][a-z]+$/)) {
+        // Two capitalized words likely a person name
+        formatted.people.push(text)
+      } else if (text.match(/^(University|Institute|Company|Corporation|Inc|Corp|LLC|Ltd)/i)) {
+        // Organization indicators
+        formatted.organizations.push(text)
+      } else if (text.match(/^(Street|Avenue|Road|City|State|Country|River|Mountain|Lake)/i)) {
+        // Location indicators
+        formatted.locations.push(text)
+      } else {
+        // Default to other, but only if it's meaningful
+        if (entity.importance > 0.2) {
+          formatted.other.push(text)
+        }
+      }
     }
   }
+  
+  // Limit each category to prevent noise
+  formatted.people = formatted.people.slice(0, 5)
+  formatted.organizations = formatted.organizations.slice(0, 5)
+  formatted.locations = formatted.locations.slice(0, 5)
+  formatted.technologies = formatted.technologies.slice(0, 5)
+  formatted.other = formatted.other.slice(0, 5)
   
   return formatted
 }

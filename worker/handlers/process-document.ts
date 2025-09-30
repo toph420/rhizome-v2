@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai'
 import { getUserFriendlyError, classifyError } from '../lib/errors.js'
 import { ProcessorRouter } from '../processors/index.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
+import { enhanceThemesFromConcepts, enhanceSummaryFromConcepts } from '../lib/markdown-chunking.js'
 import type { SourceType } from '../types/multi-format.js'
 import type { ProcessResult } from '../types/processor.js'
 
@@ -122,22 +123,46 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     // Insert chunks with embeddings to database
     console.log(`💾 Saving chunks with embeddings to database`)
     const validChunks = result.chunks.filter(chunk => chunk.content && chunk.content.trim().length > 0)
-    const chunksWithEmbeddings = validChunks.map((chunk, i) => ({
-      ...chunk,
-      document_id,
-      embedding: embeddings[i],
+    const chunksWithEmbeddings = validChunks.map((chunk, i) => {
+      // Enhance themes from concept analysis if available, otherwise use existing themes
+      let enhancedThemes = chunk.themes || ['general']
       
-      // Map metadata to database JSONB columns
-      structural_metadata: chunk.metadata?.structural || null,
-      emotional_metadata: chunk.metadata?.emotional || null,
-      conceptual_metadata: chunk.metadata?.concepts || null,
-      method_metadata: chunk.metadata?.methods || null,
-      narrative_metadata: chunk.metadata?.narrative || null,
-      reference_metadata: chunk.metadata?.references || null,
-      domain_metadata: chunk.metadata?.domain || null,
-      quality_metadata: chunk.metadata?.quality || null,
-      metadata_extracted_at: chunk.metadata ? new Date().toISOString() : null
-    }))
+      // Use conceptual metadata if available for much better themes
+      if (chunk.metadata?.concepts?.concepts && Array.isArray(chunk.metadata.concepts.concepts)) {
+        const meaningfulConcepts = chunk.metadata.concepts.concepts
+          .slice(0, 5) // Top 5 concepts
+          .map((concept: any) => concept.text || concept)
+          .filter((text: string) => text && text.length > 2)
+        
+        if (meaningfulConcepts.length > 0) {
+          enhancedThemes = meaningfulConcepts
+        }
+      }
+      
+      // Enhance summary from concept analysis if available
+      const enhancedSummary = enhanceSummaryFromConcepts(chunk)
+      
+      return {
+        ...chunk,
+        document_id,
+        embedding: embeddings[i],
+        
+        // Use enhanced themes and summary
+        themes: enhancedThemes,
+        summary: enhancedSummary,
+        
+        // Ensure required fields are present with proper names
+        chunk_index: chunk.chunk_index || i,
+        start_offset: chunk.start_offset || null,
+        end_offset: chunk.end_offset || null,
+        word_count: chunk.word_count || chunk.content.split(/\s+/).filter(w => w.length > 0).length,
+        importance_score: chunk.importance_score || 0.5,
+        
+        // Use only the consolidated metadata structure (no duplication)
+        metadata: chunk.metadata || null,
+        metadata_extracted_at: chunk.metadata ? new Date().toISOString() : null
+      }
+    })
     
     const { error: chunkError } = await supabase
       .from('chunks')
@@ -147,6 +172,27 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       throw new Error(`Failed to save chunks: ${chunkError.message}`)
     }
     console.log(`✅ Saved ${chunksWithEmbeddings.length} chunks to database`)
+    
+    // Stage 3.5: Create collision detection job (95-100%)
+    if (chunksWithEmbeddings.length >= 2) {
+      console.log(`🔍 Creating collision detection job for ${chunksWithEmbeddings.length} chunks`)
+      await supabase
+        .from('background_jobs')
+        .insert({
+          job_type: 'detect-connections',
+          status: 'pending',
+          input_data: {
+            document_id,
+            user_id: userId,
+            chunk_count: chunksWithEmbeddings.length,
+            trigger: 'document-processing-complete'
+          },
+          created_at: new Date().toISOString()
+        })
+      console.log(`🔍 Collision detection job queued`)
+    } else {
+      console.log(`📭 Skipping collision detection - need at least 2 chunks (found ${chunksWithEmbeddings.length})`)
+    }
     
     // Update document status to completed with availability flags
     await updateDocumentStatus(supabase, document_id, 'completed', true, true)

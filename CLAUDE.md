@@ -372,20 +372,21 @@ scripts/                 # Development automation
 └── benchmark-*.ts      # Performance testing scripts
 ```
 
-### Testing Priorities
-```typescript
-// Focus on critical paths
-describe('Document Processing', () => {
-  it('handles all 6 input formats correctly')
-  it('recovers from AI API failures')
-  it('generates valid embeddings')
-})
+### Testing Strategy
+Rhizome V2 uses a **development-friendly testing strategy** with categorized tests:
 
-describe('Collision Detection', () => {
-  it('runs all 7 engines successfully')
-  it('respects user weight preferences')
-  it('handles cache properly')
-})
+```bash
+# 🔴 Critical Tests (must pass - blocks deployment)
+npm run test:critical      # E2E + integration smoke tests
+
+# 🟡 Stable Tests (fix when broken - tracked but may not block)  
+npm run test:stable        # API contracts + system integration
+
+# 🟢 Flexible Tests (skip during rapid development)
+npm run test:flexible      # Component tests + utilities
+
+# 🔵 Experimental Tests (new features only)
+npm run test:experimental  # Manual execution only
 ```
 
 ### Development Workflow Patterns
@@ -506,9 +507,11 @@ beforeEach(() => {
 ```
 
 ### Testing Documentation
-- **Main Guide**: `docs/testing/README.md` - Single source of truth
-- **Patterns**: `docs/testing/patterns.md` - Code examples
-- **Status**: Phase 1 implementation complete (foundation & documentation)
+- **[docs/testing/README.md](docs/testing/README.md)** - Primary testing guide and quick start
+- **[docs/testing/development-workflow.md](docs/testing/development-workflow.md)** - Comprehensive strategy and team workflows  
+- **[docs/testing/patterns.md](docs/testing/patterns.md)** - Code examples and testing patterns
+- **[docs/testing/TROUBLESHOOTING.md](docs/testing/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[docs/testing/.archive/](docs/testing/.archive/)** - Historical documentation and task reports
 
 ## Monitoring & Performance
 

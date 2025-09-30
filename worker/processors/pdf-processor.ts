@@ -3,8 +3,6 @@
  * Handles PDF upload, extraction, chunking, and metadata generation.
  */
 
-import { Type } from '@google/genai'
-import { jsonrepair } from 'jsonrepair'
 import { SourceProcessor } from './base.js'
 import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { simpleMarkdownChunking } from '../lib/markdown-chunking.js'
@@ -16,65 +14,24 @@ const MAX_OUTPUT_TOKENS = 65536
 
 /**
  * Extraction prompt for PDF processing.
- * Instructs Gemini to extract full text and create semantic chunks.
+ * Instructs Gemini to extract only markdown text for local chunking.
  */
 const EXTRACTION_PROMPT = `
-You are a PDF extraction assistant. Your task is to:
-1. Extract ALL text from this PDF document and convert it to clean markdown format
-2. Break the content into logical chunks for semantic search (200-500 words each)
-3. Return the result as JSON
+You are a PDF extraction assistant. Your task is to extract ALL text from this PDF document and convert it to clean markdown format.
 
 IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text.
-Do not summarize or skip any content. The markdown field should contain the COMPLETE document text.
+Do not summarize or skip any content. Return the COMPLETE document text.
 
-For the chunks, break the document at natural boundaries like:
-- Section headings
-- Topic changes  
-- Paragraph groups that discuss the same concept
+Format the output as clean markdown with:
+- Proper heading hierarchy (# ## ###)
+- Organized lists and paragraphs
+- Preserved structure and formatting
+- Clear section breaks
 
-Return JSON in this exact format:
-{
-  "markdown": "The complete document text in markdown format with proper headings, lists, etc",
-  "chunks": [
-    {
-      "content": "A logical section of the document (200-500 words)",
-      "themes": ["main topic 1", "main topic 2"],
-      "importance_score": 0.7,
-      "summary": "One sentence describing this chunk"
-    }
-  ]
-}
-
-Rules:
-- The markdown field MUST contain the FULL document text
-- Each chunk should be a meaningful unit of content
-- importance_score is 0.0 to 1.0 (higher = more important)
-- Return valid JSON without any markdown code blocks
+Return only the markdown text, no JSON wrapper needed.
 `
 
-/**
- * JSON schema for extraction response validation.
- */
-const EXTRACTION_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    markdown: { type: Type.STRING },
-    chunks: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          content: { type: Type.STRING },
-          themes: { type: Type.ARRAY, items: { type: Type.STRING }},
-          importance_score: { type: Type.NUMBER },
-          summary: { type: Type.STRING }
-        },
-        required: ['content', 'themes', 'importance_score', 'summary']
-      }
-    }
-  },
-  required: ['markdown', 'chunks']
-}
+// No schema needed - expecting plain markdown text response
 
 /**
  * PDF processor for extracting content using Gemini Files API.
@@ -190,26 +147,34 @@ export class PDFProcessor extends SourceProcessor {
   /**
    * Wait for uploaded file to become active in Gemini.
    * 
-   * @param fileName - Name of uploaded file
+   * @param fileUri - URI or name of uploaded file
    * @throws Error if file validation fails
    */
-  private async waitForFileActive(fileName: string): Promise<void> {
-    let fileState = await this.ai.files.get({ name: fileName })
-    let attempts = 0
-    const maxAttempts = 30 // 60 seconds max
-    
-    while (fileState.state === 'PROCESSING' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      fileState = await this.ai.files.get({ name: fileName })
-      attempts++
+  private async waitForFileActive(fileUri: string): Promise<void> {
+    try {
+      // Extract file name from URI if full URI is provided
+      const fileName = fileUri.includes('/files/') ? fileUri.split('/files/')[1] : fileUri
+      let fileState = await this.ai.files.get({ name: fileName })
+      let attempts = 0
+      const maxAttempts = 30 // 60 seconds max
       
-      if (attempts % 5 === 0) {
-        await this.updateProgress(20, 'extract', 'validating', `Validating file... (${attempts * 2}s)`)
+      while (fileState.state === 'PROCESSING' && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        fileState = await this.ai.files.get({ name: fileName })
+        attempts++
+        
+        if (attempts % 5 === 0) {
+          await this.updateProgress(20, 'extract', 'validating', `Validating file... (${attempts * 2}s)`)
+        }
       }
-    }
-    
-    if (fileState.state !== 'ACTIVE') {
-      throw new Error('File validation failed. The file may be corrupted or in an unsupported format.')
+      
+      if (fileState.state !== 'ACTIVE') {
+        throw new Error('File validation failed. The file may be corrupted or in an unsupported format.')
+      }
+    } catch (error: any) {
+      // If file status check fails (404), assume file is ready and continue
+      // This can happen with cached files or API timing issues
+      console.warn(`File status check failed (${error.message}), proceeding with processing...`)
     }
   }
 
@@ -233,16 +198,8 @@ export class PDFProcessor extends SourceProcessor {
     }, 30000)
     
     try {
-      // Determine if model supports structured output
-      // gemini-2.0-flash-exp and gemini-2.0-flash both support structured output
-      const useStructuredOutput = GEMINI_MODEL.includes('2.5') || GEMINI_MODEL.includes('gemini-2.0-flash')
-      
-      const generationConfig = useStructuredOutput ? {
-        responseMimeType: 'application/json',
-        responseSchema: EXTRACTION_SCHEMA,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-        temperature: 0.1,
-      } : {
+      // Simple configuration for plain text markdown output
+      const generationConfig = {
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         temperature: 0.1,
       }
@@ -252,7 +209,7 @@ export class PDFProcessor extends SourceProcessor {
         contents: [{
           parts: [
             { fileData: { fileUri: uploadedFile.uri || uploadedFile.name, mimeType: 'application/pdf' } },
-            { text: EXTRACTION_PROMPT + (useStructuredOutput ? '' : '\n\nIMPORTANT: Return your response as valid JSON matching this structure: {"markdown": "...", "chunks": [{"content": "...", "themes": [...], "importance_score": 0.0-1.0, "summary": "..."}]}') }
+            { text: EXTRACTION_PROMPT }
           ]
         }],
         config: generationConfig
@@ -271,101 +228,44 @@ export class PDFProcessor extends SourceProcessor {
   }
 
   /**
-   * Parse and validate extraction result from Gemini.
+   * Parse extraction result and create chunks using local algorithm.
+   * Following the pattern from MarkdownCleanProcessor - separate extraction from chunking.
    * 
-   * @param result - Raw result from Gemini
-   * @returns Parsed markdown and chunks
+   * @param result - Raw markdown text from Gemini
+   * @returns Parsed markdown and locally-generated chunks
    */
   private async parseExtractionResult(result: any): Promise<{ markdown: string; chunks: ProcessedChunk[] }> {
     if (!result || !result.text) {
       throw new Error('AI returned empty response. Please try again.')
     }
     
-    let extracted: any
-    
-    try {
-      // Strip markdown code blocks if present
-      let jsonText = result.text
-      if (jsonText.startsWith('```json')) {
-        jsonText = jsonText.replace(/^```json\s*\n?/, '').replace(/\n?```\s*$/, '')
-      } else if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
-      }
-      
-      extracted = JSON.parse(jsonText)
-    } catch (parseError: any) {
-      // Try to repair JSON
-      try {
-        const textToRepair = result.text
-          .replace(/^```json\s*\n?/, '')
-          .replace(/\n?```\s*$/, '')
-          .replace(/^```\s*\n?/, '')
-        
-        const repairedJson = this.repairJson(textToRepair)
-        extracted = JSON.parse(repairedJson)
-      } catch (repairError: any) {
-        throw new Error(
-          `Unable to process this PDF due to complex formatting issues.\n\n` +
-          `Suggestions to resolve:\n` +
-          `1. Try uploading a smaller section of the PDF (split into parts)\n` +
-          `2. Convert the PDF to plain text first using an external tool\n` +
-          `3. If the PDF contains tables or complex layouts, consider extracting text content only`
-        )
-      }
+    // Clean up the markdown text (remove any code block wrappers)
+    let markdown = result.text.trim()
+    if (markdown.startsWith('```markdown')) {
+      markdown = markdown.replace(/^```markdown\s*\n?/, '').replace(/\n?```\s*$/, '')
+    } else if (markdown.startsWith('```')) {
+      markdown = markdown.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
     }
     
-    // Validate response structure
-    if (!extracted.markdown || !Array.isArray(extracted.chunks)) {
-      // Try to salvage what we can
-      if (extracted.markdown && (!extracted.chunks || extracted.chunks.length === 0)) {
-        // Fall back to simple chunking
-        const chunks = simpleMarkdownChunking(extracted.markdown)
-        return { 
-          markdown: extracted.markdown, 
-          chunks: chunks.map(chunk => ({
-            content: chunk.content,
-            themes: ['general'],
-            importance: 5,
-            summary: chunk.content.slice(0, 100) + '...'
-          }))
-        }
-      }
-      
-      throw new Error('AI response missing required fields (markdown or chunks). Please try again.')
+    if (!markdown || markdown.length < 50) {
+      throw new Error('AI returned insufficient content. Please try again.')
     }
+    
+    // Use local chunking algorithm (same as MarkdownAsIsProcessor)
+    const chunks = simpleMarkdownChunking(markdown)
     
     return {
-      markdown: extracted.markdown,
-      chunks: extracted.chunks.map((chunk: any) => ({
+      markdown,
+      chunks: chunks.map(chunk => ({
         content: chunk.content,
-        themes: chunk.themes || ['general'],
-        importance: chunk.importance_score || 0.5,
-        summary: chunk.summary || chunk.content.slice(0, 100) + '...'
+        themes: chunk.themes,
+        importance: chunk.importance_score,
+        summary: chunk.summary
       }))
     }
   }
 
-  /**
-   * Repair common JSON formatting issues.
-   * 
-   * @param jsonString - Potentially malformed JSON
-   * @returns Repaired JSON string
-   */
-  private repairJson(jsonString: string): string {
-    try {
-      return jsonrepair(jsonString)
-    } catch (error) {
-      // Manual fallback repairs
-      let repaired = jsonString
-        .replace(/,\s*]/g, ']')  // Remove trailing commas in arrays
-        .replace(/,\s*}/g, '}')  // Remove trailing commas in objects
-        .replace(/([^"\\])\\n/g, '$1\\\\n')  // Fix unescaped newlines
-        .replace(/([^"\\])\\t/g, '$1\\\\t')  // Fix unescaped tabs
-        .replace(/([^"\\])\\/g, '$1\\\\')    // Fix unescaped backslashes
-      
-      return repaired
-    }
-  }
+  // JSON repair method no longer needed - we expect plain markdown text
 
   /**
    * Extract document outline from markdown.

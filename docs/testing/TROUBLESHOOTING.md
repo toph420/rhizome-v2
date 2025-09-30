@@ -1,450 +1,612 @@
 # Testing Troubleshooting Guide
 
-> **Solutions for common testing issues in Rhizome V2**
+> **Common issues and solutions for Rhizome V2 testing**  
+> Updated for development-friendly testing strategy
 
-## Jest Issues
+## Quick Diagnosis
 
-### ESM Module Resolution Errors
-
-**Problem**: `Cannot use import statement outside a module`
+### Test Category Issues
 
 ```bash
-# Solution 1: Check NODE_OPTIONS
-NODE_OPTIONS='--experimental-vm-modules' npm test
+# Check which category is failing
+npm run test:critical     # Should always pass
+npm run test:stable       # Fix when broken
+npm run test:flexible     # Can fail during development
 
-# Solution 2: Verify jest.config.ts
-export default {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  extensionsToTreatAsEsm: ['.ts'],
-  moduleNameMapper: {
-    '^(\\.{1,2}/.*)\\.js$': '$1',
-  },
+# Check specific modules
+npm test                  # Main app
+cd worker && npm test     # Worker module
+```
+
+### Common Error Patterns
+
+| Error Pattern | Category | Action |
+|---------------|----------|---------|
+| E2E test failures | 🔴 Critical | **Immediate fix required** |
+| Database connection errors | 🟡 Stable | Fix during next cycle |
+| Component test failures | 🟢 Flexible | Clean up during stabilization |
+| Mock configuration errors | Any | See [Mock Issues](#mock-issues) |
+
+## Test Infrastructure Issues
+
+### ESM Import Errors
+
+**Symptoms**:
+```
+SyntaxError: Cannot use import statement outside a module
+ReferenceError: require is not defined
+```
+
+**Solutions**:
+
+1. **Worker Module ESM Issues**:
+```bash
+# Ensure NODE_OPTIONS is set correctly
+export NODE_OPTIONS='--experimental-vm-modules'
+cd worker && npm test
+```
+
+2. **Main App Import Issues**:
+```javascript
+// jest.config.js - Ensure ESM configuration
+module.exports = {
+  preset: 'ts-jest/presets/default-esm',
+  extensionsToTreatAsEsm: ['.ts', '.tsx'],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
-      useESM: true
+      useESM: true,
+      isolatedModules: true
     }]
   }
 }
 ```
 
-### TypeScript Compilation Errors
+3. **Mixed Import/Require Issues**:
+```typescript
+// ❌ Don't mix
+const { something } = require('./module')
+import { other } from './other'
 
-**Problem**: `TypeScript compilation failed`
+// ✅ Use consistent ESM
+import { something } from './module'
+import { other } from './other'
+```
 
+### Jest Configuration Problems
+
+**Symptoms**:
+```
+TypeError: Cannot read properties of undefined
+Config option "testEnvironment" is required
+```
+
+**Solutions**:
+
+1. **Check Jest Config Files**:
 ```bash
-# Check tsconfig.json
-{
-  "compilerOptions": {
-    "module": "esnext",
-    "target": "esnext",
-    "moduleResolution": "node"
-  }
+# Main app
+cat jest.config.js
+
+# Worker module  
+cat worker/jest.config.cjs
+```
+
+2. **Common Fix for Worker Module**:
+```javascript
+// worker/jest.config.cjs
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  extensionsToTreatAsEsm: ['.ts'],
+  transform: {
+    '^.+\\.ts$': ['ts-jest', {
+      useESM: true
+    }]
+  },
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts']
 }
-
-# Clear TypeScript cache
-npx tsc --build --clean
-npm test
 ```
 
-### Memory Issues
-
-**Problem**: `JavaScript heap out of memory`
-
-```bash
-# Increase Node.js memory limit
-NODE_OPTIONS="--max-old-space-size=4096" npm test
-
-# Run tests in sequence instead of parallel
-npm test -- --runInBand
-```
-
-### Timeout Issues
-
-**Problem**: `Test timeout exceeded`
-
+3. **Test Setup File Issues**:
 ```typescript
-// Solution 1: Increase global timeout
-jest.setTimeout(30000)
+// worker/tests/setup.ts
+import { jest } from '@jest/globals'
 
-// Solution 2: Per-test timeout
-it('slow test', async () => {
-  // test code
-}, 60000)
-
-// Solution 3: Check for hanging promises
-npm test -- --detectOpenHandles
+// Make jest available globally for ESM
+global.jest = jest
 ```
 
-## Supabase Database Issues
+## Mock Issues
 
-### Connection Refused
+### Supabase Client Mocking
 
-**Problem**: `connect ECONNREFUSED ::1:54322`
-
-```bash
-# Check Supabase status
-npx supabase status
-
-# Restart Supabase stack
-npx supabase stop
-npx supabase start
-
-# Reset database
-npx supabase db reset
+**Symptoms**:
+```
+TypeError: supabase.from(...).eq is not a function
+TypeError: Cannot read properties of undefined (reading 'mockResolvedValue')
 ```
 
-### Migration Errors
+**Solutions**:
 
-**Problem**: `Migration failed` or `Table does not exist`
-
-```bash
-# Reset to clean state
-npx supabase db reset
-
-# Apply migrations manually
-npx supabase migration up
-
-# Check migration status
-npx supabase db diff --schema public
-```
-
-### Permission Errors
-
-**Problem**: `permission denied for table`
-
-```bash
-# Check RLS policies
-npx supabase dashboard
-
-# Verify service role key
-echo $SUPABASE_SERVICE_ROLE_KEY
-
-# Use anon key for client operations
-echo $NEXT_PUBLIC_SUPABASE_ANON_KEY
-```
-
-## Playwright E2E Issues
-
-### Browser Installation
-
-**Problem**: `browserType.launch: Executable doesn't exist`
-
-```bash
-# Install browsers
-npx playwright install
-
-# Install system dependencies
-npx playwright install-deps
-
-# Use specific browser
-npx playwright install chromium
-```
-
-### Page Load Timeouts
-
-**Problem**: `Test timeout exceeded while waiting for page`
-
+1. **Chainable Mock Pattern**:
 ```typescript
-// Solution 1: Increase timeout
-test.setTimeout(60000)
+// tests/mocks/supabase.ts
+export function createMockSupabaseClient() {
+  const createChainableMock = () => ({
+    select: jest.fn().mockReturnThis(),
+    insert: jest.fn().mockReturnThis(),
+    update: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    single: jest.fn().mockResolvedValue({ data: {}, error: null })
+  })
 
-// Solution 2: Wait for specific elements
-await page.waitForSelector('[data-testid="app-loaded"]')
-
-// Solution 3: Check network issues
-await page.waitForLoadState('networkidle')
-```
-
-### Element Not Found
-
-**Problem**: `locator.click: Element not found`
-
-```typescript
-// Solution 1: Wait for element
-await page.waitForSelector('[data-testid="button"]')
-
-// Solution 2: Check if element exists
-const element = page.locator('[data-testid="button"]')
-await expect(element).toBeVisible()
-
-// Solution 3: Debug with screenshots
-await page.screenshot({ path: 'debug.png' })
-```
-
-### Navigation Issues
-
-**Problem**: `Page didn't navigate to expected URL`
-
-```typescript
-// Solution 1: Wait for navigation
-await Promise.all([
-  page.waitForNavigation(),
-  page.click('[data-testid="link"]')
-])
-
-// Solution 2: Check URL pattern
-await page.waitForURL(/\/expected-path/)
-
-// Solution 3: Debug current URL
-console.log('Current URL:', page.url())
-```
-
-## Worker Module Issues
-
-### AI API Failures
-
-**Problem**: `Google AI API rate limit exceeded`
-
-```typescript
-// Solution 1: Use mocks in tests
-jest.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
-    getGenerativeModel: () => ({
-      generateContent: jest.fn().mockResolvedValue({
-        response: { text: () => 'mocked response' }
-      })
-    })
-  }))
-}))
-
-// Solution 2: Implement retry logic
-const retryWithBackoff = async (fn, maxRetries = 3) => {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn()
-    } catch (error) {
-      if (i === maxRetries - 1) throw error
-      await new Promise(resolve => setTimeout(resolve, 2 ** i * 1000))
+  return {
+    from: jest.fn().mockReturnValue(createChainableMock()),
+    storage: {
+      from: jest.fn(() => ({
+        upload: jest.fn().mockResolvedValue({ data: {}, error: null })
+      }))
     }
   }
 }
 ```
 
-### File System Permissions
-
-**Problem**: `EACCES: permission denied`
-
-```bash
-# Check file permissions
-ls -la tests/fixtures/
-
-# Fix permissions
-chmod 644 tests/fixtures/*
-
-# Use relative paths
-const filePath = path.join(__dirname, 'fixtures', 'test.pdf')
-```
-
-### Memory Leaks
-
-**Problem**: `Possible EventEmitter memory leak detected`
-
+2. **Mock Reset Issues**:
 ```typescript
-// Solution 1: Clean up in afterEach
-afterEach(() => {
+// Reset mocks between tests
+beforeEach(() => {
   jest.clearAllMocks()
-  jest.restoreAllMocks()
+  // Re-setup default mock behavior
+  mockSupabase.from().select.mockResolvedValue({ data: [], error: null })
 })
-
-// Solution 2: Remove listeners
-afterEach(async () => {
-  await supabase.removeAllChannels()
-})
-
-// Solution 3: Increase listener limit temporarily
-process.setMaxListeners(0)
 ```
 
-## Coverage Issues
+### Gemini API Mocking
 
-### Incorrect Coverage Reports
+**Symptoms**:
+```
+Error: Cannot find module '@google/genai'
+TypeError: mockGeminiClient.generateContent.mockResolvedValue is not a function
+```
 
-**Problem**: Coverage shows 0% for files that have tests
+**Solutions**:
 
+1. **Proper Gemini Mocking**:
+```typescript
+// worker/tests/mocks/gemini.ts
+jest.mock('@google/genai', () => ({
+  GoogleAI: jest.fn(() => ({
+    generateContent: jest.fn().mockResolvedValue({
+      response: { text: () => 'Mocked response' }
+    })
+  }))
+}))
+```
+
+2. **Dynamic Mock Control**:
+```typescript
+import { GoogleAI } from '@google/genai'
+
+const mockGenerateContent = jest.fn()
+;(GoogleAI as jest.Mock).mockImplementation(() => ({
+  generateContent: mockGenerateContent
+}))
+
+// In tests
+mockGenerateContent.mockResolvedValue(/* response */)
+```
+
+## Database and Integration Issues
+
+### Supabase Connection Problems
+
+**Symptoms**:
+```
+Error: Database connection failed
+Error: relation "documents" does not exist
+```
+
+**Solutions**:
+
+1. **Check Supabase Status**:
 ```bash
-# Solution 1: Check coverage configuration
-npm test -- --coverage --coverageReporters=text
+npx supabase status
+# Should show all services running
 
-# Solution 2: Clear coverage cache
-rm -rf coverage/
-npm test -- --coverage
-
-# Solution 3: Include/exclude patterns
-{
-  "collectCoverageFrom": [
-    "src/**/*.{ts,tsx}",
-    "!src/**/*.d.ts"
-  ]
-}
+# If not running
+npx supabase start
 ```
 
-### Istanbul Configuration Issues
+2. **Reset Database**:
+```bash
+npx supabase db reset --local
+# This runs all migrations and seeds
+```
 
-**Problem**: `Unknown coverage provider`
+3. **Check Environment Variables**:
+```bash
+# .env.local (main app)
+echo $NEXT_PUBLIC_SUPABASE_URL
+echo $SUPABASE_SERVICE_ROLE_KEY
 
-```javascript
-// jest.config.ts
-export default {
-  coverageProvider: 'v8', // or 'babel'
-  collectCoverageFrom: [
-    'src/**/*.{ts,tsx}',
-    '!src/**/*.d.ts',
-    '!src/**/*.stories.{ts,tsx}'
-  ]
-}
+# worker/.env
+echo $SUPABASE_URL
+echo $SUPABASE_SERVICE_ROLE_KEY
+```
+
+### Migration and Schema Issues
+
+**Symptoms**:
+```
+Error: column "embedding" does not exist
+Error: function match_chunks does not exist
+```
+
+**Solutions**:
+
+1. **Check Migration Status**:
+```bash
+npx supabase migration list
+# Shows applied vs pending migrations
+```
+
+2. **Apply Pending Migrations**:
+```bash
+npx supabase db reset --local
+# Or for specific migration
+npx supabase migration up
+```
+
+3. **Check Extensions**:
+```sql
+-- In Supabase SQL Editor
+SELECT * FROM pg_extension WHERE extname = 'vector';
+-- Should show pgvector extension installed
+```
+
+## Test Execution Issues
+
+### Timeout Problems
+
+**Symptoms**:
+```
+Error: Timeout - Async callback was not invoked within the 5000ms timeout
+Test timeout of 60000ms exceeded
+```
+
+**Solutions**:
+
+1. **Increase Jest Timeout**:
+```typescript
+// Per test
+test('long running test', async () => {
+  // test code
+}, 30000) // 30 seconds
+
+// Globally
+jest.setTimeout(30000)
+```
+
+2. **E2E Test Timeouts**:
+```typescript
+// playwright.config.ts
+export default defineConfig({
+  timeout: 60000, // 1 minute per test
+  expect: {
+    timeout: 10000 // 10 seconds for assertions
+  }
+})
+```
+
+3. **Async Operation Issues**:
+```typescript
+// ❌ Don't forget await
+test('async test', () => {
+  processDocument(doc) // Missing await!
+})
+
+// ✅ Always await async operations
+test('async test', async () => {
+  await processDocument(doc)
+})
+```
+
+### Memory and Performance Issues
+
+**Symptoms**:
+```
+JavaScript heap out of memory
+Tests are running very slowly
+Worker process has failed to exit gracefully
+```
+
+**Solutions**:
+
+1. **Increase Node Memory**:
+```bash
+export NODE_OPTIONS="--max-old-space-size=4096"
+npm test
+```
+
+2. **Cleanup Test Resources**:
+```typescript
+// Clean up after tests
+afterEach(async () => {
+  await cleanup()
+  jest.clearAllMocks()
+})
+
+afterAll(async () => {
+  await teardownTestDatabase()
+})
+```
+
+3. **Avoid Memory Leaks**:
+```typescript
+// ❌ Don't create large objects without cleanup
+test('memory leak test', () => {
+  const largeArray = new Array(1000000).fill('data')
+  // Memory not released
+})
+
+// ✅ Clean up resources
+test('proper cleanup test', () => {
+  const largeArray = new Array(1000000).fill('data')
+  // Process data
+  largeArray.length = 0 // Clear array
+})
 ```
 
 ## CI/CD Issues
 
 ### GitHub Actions Failures
 
-**Problem**: Tests pass locally but fail in CI
+**Symptoms**:
+```
+Error: Process completed with exit code 1
+Tests are passing locally but failing in CI
+```
 
+**Solutions**:
+
+1. **Check CI Environment Variables**:
 ```yaml
-# Solution 1: Use same Node version
-- uses: actions/setup-node@v4
-  with:
-    node-version: '20'
-
-# Solution 2: Install dependencies correctly
-- run: npm ci
-- run: cd worker && npm ci
-
-# Solution 3: Set environment variables
+# .github/workflows/test.yml
 env:
   NODE_ENV: test
-  CI: true
+  SUPABASE_URL: http://localhost:54321
+  GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
 ```
 
-### Docker/Container Issues
-
-**Problem**: `Port already in use` in CI
-
+2. **Service Startup Issues**:
 ```yaml
-# Solution 1: Use dynamic ports
-services:
-  postgres:
-    ports:
-      - 5432:5432
-
-# Solution 2: Kill existing processes
-- run: docker stop $(docker ps -q) || true
-
-# Solution 3: Use GitHub service containers
-services:
-  postgres:
-    image: postgres:15
-    env:
-      POSTGRES_PASSWORD: postgres
+# Add wait time for services
+- name: Start Supabase
+  run: |
+    supabase start --exclude edge-runtime,logflyte,vector
+    sleep 10  # Wait for services to be ready
 ```
 
-## Debug Tools
+3. **Database Migration in CI**:
+```yaml
+- name: Run database migrations
+  run: supabase db reset --local
+  # Ensures clean state for each CI run
+```
 
-### Jest Debug
+### Branch-Specific Test Failures
 
+**Symptoms**:
+```
+Tests pass on main but fail on feature branches
+Development tests are blocking deployment
+```
+
+**Solutions**:
+
+1. **Check Test Category Configuration**:
+```yaml
+# Feature branches should only run critical tests
+- name: Run critical tests
+  if: github.ref != 'refs/heads/main'
+  run: npm run test:critical
+```
+
+2. **Verify CI Job Configuration**:
+```yaml
+# Development tests should not block
+development-tests:
+  continue-on-error: true
+  run: npm run test:stable || echo "Tracked but not blocking"
+```
+
+## E2E Test Issues
+
+### Playwright Setup Problems
+
+**Symptoms**:
+```
+Error: Browser not found
+TimeoutError: page.goto: Timeout 30000ms exceeded
+```
+
+**Solutions**:
+
+1. **Install Browsers**:
 ```bash
-# Debug specific test
-node --inspect-brk node_modules/.bin/jest --runInBand test.js
-
-# Debug with Chrome DevTools
-npm test -- --inspect-brk --runInBand
-
-# Verbose output
-npm test -- --verbose
+npx playwright install chromium
+# Or for CI
+npx playwright install --with-deps chromium
 ```
 
-### Playwright Debug
-
+2. **Application Startup Issues**:
 ```bash
-# Debug mode
-npx playwright test --debug
+# Check if app is running
+curl http://localhost:3000/api/health
 
-# Headed mode
-npx playwright test --headed
-
-# Step through
-npx playwright test --debug --project=chromium
+# Wait for app to be ready
+npx wait-on http://localhost:3000 --timeout 60000
 ```
 
-### Console Debugging
-
+3. **Test Environment Setup**:
 ```typescript
-// Debug test data
-console.log('Test data:', JSON.stringify(testData, null, 2))
-
-// Debug async operations
-console.log('Before async operation')
-await asyncOperation()
-console.log('After async operation')
-
-// Debug with Jest
-console.log('Current state:', expect.getState())
-```
-
-## Performance Issues
-
-### Slow Test Execution
-
-**Problem**: Test suite takes too long
-
-```bash
-# Solution 1: Run tests in parallel
-npm test -- --maxWorkers=4
-
-# Solution 2: Optimize imports
-// Use specific imports instead of barrel exports
-import { specificFunction } from './specific-module'
-
-# Solution 3: Profile test execution
-npm test -- --verbose --no-cache
-```
-
-### Memory Usage
-
-**Problem**: High memory usage during tests
-
-```bash
-# Monitor memory usage
-npm test -- --logHeapUsage
-
-# Limit workers
-npm test -- --maxWorkers=2
-
-# Clear modules between tests
-afterEach(() => {
-  jest.resetModules()
+// playwright.config.ts
+export default defineConfig({
+  webServer: {
+    command: 'npm run build && npm start',
+    port: 3000,
+    reuseExistingServer: !process.env.CI
+  }
 })
+```
+
+### Page Object Issues
+
+**Symptoms**:
+```
+Error: Locator not found
+Test flakiness with element selection
+```
+
+**Solutions**:
+
+1. **Use Data Test IDs**:
+```typescript
+// ❌ Fragile selectors
+await page.click('button.bg-blue-500')
+
+// ✅ Stable selectors
+await page.click('[data-testid="upload-button"]')
+```
+
+2. **Wait for Elements**:
+```typescript
+// ❌ Don't assume elements exist immediately
+await page.click('[data-testid="button"]')
+
+// ✅ Wait for elements to be ready
+await page.waitForSelector('[data-testid="button"]')
+await page.click('[data-testid="button"]')
+```
+
+## Test Factory Issues
+
+### Factory Reset Problems
+
+**Symptoms**:
+```
+Test data persisting between tests
+Unexpected test interactions
+```
+
+**Solutions**:
+
+1. **Proper Factory Reset**:
+```typescript
+// tests/factories/index.ts
+beforeEach(() => {
+  factories.document.reset()
+  factories.chunk.reset()
+  factories.entity.reset()
+})
+```
+
+2. **Isolated Test Data**:
+```typescript
+// Use unique IDs per test
+test('isolated test', () => {
+  const doc = factories.document.create({
+    id: `test-${Date.now()}-${Math.random()}`
+  })
+})
+```
+
+## Development Workflow Issues
+
+### Test Category Confusion
+
+**Symptoms**:
+```
+Unclear which tests should pass/fail
+Tests being fixed unnecessarily
+```
+
+**Solutions**:
+
+1. **Use Clear Commands**:
+```bash
+# Must pass (blocks deployment)
+npm run test:critical
+
+# Should pass (fix when broken)  
+npm run test:stable
+
+# Can fail (clean up later)
+npm run test:flexible
+```
+
+2. **Check Test Status Dashboard**:
+```bash
+# Overall health check
+npm run test:gates
+
+# Category-specific status
+npm run test:critical && echo "✅ Critical: PASS" || echo "❌ Critical: FAIL"
+npm run test:stable && echo "✅ Stable: PASS" || echo "⚠️ Stable: NEEDS FIX"
 ```
 
 ## Getting Help
 
-### Debugging Checklist
+### Diagnostic Commands
 
-1. ✅ Check error message carefully
-2. ✅ Verify environment variables
-3. ✅ Confirm dependencies are installed
-4. ✅ Check service status (Supabase)
-5. ✅ Clear caches and restart
-6. ✅ Run minimal reproduction case
-7. ✅ Check recent code changes
+```bash
+# Test environment check
+npm run test:gates
 
-### Resources
+# Full validation
+npm test -- --verbose
+cd worker && npm test -- --verbose
 
-- **Internal**: Check existing tests for working patterns
-- **Jest**: https://jestjs.io/docs/troubleshooting
-- **Playwright**: https://playwright.dev/docs/debug
-- **Supabase**: https://supabase.com/docs/reference/cli
-- **Team**: Ask in development channel
+# Coverage analysis
+npm test -- --coverage
+cd worker && npm test -- --coverage
 
-### Escalation Path
+# CI simulation
+./.github/workflows/test.yml # Review configuration
+```
 
-1. Search existing issues in repository
-2. Check documentation and patterns
-3. Create minimal reproduction case
-4. Ask team for help with specific error message
-5. File issue with reproduction steps
+### Debug Information to Collect
+
+When reporting issues, include:
+
+1. **Environment Information**:
+```bash
+node --version
+npm --version
+npx supabase --version
+```
+
+2. **Test Category and Command**:
+```bash
+# Which command failed?
+npm run test:critical
+npm run test:stable
+npm run test:flexible
+```
+
+3. **Error Messages**:
+- Full stack trace
+- Jest configuration
+- Environment variables (sanitized)
+
+4. **Context**:
+- Which branch/commit
+- Recent changes made
+- Development vs CI environment
 
 ---
 
-**Remember**: Most testing issues have been solved before. Check existing patterns first!
+**See Also**:
+- [README.md](./README.md) - Primary testing guide and quick start
+- [development-workflow.md](./development-workflow.md) - Testing strategy details
+- [patterns.md](./patterns.md) - Code examples and patterns

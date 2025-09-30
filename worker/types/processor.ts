@@ -30,17 +30,19 @@ export interface ProcessedChunk {
   /** Chunk text content */
   content: string
   /** Starting position in source document */
-  startOffset?: number
+  start_offset?: number
   /** Ending position in source document */
-  endOffset?: number
+  end_offset?: number
   /** Index of chunk in document sequence */
-  chunkIndex?: number
+  chunk_index?: number
   /** Extracted themes/topics */
   themes?: string[]
-  /** Importance score (0-10) */
-  importance?: number
+  /** Importance score (0-1) */
+  importance_score?: number
   /** AI-generated summary */
   summary?: string
+  /** Word count for the chunk */
+  word_count?: number
   /** Position context for fuzzy matching */
   positionContext?: PositionContext
   /** YouTube timestamps if applicable */

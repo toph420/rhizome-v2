@@ -14,7 +14,7 @@ import {
   ChunkWithMetadata,
   EngineType,
 } from './types';
-import { VectorSearchClient, VectorSearchOptions } from '../lib/vector-search';
+import { getVectorSearch, VectorSearchOptions } from '../lib/vector-search';
 
 export interface SemanticSimilarityConfig {
   /** Minimum similarity threshold (0-1) */
@@ -33,7 +33,7 @@ export interface SemanticSimilarityConfig {
  */
 export class SemanticSimilarityEngine extends BaseEngine {
   readonly type: EngineType = EngineType.SEMANTIC_SIMILARITY;
-  private vectorClient: VectorSearchClient;
+  private vectorClient: ReturnType<typeof getVectorSearch>;
   private config: SemanticSimilarityConfig;
 
   constructor(config: SemanticSimilarityConfig = {}) {
@@ -45,7 +45,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
       importanceWeight: 0.3,
       ...config
     };
-    this.vectorClient = new VectorSearchClient();
+    this.vectorClient = getVectorSearch();
   }
 
   /**

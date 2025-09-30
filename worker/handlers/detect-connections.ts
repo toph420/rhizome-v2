@@ -19,10 +19,7 @@ import {
   WeightConfig,
 } from '../engines/types';
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Supabase client will be initialized when needed
 
 // Global orchestrator instance (reused across requests)
 let orchestrator: CollisionOrchestrator | null = null;
@@ -84,6 +81,12 @@ export async function detectConnections(
   }
 ): Promise<AggregatedResults> {
   const startTime = performance.now();
+  
+  // Create Supabase client
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
   
   try {
     console.log(`[DetectConnections] Starting detection for chunk ${sourceChunkId}`);
@@ -248,6 +251,150 @@ export async function detectConnectionsBatch(
   console.log(`[DetectConnections] Batch detection completed for ${results.size} chunks`);
   
   return results;
+}
+
+/**
+ * Main handler for detect-connections background jobs.
+ * Processes all chunks in a document to find connections across all user documents.
+ */
+export async function detectConnectionsHandler(supabase: any, job: any): Promise<void> {
+  const { document_id, chunk_count, trigger, user_id } = job.input_data;
+  
+  console.log(`[DetectConnections] Starting handler for document ${document_id} with ${chunk_count} chunks (${trigger})`);
+  
+  try {
+    // Fetch chunks from the newly processed document
+    const { data: newDocumentChunks, error: newChunksError } = await supabase
+      .from('chunks')
+      .select('id, content, metadata, embedding, themes, summary, importance_score')
+      .eq('document_id', document_id)
+      .order('chunk_index');
+    
+    if (newChunksError || !newDocumentChunks) {
+      throw new Error(`Failed to fetch new document chunks: ${newChunksError?.message || 'No chunks found'}`);
+    }
+    
+    // Fetch all existing chunks from other documents for cross-document detection
+    const { data: allUserChunks, error: allChunksError } = await supabase
+      .from('chunks')
+      .select('id, content, metadata, embedding, themes, summary, importance_score, document_id')
+      .eq('user_id', user_id)
+      .order('created_at');
+    
+    if (allChunksError || !allUserChunks) {
+      throw new Error(`Failed to fetch user chunks: ${allChunksError?.message || 'No chunks found'}`);
+    }
+    
+    if (newDocumentChunks.length < 1) {
+      console.log('[DetectConnections] Skipping - no chunks in new document');
+      return;
+    }
+    
+    // Filter out chunks from the current document for candidate set (avoid self-connections)
+    const candidateChunks = allUserChunks.filter(chunk => chunk.document_id !== document_id);
+    
+    if (candidateChunks.length < 1) {
+      console.log('[DetectConnections] Skipping - no existing chunks to connect with');
+      return;
+    }
+    
+    console.log(`[DetectConnections] Processing ${newDocumentChunks.length} new chunks against ${candidateChunks.length} existing chunks for cross-document connections`);
+    
+    // Process each chunk from the new document against all existing chunks
+    const allResults = new Map<string, any>();
+    
+    for (const newChunk of newDocumentChunks) {
+      try {
+        const result = await detectConnections(
+          newChunk.id, 
+          undefined, // Don't filter by document_id 
+          user_id,   // Filter by user_id instead
+          {
+            minScore: 0.1, // Low threshold to capture all connections
+            limit: 50 // Per chunk limit
+          }
+        );
+        allResults.set(newChunk.id, result);
+      } catch (error) {
+        console.error(`[DetectConnections] Error processing chunk ${newChunk.id}:`, error);
+        // Continue with other chunks
+      }
+    }
+    
+    // Convert results to database connections format
+    const connections: any[] = [];
+    
+    for (const [sourceChunkId, results] of allResults.entries()) {
+      for (const collision of results.collisions) {
+        connections.push({
+          source_chunk_id: sourceChunkId,
+          target_chunk_id: collision.targetChunkId,
+          type: collision.type,
+          strength: collision.score,
+          auto_detected: true,
+          discovered_at: new Date().toISOString(),
+          metadata: {
+            engine: collision.engineType,
+            reasoning: collision.reasoning || '',
+            shared_elements: collision.metadata?.sharedElements || []
+          }
+        });
+      }
+    }
+    
+    // Batch insert all connections
+    if (connections.length > 0) {
+      console.log(`[DetectConnections] Saving ${connections.length} connections to database`);
+      
+      const { error: insertError } = await supabase
+        .from('connections')
+        .insert(connections);
+      
+      if (insertError) {
+        throw new Error(`Failed to save connections: ${insertError.message}`);
+      }
+      
+      console.log(`[DetectConnections] Successfully saved ${connections.length} connections`);
+    } else {
+      console.log('[DetectConnections] No connections found above threshold');
+    }
+    
+    // Update job with success result
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        output_data: {
+          success: true,
+          document_id,
+          connections_created: connections.length,
+          chunks_processed: newDocumentChunks.length,
+          cross_document_candidates: candidateChunks.length
+        },
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
+    
+  } catch (error: any) {
+    console.error('[DetectConnections] Handler error:', error);
+    
+    // Mark job as failed
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'failed',
+        output_data: {
+          success: false,
+          document_id,
+          error: error.message
+        },
+        last_error: error.message,
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
+    
+    throw error;
+  }
 }
 
 /**

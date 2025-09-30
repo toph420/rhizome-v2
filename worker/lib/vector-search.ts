@@ -216,5 +216,12 @@ export class VectorSearchClient {
   }
 }
 
-// Export a singleton instance for convenience
-export const vectorSearch = new VectorSearchClient();
+// Export a lazy singleton instance for convenience
+let _vectorSearchInstance: VectorSearchClient | null = null;
+
+export function getVectorSearch(): VectorSearchClient {
+  if (!_vectorSearchInstance) {
+    _vectorSearchInstance = new VectorSearchClient();
+  }
+  return _vectorSearchInstance;
+}

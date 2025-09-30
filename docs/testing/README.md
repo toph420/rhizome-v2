@@ -1,139 +1,154 @@
 # Testing Guide - Rhizome V2
 
-> **Single Source of Truth for Testing**
-> Last Updated: January 2025
-> Status: Phase 1 Implementation In Progress
+> **Primary Testing Documentation**  
+> Last Updated: January 30, 2025  
+> Status: Active - Development-Friendly Strategy
 
 ## Quick Start
 
 ```bash
+# Install dependencies
+npm install && cd worker && npm install && cd ..
+
+# Start local development environment
+npm run dev
+
+# Run tests by category
+npm run test:critical     # Must pass tests (E2E + core integration)
+npm run test:stable       # Important tests (can fail during development)  
+npm run test:flexible     # Unit tests (skip during rapid development)
+
 # Run all tests
-npm test
+npm test                  # Main app tests
+cd worker && npm test     # Worker module tests
 
-# Run specific test suites
-npm test -- src/lib/ecs          # ECS tests
-npm test -- worker/processors    # Worker tests
-
-# Run with coverage
-npm run test:coverage
-
-# Run E2E tests (when available)
+# Run E2E tests
 npm run test:e2e
 ```
 
-## Testing Philosophy
+## Testing Strategy Overview
 
-### Core Principles
-- **Pragmatic Coverage**: 70% on critical paths > 100% everywhere
-- **Test What Matters**: User journeys > implementation details
-- **Fast Feedback**: Unit tests run in <1s, integration <10s
-- **Isolation**: Tests should not depend on external services
+Rhizome V2 uses a **development-friendly testing strategy** that categorizes tests by maintenance priority, allowing rapid iteration while maintaining quality protection.
 
-### What We Test
-1. **Critical Paths** (70% coverage target)
-   - Document processing pipeline
-   - 7-engine collision detection system
-   - ECS operations
-   - User data flows
+### 🔴 Critical Tests (Must Pass)
+- **E2E user journeys** - Core workflows that define product value
+- **Integration smoke tests** - System connectivity and data flow
+- **Core business logic** - Document processing, collision detection
 
-2. **Supporting Systems** (50% coverage target)
-   - UI components
-   - Utility functions
-   - Configuration systems
+```bash
+npm run test:critical      # Blocks deployment if failing
+```
 
-3. **Experimental Features** (No coverage requirement)
-   - New engines
-   - Beta features
+### 🟡 Stable Tests (Fix When Broken)
+- **API contract tests** - Server Actions, database operations
+- **System integration** - Auth, file uploads, background jobs
+- **Data layer tests** - CRUD operations, ECS functionality
+
+```bash
+npm run test:stable        # Tracked but doesn't block deployment
+```
+
+### 🟢 Flexible Tests (Clean Up During Stabilization)
+- **Component tests** - React component behavior
+- **Utility functions** - Helpers, formatters, validation
+- **Implementation details** - Internal method testing
+
+```bash
+npm run test:flexible      # Can fail during development
+```
+
+### 🔵 Experimental Tests (New Features Only)
+- **Feature spikes** - Proof of concept validation
+- **Research tests** - Architecture exploration
+- **Prototype validation** - Temporary integration tests
+
+```bash
+npm run test:experimental  # Manual execution only
+```
 
 ## Project Structure
 
 ```
 rhizome-v2/
-├── tests/                    # Shared test infrastructure
+├── tests/                    # Main app tests
+│   ├── critical/            # Must-pass tests
+│   ├── stable/              # Fix-when-broken tests  
+│   ├── flexible/            # Clean-up-later tests
+│   ├── experimental/        # New feature tests
 │   ├── factories/           # Test data generators
 │   ├── fixtures/            # Static test data
-│   ├── mocks/               # MSW handlers & mocks
+│   ├── mocks/               # API mocks and handlers
 │   └── e2e/                 # Playwright E2E tests
-├── src/
-│   ├── lib/ecs/__tests__/  # ECS unit tests
-│   └── app/actions/__tests__/ # Server action tests
-└── worker/
-    └── tests/
-        ├── unit/            # Pure function tests
-        ├── integration/     # Multi-component tests
-        └── helpers/         # Worker-specific utilities
+├── src/lib/ecs/__tests__/   # ECS unit tests
+└── worker/tests/            # Worker module tests
+    ├── integration/         # Multi-component tests
+    ├── engines/             # Collision detection tests
+    ├── utils/               # Worker utilities
+    └── fixtures/            # Worker test data
 ```
 
-## Test Categories
+## Development Workflows
 
-### 1. Unit Tests
-Test individual functions and components in isolation.
+### Rapid Development Phase (Current)
+**Focus**: Speed and user value delivery
+
+```bash
+# Daily workflow
+npm run test:critical && npm run test:e2e  # Must pass
+npm run test:stable || echo "Tracked but not blocking"
+
+# Skip during rapid iteration
+# npm run test:flexible  # Fix during stabilization
+```
+
+**Quality Gates**:
+- ✅ Critical tests must pass (blocks deploy)
+- ✅ E2E tests must pass (blocks deploy)
+- ⚠️ Unit test coverage advisory only (doesn't block)
+
+### Stabilization Phase
+**Focus**: Technical debt cleanup and test maintenance
+
+```bash
+# Stabilization workflow  
+npm run test:critical       # Must pass
+npm run test:stable         # Fix all failures
+npm run test:flexible       # Clean up test debt
+npm run test:experimental   # Archive or promote
+```
+
+### New Feature Development Pattern
 
 ```typescript
-// Example: src/lib/ecs/__tests__/ecs.test.ts
-import { ecs } from '../ecs'
-import { factories } from '@/tests/factories'
+// 1. Start with E2E test for user journey
+test('User can upload and process document', async () => {
+  // Test complete user workflow
+});
 
-describe('ECS.createEntity', () => {
-  it('creates entity with components', async () => {
-    const userId = 'test-user'
-    const components = {
-      flashcard: { question: 'Q', answer: 'A' }
-    }
+// 2. Create integration smoke test
+test('Document processing pipeline works', async () => {
+  // Test core system integration
+});
 
-    const entityId = await ecs.createEntity(userId, components)
+// 3. Skip detailed unit tests during prototyping
+// Focus on making the feature work
 
-    expect(entityId).toBeDefined()
-    expect(typeof entityId).toBe('string')
-  })
-})
+// 4. Add unit tests when feature stabilizes
+// Move from experimental/ to appropriate category
+
+// 5. Clean up test debt in stabilization sprints
 ```
 
-### 2. Integration Tests
-Test multiple components working together.
+## Core Testing Patterns
 
-```typescript
-// Example: worker/tests/integration/pipeline.test.ts
-describe('Document Processing Pipeline', () => {
-  it('processes PDF end-to-end', async () => {
-    const document = factories.document.createPDF()
-    const result = await processDocument(document)
-
-    expect(result.markdown).toBeDefined()
-    expect(result.chunks.length).toBeGreaterThan(0)
-    expect(result.embeddingsAvailable).toBe(true)
-  })
-})
-```
-
-### 3. E2E Tests
-Test complete user journeys in a real browser.
-
-```typescript
-// Example: tests/e2e/upload-flow.spec.ts
-test('user uploads and reads document', async ({ page }) => {
-  await page.goto('/upload')
-  await page.setInputFiles('input[type=file]', 'tests/fixtures/sample.pdf')
-  await page.waitForSelector('[data-testid="processing-complete"]')
-  await page.click('[data-testid="read-document"]')
-  await expect(page).toHaveURL(/\/read\//)
-})
-```
-
-## Using Test Factories
-
-Test factories provide consistent test data generation:
+### Using Test Factories
 
 ```typescript
 import { factories } from '@/tests/factories'
 
-// Create test documents
+// Create test data
 const doc = factories.document.create()
 const processedDoc = factories.document.createProcessed()
-const pdfDoc = factories.document.createPDF()
-
-// Create test chunks
-const chunk = factories.chunk.create()
 const chunks = factories.chunk.createMany(10, 'doc-id')
 
 // Create ECS entities
@@ -142,113 +157,36 @@ const flashcard = factories.entity.createFlashcard({
   answer: 'Entity-Component-System'
 })
 
-// Reset factories between tests
+// Reset between tests
 beforeEach(() => {
   factories.document.reset()
   factories.chunk.reset()
-  factories.entity.reset()
 })
 ```
-
-## Mocking Strategies
-
-### External Services
-Use MSW for mocking HTTP requests:
-
-```typescript
-// tests/mocks/handlers.ts
-import { http } from 'msw'
-
-export const handlers = [
-  http.post('*/gemini/process', () => {
-    return new Response(JSON.stringify({
-      markdown: '# Processed Content',
-      chunks: []
-    }))
-  })
-]
-```
-
-### Supabase
-Use the mock client from test helpers:
-
-```typescript
-import { createMockSupabaseClient } from '@/worker/tests/helpers'
-
-const supabase = createMockSupabaseClient()
-supabase.from('documents').insert.mockResolvedValue({
-  data: [{ id: 'doc-1' }],
-  error: null
-})
-```
-
-## Running Tests
-
-### Development Workflow
-```bash
-# Watch mode for TDD
-npm test -- --watch
-
-# Run specific test file
-npm test -- ecs.test.ts
-
-# Run with coverage
-npm test -- --coverage
-
-# Debug a specific test
-npm test -- --detectOpenHandles ecs.test.ts
-```
-
-### CI/CD Pipeline
-```yaml
-# .github/workflows/test.yml
-- name: Run Tests
-  run: |
-    npm test -- --ci --coverage
-    npm run test:e2e -- --reporter=github
-```
-
-## Coverage Requirements
-
-### Current Targets
-| Module | Target | Current | Status |
-|--------|--------|---------|--------|
-| Main App | 50% | ~10% | 🔴 |
-| Worker | 70% | ~30% | 🟡 |
-| ECS | 80% | 0% | 🔴 |
-| E2E | Critical paths | 0% | 🔴 |
-
-### Measurement
-```bash
-# Generate coverage report
-npm run test:coverage
-
-# View in browser
-npm run test:coverage:open
-
-# CI reporting
-npm run test:ci -- --coverage
-```
-
-## Common Patterns
 
 ### Testing Async Operations
+
 ```typescript
-it('handles async processing', async () => {
+it('handles document processing workflow', async () => {
+  const doc = factories.document.create()
+  
+  // Start processing
   const promise = processDocument(doc)
-
+  
   // Assert loading state
-  expect(getStatus()).toBe('processing')
-
+  expect(doc.processing_status).toBe('processing')
+  
   // Wait for completion
-  await promise
-
+  const result = await promise
+  
   // Assert final state
-  expect(getStatus()).toBe('completed')
+  expect(result.status).toBe('completed')
+  expect(result.chunks.length).toBeGreaterThan(0)
 })
 ```
 
 ### Testing Error Cases
+
 ```typescript
 it('handles processing failures gracefully', async () => {
   const doc = factories.document.create()
@@ -260,106 +198,101 @@ it('handles processing failures gracefully', async () => {
 })
 ```
 
-### Testing with Time
+### Mocking External Services
+
 ```typescript
-import { delay } from '@/tests/factories/utils'
+// Supabase mocking
+import { createMockSupabaseClient } from '@/tests/helpers'
 
-it('respects retry delays', async () => {
-  const start = Date.now()
-
-  await retryWithBackoff(failingOperation)
-
-  const elapsed = Date.now() - start
-  expect(elapsed).toBeGreaterThan(3000) // 3 retries with delays
+const supabase = createMockSupabaseClient()
+supabase.from('documents').insert.mockResolvedValue({
+  data: [{ id: 'doc-1' }],
+  error: null
 })
+
+// Gemini API mocking (worker tests)
+jest.mock('@google/genai', () => ({
+  GoogleAI: jest.fn(() => ({
+    generateContent: jest.fn().mockResolvedValue({
+      text: '# Processed Content'
+    })
+  }))
+}))
 ```
 
-## Troubleshooting
+## CI/CD Integration
 
-### Common Issues
+The testing strategy integrates with GitHub Actions through flexible job configuration:
 
-**ESM Import Errors**
+```yaml
+# Critical tests must pass (blocks deployment)
+critical-tests:
+  run: npm run test:critical && npm run test:e2e
+
+# Development tests can fail (tracked but not blocking)  
+development-tests:
+  run: npm run test:stable || echo "Tracked but not blocking"
+  continue-on-error: true
+```
+
+### Branch-Specific Behavior
+- **Feature branches**: Critical tests only
+- **Develop branch**: Critical + stable tests  
+- **Main branch**: All test categories
+- **Release branches**: Full validation + performance
+
+## Coverage Philosophy
+
+We focus on **coverage direction** rather than absolute percentages:
+
+### Current Phase Targets
+```
+E2E Coverage: 100% critical user journeys
+Integration: 60% core system paths
+Unit Tests: 30% stable APIs  
+Overall: 40% weighted average
+```
+
+### Measurement Commands
 ```bash
-# Solution: Ensure NODE_OPTIONS is set
-NODE_OPTIONS='--experimental-vm-modules' npm test
+# Generate coverage reports
+npm test -- --coverage
+cd worker && npm test -- --coverage
+
+# Quality gate validation
+npm run test:gates
+
+# Full validation for releases
+npm run test:all
 ```
 
-**TypeScript Compilation Errors**
-```bash
-# Solution: Check tsconfig in jest.config.cjs
-transform: {
-  '^.+\\.tsx?$': ['ts-jest', {
-    useESM: true,
-    isolatedModules: true
-  }]
-}
-```
+## Documentation Navigation
 
-**Timeout Issues**
-```typescript
-// Increase timeout for slow operations
-jest.setTimeout(30000) // 30 seconds
-
-// Or per test
-it('processes large document', async () => {
-  // test code
-}, 60000)
-```
+- **[development-workflow.md](./development-workflow.md)** - Comprehensive strategy guide with examples
+- **[patterns.md](./patterns.md)** - Code examples and testing patterns
+- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
+- **[.archive/](./.archive/)** - Historical documentation and task reports
 
 ## Best Practices
 
-### 1. Test Naming
-- Use descriptive names that explain the behavior
-- Follow pattern: `should [expected behavior] when [condition]`
-- Group related tests with `describe` blocks
+### Test Writing Guidelines
+1. **Test behavior, not implementation** - Focus on what the code does, not how
+2. **Use descriptive names** - Test names should explain the expected behavior
+3. **Keep tests independent** - Each test should run in isolation
+4. **Mock external dependencies** - Tests shouldn't depend on external services
+5. **Test edge cases** - Include error conditions and boundary cases
 
-### 2. Test Independence
-- Each test should be able to run in isolation
-- Use `beforeEach`/`afterEach` for setup/teardown
-- Reset factories and mocks between tests
-
-### 3. Assertion Quality
-- Test behavior, not implementation
-- Use specific assertions (`toBe` > `toBeTruthy`)
-- Include edge cases and error paths
-
-### 4. Performance
+### Performance Guidelines
 - Keep unit tests fast (<100ms each)
-- Use mocks to avoid external dependencies
+- Use factories for consistent test data
 - Parallelize test execution where possible
+- Clean up resources in teardown methods
 
-## Next Steps
+### Maintenance Schedule
+- **Weekly**: Run critical + stable tests, note failing flexible tests
+- **Monthly**: Review test categorization, clean up experimental tests  
+- **Quarterly**: Assess strategy effectiveness, adjust coverage targets
 
-### Phase 1 (Current)
-- [x] Fix Jest ESM configuration
-- [x] Create test factories
-- [x] Consolidate documentation
-- [ ] Write core ECS tests
-- [ ] Update CLAUDE.md
+---
 
-### Phase 2 (Next Week)
-- [ ] Document processing tests
-- [ ] Collision detection tests
-- [ ] Database operation tests
-- [ ] Coverage >50% on critical paths
-
-### Phase 3 (Week 3) ✅ COMPLETED
-- [x] Playwright E2E setup
-- [x] Critical user journey tests
-- [x] Page Object Model implementation
-- [x] CI/CD pipeline integration
-- [ ] MSW for API mocking (optional)
-- [ ] Coverage >70% on critical paths
-
-## Resources
-
-### Internal Documentation
-- [Testing Status](./TESTING_STATUS.md) - Current test health
-- [Testing Patterns](./patterns.md) - Code examples
-- [Coverage Report](./coverage-report.md) - Latest metrics
-
-### External Resources
-- [Jest Documentation](https://jestjs.io/docs/getting-started)
-- [Testing Library](https://testing-library.com/docs/)
-- [MSW Documentation](https://mswjs.io/docs/)
-- [Playwright Documentation](https://playwright.dev/docs/intro)
+**Next Steps**: See [development-workflow.md](./development-workflow.md) for detailed implementation guidance and team workflows.

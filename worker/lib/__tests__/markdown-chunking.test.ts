@@ -212,6 +212,86 @@ Finally, some actual content here that is long enough to be included as a chunk.
       expect(chunks.length).toBeGreaterThan(0)
       expect(chunks[chunks.length - 1].content).toContain('Finally, some actual content')
     })
+
+    it('tracks character offsets correctly for viewport positioning', () => {
+      const markdown = `# Introduction
+
+This is the opening section that explains the fundamentals and provides context for understanding the material. We need substantial content here to meet the minimum 200 character requirement for chunk creation and processing.
+
+## Chapter 1
+
+The story begins here with detailed information about the main concepts. This section also needs to be long enough to qualify as a valid chunk, so we're adding additional content to ensure it meets the minimum threshold requirements.
+
+### Subsection
+
+Additional details about specific aspects covered in this subsection. Again, we need sufficient content to meet the chunking algorithm's minimum size requirements for proper processing and inclusion in the output.`
+
+      const chunks = simpleMarkdownChunking(markdown)
+
+      // Verify each chunk has offset information
+      chunks.forEach(chunk => {
+        expect(chunk.start_offset).toBeDefined()
+        expect(chunk.end_offset).toBeDefined()
+        expect(typeof chunk.start_offset).toBe('number')
+        expect(typeof chunk.end_offset).toBe('number')
+        expect(chunk.end_offset).toBeGreaterThan(chunk.start_offset!)
+      })
+
+      // Verify offsets match actual content
+      chunks.forEach(chunk => {
+        if (chunk.start_offset !== undefined && chunk.end_offset !== undefined) {
+          const extractedContent = markdown.slice(chunk.start_offset, chunk.end_offset)
+          // Content should match (allowing for trimming differences)
+          expect(extractedContent.trim()).toBe(chunk.content.trim())
+        }
+      })
+
+      // Test viewport overlap calculation
+      const viewportStart = 50
+      const viewportEnd = 150
+      
+      const visibleChunks = chunks.filter(chunk => 
+        chunk.start_offset !== undefined && 
+        chunk.end_offset !== undefined &&
+        chunk.start_offset <= viewportEnd && 
+        chunk.end_offset >= viewportStart
+      )
+
+      // Should find chunks that overlap with the viewport
+      expect(visibleChunks.length).toBeGreaterThan(0)
+    })
+
+    it('maintains accurate offsets in long content splitting', () => {
+      const longContent = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '.repeat(50)
+      const markdown = `# Long Section
+
+${longContent}
+
+## Next Section
+
+Short content here to verify offset tracking continues correctly.`
+
+      const chunks = simpleMarkdownChunking(markdown)
+
+      // Should have multiple chunks due to length
+      expect(chunks.length).toBeGreaterThan(1)
+
+      // Verify offsets are sequential and non-overlapping
+      for (let i = 0; i < chunks.length - 1; i++) {
+        const currentChunk = chunks[i]
+        const nextChunk = chunks[i + 1]
+        
+        expect(currentChunk.end_offset).toBeLessThanOrEqual(nextChunk.start_offset!)
+      }
+
+      // Verify content extraction works for all chunks
+      chunks.forEach(chunk => {
+        if (chunk.start_offset !== undefined && chunk.end_offset !== undefined) {
+          const extractedContent = markdown.slice(chunk.start_offset, chunk.end_offset)
+          expect(extractedContent.length).toBeGreaterThan(0)
+        }
+      })
+    })
   })
 
   describe('extractTimestampsWithContext', () => {
