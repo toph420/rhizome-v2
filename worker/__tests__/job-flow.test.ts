@@ -6,6 +6,8 @@
  * retry mechanisms, and error handling.
  */
 
+import { jest } from '@jest/globals'
+
 describe('Background Job Status Flow', () => {
   // Mock Supabase client
   const mockSupabase = {

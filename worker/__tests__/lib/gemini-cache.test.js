@@ -4,19 +4,22 @@
 
 import { jest } from '@jest/globals'
 
-// Mock crypto module
+// Mock crypto module with proper chaining support
 const mockHash = {
-  update: jest.fn(),
+  update: jest.fn().mockReturnThis(), // Enable chaining
   digest: jest.fn(() => 'test-hash-123')
 }
+
 jest.unstable_mockModule('crypto', () => ({
   default: {
     createHash: jest.fn(() => mockHash)
-  }
+  },
+  // Also support named import
+  createHash: jest.fn(() => mockHash)
 }))
 
-// Import after mocking
-const { GeminiFileCache } = await import('../../dist/lib/gemini-cache.js')
+// Import after mocking (from TypeScript source, not compiled dist)
+const { GeminiFileCache } = await import('../../lib/gemini-cache.ts')
 
 describe('GeminiFileCache', () => {
   let cache

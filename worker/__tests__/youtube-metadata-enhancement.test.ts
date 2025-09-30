@@ -16,6 +16,7 @@
  * - Graceful degradation on AI failures
  */
 
+import { jest } from '@jest/globals'
 import { processDocumentHandler } from '../handlers/process-document'
 import type { TranscriptSegment } from '../types/multi-format'
 
