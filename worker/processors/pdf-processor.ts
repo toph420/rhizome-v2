@@ -161,20 +161,24 @@ export class PDFProcessor extends SourceProcessor {
     const wordCount = markdown.split(/\s+/).filter(word => word.length > 0).length
     const outline = this.extractOutline(markdown)
     
-    // Stage 6: Prepare final result
+    // Stage 6: Enrich chunks with metadata extraction
+    await this.updateProgress(85, 'finalize', 'metadata', 'Extracting metadata for collision detection')
+    const enrichedChunks = await this.enrichChunksWithMetadata(chunks.map((chunk, index) => ({
+      document_id: this.job.document_id,
+      content: chunk.content,
+      chunk_index: index,
+      themes: chunk.themes,
+      importance_score: chunk.importance || 0.5,
+      summary: chunk.summary
+    })))
+    
+    // Stage 7: Prepare final result
     await this.updateProgress(90, 'finalize', 'complete', 'Processing complete')
     
     // Return complete ProcessResult for handler to save
     return {
       markdown,
-      chunks: chunks.map((chunk, index) => ({
-        document_id: this.job.document_id,
-        content: chunk.content,
-        chunk_index: index,
-        themes: chunk.themes,
-        importance_score: chunk.importance || 0.5,
-        summary: chunk.summary
-      })),
+      chunks: enrichedChunks,
       metadata: {
         sourceUrl: this.job.metadata?.source_url
       },

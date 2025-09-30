@@ -114,6 +114,9 @@ export class ScoringSystem {
       this.weights
     );
     
+    // Calculate total actual contributions for percentage calculation
+    const totalContributions = scoreExplanation.breakdown.reduce((sum, item) => sum + item.contribution, 0);
+    
     return {
       score: totalScore,
       explanations: scoreExplanation.breakdown.map(item => ({
@@ -121,7 +124,7 @@ export class ScoringSystem {
         rawScore: item.rawScore,
         weight: item.weight,
         contributionScore: item.contribution,
-        contributionPercentage: (item.contribution / totalScore) * 100,
+        contributionPercentage: totalContributions > 0 ? (item.contribution / totalContributions) * 100 : 0,
       })),
     };
   }

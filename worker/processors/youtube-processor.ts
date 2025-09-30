@@ -139,13 +139,17 @@ export class YouTubeProcessor extends SourceProcessor {
       await this.updateProgress(90, 'extract', 'positioned', 
         `Positioned ${highConfidenceCount}/${chunks.length} chunks with high confidence`)
       
-      // Note: Stages 6 (embeddings) and 7 (storage) are handled by the main handler
+      // Stage 6: Enrich chunks with metadata extraction
+      await this.updateProgress(92, 'extract', 'metadata', 'Extracting metadata for collision detection')
+      const chunksWithMetadata = await this.enrichChunksWithMetadata(enhancedChunks)
+      
+      // Note: Stages 7 (embeddings) and 8 (storage) are handled by the main handler
       // This processor returns the prepared data for those final stages
       
       // Prepare result with complete metadata
       return {
         markdown,
-        chunks: enhancedChunks,
+        chunks: chunksWithMetadata,
         outline: undefined, // TODO: Convert to OutlineSection[] format
         wordCount: markdown.split(/\s+/).filter(word => word.length > 0).length,
         metadata: {

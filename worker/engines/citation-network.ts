@@ -112,8 +112,9 @@ export class CitationNetworkEngine extends BaseEngine {
               overlap
             ),
             metadata: {
-              sharedCitations: overlap.sharedCitations.length,
-              coCitations: overlap.coCitations.length,
+              sharedCitations: overlap.sharedCitations.map(c => c.text),
+              coCitations: overlap.coCitations,
+              overlapRatio: overlap.bibliographicCoupling,
               bibliographicCoupling: overlap.bibliographicCoupling,
               sourceCentrality: sourceNode.centrality,
               targetCentrality: targetNode.centrality,

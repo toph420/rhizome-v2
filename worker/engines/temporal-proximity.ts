@@ -119,7 +119,7 @@ export class TemporalProximityEngine extends BaseEngine {
         return {
           sourceChunkId: sourceChunk.id,
           targetChunkId: targetChunk.id,
-          engine: this.type,
+          engineType: this.type,
           score: finalScore,
           confidence,
           metadata: {

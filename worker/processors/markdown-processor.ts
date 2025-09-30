@@ -86,6 +86,10 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
     
     await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} chunks`)
     
+    // Enrich chunks with metadata extraction
+    await this.updateProgress(70, 'finalize', 'metadata', 'Extracting metadata for collision detection')
+    const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
+    
     // Extract basic metadata
     const wordCount = markdown.split(/\s+/).length
     const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
@@ -93,7 +97,7 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
     
     return {
       markdown,
-      chunks,
+      chunks: enrichedChunks,
       wordCount,
       outline: outline.length > 0 ? outline.map((title, i) => ({ 
         title, 
@@ -206,6 +210,10 @@ export class MarkdownCleanProcessor extends SourceProcessor {
     
     await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} semantic chunks`)
     
+    // Enrich chunks with metadata extraction
+    await this.updateProgress(70, 'finalize', 'metadata', 'Extracting metadata for collision detection')
+    const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
+    
     // Extract enhanced metadata
     const wordCount = markdown.split(/\s+/).length
     const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
@@ -213,7 +221,7 @@ export class MarkdownCleanProcessor extends SourceProcessor {
     
     // Calculate document-level themes from chunk themes
     const themeFrequency = new Map<string, number>()
-    chunks.forEach(chunk => {
+    enrichedChunks.forEach(chunk => {
       chunk.themes.forEach(theme => {
         themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
       })
@@ -226,11 +234,11 @@ export class MarkdownCleanProcessor extends SourceProcessor {
       .map(([theme]) => theme)
     
     // Calculate average importance score
-    const avgImportance = chunks.reduce((sum, chunk) => sum + chunk.importance_score, 0) / chunks.length
+    const avgImportance = enrichedChunks.reduce((sum, chunk) => sum + chunk.importance_score, 0) / enrichedChunks.length
     
     return {
       markdown,
-      chunks,
+      chunks: enrichedChunks,
       wordCount,
       outline: outline.length > 0 ? outline.map((title, i) => ({ 
         title, 

@@ -288,6 +288,10 @@ ${pastedContent}`
     
     await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} chunks`)
     
+    // Enrich chunks with metadata extraction
+    await this.updateProgress(70, 'finalize', 'metadata', 'Extracting metadata for collision detection')
+    const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
+    
     // Extract metadata
     const wordCount = markdown.split(/\s+/).length
     const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
@@ -295,9 +299,9 @@ ${pastedContent}`
     
     // Collect themes if semantic chunking was used
     let documentThemes: string[] | undefined
-    if (chunks.length > 0 && 'themes' in chunks[0]) {
+    if (enrichedChunks.length > 0 && 'themes' in enrichedChunks[0]) {
       const themeFrequency = new Map<string, number>()
-      chunks.forEach(chunk => {
+      enrichedChunks.forEach(chunk => {
         if (chunk.themes) {
           chunk.themes.forEach((theme: string) => {
             themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
@@ -313,7 +317,7 @@ ${pastedContent}`
     
     return {
       markdown,
-      chunks,
+      chunks: enrichedChunks,
       wordCount,
       outline: outline.length > 0 ? outline.map((title, i) => ({ 
         title, 

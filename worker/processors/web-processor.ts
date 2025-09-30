@@ -131,12 +131,16 @@ ${article.textContent}`
         word_count: markdown.split(/\s+/).length
       }
 
+      // Enrich chunks with metadata extraction
+      await this.updateProgress(90, 'finalize', 'metadata', 'Extracting metadata for collision detection')
+      const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
+
       // Final progress
       await this.updateProgress(100, 'complete', 'success', 'Web article processed successfully')
 
       return {
         markdown,
-        chunks,
+        chunks: enrichedChunks,
         metadata
       }
     } catch (error: any) {

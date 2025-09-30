@@ -106,16 +106,37 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     
     // Generate embeddings for chunks
     console.log(`🔢 Generating embeddings for ${result.chunks.length} chunks`)
-    const chunkTexts = result.chunks.map(chunk => chunk.text)
+    const chunkTexts = result.chunks.map(chunk => chunk.content).filter(text => text && text.trim().length > 0)
+    
+    if (chunkTexts.length === 0) {
+      throw new Error('No valid chunk content found for embedding generation')
+    }
+    
+    if (chunkTexts.length !== result.chunks.length) {
+      console.warn(`⚠️ Filtered out ${result.chunks.length - chunkTexts.length} empty chunks`)
+    }
+    
     const embeddings = await generateEmbeddings(chunkTexts)
     console.log(`✅ Generated ${embeddings.length} embeddings`)
     
     // Insert chunks with embeddings to database
     console.log(`💾 Saving chunks with embeddings to database`)
-    const chunksWithEmbeddings = result.chunks.map((chunk, i) => ({
+    const validChunks = result.chunks.filter(chunk => chunk.content && chunk.content.trim().length > 0)
+    const chunksWithEmbeddings = validChunks.map((chunk, i) => ({
       ...chunk,
       document_id,
-      embedding: embeddings[i]
+      embedding: embeddings[i],
+      
+      // Map metadata to database JSONB columns
+      structural_metadata: chunk.metadata?.structural || null,
+      emotional_metadata: chunk.metadata?.emotional || null,
+      conceptual_metadata: chunk.metadata?.concepts || null,
+      method_metadata: chunk.metadata?.methods || null,
+      narrative_metadata: chunk.metadata?.narrative || null,
+      reference_metadata: chunk.metadata?.references || null,
+      domain_metadata: chunk.metadata?.domain || null,
+      quality_metadata: chunk.metadata?.quality || null,
+      metadata_extracted_at: chunk.metadata ? new Date().toISOString() : null
     }))
     
     const { error: chunkError } = await supabase

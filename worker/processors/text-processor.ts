@@ -106,6 +106,10 @@ export class TextProcessor extends SourceProcessor {
     
     await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} chunks from text`)
     
+    // Enrich chunks with metadata extraction
+    await this.updateProgress(70, 'finalize', 'metadata', 'Extracting metadata for collision detection')
+    const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
+    
     // Extract metadata
     const wordCount = markdown.split(/\s+/).length
     const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
@@ -113,7 +117,7 @@ export class TextProcessor extends SourceProcessor {
     
     // Collect document themes
     const themeFrequency = new Map<string, number>()
-    chunks.forEach(chunk => {
+    enrichedChunks.forEach(chunk => {
       chunk.themes.forEach(theme => {
         themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
       })
@@ -126,7 +130,7 @@ export class TextProcessor extends SourceProcessor {
     
     return {
       markdown,
-      chunks,
+      chunks: enrichedChunks,
       wordCount,
       outline: outline.length > 0 ? outline.map((title, i) => ({ 
         title, 
