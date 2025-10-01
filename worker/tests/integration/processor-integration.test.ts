@@ -235,10 +235,11 @@ describe('Document Processor Integration Tests', () => {
       expect(result.markdown).not.toContain('[[')
       expect(result.chunks.length).toBeGreaterThan(0)
       
-      // Check fuzzy positioning was applied
+      // Check fuzzy positioning was applied (but NO timestamps)
       result.chunks.forEach(chunk => {
         if (chunk.position_context) {
-          expect(chunk.position_context).toHaveProperty('confidence_score')
+          expect(chunk.position_context).toHaveProperty('confidence')
+          expect(chunk.position_context).not.toHaveProperty('timestamp_ms')
         }
       })
       
@@ -356,24 +357,33 @@ describe('Document Processor Integration Tests', () => {
       testReporter.recordTest('Markdown - AI Cleaning', metrics, true)
     })
 
-    test('should extract timestamps from markdown', async () => {
+    test('should NOT extract timestamps to chunks (timestamps moved to document level)', async () => {
       const job = createTestJobForFixture('markdown_asis', 'withTimestamps')
-      
+
       mockSupabase.storage.from().download.mockResolvedValueOnce({
         data: MARKDOWN_FIXTURES.withTimestamps.content,
         error: null
       })
-      
+
       const processor = new MarkdownAsIsProcessor(mockGeminiAI, mockSupabase, job)
       const result = await processor.process()
-      
-      // Verify timestamps were extracted
-      const hasTimestamps = result.chunks.some(chunk => 
+
+      // Verify timestamps were NOT added to chunks (architecture change: document-level storage)
+      const hasTimestamps = result.chunks.some(chunk =>
         chunk.position_context?.timestamp_ms !== undefined
       )
-      expect(hasTimestamps).toBe(true)
-      
-      testReporter.recordTest('Markdown - Timestamp Extraction', performanceTracker.getMetrics(), true)
+      expect(hasTimestamps).toBe(false)
+
+      // Verify chunks still have position_context for fuzzy matching
+      expect(result.chunks.length).toBeGreaterThan(0)
+      result.chunks.forEach(chunk => {
+        if (chunk.position_context) {
+          expect(chunk.position_context).toHaveProperty('confidence')
+          expect(chunk.position_context).not.toHaveProperty('timestamp_ms')
+        }
+      })
+
+      testReporter.recordTest('Markdown - No Chunk-Level Timestamps', performanceTracker.getMetrics(), true)
     })
   })
 
@@ -399,24 +409,24 @@ describe('Document Processor Integration Tests', () => {
       testReporter.recordTest('Text - Structure Generation', metrics, true)
     })
 
-    test('should detect timestamps in transcripts', async () => {
+    test('should NOT add timestamps to chunks (architecture change)', async () => {
       const job = createTestJobForFixture('txt', 'transcript')
-      
+
       mockSupabase.storage.from().download.mockResolvedValueOnce({
         data: TEXT_FIXTURES.transcript.content,
         error: null
       })
-      
+
       const processor = new TextProcessor(mockGeminiAI, mockSupabase, job)
       const result = await processor.process()
-      
-      // Should detect and preserve timestamps
-      const hasTimestamps = result.chunks.some(chunk => 
+
+      // Timestamps should NOT be in chunks (moved to document-level storage)
+      const hasTimestamps = result.chunks.some(chunk =>
         chunk.position_context?.timestamp_ms !== undefined
       )
-      expect(hasTimestamps).toBe(true)
-      
-      testReporter.recordTest('Text - Transcript Processing', performanceTracker.getMetrics(), true)
+      expect(hasTimestamps).toBe(false)
+
+      testReporter.recordTest('Text - No Chunk Timestamps', performanceTracker.getMetrics(), true)
     })
   })
 
@@ -438,21 +448,21 @@ describe('Document Processor Integration Tests', () => {
       testReporter.recordTest('Paste - Mixed Content', metrics, true)
     })
 
-    test('should handle chat logs with timestamps', async () => {
+    test('should handle chat logs without chunk-level timestamps', async () => {
       const job = createTestJobForFixture('paste', 'chatLog')
       job.raw_content = PASTE_FIXTURES.chatLog.content
-      
+
       const processor = new PasteProcessor(mockGeminiAI, mockSupabase, job)
       const result = await processor.process()
-      
-      // Should detect chat format and preserve timestamps
+
+      // Should detect chat format but NOT add timestamps to chunks
       expect(result.chunks.length).toBeGreaterThan(0)
-      const hasTimestamps = result.chunks.some(chunk => 
+      const hasTimestamps = result.chunks.some(chunk =>
         chunk.position_context?.timestamp_ms !== undefined
       )
-      expect(hasTimestamps).toBe(true)
-      
-      testReporter.recordTest('Paste - Chat Log', performanceTracker.getMetrics(), true)
+      expect(hasTimestamps).toBe(false)
+
+      testReporter.recordTest('Paste - Chat Log (No Chunk Timestamps)', performanceTracker.getMetrics(), true)
     })
   })
 
