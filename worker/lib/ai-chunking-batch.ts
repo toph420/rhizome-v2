@@ -318,25 +318,32 @@ async function callGeminiForMetadata(
  * AI identifies boundaries AND extracts metadata.
  */
 function generateSemanticChunkingPrompt(batch: MetadataExtractionBatch): string {
-  return `Analyze this document section and identify semantic chunks.
+  return `Analyze the DOCUMENT TEXT below and identify semantic chunks.
 
-A semantic chunk is a COMPLETE UNIT OF THOUGHT (300-500 words typically):
+A semantic chunk is a COMPLETE UNIT OF THOUGHT with these HARD CONSTRAINTS:
+- MINIMUM: 200 words
+- TARGET: 300-500 words
+- MAXIMUM: 3000 characters (~600 words)
+- NEVER create chunks larger than 3000 characters (this is a technical constraint)
+
+Semantic chunking rules:
 - May span multiple paragraphs if they form one coherent idea
 - May split a long paragraph if it covers multiple distinct ideas
 - Should feel like a natural "node" in a knowledge graph
+- If semantic completeness would exceed 3000 chars, split into multiple chunks at natural boundaries
 
 MARKDOWN STRUCTURE GUIDANCE:
 - Code blocks: Keep with surrounding context (don't isolate)
 - Lists: Keep intact unless they span very different topics
 - Tables: Usually keep as single chunks unless very large
 - Headings: Good natural boundaries, but not always required
-- Prioritize semantic completeness over structure
+- Prioritize semantic completeness WITHIN the 3000 character limit
 
 For each chunk you identify, extract:
 
-1. **content**: The exact text of this chunk (verbatim from the document)
-2. **start_offset**: Character position where chunk starts (relative to provided text, starting at 0)
-3. **end_offset**: Character position where chunk ends (relative to provided text)
+1. **content**: The exact text from the DOCUMENT TEXT section below (verbatim, character-for-character copy)
+2. **start_offset**: Character position where chunk starts (relative to DOCUMENT TEXT below, starting at 0)
+3. **end_offset**: Character position where chunk ends (relative to DOCUMENT TEXT below)
 4. **themes**: 2-5 key themes/topics (e.g., ["authentication", "security"])
 5. **concepts**: 3-5 specific concepts with importance scores (keep concise)
    - Format: [{"text": "JWT tokens", "importance": 0.8}]
@@ -351,19 +358,21 @@ For each chunk you identify, extract:
 
 CRITICAL REQUIREMENTS:
 - Identify chunk boundaries based on semantic completeness, not paragraph breaks
-- Target 300-500 words per chunk (can vary if semantically necessary)
+- ENFORCE the 3000 character maximum limit - this is NOT optional
+- Target 300-500 words per chunk, NEVER exceed 3000 characters
 - Return chunks in sequential order
 - start_offset and end_offset must be accurate character positions
-- content must be exact text from document (verbatim)
+- content must be ONLY text from DOCUMENT TEXT section below - DO NOT include instructions or examples
 - Emotional polarity is CRITICAL for detecting contradictions
 - IMPORTANT: Properly escape all JSON strings (quotes, newlines, backslashes)
 - IMPORTANT: Ensure all JSON is well-formed and complete
+- IMPORTANT: If a semantic unit would exceed 3000 chars, split it into multiple chunks
 
 Return JSON in this exact format:
 {
   "chunks": [
     {
-      "content": "The exact text of the chunk...",
+      "content": "Exact text copied from DOCUMENT TEXT...",
       "start_offset": 0,
       "end_offset": 1847,
       "themes": ["theme1", "theme2"],
@@ -383,10 +392,15 @@ Return JSON in this exact format:
   ]
 }
 
-DOCUMENT SECTION (this text starts at character ${batch.startOffset} in the full document):
+═══════════════════════════════════════════════════════════════════════════
+DOCUMENT TEXT (this text starts at character ${batch.startOffset} in the full document):
+═══════════════════════════════════════════════════════════════════════════
+
 ${batch.content}
 
-Identify complete semantic chunks with accurate offsets.`
+═══════════════════════════════════════════════════════════════════════════
+
+Extract semantic chunks from the DOCUMENT TEXT above. Return ONLY valid JSON.`
 }
 
 /**
@@ -439,7 +453,10 @@ function parseMetadataResponse(
   console.log(`[AI Metadata] Batch ${batch.batchId}: AI identified ${parsed.chunks.length} semantic chunks`)
 
   // Validate and convert to absolute offsets
-  const validated = parsed.chunks.map((chunk: any, index: number): ChunkWithOffsets => {
+  const MAX_CHUNK_SIZE = 30000 // 30KB conservative limit (36KB API limit - 6KB safety buffer)
+  const IDEAL_SPLIT_SIZE = 2500 // Target size for split chunks
+
+  const validated = parsed.chunks.flatMap((chunk: any, index: number): ChunkWithOffsets[] => {
     // Validate required fields
     if (!chunk.content || typeof chunk.content !== 'string') {
       throw new Error(`Chunk ${index}: Missing or invalid content`)
@@ -456,6 +473,42 @@ function parseMetadataResponse(
     // Validate offset logic
     if (absoluteStart >= absoluteEnd) {
       console.warn(`[AI Metadata] Chunk ${index}: Invalid offsets (${absoluteStart} >= ${absoluteEnd})`)
+    }
+
+    // CRITICAL: Validate chunk size for embedding API limits and auto-split if needed
+    if (chunk.content.length > MAX_CHUNK_SIZE) {
+      console.warn(
+        `[AI Metadata] ⚠️ Chunk ${index} violates size constraint: ${chunk.content.length} chars > ${MAX_CHUNK_SIZE} chars. ` +
+        `Auto-splitting into smaller chunks...`
+      )
+
+      // Split the oversized chunk into manageable pieces
+      const subChunks: ChunkWithOffsets[] = []
+      let position = 0
+
+      while (position < chunk.content.length) {
+        const end = Math.min(position + IDEAL_SPLIT_SIZE, chunk.content.length)
+        const subContent = chunk.content.substring(position, end)
+
+        subChunks.push({
+          content: subContent.trim(),
+          start_offset: absoluteStart + position,
+          end_offset: absoluteStart + end,
+          metadata: {
+            themes: chunk.themes || ['general'],
+            concepts: chunk.concepts || [],
+            importance: chunk.importance || 0.5,
+            summary: chunk.summary ? `${chunk.summary} (part ${subChunks.length + 1})` : undefined,
+            domain: chunk.domain || undefined,
+            emotional: chunk.emotional || { polarity: 0, primaryEmotion: 'neutral', intensity: 0 }
+          }
+        })
+
+        position = end
+      }
+
+      console.log(`[AI Metadata] Split oversized chunk into ${subChunks.length} sub-chunks`)
+      return subChunks
     }
 
     // Validate themes
@@ -499,7 +552,8 @@ function parseMetadataResponse(
       }
     }
 
-    return {
+    // Return single validated chunk (normal case)
+    return [{
       content: chunk.content.trim(),
       start_offset: absoluteStart,
       end_offset: absoluteEnd,
@@ -511,7 +565,7 @@ function parseMetadataResponse(
         domain: chunk.domain || undefined,
         emotional: chunk.emotional
       }
-    }
+    }]
   })
 
   return validated
