@@ -222,3 +222,105 @@ export function formatTranscriptToMarkdown(
     return `[[${timestamp}](${deepLink})] ${segment.text}`
   }).join('\n\n')
 }
+
+/**
+ * Calculates the video timestamp for a chunk based on its character offset.
+ * Maps chunk position to the corresponding timestamp segment from document metadata.
+ *
+ * This function enables "Watch at 9:35" links in the frontend by calculating
+ * which video timestamp corresponds to a chunk's position in the document.
+ *
+ * @param chunk - Chunk with start_offset (character position in document)
+ * @param document - Document with source_metadata containing timestamps
+ * @returns Video timestamp info with seconds and optional URL, or null if not a YouTube document
+ *
+ * @example
+ * const result = getVideoTimestamp(
+ *   { start_offset: 1250 },
+ *   {
+ *     source_type: 'youtube',
+ *     source_metadata: {
+ *       videoId: 'abc123',
+ *       isTranscript: true,
+ *       timestamps: [
+ *         { start_seconds: 0, end_seconds: 575, text: 'Intro...' },
+ *         { start_seconds: 575, end_seconds: 1847, text: 'Main content...' }
+ *       ]
+ *     }
+ *   }
+ * )
+ * // Returns: { seconds: 575, url: 'https://youtube.com/watch?v=abc123&t=575s', hasVideoLink: true }
+ *
+ * @example
+ * // For pasted transcripts (no videoId)
+ * const result = getVideoTimestamp(
+ *   { start_offset: 500 },
+ *   {
+ *     source_type: 'youtube_transcript',
+ *     source_metadata: {
+ *       isTranscript: true,
+ *       timestamps: [...]
+ *     }
+ *   }
+ * )
+ * // Returns: { seconds: 30, url: null, hasVideoLink: false }
+ */
+export function getVideoTimestamp(
+  chunk: { start_offset: number },
+  document: {
+    source_type?: string
+    source_metadata?: {
+      videoId?: string
+      isTranscript?: boolean
+      timestamps?: Array<{
+        start_seconds: number
+        end_seconds: number
+        text: string
+      }>
+    }
+  }
+): { seconds: number; url: string | null; hasVideoLink: boolean } | null {
+  // Return null if not a YouTube document
+  if (!document.source_type || !['youtube', 'youtube_transcript'].includes(document.source_type)) {
+    return null
+  }
+
+  // Return null if no timestamps available
+  if (!document.source_metadata?.isTranscript || !document.source_metadata.timestamps) {
+    return null
+  }
+
+  const timestamps = document.source_metadata.timestamps
+  let charCount = 0
+
+  // Find which timestamp segment contains this chunk's start_offset
+  for (const segment of timestamps) {
+    const segmentLength = segment.text.length
+
+    // Check if chunk offset falls within this segment
+    if (chunk.start_offset >= charCount && chunk.start_offset < charCount + segmentLength) {
+      const videoId = document.source_metadata.videoId
+
+      // Return with video URL if we have a videoId (real YouTube video)
+      if (videoId) {
+        return {
+          seconds: segment.start_seconds,
+          url: `https://youtube.com/watch?v=${videoId}&t=${segment.start_seconds}s`,
+          hasVideoLink: true
+        }
+      } else {
+        // Pasted transcript: no video link, just timestamp
+        return {
+          seconds: segment.start_seconds,
+          url: null,
+          hasVideoLink: false
+        }
+      }
+    }
+
+    charCount += segmentLength
+  }
+
+  // No matching segment found
+  return null
+}
