@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rhizome V2 is an **AI-first document processing system** with **7-engine collision detection** for discovering connections between ideas. It transforms documents into structured knowledge through clean markdown, semantic chunking, and aggressive connection synthesis.
+Rhizome V2 is an **AI-first document processing system** with **3-engine collision detection** for discovering connections between ideas. It transforms documents into structured knowledge through clean markdown, semantic chunking, and aggressive connection synthesis.
 
 **This is a GREENFIELD APP, we are NOT CONCERNED ABOUT BACKWARD COMPATIBILITY!!**
 
@@ -14,17 +14,13 @@ Rhizome V2 is an **AI-first document processing system** with **7-engine collisi
 
 **Key Documents**:
 - `docs/APP_VISION.md` - Core philosophy and vision
-- `docs/USER_FLOW.md` - Core philosophy and vision
+- `docs/USER_FLOW.md` - Core user flow
 - `docs/IMPLEMENTATION_STATUS.md` - Current feature status
-- `docs/ARCHITECTURE.md` - System architecture (first 1000 lines = implemented)
+- `docs/ARCHITECTURE.md` - System architecture
 
 ## Project Context
 
-**ARCHON PROJECT ID**: a2232595-4e55-41d2-a041-1a4a8a4ff3c6
-
 This is a personal tool optimized for aggressive connection detection and knowledge synthesis. Not designed for multi-user or enterprise use. 
-
-
 
 ## Core Architecture
 
@@ -34,17 +30,31 @@ This is a personal tool optimized for aggressive connection detection and knowle
 - **Modular Processors**: Each format has dedicated processor with error recovery
 - **YouTube Enhancement**: Transcript cleaning, fuzzy positioning for annotations
 
-### 2. 7-Engine Collision Detection System ✅ COMPLETE
-```typescript
-// Implemented engines in worker/engines/
-- semantic-similarity.ts    // Embedding-based similarity (25% weight)
-- conceptual-density.ts      // Concept clustering detection (20% weight)  
-- structural-pattern.ts      // Document structure matching (15% weight)
-- citation-network.ts        // Reference graph analysis (15% weight)
-- temporal-proximity.ts      // Time-based clustering (10% weight)
-- contradiction-detection.ts // Opposing viewpoint finder (10% weight)
-- emotional-resonance.ts     // Emotional pattern matching (5% weight)
-```
+### The 3-Engine System
+
+Dropped from 7 engines to 3. Each does something distinct:
+
+#### 1. Semantic Similarity (Baseline)
+- Fast embedding-based search
+- Finds "these say the same thing"
+- Uses pgvector indexes
+- No AI calls, just cosine distance
+- Weight: 0.25
+
+#### 2. Contradiction Detection (Enhanced)
+- Finds conceptual tensions using metadata
+- Same concepts + opposite emotional polarity = tension
+- "Paranoia" discussed positively vs negatively
+- Uses existing metadata (concepts + polarity), no AI calls
+- Falls back to syntax-based detection if metadata insufficient
+- Weight: 0.40 (highest priority)
+
+#### 3. Thematic Bridge (AI-Powered)
+- Cross-domain concept matching
+- "Paranoia in Gravity's Rainbow ↔ surveillance capitalism"
+- Aggressive filtering: importance > 0.6, cross-document, different domains
+- AI analyzes only ~200 chunk pairs per document
+- Weight: 0.35
 
 ### 3. User-Configurable Weight System ✅ COMPLETE
 - Database table: `user_preferences` (migration 016)
@@ -133,7 +143,7 @@ This is a personal tool optimized for aggressive connection detection and knowle
 ### 🚧 IN PROGRESS
 
 #### Document Reader & Annotations
-- [ ] MDX-based markdown renderer
+- [ ] Markdown renderer
 - [ ] Virtual scrolling for performance
 - [ ] Text selection → annotation flow
 - [ ] Annotation persistence with ECS
@@ -222,55 +232,6 @@ const flashcards = await ecs.query(
 await ecs.updateComponent(componentId, { ease: 3.0 }, userId)
 ```
 
-### Processing a Document
-```typescript
-// Server Action in src/app/actions/documents.ts
-'use server'
-
-export async function uploadDocument(formData: FormData) {
-  const file = formData.get('file') as File
-  const sourceType = detectSourceType(file.name)
-  
-  // Upload to storage
-  const storagePath = `${userId}/${docId}/source.pdf`
-  await supabase.storage.from('documents').upload(storagePath, file)
-  
-  // Create document record
-  await supabase.from('documents').insert({
-    id: docId,
-    user_id: userId,
-    title: file.name,
-    storage_path: storagePath,
-    source_type: sourceType,
-    processing_status: 'pending'
-  })
-  
-  // Trigger background processing
-  await supabase.from('background_jobs').insert({
-    job_type: 'process-document',
-    input_data: { document_id: docId, source_type: sourceType }
-  })
-}
-```
-
-### Configuring Engine Weights
-```typescript
-// Update user preferences
-await supabase.rpc('update_engine_weights', {
-  p_user_id: userId,
-  p_weights: {
-    'semantic-similarity': 0.30,      // Boost semantic matching
-    'conceptual-density': 0.25,       // Increase concept clustering
-    'structural-pattern': 0.10,       // Reduce structure weight
-    'citation-network': 0.15,
-    'temporal-proximity': 0.10,
-    'contradiction-detection': 0.05,
-    'emotional-resonance': 0.05
-  },
-  p_normalization_method: 'sigmoid',  // Smooth score distribution
-  p_preset_name: 'custom'
-})
-```
 
 ## Architecture Patterns
 
@@ -337,7 +298,7 @@ This project uses a **dual-module architecture** with distinct testing and depen
 
 **Worker Module** (`/worker/`) - Node.js background processing
 - Document processors (PDF, YouTube, Web, etc.)
-- 7-engine collision detection system
+- 3-engine collision detection system
 - Gemini AI integration and embeddings
 - Jest + node environment for integration testing
 
@@ -430,15 +391,6 @@ npm run dev:next             # Next.js on port 3000
 7. **Never test without mocks in CI** - Use `validate:metadata` not `validate:metadata:real`
 8. **Never commit node_modules** - Check .gitignore in both root and worker/
 9. **Never modify worker deps without testing** - Worker has strict ESM requirements
-
-### PDF Offset Behavior
-
-**Important Note on PDF Chunk Offsets:**
-- PDF chunks' `start_offset` and `end_offset` refer to character positions in the **generated markdown**, not the original PDF
-- This is because PDF processing involves AI transformation: `PDF → Gemini Files API → Markdown → Chunking`
-- Offsets are useful for navigating within the stored markdown content
-- For linking back to PDF pages, use `chunk_index` and content matching instead
-- Other formats (markdown, text, paste) have offsets that directly correspond to the original source
 
 ## Testing Guidelines
 

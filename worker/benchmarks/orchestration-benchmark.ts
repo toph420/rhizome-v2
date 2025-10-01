@@ -1,16 +1,12 @@
 /**
- * Performance benchmark for the 7-engine collision detection system.
- * Tests with 50-chunk documents to verify <5 second performance target.
+ * Performance benchmark for the 3-engine collision detection system.
+ * Tests with 100-chunk documents to verify <500ms performance target.
  */
 
 import { CollisionOrchestrator } from '../engines/orchestrator';
 import { SemanticSimilarityEngine } from '../engines/semantic-similarity';
-import { StructuralPatternEngine } from '../engines/structural-pattern';
-import { TemporalProximityEngine } from '../engines/temporal-proximity';
-import { ConceptualDensityEngine } from '../engines/conceptual-density';
-import { EmotionalResonanceEngine } from '../engines/emotional-resonance';
-import { CitationNetworkEngine } from '../engines/citation-network';
 import { ContradictionDetectionEngine } from '../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../engines/thematic-bridge';
 import { CollisionDetectionInput, EngineType } from '../engines/types';
 
 // Color codes for console output
@@ -47,23 +43,32 @@ function generateTestChunks(count: number) {
     
     chunks.push({
       id: `chunk-${i}`,
+      document_id: `doc-${Math.floor(i / 10)}`,
+      chunk_index: i,
       content: `This is test content about ${topic}. It discusses various aspects including 
                 ${relatedTopic} integration and future implications. The analysis shows that
                 ${topic} has significant potential for transformation in multiple sectors.`,
       embedding: Array(768).fill(0).map(() => Math.random() * 0.4 - 0.2),
       metadata: {
         themes: [topic, relatedTopic, 'technology', 'innovation'],
-        key_concepts: [topic, `${topic} applications`, `${topic} impact`],
+        key_concepts: {
+          concepts: [
+            { term: topic, importance: 0.8 },
+            { term: `${topic} applications`, importance: 0.6 },
+            { term: `${topic} impact`, importance: 0.7 }
+          ]
+        },
         emotional_tone: {
-          sentiment: sentiments[i % sentiments.length],
-          emotions: ['analytical', 'informative'],
+          primary_emotion: sentiments[i % sentiments.length],
           polarity: Math.random() * 2 - 1,
         },
-        structural_type: structuralTypes[i % structuralTypes.length],
-        importance_score: 0.5 + Math.random() * 0.5,
-        timestamp: new Date(2024, 0, 1 + (i % 30)).toISOString(),
-        temporal_markers: [`2024-01-${String(1 + (i % 30)).padStart(2, '0')}`],
-        references: i % 3 === 0 ? [`Reference ${i}`, `Citation ${i}`] : [],
+        importance: 0.5 + Math.random() * 0.5,
+        temporal_info: {
+          timestamp: new Date(2024, 0, 1 + (i % 30)).toISOString(),
+        },
+        citations: i % 3 === 0 ? {
+          references: [`Reference ${i}`, `Citation ${i}`]
+        } : undefined,
       },
     });
   }
@@ -88,9 +93,9 @@ async function runBenchmark(
   
   const input: CollisionDetectionInput = {
     sourceChunk,
-    candidateChunks,
+    targetChunks: candidateChunks,
     config: {
-      limit: 50,
+      maxResults: 50,
       minScore: 0.3,
     },
   };
@@ -114,14 +119,14 @@ async function runBenchmarkSuite(
   chunkCounts: number[] = [10, 25, 50, 75, 100]
 ) {
   console.log(`${colors.bright}${colors.blue}═══════════════════════════════════════════════════`);
-  console.log(`   7-Engine Collision Detection Performance Benchmark`);
+  console.log(`   3-Engine Collision Detection Performance Benchmark`);
   console.log(`═══════════════════════════════════════════════════${colors.reset}\n`);
   
   // Initialize orchestrator
   const orchestrator = new CollisionOrchestrator({
     parallel: true,
-    maxConcurrency: 7,
-    globalTimeout: 5000,
+    maxConcurrency: 3,
+    globalTimeout: 10000, // Increased for AI processing
     cache: {
       enabled: true,
       ttl: 300000,
@@ -129,15 +134,18 @@ async function runBenchmarkSuite(
     },
   });
   
-  // Register all engines
+  // Get API key for ThematicBridge
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) {
+    console.error('GOOGLE_AI_API_KEY environment variable is required');
+    process.exit(1);
+  }
+  
+  // Register the 3 engines
   const engines = [
     new SemanticSimilarityEngine(),
-    new StructuralPatternEngine(),
-    new TemporalProximityEngine(),
-    new ConceptualDensityEngine(),
-    new EmotionalResonanceEngine(),
-    new CitationNetworkEngine(),
     new ContradictionDetectionEngine(),
+    new ThematicBridgeEngine({ apiKey }),
   ];
   
   orchestrator.registerEngines(engines);
@@ -195,12 +203,12 @@ async function runBenchmarkSuite(
     }
     
     // Performance assessment
-    if (chunkCount === 50) {
-      console.log(`\n  ${colors.bright}50-Chunk Performance Target:${colors.reset}`);
-      if (avgTime < 5000) {
-        console.log(`    ${colors.green}✓ PASSED: ${avgTime.toFixed(2)}ms < 5000ms${colors.reset}`);
+    if (chunkCount === 100) {
+      console.log(`\n  ${colors.bright}100-Chunk Performance Target:${colors.reset}`);
+      if (avgTime < 500) {
+        console.log(`    ${colors.green}✓ PASSED: ${avgTime.toFixed(2)}ms < 500ms${colors.reset}`);
       } else {
-        console.log(`    ${colors.red}✗ FAILED: ${avgTime.toFixed(2)}ms > 5000ms${colors.reset}`);
+        console.log(`    ${colors.red}✗ FAILED: ${avgTime.toFixed(2)}ms > 500ms${colors.reset}`);
       }
     }
     
@@ -224,22 +232,25 @@ async function runStressTest(
   console.log(`   Stress Test: ${concurrentRequests} Concurrent Requests`);
   console.log(`═══════════════════════════════════════════════════${colors.reset}\n`);
   
+  // Get API key for ThematicBridge
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) {
+    console.error('GOOGLE_AI_API_KEY environment variable is required');
+    process.exit(1);
+  }
+  
   // Create multiple orchestrators (simulating different workers)
   const orchestrators = Array.from({ length: concurrentRequests }, () => {
     const orch = new CollisionOrchestrator({
       parallel: true,
-      maxConcurrency: 7,
-      globalTimeout: 5000,
+      maxConcurrency: 3,
+      globalTimeout: 10000,
     });
     
     orch.registerEngines([
       new SemanticSimilarityEngine(),
-      new StructuralPatternEngine(),
-      new TemporalProximityEngine(),
-      new ConceptualDensityEngine(),
-      new EmotionalResonanceEngine(),
-      new CitationNetworkEngine(),
       new ContradictionDetectionEngine(),
+      new ThematicBridgeEngine({ apiKey }),
     ]);
     
     return orch;
@@ -281,10 +292,10 @@ async function main() {
     // Run standard benchmark
     await runBenchmarkSuite();
     
-    // Run specific 50-chunk test
-    if (args.includes('--50')) {
-      console.log(`${colors.bright}${colors.cyan}Running focused 50-chunk test...${colors.reset}\n`);
-      await runBenchmarkSuite(10, [50]);
+    // Run specific 100-chunk test
+    if (args.includes('--100')) {
+      console.log(`${colors.bright}${colors.cyan}Running focused 100-chunk test...${colors.reset}\n`);
+      await runBenchmarkSuite(10, [100]);
     }
   }
 }

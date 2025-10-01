@@ -4,14 +4,15 @@
  */
 
 import { CollisionOrchestrator } from '../engines/orchestrator';
-import { 
-  CollisionEngine, 
-  CollisionDetectionInput, 
-  EngineType, 
+import {
+  CollisionEngine,
+  CollisionDetectionInput,
+  EngineType,
   CollisionResult,
-  ChunkWithMetadata 
+  ChunkWithMetadata
 } from '../engines/types';
 import { PerformanceMonitor } from '../lib/performance-monitor';
+import { z } from 'zod';
 
 // Mock engine implementation for testing
 class MockEngine implements CollisionEngine {
@@ -23,7 +24,7 @@ class MockEngine implements CollisionEngine {
   async detect(input: CollisionDetectionInput): Promise<CollisionResult[]> {
     // Simulate processing time
     await new Promise(resolve => setTimeout(resolve, this.processingTime));
-    
+
     // Return mock results
     return input.targetChunks?.slice(0, 5).map(chunk => ({
       sourceChunkId: input.sourceChunk.id,
@@ -39,6 +40,10 @@ class MockEngine implements CollisionEngine {
     return true;
   }
 
+  getConfigSchema(): z.ZodSchema {
+    return z.object({});
+  }
+
   async cleanup(): Promise<void> {
     // No cleanup needed for mock
   }
@@ -47,7 +52,7 @@ class MockEngine implements CollisionEngine {
 // Generate test chunks
 function generateTestChunks(count: number): ChunkWithMetadata[] {
   const chunks: ChunkWithMetadata[] = [];
-  
+
   for (let i = 0; i < count; i++) {
     chunks.push({
       id: `chunk-${i}`,
@@ -55,11 +60,13 @@ function generateTestChunks(count: number): ChunkWithMetadata[] {
       chunk_index: i,
       content: `Test content for chunk ${i}. This is a sample text that discusses various topics.`,
       embedding: Array(768).fill(0).map(() => Math.random() * 0.4 - 0.2),
-      themes: ['test', 'sample', 'chunk'],
-      importance_score: 0.5 + Math.random() * 0.5,
+      metadata: {
+        themes: ['test', 'sample', 'chunk'],
+        importance: 0.5 + Math.random() * 0.5,
+      },
     });
   }
-  
+
   return chunks;
 }
 
@@ -69,10 +76,10 @@ async function runPerformanceTest() {
   console.log('   Target: <5 seconds for 50-chunk detection');
   console.log('═══════════════════════════════════════════════════\n');
 
-  // Initialize orchestrator
+  // Initialize orchestrator for 3-engine system
   const orchestrator = new CollisionOrchestrator({
     parallel: true,
-    maxConcurrency: 7,
+    maxConcurrency: 3,
     globalTimeout: 5000,
     cache: {
       enabled: true,
@@ -81,20 +88,16 @@ async function runPerformanceTest() {
     },
   });
 
-  // Register mock engines with varying processing times
+  // Register 3 active engines with varying processing times
   const engines = [
     new MockEngine(EngineType.SEMANTIC_SIMILARITY, 150),
-    new MockEngine(EngineType.STRUCTURAL_PATTERN, 100),
-    new MockEngine(EngineType.TEMPORAL_PROXIMITY, 80),
-    new MockEngine(EngineType.CONCEPTUAL_DENSITY, 120),
-    new MockEngine(EngineType.EMOTIONAL_RESONANCE, 90),
-    new MockEngine(EngineType.CITATION_NETWORK, 110),
     new MockEngine(EngineType.CONTRADICTION_DETECTION, 140),
+    new MockEngine(EngineType.THEMATIC_BRIDGE, 120),
   ];
 
   orchestrator.registerEngines(engines);
 
-  console.log(`Registered ${engines.length} mock engines\n`);
+  console.log(`Registered ${engines.length} mock engines (3-engine optimized system)\n`);
 
   // Test with different chunk counts
   const chunkCounts = [10, 25, 50, 75, 100];

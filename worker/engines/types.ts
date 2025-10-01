@@ -54,15 +54,12 @@ export interface CollisionResult {
 
 /**
  * Types of collision detection engines.
+ * Optimized 3-engine system for efficient connection discovery.
  */
 export enum EngineType {
   SEMANTIC_SIMILARITY = 'semantic_similarity',
-  STRUCTURAL_PATTERN = 'structural_pattern',
-  TEMPORAL_PROXIMITY = 'temporal_proximity',
-  CONCEPTUAL_DENSITY = 'conceptual_density',
-  EMOTIONAL_RESONANCE = 'emotional_resonance',
-  CITATION_NETWORK = 'citation_network',
-  CONTRADICTION_DETECTION = 'contradiction_detection'
+  CONTRADICTION_DETECTION = 'contradiction_detection',
+  THEMATIC_BRIDGE = 'thematic_bridge'
 }
 
 /**
@@ -79,6 +76,25 @@ export interface EngineConfig {
   enableCache?: boolean;
   /** Custom parameters for specific engines */
   customParams?: Record<string, unknown>;
+}
+
+/**
+ * Bridge analysis result from AI processing.
+ * Used by ThematicBridge engine for AI-powered connection analysis.
+ */
+export interface BridgeAnalysis {
+  /** Type of thematic bridge detected */
+  bridgeType: 'conceptual' | 'causal' | 'temporal' | 'argumentative' | 'metaphorical' | 'contextual';
+  /** Strength of the bridge connection (0-1) */
+  strength: number;
+  /** Human-readable explanation of the connection */
+  explanation: string;
+  /** Key concepts that form the bridge */
+  bridgeConcepts?: string[];
+  /** Supporting evidence or quotes */
+  evidence?: string[];
+  /** Confidence level of the AI analysis */
+  confidence: 'high' | 'medium' | 'low';
 }
 
 /**
@@ -203,7 +219,7 @@ export interface AggregatedResults {
  * Weight configuration for scoring system.
  */
 export interface WeightConfig {
-  weights: Record<EngineType, number>;
+  weights: Partial<Record<EngineType, number>>;
   normalizationMethod: 'linear' | 'sigmoid' | 'softmax';
   combineMethod: 'sum' | 'average' | 'max' | 'harmonic_mean';
 }
@@ -280,16 +296,12 @@ export const WeightConfigSchema = z.object({
   combineMethod: z.enum(['sum', 'average', 'max', 'harmonic_mean']),
 });
 
-// Default weight configuration
+// Default weight configuration for 3-engine system
 export const DEFAULT_WEIGHTS: WeightConfig = {
   weights: {
     [EngineType.SEMANTIC_SIMILARITY]: 0.25,
-    [EngineType.STRUCTURAL_PATTERN]: 0.15,
-    [EngineType.TEMPORAL_PROXIMITY]: 0.10,
-    [EngineType.CONCEPTUAL_DENSITY]: 0.20,
-    [EngineType.EMOTIONAL_RESONANCE]: 0.10,
-    [EngineType.CITATION_NETWORK]: 0.15,
-    [EngineType.CONTRADICTION_DETECTION]: 0.05,
+    [EngineType.CONTRADICTION_DETECTION]: 0.40,
+    [EngineType.THEMATIC_BRIDGE]: 0.35,
   },
   normalizationMethod: 'linear',
   combineMethod: 'sum',

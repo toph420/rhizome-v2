@@ -7,10 +7,17 @@ import { SourceProcessor } from './base.js'
 import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { simpleMarkdownChunking } from '../lib/markdown-chunking.js'
 import { GeminiFileCache } from '../lib/gemini-cache.js'
+import { extractLargePDF, DEFAULT_BATCH_CONFIG } from '../lib/pdf-batch-utils.js'
+import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
+import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 
 // Model configuration
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
 const MAX_OUTPUT_TOKENS = 65536
+
+// Thresholds for batched processing
+const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
+const LARGE_PDF_SIZE_MB_THRESHOLD = 10 // Or files larger than 10MB
 
 /**
  * Extraction prompt for PDF processing.
@@ -50,25 +57,42 @@ export class PDFProcessor extends SourceProcessor {
    */
   async process(): Promise<ProcessResult> {
     const storagePath = this.getStoragePath()
-    
+
     // Stage 1: Download PDF from storage
     await this.updateProgress(10, 'download', 'fetching', 'Retrieving PDF from storage')
-    
+
     const { data: signedUrlData } = await this.supabase.storage
       .from('documents')
       .createSignedUrl(`${storagePath}/source.pdf`, 3600)
-    
+
     if (!signedUrlData?.signedUrl) {
       throw new Error('Failed to create signed URL for PDF')
     }
-    
+
     const fileResponse = await fetch(signedUrlData.signedUrl)
     const fileBuffer = await fileResponse.arrayBuffer()
-    
+
     const fileSizeKB = Math.round(fileBuffer.byteLength / 1024)
     const fileSizeMB = fileBuffer.byteLength / (1024 * 1024)
-    
+
     await this.updateProgress(12, 'download', 'complete', `Downloaded ${fileSizeKB} KB file`)
+
+    // Check if we should use batched processing based on file size
+    // Note: Page count check will happen after initial extraction if needed
+    const shouldUseBatchedProcessing = fileSizeMB > LARGE_PDF_SIZE_MB_THRESHOLD
+
+    if (shouldUseBatchedProcessing) {
+      console.log(
+        `[PDFProcessor] Large PDF detected (${fileSizeMB.toFixed(1)}MB > ${LARGE_PDF_SIZE_MB_THRESHOLD}MB threshold), ` +
+        `using batched extraction`
+      )
+      return await this.processBatched(fileBuffer, fileSizeMB)
+    } else {
+      console.log(
+        `[PDFProcessor] Standard size PDF (${fileSizeMB.toFixed(1)}MB), ` +
+        `using standard extraction`
+      )
+    }
     
     // Stage 2: Upload to Gemini Files API (with caching)
     await this.updateProgress(15, 'extract', 'uploading', `Processing ${fileSizeKB} KB PDF with Gemini`)
@@ -113,31 +137,71 @@ export class PDFProcessor extends SourceProcessor {
     
     const markdownKB = Math.round(markdown.length / 1024)
     await this.updateProgress(40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB)`)
-    
+
+    // ALWAYS use AI metadata extraction (no conditional logic)
+    console.log(`[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document`)
+
+    await this.updateProgress(45, 'metadata', 'ai-extraction', 'Processing with AI metadata extraction...')
+
+    const aiChunks = await batchChunkAndExtractMetadata(
+      markdown,
+      {
+        apiKey: process.env.GOOGLE_AI_API_KEY,
+        modelName: GEMINI_MODEL,
+        enableProgress: true
+      },
+      async (progress: MetadataExtractionProgress) => {
+        // Map AI extraction progress to overall progress (45-85%)
+        const aiProgressPercent = progress.currentBatch / progress.totalBatches
+        const overallPercent = 45 + Math.floor(aiProgressPercent * 40)
+
+        await this.updateProgress(
+          overallPercent,
+          'metadata',
+          progress.stage,
+          `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches} (${progress.chunksProcessed}/${progress.totalChunks} chunks)`
+        )
+      }
+    )
+
+    // Convert AI chunks to ProcessedChunk format
+    const enrichedChunks = aiChunks.map((aiChunk, index) => ({
+      document_id: this.job.document_id,
+      content: aiChunk.content,
+      chunk_index: index,
+      themes: aiChunk.metadata.themes,
+      importance_score: aiChunk.metadata.importance,
+      summary: aiChunk.metadata.summary,
+      start_offset: 0,
+      end_offset: aiChunk.content.length,
+      word_count: aiChunk.content.split(/\s+/).length
+    }))
+
+    await this.updateProgress(
+      85,
+      'metadata',
+      'complete',
+      `Extracted ${aiChunks.length} chunks with AI metadata`
+    )
+
     // Calculate additional metadata
     const wordCount = markdown.split(/\s+/).filter(word => word.length > 0).length
     const outline = this.extractOutline(markdown)
-    
-    // Stage 6: Enrich chunks with metadata extraction
-    await this.updateProgress(85, 'finalize', 'metadata', 'Extracting metadata for collision detection')
-    const enrichedChunks = await this.enrichChunksWithMetadata(chunks.map((chunk, index) => ({
-      document_id: this.job.document_id,
-      content: chunk.content,
-      chunk_index: index,
-      themes: chunk.themes,
-      importance_score: chunk.importance || 0.5,
-      summary: chunk.summary
-    })))
-    
+
     // Stage 7: Prepare final result
     await this.updateProgress(90, 'finalize', 'complete', 'Processing complete')
-    
+
     // Return complete ProcessResult for handler to save
     return {
       markdown,
       chunks: enrichedChunks,
       metadata: {
-        sourceUrl: this.job.metadata?.source_url
+        sourceUrl: this.job.metadata?.source_url,
+        extra: {
+          usedAIMetadata: true,
+          processingMode: 'standard',
+          markdownSize: markdown.length
+        }
       },
       wordCount,
       outline
@@ -274,7 +338,7 @@ export class PDFProcessor extends SourceProcessor {
 
   /**
    * Extract document outline from markdown.
-   * 
+   *
    * @param markdown - Processed markdown content
    * @returns Hierarchical outline structure
    */
@@ -283,37 +347,178 @@ export class PDFProcessor extends SourceProcessor {
     const outline: any[] = []
     const stack: any[] = []
     let offset = 0
-    
+
     for (const line of lines) {
       const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
       if (headingMatch) {
         const level = headingMatch[1].length
         const title = headingMatch[2].trim()
-        
+
         const section = {
           title,
           level,
           offset,
           children: []
         }
-        
+
         // Find parent level
         while (stack.length > 0 && stack[stack.length - 1].level >= level) {
           stack.pop()
         }
-        
+
         if (stack.length === 0) {
           outline.push(section)
         } else {
           stack[stack.length - 1].children.push(section)
         }
-        
+
         stack.push(section)
       }
-      
+
       offset += line.length + 1 // +1 for newline
     }
-    
+
     return outline
+  }
+
+  /**
+   * Process large PDF using batched extraction.
+   * Splits PDF into 100-page batches with 10-page overlap.
+   *
+   * @param fileBuffer - PDF file buffer
+   * @param fileSizeMB - File size in MB for logging
+   * @returns Processed result with stitched markdown and chunks
+   */
+  private async processBatched(
+    fileBuffer: ArrayBuffer,
+    fileSizeMB: number
+  ): Promise<ProcessResult> {
+    // Stage 2: Extract using batched processing
+    await this.updateProgress(
+      15,
+      'extract',
+      'batching',
+      `Processing large PDF (${fileSizeMB.toFixed(1)}MB) in batches...`
+    )
+
+    const result = await extractLargePDF(
+      this.ai,
+      fileBuffer,
+      async (batchNumber, totalBatches) => {
+        // Update progress as batches complete
+        // Scale from 15% to 40% during extraction
+        const progressPercent = 15 + Math.floor((batchNumber / totalBatches) * 25)
+        await this.updateProgress(
+          progressPercent,
+          'extract',
+          'batch',
+          `Extracting batch ${batchNumber}/${totalBatches}...`
+        )
+      },
+      {
+        pagesPerBatch: DEFAULT_BATCH_CONFIG.pagesPerBatch,
+        overlapPages: DEFAULT_BATCH_CONFIG.overlapPages,
+        model: GEMINI_MODEL,
+        maxOutputTokens: MAX_OUTPUT_TOKENS
+      }
+    )
+
+    if (result.failedCount > 0) {
+      console.warn(
+        `[PDFProcessor] ${result.failedCount}/${result.batches.length} batches failed. ` +
+        `Proceeding with partial results.`
+      )
+    }
+
+    // Note: Stitching will be handled in T-006
+    // For now, batches are concatenated with separators
+    const markdown = result.markdown
+
+    const markdownKB = Math.round(markdown.length / 1024)
+    await this.updateProgress(
+      40,
+      'extract',
+      'complete',
+      `Extracted ${result.totalPages} pages in ${result.batches.length} batches (${markdownKB} KB)`
+    )
+
+    // Stage 3: Create chunks with AI metadata extraction
+    await this.updateProgress(45, 'chunking', 'processing', 'Processing with AI metadata extraction...')
+
+    console.log(
+      `[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document ` +
+      `(batched processing)`
+    )
+
+    const aiChunks = await batchChunkAndExtractMetadata(
+      markdown,
+      {
+        apiKey: process.env.GOOGLE_AI_API_KEY,
+        modelName: GEMINI_MODEL,
+        enableProgress: true
+      },
+      async (progress: MetadataExtractionProgress) => {
+        // Map AI extraction progress to overall progress (45-85%)
+        const aiProgressPercent = progress.currentBatch / progress.totalBatches
+        const overallPercent = 45 + Math.floor(aiProgressPercent * 40)
+
+        await this.updateProgress(
+          overallPercent,
+          'metadata',
+          progress.stage,
+          `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches} (${progress.chunksProcessed}/${progress.totalChunks} chunks)`
+        )
+      }
+    )
+
+    await this.updateProgress(
+      85,
+      'metadata',
+      'complete',
+      `Extracted ${aiChunks.length} chunks with AI metadata`
+    )
+
+    // Convert AI chunks to ProcessedChunk format
+    const enrichedChunks = aiChunks.map((aiChunk, index) => ({
+      document_id: this.job.document_id,
+      content: aiChunk.content,
+      chunk_index: index,
+      themes: aiChunk.metadata.themes,
+      importance_score: aiChunk.metadata.importance,
+      summary: aiChunk.metadata.summary,
+      // Note: AI metadata system doesn't provide offsets yet
+      // These will be calculated if needed for annotation support
+      start_offset: 0,
+      end_offset: aiChunk.content.length,
+      word_count: aiChunk.content.split(/\s+/).length
+    }))
+
+    // Calculate additional document metadata
+    const wordCount = markdown.split(/\s+/).filter(word => word.length > 0).length
+    const outline = this.extractOutline(markdown)
+
+    // Stage 4: Prepare final result
+    await this.updateProgress(90, 'finalize', 'complete', 'Processing complete')
+
+    return {
+      markdown,
+      chunks: enrichedChunks,
+      metadata: {
+        sourceUrl: this.job.metadata?.source_url,
+        extra: {
+          batchInfo: {
+            totalBatches: result.batches.length,
+            successfulBatches: result.successCount,
+            failedBatches: result.failedCount,
+            totalPages: result.totalPages,
+            processingTimeMs: result.totalTime
+          },
+          usedAIMetadata: true,
+          processingMode: 'batched'
+        }
+      },
+      wordCount,
+      outline
+    }
   }
 }

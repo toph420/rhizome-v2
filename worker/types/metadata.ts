@@ -8,8 +8,6 @@
  * Contains all 7 metadata types for collision detection engines.
  */
 export interface ChunkMetadata {
-  /** Structural patterns in the content */
-  structural: StructuralMetadata
   /** Emotional tone and sentiment */
   emotional: EmotionalMetadata
   /** Key concepts and entities */
@@ -310,14 +308,6 @@ export type PartialChunkMetadata = Partial<ChunkMetadata> & {
  * Default metadata values for initialization.
  */
 export const DEFAULT_METADATA: ChunkMetadata = {
-  structural: {
-    patterns: [],
-    hierarchyDepth: 0,
-    listTypes: [],
-    hasTable: false,
-    hasCode: false,
-    confidence: 0
-  },
   emotional: {
     primaryEmotion: 'neutral',
     polarity: 0,
@@ -397,7 +387,7 @@ export const DEFAULT_METADATA: ChunkMetadata = {
  * Validation function for metadata completeness.
  */
 export function validateMetadata(metadata: Partial<ChunkMetadata>): QualityMetadata {
-  const fields = ['structural', 'emotional', 'concepts', 'narrative', 'references', 'domain']
+  const fields = ['emotional', 'concepts', 'narrative', 'references', 'domain']
   let extractedFields = 0
   const errors: Array<{ field: string; error: string }> = []
   
@@ -414,7 +404,7 @@ export function validateMetadata(metadata: Partial<ChunkMetadata>): QualityMetad
     extractedFields++
   }
   
-  const totalFields = metadata.structural?.hasCode ? 7 : 6
+  const totalFields = 6
   const completeness = extractedFields / totalFields
   
   return {
@@ -437,7 +427,7 @@ export function isCompleteMetadata(
   if (!metadata) return false
   
   const requiredFields: (keyof ChunkMetadata)[] = [
-    'structural', 'emotional', 'concepts', 
+    'emotional', 'concepts', 
     'narrative', 'references', 'domain', 'quality'
   ]
   

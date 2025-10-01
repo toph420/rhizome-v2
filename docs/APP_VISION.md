@@ -1,18 +1,20 @@
+# Updated APP_VISION.md
+
 # Rhizome: Personal Knowledge Synthesis Engine
 
 **Status:** Personal tool in active development. No external users, no compromises.
 
 ## Core Philosophy
 
-This is my personal thinking environment. Every feature is built for how I actually work, not how I imagine others might. The app aggressively surfaces connections, embraces complexity from day one, and optimizes for serendipitous discovery over user-friendliness.
+This is my personal thinking environment. Every feature is built for how I actually work, not how I imagine others might. The app surfaces meaningful connections using AI where it matters, optimizes for serendipitous discovery, and processes books of any size efficiently.
 
 ## Architecture Principles
 
-### 1. Maximum Intelligence, Minimum Friction
-- **No progressive disclosure** - All features available immediately
-- **Aggressive connection detection** - Surface everything, filter later
-- **Personal tuning** - Every algorithm weight is adjustable in real-time
-- **Experimental features** - Ship broken things, fix them when they annoy me
+### 1. Intelligence Where It Matters
+- **AI-powered for insight** - Cross-domain thematic bridges, rich metadata
+- **Local processing for speed** - Stitching, chunking, filtering
+- **Cost-aware design** - ~$0.50 per book through aggressive filtering
+- **No token limits** - Batched processing handles 1000+ page books
 
 ### 2. File-Over-App (But For Me)
 - Local files I can manipulate directly
@@ -22,72 +24,107 @@ This is my personal thinking environment. Every feature is built for how I actua
 
 ## Core Systems
 
-### Document Processing Pipeline (✅ BUILT)
+### Document Processing Pipeline
+
 ```
-Upload → Extract → Clean → Chunk → Fingerprint → Embed → Detect → Surface
+Upload → Extract (batched) → Stitch → Chunk + Metadata (batched) → Embed → Detect → Surface
 ```
 
-Every document gets:
-1. **Verbatim markdown conversion** - Full document preserved in `content.md`
-2. **Semantic chunking** - AI identifies complete thought units (300-500 words)
-3. **Deep thematic fingerprinting** - Themes, tone, structure, concepts per chunk
-4. **Multiple embedding strategies** - Semantic vectors for each chunk
-5. **Full collision detection** - All 7 engines, all the time
-6. **No filtering** - Store every possible connection, surface based on context
+#### For Large Books (500+ pages)
 
-### Collision Detection Engines (🚧 IN PROGRESS - All Running in Parallel)
+**Stage 1: Batched Extraction**
+- Extract 100 pages at a time with 10-page overlap
+- Gemini 2.0 Flash has 65k output token limit
+- 5-6 API calls for 500-page book
+- Cost: ~$0.12
 
-1. **Semantic Similarity** - Standard embedding distance
-2. **Thematic Bridges** - Cross-domain concept matching
-3. **Structural Isomorphisms** - Pattern recognition across contexts
-4. **Contradiction Tensions** - Productive disagreements
-5. **Emotional Resonance** - Mood/tone matching (experimental)
-6. **Methodological Echoes** - Similar analytical approaches
-7. **Temporal Rhythms** - Documents that follow similar narrative patterns
+**Stage 2: Intelligent Stitching**
+- Find overlapping content via fuzzy matching
+- Remove duplicates at boundaries
+- Local processing, free
 
-All engines write to same connection table. Every connection stored, no threshold filtering.
+**Stage 3: Batched Metadata Extraction**
+- Process 100k characters at a time
+- Extract per chunk: content, themes, concepts (with importance), emotional_tone (polarity + emotion), importance_score
+- 10 API calls for 500-page book
+- Cost: ~$0.20
+
+**Stage 4: Embedding Generation**
+- Batch API call for all chunks
+- 768-dim vectors for semantic search
+- Cost: ~$0.02
+
+**Stage 5: Connection Detection**
+- 3 engines run in parallel
+- Aggressive filtering reduces 160k potential comparisons to ~200 AI calls
+- Cost: ~$0.20
+
+**Total: ~$0.54 per 500-page book**
+
+### The 3-Engine System
+
+Dropped from 7 engines to 3. Each does something distinct:
+
+#### 1. Semantic Similarity (Baseline)
+- Fast embedding-based search
+- Finds "these say the same thing"
+- Uses pgvector indexes
+- No AI calls, just cosine distance
+- Weight: 0.25
+
+#### 2. Contradiction Detection (Enhanced)
+- Finds conceptual tensions using metadata
+- Same concepts + opposite emotional polarity = tension
+- "Paranoia" discussed positively vs negatively
+- Uses existing metadata (concepts + polarity), no AI calls
+- Falls back to syntax-based detection if metadata insufficient
+- Weight: 0.40 (highest priority)
+
+#### 3. Thematic Bridge (AI-Powered)
+- Cross-domain concept matching
+- "Paranoia in Gravity's Rainbow ↔ surveillance capitalism"
+- Aggressive filtering: importance > 0.6, cross-document, different domains
+- AI analyzes only ~200 chunk pairs per document
+- Weight: 0.35
 
 ### Connection Scoring
 
-Personal preference weights (adjustable via config):
+Personal preference weights:
+```typescript
+contradiction_weight: 0.40  // Maximum friction (top priority)
+thematic_bridge_weight: 0.35  // Cross-domain discovery
+semantic_weight: 0.25  // Baseline similarity
 ```
-semantic_weight: 0.3
-thematic_weight: 0.9  # I care about concepts
-structural_weight: 0.7
-contradiction_weight: 1.0  # Maximum friction
-emotional_weight: 0.4
-methodological_weight: 0.8
-temporal_weight: 0.2
-```
+
+No preset modes. These are my weights. Adjustable in real-time via code or config.
 
 ### The Synthesis Flow
 
 1. **Chunks & Connections** (PostgreSQL)
-   - Immutable document chunks
-   - All connections stored (no strength threshold)
+   - Immutable document chunks with rich metadata
+   - All connections stored (filtered at display time)
    - Full version history
 
 2. **User Layer** (ECS)
-   - Annotations
+   - Annotations with global positions + chunk references
    - Flashcards
    - Sparks (quick captures with full context)
-   - Threads (grown aggressively, no waiting for "maturity")
+   - Threads (connection chains)
 
 3. **Intelligence Layer**
-   - Runs constantly in background
-   - Re-fingerprints on every Obsidian sync
-   - Learns from my validation patterns
-   - No compute limits - use GPT-4 if needed
+   - Runs on document upload (background job)
+   - Re-runs on manual reprocess
+   - ThematicBridge engine learns from validation patterns (future)
 
 ## Personal Optimizations
 
-### Obsidian Integration (Important Feature)
+### Obsidian Integration
 - Two-way sync between vault and Rhizome
-- Chunks regenerate on every sync
+- Chunks regenerate on sync
 - Fuzzy matching preserves connections when content changes
 - My folder structure becomes navigational hierarchy
-- Rhizome metadata written back as frontmatter (connections, themes, importance)
-- Cross-vault connections weighted higher (more interesting)
+- Rhizome metadata written back as frontmatter
+- Cross-vault connections weighted higher
 
 ### Connection Surfacing
 
@@ -97,24 +134,20 @@ temporal_weight: 0.2
 - **Surface**: Connections for visible chunks in sidebar
 - **Score**: Apply personal weights in real-time
 
-**Reading Mode**: Show ALL connections in sidebar, sorted by personal scoring
+**Reading Mode**: Show connections in sidebar, sorted by weighted score
 - Connections are chunk-to-chunk, not doc-to-doc
 - Click through to explore connection chains (A→B→C)
-- Adjust weights on the fly to tune what surfaces
+- Filter by type (contradictions, bridges, similarity)
 
 **Writing Mode**: Aggressive suggestion of related chunks while drafting
 - As you type, system finds relevant chunks across corpus
-- Suggests connections from your entire knowledge graph
+- Suggests connections from entire knowledge graph
 - Pull in quotes, references, contradictions
 
-**Research Mode**: Full graph visualization with all connection types visible
-- See the entire network of relationships
-- Filter by engine type (show only contradictions, only thematic bridges)
+**Research Mode**: Full graph visualization
+- See entire network of relationships
+- Filter by engine type
 - Zoom from bird's eye to chunk detail
-
-**Chaos Mode**: Random high-strength connection every hour as notification
-- Inject serendipity into routine reading
-- Surface buried connections that deserve attention
 
 ### The Reader Architecture (Critical Design)
 
@@ -127,7 +160,7 @@ temporal_weight: 0.2
 ```
 Full Document (content.md)     Semantic Chunks (database)
         ↓                              ↓
-   Display Layer    ←────┬───→   Connection Layer
+   Display Layer    ←────┬────→   Connection Layer
                          │
                    Bridge via:
               - Chunk boundaries (offsets)
@@ -143,143 +176,63 @@ Full Document (content.md)     Semantic Chunks (database)
 5. Connection graph operates entirely on chunk relationships
 6. Export/Obsidian sync uses full markdown (portable)
 
-**Why This Matters:**
-- You get narrative continuity (reading full documents)
-- System gets semantic precision (chunk-level connections)
-- Portability preserved (markdown files you own)
-- Connection discovery maximized (operates on thought units)
+## Cost Management
 
-No compromises. Both layers working in harmony.
+**Design philosophy:** AI where it provides insight, local processing everywhere else.
 
-### Experimental Features (Ship Immediately)
-- ✅ YouTube transcript extraction with timestamp preservation
-- ✅ Fuzzy position matching for resilient annotation recovery
-- ⏳ Voice note transcription → automatic spark creation
-- ⏳ PDF highlight import from Remarkable tablet
-- ⏳ Connection strength decay (unused connections weaken over time)
-- ⏳ Anti-connections (explicitly marked "these should NOT be connected")
-- ⏳ Connection chains (A→B→C traversal paths)
-- ⏳ Time-based threading (what was I thinking about in September?)
-- ⏳ Multiple AI models per engine (GPT-4 for nuance, Perplexity for contradictions)
-- ⏳ Auto-threading when sparks cluster within 30 minutes
+**Per-document costs (500-page book):**
+- Extraction: $0.12 (batched)
+- Metadata: $0.20 (batched, rich concepts/emotion)
+- Connection detection: $0.20 (filtered to ~200 AI calls)
+- Total: ~$0.52
 
-## Data Architecture
+**Cost controls:**
+- Importance filtering (only analyze important chunks)
+- Cross-document only (no self-connections)
+- Domain filtering (bridges connect different contexts)
+- Candidate limiting (top 15 per source chunk)
 
-### Hybrid Approach: Full Documents + Semantic Chunks
+**For 100 books:** ~$52
+**For 1000 books:** ~$520
 
-**File System (Source of Truth)**
-```
-storage/
-├── {doc_id}/content.md          # Full verbatim markdown (for reading)
-├── {doc_id}/annotations.json    # Sidecar annotations with global positions
-└── {doc_id}/metadata.json       # Document-level metadata
-```
+Acceptable for a personal tool that actually delivers on the vision.
 
-**PostgreSQL (Knowledge Graph)**
-```sql
--- Full documents for portability
-documents (
-  id, title, source_type,
-  storage_path,  -- Points to content.md
-  markdown_content,  -- Cached for quick access
-  processing_status,
-  created_at, updated_at
-)
+## What's Built
 
--- Chunks: Atomic units for connections
-chunks (
-  id, document_id, chunk_index,
-  content,  -- Semantic unit (300-500 words)
-  start_offset, end_offset,  -- Position in full document
-  themes[], tone[], patterns[], concepts[],
-  embedding vector(768),
-  importance float,
-  summary text,
-  user_overrides jsonb
-)
-
--- Connections: Where the magic happens
-connections (
-  source_chunk_id, target_chunk_id,
-  type enum(semantic|thematic|structural|contradiction|emotional|methodological|temporal),
-  strength float,
-  auto_detected boolean,
-  user_validated boolean,
-  discovered_at timestamp,
-  metadata jsonb,
-  INDEX on source_chunk_id,
-  INDEX on target_chunk_id,
-  INDEX on type,
-  INDEX on strength
-)
-```
-
-**Why Both?**
-- **Full markdown**: Natural reading flow, portability, Obsidian sync
-- **Chunks**: Where connections attach, what collision detection runs on
-- **Reader displays full document, connection system operates on chunks underneath**
-
-### ECS Layer
-- Annotations → ChunkRef component (points to specific chunk for connections)
-- Flashcards → ChunkRef component  
-- Sparks → ContextRef component (includes app state when created: visible chunks, active connections, navigation path, scroll position, engine states)
-- Threads → ConnectionRef[] component array
-
-**Annotation Architecture:**
-```typescript
-// Stored in annotations.json (file-over-app)
-{
-  id: "ann_123",
-  position: { start: 1547, end: 1623 },  // Global position in content.md
-  chunkId: "chunk-42",  // For connection lookups
-  content: { note: "...", tags: [...], color: "yellow" },
-  created_at: "2025-09-29T..."
-}
-
-// When reading: Map global position to visible markdown
-// When connecting: Use chunkId to find related chunks
-// Fuzzy matching: Resilient to content edits
-```
+1. ✅ Multi-format upload (PDFs, YouTube, text, paste)
+2. ✅ Batched extraction for large documents
+3. ✅ Intelligent stitching with overlap detection
+4. ✅ Batched metadata extraction (concepts, emotional_tone, themes)
+5. ✅ Embedding generation (batched)
+6. ✅ 3-engine collision detection (Semantic, Contradiction, ThematicBridge)
+7. 🚧 Document reader with connection surfacing (in progress)
+8. 🚧 Obsidian bidirectional sync (planned)
 
 ## Development Approach
 
-### What's Built
-1. ✅ Upload pipeline (PDFs, text, YouTube, drag-and-drop)
-2. ✅ Multi-stage processing (extract → clean → chunk → fingerprint → embed)
-3. ✅ Semantic chunking with AI (300-500 word thought units)
-4. ✅ Deep fingerprinting per chunk (themes, tone, patterns, concepts)
-5. ✅ Embedding generation (batched for performance)
-6. 🚧 7-engine collision detection (in progress)
-7. 🚧 Document reader with connection surfacing (next)
+### What Works
+- Batched processing scales to any book size
+- Rich metadata from AI (concepts with importance, emotional polarity)
+- Cost-effective through aggressive filtering
+- Clean 3-engine architecture
 
 ### Current Focus
-- Finish collision detection system (all 7 engines writing to connections table)
-- Build document reader that displays full markdown while surfacing chunk-level connections
-- Implement real-time weight tuning interface
-- Enable inline connection validation while reading
+- Build document reader with hybrid display
+- Test ThematicBridge on 10 real books
+- Tune weights based on connection quality
+- Add manual reprocessing for existing documents
 
 ### Immediate Next Steps
-1. Complete connection detection for all 7 engines
-2. Document reader with hybrid chunk/markdown approach:
-   - Display full markdown for natural reading flow
-   - Track visible chunks in viewport
-   - Surface connections for visible chunks in sidebar
-   - Real-time weight adjustment
-3. Build tuning interface (adjust engine weights on the fly)
-4. Validate connections inline while reading
-5. Obsidian bidirectional sync
-
-### No Compromises On
-- Every connection stored
-- Full version history
-- Instant collision detection
-- My workflow, not "best practices"
+1. Implement reader UI with viewport tracking
+2. Test connection quality on personal library
+3. Tune importance thresholds if needed
+4. Build Obsidian sync
 
 ### Explicitly Ignore
 - Performance optimization (until it personally annoys me)
-- Clean architecture (working code > pretty code)
-- User experience (I know how it works)
-- Scale considerations (it's just me)
+- Multi-user features (it's just me)
+- UI polish (functional > pretty)
+- Scale considerations (personal library, not production)
 
 ## Success Metrics
 
@@ -295,14 +248,17 @@ But:
 - Did a chunk-level connection lead to a spark?
 - Did a spark become a thread?
 - Did a thread become actual writing?
-- Did I discover a connection I wouldn't have made manually?
-- Did the collision detection surface something genuinely surprising?
-- Am I actually reading full documents while the connection system works underneath?
+- Did ThematicBridge surface a cross-domain insight I wouldn't have made manually?
+- Are contradictions showing me productive intellectual tension?
+- Am I reading full documents while the system works underneath?
 
 ## The Real Goal
 
-Build a thinking partner that knows my entire knowledge graph at the chunk level and aggressively suggests connections I wouldn't make myself. The hybrid approach means I read naturally (full markdown) while the system operates on semantic precision (chunks).
+Build a thinking partner that knows my entire knowledge graph at the chunk level and surfaces connections I wouldn't make myself. The hybrid approach means I read naturally (full markdown) while the system operates on semantic precision (chunks with rich metadata).
 
-Even if 95% of connections are noise, the 5% that spark genuine insight will be worth it.
+The 3 engines work together:
+- Semantic Similarity finds the obvious connections
+- Contradiction Detection finds the friction
+- Thematic Bridge finds the surprising cross-domain insights
 
-This isn't a product. It's my external cognitive system. Build accordingly.
+This isn't a product. It's my external cognitive system. Build accordingly

@@ -34,17 +34,13 @@ export class CollisionOrchestrator {
   constructor(config?: Partial<OrchestratorConfig>) {
     this.config = {
       parallel: true,
-      maxConcurrency: 7,
+      maxConcurrency: 3,
       globalTimeout: 5000, // 5 seconds default
       weights: DEFAULT_WEIGHTS,
       enabledEngines: [
         EngineType.SEMANTIC_SIMILARITY,
-        EngineType.STRUCTURAL_PATTERN,
-        EngineType.TEMPORAL_PROXIMITY,
-        EngineType.CONCEPTUAL_DENSITY,
-        EngineType.EMOTIONAL_RESONANCE,
-        EngineType.CITATION_NETWORK,
         EngineType.CONTRADICTION_DETECTION,
+        EngineType.THEMATIC_BRIDGE,
       ],
       cache: {
         enabled: true,

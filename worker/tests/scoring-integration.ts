@@ -28,12 +28,12 @@ const testCollisions: CollisionResult[] = [
     explanation: 'High semantic match'
   },
   {
-    sourceChunkId: 'test1', 
+    sourceChunkId: 'test1',
     targetChunkId: 'target1',
-    engineType: EngineType.CONCEPTUAL_DENSITY,
+    engineType: EngineType.CONTRADICTION_DETECTION,
     score: 0.6,
     confidence: 'medium',
-    explanation: 'Moderate concept overlap'
+    explanation: 'Moderate contradiction detected'
   }
 ];
 

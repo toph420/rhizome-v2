@@ -80,394 +80,695 @@ export async function uploadDocument(formData: FormData) {
   
   if (jobError) throw jobError
   
-  // Trigger processing
-  await triggerProcessing(job.id)
-  
   revalidatePath('/')
   return { success: true, documentId, jobId: job.id }
 }
 ```
 
-### YouTube URL Processing
-```typescript
-// User enters YouTube URL
-const handleYouTubeSubmit = async (url: string) => {
-  // Extract video ID
-  const videoId = extractVideoId(url) // Uses regex patterns
-  
-  // Create "file-like" object for consistency
-  const pseudoFile = {
-    name: `youtube_${videoId}.txt`,
-    content: url
-  }
-  
-  // Process same as file upload
-  const formData = new FormData()
-  formData.append('url', url)
-  formData.append('source_type', 'youtube')
-  
-  const result = await uploadDocument(formData)
-}
-
-// Backend processing (worker/processors/youtube-processor.ts)
-export class YouTubeProcessor extends BaseProcessor {
-  async process(): Promise<ProcessResult> {
-    // 1. Extract video ID
-    const videoId = extractVideoId(this.job.input_data.url)
-    
-    // 2. Fetch transcript
-    const transcript = await fetchYouTubeTranscript(videoId)
-    
-    // 3. Clean with AI (remove timestamps)
-    const cleanedTranscript = await this.cleanTranscript(transcript)
-    
-    // 4. Chunk and extract metadata
-    const chunks = await this.extractChunks(cleanedTranscript)
-    
-    // 5. Generate embeddings
-    for (const chunk of chunks) {
-      chunk.embedding = await generateEmbedding(chunk.content)
-    }
-    
-    // 6. Save everything
-    await this.uploadToStorage(cleanedTranscript)
-    await this.insertChunksBatch(chunks)
-    
-    return { 
-      markdown: cleanedTranscript,
-      chunks,
-      metadata: { videoId, duration, channelName }
-    }
-  }
-}
-```
-
 ## Document Processing
 
-### Processor Router Pattern
-```typescript
-// worker/processors/index.ts
-export class ProcessorRouter {
-  static createProcessor(
-    sourceType: SourceType,
-    ai: GoogleGenAI,
-    supabase: SupabaseClient,
-    job: BackgroundJob
-  ): BaseProcessor {
-    switch (sourceType) {
-      case 'pdf':
-        return new PDFProcessor(ai, supabase, job)
-      case 'youtube':
-        return new YouTubeProcessor(ai, supabase, job)
-      case 'web_url':
-        return new WebProcessor(ai, supabase, job)
-      case 'markdown_asis':
-        return new MarkdownProcessor(ai, supabase, job, false)
-      case 'markdown_clean':
-        return new MarkdownProcessor(ai, supabase, job, true)
-      case 'txt':
-        return new TextProcessor(ai, supabase, job)
-      case 'paste':
-        return new PasteProcessor(ai, supabase, job)
-      default:
-        throw new Error(`Unknown source type: ${sourceType}`)
-    }
-  }
-}
+### Large Document Processing (500+ pages)
 
-// Usage in handler
-const processor = ProcessorRouter.createProcessor(
-  sourceType,
-  ai,
-  supabase,
-  job
-)
-const result = await processor.process()
-```
-
-### Gemini AI Processing
 ```typescript
 // worker/processors/pdf-processor.ts
-export class PDFProcessor extends BaseProcessor {
+export class PDFProcessor extends SourceProcessor {
   async process(): Promise<ProcessResult> {
-    // 1. Download PDF from storage
-    const pdfBuffer = await this.downloadFromStorage()
+    const storagePath = this.getStoragePath();
     
-    // 2. Upload to Gemini Files API (for large files)
-    const file = await this.uploadToGeminiFiles(pdfBuffer)
+    // Download and upload to Gemini
+    await this.updateProgress(10, 'download', 'fetching', 'Retrieving PDF');
+    const { fileUri, totalPages } = await this.uploadPDFToGemini();
     
-    // 3. Process with Gemini
-    const model = this.ai.getGenerativeModel({ 
-      model: 'gemini-2.0-flash-exp',
-      generationConfig: {
-        maxOutputTokens: 65536,
-        temperature: 0.3
-      }
-    })
+    // Decide: single pass or batched extraction?
+    const useBatched = totalPages > 200;
     
-    const prompt = `
-      Process this document in three phases:
+    let markdown: string;
+    let chunks: ProcessedChunk[];
+    
+    if (useBatched) {
+      await this.updateProgress(15, 'extract', 'batched', `Large book: ${totalPages} pages`);
       
-      PHASE 1 - EXTRACTION:
-      Extract all text content, preserving structure.
+      // Stage 1: Batched extraction
+      markdown = await extractLargePDF(this.ai, fileUri, totalPages);
+      await this.updateProgress(60, 'extract', 'complete', `Extracted ${Math.round(markdown.length / 1024)}kb`);
       
-      PHASE 2 - SEMANTIC CHUNKING:
-      Break into semantic chunks of 500-1500 tokens.
+      // Stage 2: Batched chunking + metadata
+      chunks = await batchChunkAndExtractMetadata(this.ai, markdown);
+      await this.updateProgress(85, 'finalize', 'complete', `Created ${chunks.length} chunks`);
       
-      PHASE 3 - ANALYSIS:
-      For each chunk, extract:
-      - themes (2-4 key concepts)
-      - importance (0-1 score)
-      - summary (1-2 sentences)
-      
-      Output as JSON.
-    `
+    } else {
+      // Single pass for smaller docs
+      await this.updateProgress(25, 'extract', 'analyzing', 'Processing with AI');
+      const result = await this.extractSinglePass(fileUri);
+      markdown = result.markdown;
+      chunks = result.chunks;
+      await this.updateProgress(85, 'finalize', 'complete', `Created ${chunks.length} chunks`);
+    }
     
-    const result = await model.generateContent([
-      { fileData: { mimeType: 'application/pdf', fileUri: file.uri } },
-      { text: prompt }
-    ])
-    
-    // 4. Parse and validate result
-    const processed = JSON.parse(result.response.text())
-    
-    // 5. Generate embeddings (using Vercel AI SDK)
-    const chunks = await this.addEmbeddings(processed.chunks)
-    
-    // 6. Store results
-    await this.uploadToStorage(processed.markdown)
-    await this.insertChunksBatch(chunks)
-    
-    return { 
-      markdown: processed.markdown,
+    return {
+      markdown,
       chunks,
-      metadata: processed.metadata
+      metadata: { sourceUrl: this.job.metadata?.source_url },
+      wordCount: markdown.split(/\s+/).length,
+      outline: this.extractOutline(markdown)
+    };
+  }
+}
+```
+
+### Batched PDF Extraction
+
+```typescript
+// worker/processors/pdf-processor.ts
+
+interface ExtractionBatch {
+  markdown: string;
+  startPage: number;
+  endPage: number;
+  overlapStart: number;
+}
+
+async function extractLargePDF(
+  ai: GoogleGenAI,
+  fileUri: string,
+  totalPages: number
+): Promise<string> {
+  const BATCH_SIZE = 100;
+  const OVERLAP_PAGES = 10;
+  const batches: ExtractionBatch[] = [];
+  
+  console.log(`📚 Extracting ${totalPages} pages in batches of ${BATCH_SIZE}`);
+  
+  for (let start = 0; start < totalPages; start += BATCH_SIZE - OVERLAP_PAGES) {
+    const end = Math.min(start + BATCH_SIZE, totalPages);
+    const batchNum = Math.floor(start / (BATCH_SIZE - OVERLAP_PAGES)) + 1;
+    const totalBatches = Math.ceil(totalPages / (BATCH_SIZE - OVERLAP_PAGES));
+    
+    console.log(`📄 Extracting pages ${start + 1}-${end} (batch ${batchNum}/${totalBatches})`);
+    
+    const prompt = `Extract pages ${start + 1} through ${end} from this PDF as clean markdown.
+
+IMPORTANT INSTRUCTIONS:
+- Return ALL text from these pages verbatim as markdown
+- Preserve headings (# ## ###), lists, paragraphs, emphasis
+- Do NOT summarize or skip content
+- If starting mid-chapter, begin with the actual content (no introduction)
+${start > 0 ? '- This continues from previous pages, start immediately with the content' : '- This is the beginning of the document'}
+
+Return ONLY the markdown text, no JSON, no code blocks.`;
+
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-exp',
+      contents: [{
+        parts: [
+          { fileData: { fileUri, mimeType: 'application/pdf' } },
+          { text: prompt }
+        ]
+      }],
+      config: { 
+        maxOutputTokens: 65536,
+        temperature: 0.1
+      }
+    });
+    
+    if (!result.text) {
+      throw new Error(`Extraction failed for pages ${start + 1}-${end}`);
+    }
+    
+    batches.push({
+      markdown: result.text.trim(),
+      startPage: start,
+      endPage: end,
+      overlapStart: 0
+    });
+  }
+  
+  console.log(`✅ Extracted ${batches.length} batches, stitching...`);
+  return stitchMarkdownBatches(batches);
+}
+
+function stitchMarkdownBatches(batches: ExtractionBatch[]): string {
+  if (batches.length === 1) return batches[0].markdown;
+  
+  let stitched = batches[0].markdown;
+  
+  for (let i = 1; i < batches.length; i++) {
+    const prevBatch = batches[i - 1].markdown;
+    const currBatch = batches[i].markdown;
+    
+    // Take last 2000 chars of previous, first 3000 of current for overlap search
+    const searchInPrev = prevBatch.slice(-2000);
+    const searchInCurr = currBatch.slice(0, 3000);
+    
+    // Find overlap by searching for progressively smaller substrings
+    const overlapPoint = findBestOverlap(searchInPrev, searchInCurr);
+    
+    if (overlapPoint > 0) {
+      console.log(`🔗 Found overlap at position ${overlapPoint} for batch ${i}`);
+      stitched += currBatch.slice(overlapPoint);
+    } else {
+      console.warn(`⚠️  No overlap found for batch ${i}, using paragraph boundary`);
+      const paraStart = currBatch.indexOf('\n\n');
+      if (paraStart > 0) {
+        stitched += currBatch.slice(paraStart);
+      } else {
+        stitched += '\n\n' + currBatch;
+      }
     }
   }
+  
+  return stitched;
+}
+
+function findBestOverlap(prevEnd: string, currStart: string): number {
+  // Try matching with progressively smaller windows
+  for (let windowSize = 800; windowSize >= 100; windowSize -= 50) {
+    const needle = prevEnd.slice(-windowSize).trim();
+    
+    // Search for this substring in the current batch
+    const idx = currStart.indexOf(needle);
+    if (idx !== -1) {
+      return idx + needle.length;
+    }
+    
+    // Also try with normalized whitespace
+    const normalizedNeedle = needle.replace(/\s+/g, ' ');
+    const normalizedHaystack = currStart.replace(/\s+/g, ' ');
+    const normalizedIdx = normalizedHaystack.indexOf(normalizedNeedle);
+    
+    if (normalizedIdx !== -1) {
+      const ratio = currStart.length / normalizedHaystack.length;
+      return Math.floor((normalizedIdx + normalizedNeedle.length) * ratio);
+    }
+  }
+  
+  return 0; // No overlap found
+}
+```
+
+### Batched Metadata Extraction
+
+```typescript
+// worker/lib/ai-chunking-batch.ts
+
+export interface ChunkWithRichMetadata {
+  content: string;
+  themes: string[];
+  concepts: Array<{ text: string; importance: number }>;
+  emotional_tone: {
+    polarity: number;
+    primaryEmotion: string;
+  };
+  importance_score: number;
+  start_offset: number;
+  end_offset: number;
+  chunk_index: number;
+  word_count: number;
+}
+
+export async function batchChunkAndExtractMetadata(
+  ai: GoogleGenAI,
+  markdown: string
+): Promise<ChunkWithRichMetadata[]> {
+  const allChunks: ChunkWithRichMetadata[] = [];
+  const WINDOW_SIZE = 100000; // ~25k tokens
+  let position = 0;
+  let chunkIndex = 0;
+  
+  while (position < markdown.length) {
+    const section = markdown.slice(position, position + WINDOW_SIZE);
+    const remaining = markdown.length - position;
+    const progress = Math.round((position / markdown.length) * 100);
+    
+    console.log(`🔍 Chunking: ${progress}% (${Math.round(remaining / 1000)}k chars remaining)`);
+    
+    const prompt = `You are chunking a document. Process this section starting at character ${position}.
+
+Create semantic chunks (200-500 words each) with complete thoughts.
+For each chunk extract:
+- content: the actual text
+- themes: 2-3 key topics as array of strings
+- concepts: 5-10 important concepts as [{text: string, importance: 0-1}]
+- emotional_tone: {polarity: -1 to 1, primaryEmotion: string}
+- importance_score: 0-1 based on content centrality
+- start_offset: character position in full document
+- end_offset: character position where chunk ends
+
+Return JSON:
+{
+  "chunks": [...],
+  "lastProcessedOffset": absolute_character_position_in_full_doc
+}
+
+CRITICAL: start_offset and end_offset must be absolute positions in the original document.
+The first chunk should start at or near position ${position}.
+
+Markdown section:
+${section}`;
+
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-exp',
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        maxOutputTokens: 65536,
+        temperature: 0.1
+      }
+    });
+    
+    const response = JSON.parse(result.text);
+    
+    // Validate chunks have required fields
+    for (const chunk of response.chunks) {
+      if (!chunk.content || !chunk.start_offset) {
+        console.warn('Skipping invalid chunk:', chunk);
+        continue;
+      }
+      
+      allChunks.push({
+        ...chunk,
+        chunk_index: chunkIndex++,
+        word_count: chunk.content.split(/\s+/).length
+      });
+    }
+    
+    // Move to where we left off
+    if (response.lastProcessedOffset > position) {
+      position = response.lastProcessedOffset;
+    } else {
+      console.warn('AI did not advance, forcing +50k chars');
+      position += 50000;
+    }
+  }
+  
+  console.log(`✅ Created ${allChunks.length} chunks`);
+  return allChunks;
 }
 ```
 
 ## Collision Detection
 
-### Running All 7 Engines
+### The 3-Engine System
+
 ```typescript
-// worker/engines/orchestrator.ts
-export class CollisionOrchestrator {
-  private engines: CollisionEngine[]
-  
-  constructor(supabase: SupabaseClient) {
-    // Initialize all engines
-    this.engines = [
-      new SemanticSimilarityEngine(supabase),
-      new ConceptualDensityEngine(supabase),
-      new StructuralPatternEngine(supabase),
-      new CitationNetworkEngine(supabase),
-      new TemporalProximityEngine(supabase),
-      new ContradictionDetectionEngine(supabase),
-      new EmotionalResonanceEngine(supabase)
-    ]
+// worker/handlers/detect-connections.ts
+
+import { SemanticSimilarityEngine } from '../engines/semantic-similarity';
+import { ContradictionDetectionEngine } from '../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../engines/thematic-bridge';
+
+function initializeOrchestrator(weights?: WeightConfig): CollisionOrchestrator {
+  if (!orchestrator) {
+    console.log('[DetectConnections] Initializing orchestrator with 3 engines');
+    
+    orchestrator = new CollisionOrchestrator({
+      parallel: true,
+      maxConcurrency: 3,
+      globalTimeout: 10000,  // 10 seconds (AI takes longer)
+      weights: weights || {
+        weights: {
+          [EngineType.SEMANTIC_SIMILARITY]: 0.25,
+          [EngineType.CONTRADICTION_DETECTION]: 0.40,  // Highest priority
+          [EngineType.THEMATIC_BRIDGE]: 0.35,
+        },
+        normalizationMethod: 'linear',
+        combineMethod: 'sum',
+      },
+      cache: {
+        enabled: true,
+        ttl: 300000,
+        maxSize: 1000,
+      },
+    });
+    
+    // Register only 3 engines
+    const apiKey = process.env.GOOGLE_AI_API_KEY!;
+    const engines = [
+      new SemanticSimilarityEngine(),
+      new ContradictionDetectionEngine(),
+      new ThematicBridgeEngine(apiKey),
+    ];
+    
+    orchestrator.registerEngines(engines);
+    
+    console.log('[DetectConnections] Orchestrator initialized with 3 engines');
+  } else if (weights) {
+    orchestrator.updateWeights(weights);
   }
   
-  async detectCollisions(
-    sourceChunks: Chunk[],
-    targetChunks: Chunk[],
-    userWeights: EngineWeights
-  ): Promise<CollisionResult[]> {
-    // Run all engines in parallel
-    const engineResults = await Promise.all(
-      this.engines.map(engine => 
-        engine.analyze(sourceChunks, targetChunks)
-      )
-    )
-    
-    // Apply user weights
-    const weightedScores = this.applyWeights(
-      engineResults,
-      userWeights
-    )
-    
-    // Normalize and rank
-    const normalized = this.normalizeScores(
-      weightedScores,
-      userWeights.normalization_method
-    )
-    
-    // Filter and sort
-    return normalized
-      .filter(r => r.score > 0.3) // Threshold
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 20) // Top 20 connections
-  }
+  return orchestrator;
 }
 ```
 
-### Individual Engine Example
+### Engine 1: Semantic Similarity (Fast Baseline)
+
 ```typescript
 // worker/engines/semantic-similarity.ts
+
 export class SemanticSimilarityEngine extends BaseEngine {
-  async analyze(
-    sourceChunks: Chunk[],
-    targetChunks: Chunk[]
-  ): Promise<EngineResult> {
-    const similarities: SimilarityPair[] = []
+  readonly type = EngineType.SEMANTIC_SIMILARITY;
+  
+  protected async detectImpl(
+    input: CollisionDetectionInput
+  ): Promise<CollisionResult[]> {
+    const { sourceChunk } = input;
     
-    // Check cache first
-    const cacheKey = this.getCacheKey(sourceChunks, targetChunks)
-    const cached = await this.cache.get(cacheKey)
-    if (cached) return cached
-    
-    // Calculate similarities using embeddings
-    for (const source of sourceChunks) {
-      for (const target of targetChunks) {
-        const similarity = cosineSimilarity(
-          source.embedding,
-          target.embedding
-        )
-        
-        if (similarity > 0.7) { // Threshold
-          similarities.push({
-            sourceChunkId: source.id,
-            targetChunkId: target.id,
-            score: similarity,
-            explanation: `High semantic similarity (${(similarity * 100).toFixed(1)}%)`
-          })
-        }
-      }
+    if (!sourceChunk.embedding) {
+      return [];
     }
     
-    // Cache result
-    const result = { 
-      engineName: 'semantic-similarity',
-      similarities,
-      metadata: { threshold: 0.7 }
-    }
-    await this.cache.set(cacheKey, result, 3600) // 1 hour TTL
+    // Use pgvector for efficient similarity search
+    const matches = await this.supabase.rpc('match_chunks', {
+      query_embedding: sourceChunk.embedding,
+      threshold: 0.7,
+      exclude_document: sourceChunk.document_id,
+      limit: 50
+    });
     
-    return result
+    return matches.data?.map(m => ({
+      sourceChunkId: sourceChunk.id,
+      targetChunkId: m.id,
+      engineType: this.type,
+      score: m.similarity,
+      confidence: m.similarity > 0.85 ? 'high' : 'medium',
+      explanation: `Semantic similarity: ${(m.similarity * 100).toFixed(1)}%`,
+      metadata: { similarity_score: m.similarity }
+    })) || [];
+  }
+  
+  protected hasRequiredMetadata(chunk: ChunkWithMetadata): boolean {
+    return !!chunk.embedding;
   }
 }
 ```
 
-## ECS Operations
+### Engine 2: Contradiction Detection (Metadata-Enhanced)
 
-### Creating Entities with Components
 ```typescript
-// Creating a flashcard from selection
-import { ecs } from '@/lib/ecs'
+// worker/engines/contradiction-detection.ts
 
-export async function createFlashcardFromSelection(
-  selection: TextSelection,
-  chunkId: string,
-  documentId: string
-) {
-  const userId = 'dev-user-123'
+export class ContradictionDetectionEngine extends BaseEngine {
+  readonly type = EngineType.CONTRADICTION_DETECTION;
   
-  // Create entity with multiple components
-  const entityId = await ecs.createEntity(userId, {
-    // Flashcard component
-    flashcard: {
-      question: selection.text,
-      answer: '', // User will fill in
-      created_from: 'selection'
-    },
+  private readonly MIN_CONCEPT_OVERLAP = 0.3;
+  private readonly MIN_POLARITY_DIFFERENCE = 0.6;
+  
+  protected async detectImpl(
+    input: CollisionDetectionInput
+  ): Promise<CollisionResult[]> {
+    const results: CollisionResult[] = [];
     
-    // Study component (FSRS data)
-    study: {
-      due: new Date(),
-      interval: 0,
-      ease: 2.5,
-      reviews: 0,
-      lapses: 0
-    },
-    
-    // Source component (links to document)
-    source: {
-      chunk_id: chunkId,
-      document_id: documentId,
-      selection_range: {
-        start: selection.start,
-        end: selection.end
+    for (const targetChunk of input.targetChunks) {
+      if (targetChunk.id === input.sourceChunk.id) continue;
+      
+      // Strategy 1: Metadata-based conceptual tension
+      const conceptualTension = this.detectConceptualTension(
+        input.sourceChunk,
+        targetChunk
+      );
+      
+      if (conceptualTension) {
+        results.push(conceptualTension);
+        continue;
+      }
+      
+      // Strategy 2: Syntax-based contradiction (fallback)
+      const syntaxContradiction = this.detectSyntaxContradiction(
+        input.sourceChunk,
+        targetChunk
+      );
+      
+      if (syntaxContradiction) {
+        results.push(syntaxContradiction);
       }
     }
-  })
+    
+    return results;
+  }
   
-  return entityId
+  private detectConceptualTension(
+    sourceChunk: ChunkWithMetadata,
+    targetChunk: ChunkWithMetadata
+  ): CollisionResult | null {
+    const sourceConcepts = sourceChunk.metadata?.concepts?.concepts;
+    const targetConcepts = targetChunk.metadata?.concepts?.concepts;
+    const sourceEmotion = sourceChunk.metadata?.emotional_tone;
+    const targetEmotion = targetChunk.metadata?.emotional_tone;
+    
+    if (!sourceConcepts || !targetConcepts || !sourceEmotion || !targetEmotion) {
+      return null;
+    }
+    
+    // Check for concept overlap (same topic?)
+    const { overlap, sharedConcepts } = this.calculateConceptOverlapDetailed(
+      sourceConcepts,
+      targetConcepts
+    );
+    
+    if (overlap < this.MIN_CONCEPT_OVERLAP) {
+      return null;
+    }
+    
+    // Check for opposing emotional stances
+    const polarityDiff = Math.abs(
+      (sourceEmotion.polarity || 0) - (targetEmotion.polarity || 0)
+    );
+    
+    if (polarityDiff < this.MIN_POLARITY_DIFFERENCE) {
+      return null;
+    }
+    
+    const score = this.calculateTensionScore(overlap, polarityDiff, sharedConcepts.length);
+    
+    if (score < 0.4) return null;
+    
+    return {
+      sourceChunkId: sourceChunk.id,
+      targetChunkId: targetChunk.id,
+      engineType: this.type,
+      score,
+      confidence: score > 0.7 ? 'high' : 'medium',
+      explanation: `Conceptual tension: Both discuss ${sharedConcepts.slice(0,3).join(', ')}, but with opposing viewpoints`,
+      metadata: {
+        contradictionType: 'conceptual_tension',
+        sharedConcepts,
+        polarityDifference: polarityDiff,
+      },
+    };
+  }
+  
+  protected hasRequiredMetadata(chunk: ChunkWithMetadata): boolean {
+    return !!(
+      chunk.content && chunk.content.length > 50 ||
+      (chunk.metadata?.concepts && chunk.metadata?.emotional_tone)
+    );
+  }
 }
 ```
 
-### Querying Entities
-```typescript
-// Find all flashcards due for review
-export async function getDueFlashcards(userId: string) {
-  // Query entities with both flashcard and study components
-  const entities = await ecs.query(
-    ['flashcard', 'study'],
-    userId,
-    { /* optional filters */ }
-  )
-  
-  // Filter for due cards
-  const now = new Date()
-  const dueCards = entities.filter(entity => {
-    const studyComponent = entity.components?.find(
-      c => c.component_type === 'study'
-    )
-    return studyComponent && 
-           new Date(studyComponent.data.due) <= now
-  })
-  
-  return dueCards
-}
+### Engine 3: Thematic Bridge (AI-Powered, Filtered)
 
-// Find all annotations for a document
-export async function getDocumentAnnotations(
-  documentId: string,
-  userId: string
-) {
-  return await ecs.query(
-    ['annotation'],
-    userId,
-    { document_id: documentId }
-  )
-}
-```
-
-### Updating Components
 ```typescript
-// Update flashcard after review
-export async function updateFlashcardAfterReview(
-  entityId: string,
-  componentId: string,
-  rating: number // 1-5 rating from user
-) {
-  const userId = 'dev-user-123'
+// worker/engines/thematic-bridge.ts
+
+export class ThematicBridgeEngine extends BaseEngine {
+  readonly type = EngineType.THEMATIC_BRIDGE;
   
-  // Get current study data
-  const entity = await ecs.getEntity(entityId, userId)
-  const studyComponent = entity?.components?.find(
-    c => c.component_type === 'study'
-  )
+  private ai: GoogleGenAI;
+  private readonly IMPORTANCE_THRESHOLD = 0.6;
+  private readonly MAX_CANDIDATES = 15;
+  private readonly MIN_CONCEPT_OVERLAP = 0.2;
+  private readonly MAX_CONCEPT_OVERLAP = 0.7;
+  private readonly MIN_BRIDGE_STRENGTH = 0.6;
   
-  if (!studyComponent) throw new Error('No study component')
+  constructor(apiKey: string) {
+    super();
+    this.ai = new GoogleGenAI({ apiKey });
+  }
   
-  // Calculate new FSRS values
-  const newStudyData = calculateFSRS(
-    studyComponent.data,
-    rating
-  )
+  protected async detectImpl(
+    input: CollisionDetectionInput
+  ): Promise<CollisionResult[]> {
+    const results: CollisionResult[] = [];
+    
+    // FILTER 1: Source chunk must be important
+    if ((input.sourceChunk.importance_score || 0) < this.IMPORTANCE_THRESHOLD) {
+      return [];
+    }
+    
+    // FILTER 2: Get promising candidates
+    const candidates = this.filterCandidates(input.sourceChunk, input.targetChunks);
+    
+    if (candidates.length === 0) {
+      return [];
+    }
+    
+    console.log(
+      `[ThematicBridge] Analyzing ${candidates.length} candidates for chunk ${input.sourceChunk.id}`
+    );
+    
+    // ANALYZE: Use AI for each candidate (batched for efficiency)
+    const analyses = await this.batchAnalyzeBridges(input.sourceChunk, candidates);
+    
+    for (let i = 0; i < analyses.length; i++) {
+      const analysis = analyses[i];
+      const candidate = candidates[i];
+      
+      if (analysis.connected && analysis.strength >= this.MIN_BRIDGE_STRENGTH) {
+        results.push({
+          sourceChunkId: input.sourceChunk.id,
+          targetChunkId: candidate.id,
+          engineType: this.type,
+          score: analysis.strength,
+          confidence: analysis.strength > 0.8 ? 'high' : 'medium',
+          explanation: analysis.explanation,
+          metadata: {
+            bridgeType: analysis.bridgeType,
+            sharedConcept: analysis.sharedConcept,
+            sourceDomain: this.inferDomain(input.sourceChunk),
+            targetDomain: this.inferDomain(candidate),
+          },
+        });
+      }
+    }
+    
+    console.log(
+      `[ThematicBridge] Found ${results.length} bridges from ${analyses.length} analyses`
+    );
+    
+    return results;
+  }
   
-  // Update component
-  await ecs.updateComponent(
-    componentId,
-    newStudyData,
-    userId
-  )
+  private filterCandidates(
+    sourceChunk: ChunkWithMetadata,
+    targetChunks: ChunkWithMetadata[]
+  ): ChunkWithMetadata[] {
+    const sourceConcepts = sourceChunk.metadata?.concepts?.concepts;
+    const sourceDomain = this.inferDomain(sourceChunk);
+    
+    if (!sourceConcepts || sourceConcepts.length === 0) {
+      return [];
+    }
+    
+    const candidates = targetChunks
+      .filter(target => {
+        // Must be cross-document
+        if (target.document_id === sourceChunk.document_id) return false;
+        
+        // Must be important enough
+        if ((target.importance_score || 0) < this.IMPORTANCE_THRESHOLD) return false;
+        
+        // Must have concept metadata
+        const targetConcepts = target.metadata?.concepts?.concepts;
+        if (!targetConcepts || targetConcepts.length === 0) return false;
+        
+        // Check concept overlap (sweet spot: some but not too much)
+        const overlap = this.calculateConceptOverlap(sourceConcepts, targetConcepts);
+        if (overlap < this.MIN_CONCEPT_OVERLAP || overlap > this.MAX_CONCEPT_OVERLAP) {
+          return false;
+        }
+        
+        // Prefer different domains
+        const targetDomain = this.inferDomain(target);
+        const crossDomain = sourceDomain !== targetDomain && 
+                           sourceDomain !== 'general' && 
+                           targetDomain !== 'general';
+        
+        return crossDomain;
+      })
+      .sort((a, b) => {
+        return (b.importance_score || 0) - (a.importance_score || 0);
+      })
+      .slice(0, this.MAX_CANDIDATES);
+    
+    return candidates;
+  }
+  
+  private async analyzeBridge(
+    sourceChunk: ChunkWithMetadata,
+    targetChunk: ChunkWithMetadata
+  ): Promise<BridgeAnalysis> {
+    const sourceConcepts = sourceChunk.metadata?.concepts?.concepts?.slice(0, 5).map(c => c.text) || [];
+    const targetConcepts = targetChunk.metadata?.concepts?.concepts?.slice(0, 5).map(c => c.text) || [];
+    const sourceDomain = this.inferDomain(sourceChunk);
+    const targetDomain = this.inferDomain(targetChunk);
+    
+    const prompt = `You are analyzing whether two text chunks from different domains explore the same underlying concept.
+
+CHUNK 1 (${sourceDomain} domain):
+Concepts: ${sourceConcepts.join(', ')}
+Excerpt: "${sourceChunk.content.slice(0, 300).replace(/\n/g, ' ')}..."
+
+CHUNK 2 (${targetDomain} domain):
+Concepts: ${targetConcepts.join(', ')}
+Excerpt: "${targetChunk.content.slice(0, 300).replace(/\n/g, ' ')}..."
+
+Question: Do these explore the same underlying idea from different perspectives?
+
+Look for:
+- Cross-domain concept mapping (e.g., "paranoia" in literature ↔ "surveillance" in tech)
+- Framework shifts (same problem, different analytical approach)
+- Methodological parallels (similar reasoning patterns)
+- Causal parallels (similar cause-effect structures)
+
+Respond ONLY with valid JSON (no markdown, no code blocks):
+{
+  "connected": true or false,
+  "bridgeType": "cross_domain" | "framework_shift" | "methodological" | "causal_parallel" | null,
+  "sharedConcept": "the core concept linking them (one phrase)",
+  "explanation": "brief explanation of the connection (max 100 chars)",
+  "strength": 0.0-1.0
+}`;
+
+    try {
+      const result = await this.ai.models.generateContent({
+        model: 'gemini-2.0-flash-exp',
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 200,
+        },
+      });
+      
+      let responseText = result.text.trim();
+      responseText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      
+      const analysis: BridgeAnalysis = JSON.parse(responseText);
+      
+      if (typeof analysis.connected !== 'boolean' || 
+          typeof analysis.strength !== 'number' ||
+          analysis.strength < 0 || analysis.strength > 1) {
+        throw new Error('Invalid analysis structure');
+      }
+      
+      return analysis;
+      
+    } catch (error) {
+      console.warn(`[ThematicBridge] Analysis failed:`, error);
+      return {
+        connected: false,
+        bridgeType: null,
+        sharedConcept: '',
+        explanation: '',
+        strength: 0,
+      };
+    }
+  }
+  
+  protected hasRequiredMetadata(chunk: ChunkWithMetadata): boolean {
+    return !!(
+      chunk.metadata?.concepts?.concepts &&
+      chunk.metadata.concepts.concepts.length > 0 &&
+      chunk.importance_score !== undefined
+    );
+  }
 }
 ```
 
 ## User Preferences
 
 ### Configuring Engine Weights
+
 ```typescript
 // app/actions/preferences.ts
 'use server'
@@ -487,57 +788,43 @@ export async function updateEngineWeights(
     throw new Error('Weights must sum to 1.0')
   }
   
-  // Update using database function
-  const { data, error } = await supabaseAdmin.rpc(
-    'update_engine_weights',
-    {
-      p_user_id: userId,
-      p_weights: weights,
-      p_normalization_method: 'sigmoid',
-      p_preset_name: 'custom'
-    }
-  )
+  // Update configuration
+  const { data, error } = await supabaseAdmin
+    .from('user_preferences')
+    .upsert({
+      user_id: userId,
+      engine_weights: weights,
+      updated_at: new Date().toISOString()
+    })
   
   if (error) throw error
   
-  // Clear cache to apply new weights immediately
-  await clearCollisionCache(userId)
-  
   revalidatePath('/settings')
-  return { success: true, weights: data }
+  return { success: true, weights }
 }
 ```
 
-### Using Preset Configurations
+### Weight Presets
+
 ```typescript
-// Preset weight configurations
+// Only 3 engines now
 const WEIGHT_PRESETS = {
   balanced: {
-    'semantic-similarity': 0.25,
-    'conceptual-density': 0.20,
-    'structural-pattern': 0.15,
-    'citation-network': 0.15,
-    'temporal-proximity': 0.10,
-    'contradiction-detection': 0.10,
-    'emotional-resonance': 0.05
+    'semantic_similarity': 0.25,
+    'contradiction_detection': 0.40,
+    'thematic_bridge': 0.35
   },
-  academic: {
-    'semantic-similarity': 0.20,
-    'conceptual-density': 0.15,
-    'structural-pattern': 0.10,
-    'citation-network': 0.35, // Boost citations
-    'temporal-proximity': 0.05,
-    'contradiction-detection': 0.15, // Value opposing views
-    'emotional-resonance': 0.00
+  
+  tension_focused: {
+    'semantic_similarity': 0.15,
+    'contradiction_detection': 0.60,  // Maximum friction
+    'thematic_bridge': 0.25
   },
-  narrative: {
-    'semantic-similarity': 0.20,
-    'conceptual-density': 0.20,
-    'structural-pattern': 0.20, // Story structure
-    'citation-network': 0.05,
-    'temporal-proximity': 0.15, // Timeline matters
-    'contradiction-detection': 0.05,
-    'emotional-resonance': 0.15 // Emotional arcs
+  
+  discovery_focused: {
+    'semantic_similarity': 0.20,
+    'contradiction_detection': 0.30,
+    'thematic_bridge': 0.50  // Maximum cross-domain discovery
   }
 }
 
@@ -552,332 +839,102 @@ export async function applyWeightPreset(
 
 ## Common Patterns
 
-### Server Components with Data Fetching
+### Cost Tracking
+
 ```typescript
-// app/read/[id]/page.tsx
-export default async function DocumentPage({ 
-  params 
-}: { 
-  params: { id: string } 
-}) {
-  // Direct database access in Server Component
-  const { data: doc, error } = await supabaseAdmin
-    .from('documents')
-    .select(`
-      id,
-      title,
-      storage_path,
-      processing_status,
-      chunks (
-        id,
-        content,
-        themes,
-        chunk_index
-      )
-    `)
-    .eq('id', params.id)
-    .single()
+// Track API costs during processing
+class CostTracker {
+  private costs = {
+    extraction: 0,
+    metadata: 0,
+    connections: 0
+  };
   
-  if (error || !doc) {
-    notFound()
+  trackExtraction(pages: number) {
+    const batches = Math.ceil(pages / 100);
+    this.costs.extraction = batches * 0.02;
   }
   
-  // Generate signed URL for markdown
-  const { data: signedUrl } = await supabaseAdmin.storage
-    .from('documents')
-    .createSignedUrl(
-      `${doc.storage_path}/content.md`,
-      3600 // 1 hour
-    )
-  
-  return (
-    <div className="grid grid-cols-[1fr,400px]">
-      <DocumentReader 
-        markdownUrl={signedUrl}
-        chunks={doc.chunks}
-      />
-      <RightPanel documentId={doc.id} />
-    </div>
-  )
-}
-```
-
-### Client Components with Interactivity
-```typescript
-// components/reader/DocumentReader.tsx
-'use client'
-
-import { useState, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-
-export function DocumentReader({ 
-  markdownUrl,
-  chunks 
-}: {
-  markdownUrl: string
-  chunks: Chunk[]
-}) {
-  const [selectedText, setSelectedText] = useState<Selection | null>(null)
-  
-  // Fetch markdown content
-  const { data: markdown } = useQuery({
-    queryKey: ['markdown', markdownUrl],
-    queryFn: async () => {
-      const res = await fetch(markdownUrl)
-      return res.text()
-    },
-    staleTime: Infinity // Markdown never changes
-  })
-  
-  // Handle text selection
-  const handleMouseUp = () => {
-    const selection = window.getSelection()
-    if (selection && selection.toString().trim()) {
-      setSelectedText({
-        text: selection.toString(),
-        range: {
-          start: selection.anchorOffset,
-          end: selection.focusOffset
-        }
-      })
-    }
+  trackMetadata(chunks: number) {
+    const batches = Math.ceil(chunks / 100);
+    this.costs.metadata = batches * 0.02;
   }
   
-  return (
-    <article 
-      onMouseUp={handleMouseUp}
-      className="prose prose-lg max-w-none"
-    >
-      <MarkdownRenderer content={markdown} />
-      {selectedText && (
-        <QuickCaptureBar 
-          selection={selectedText}
-          onClose={() => setSelectedText(null)}
-        />
-      )}
-    </article>
-  )
-}
-```
-
-### Zustand Store for Client State
-```typescript
-// stores/processing-store.ts
-import { create } from 'zustand'
-
-interface ProcessingStore {
-  jobs: ProcessingJob[]
-  addJob: (job: ProcessingJob) => void
-  updateJob: (id: string, update: Partial<ProcessingJob>) => void
-  removeJob: (id: string) => void
-}
-
-export const useProcessingStore = create<ProcessingStore>((set) => ({
-  jobs: [],
+  trackThematicBridge(aiCalls: number) {
+    this.costs.connections = aiCalls * 0.001;
+  }
   
-  addJob: (job) => set((state) => ({
-    jobs: [...state.jobs, job]
-  })),
+  getTotal() {
+    return Object.values(this.costs).reduce((a, b) => a + b, 0);
+  }
   
-  updateJob: (id, update) => set((state) => ({
-    jobs: state.jobs.map(j => 
-      j.id === id ? { ...j, ...update } : j
-    )
-  })),
-  
-  removeJob: (id) => set((state) => ({
-    jobs: state.jobs.filter(j => j.id !== id)
-  }))
-}))
-```
-
-### Error Handling Pattern
-```typescript
-// lib/errors.ts
-export class ProcessingError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public isRetryable: boolean = false
-  ) {
-    super(message)
-    this.name = 'ProcessingError'
+  log() {
+    console.log('Cost breakdown:', {
+      ...this.costs,
+      total: this.getTotal()
+    });
   }
 }
 
 // Usage in processor
-try {
-  const result = await processor.process()
-  return result
-} catch (error) {
-  if (error instanceof ProcessingError) {
-    if (error.isRetryable) {
-      // Queue for retry
-      await queueRetry(job.id, error.message)
-    } else {
-      // Permanent failure
-      await markFailed(job.id, error.message)
-    }
-  } else {
-    // Unknown error
-    console.error('Unexpected error:', error)
-    await markFailed(job.id, 'An unexpected error occurred')
+const costTracker = new CostTracker();
+costTracker.trackExtraction(totalPages);
+// ... processing
+costTracker.log(); // Shows ~$0.54 for 500-page book
+```
+
+### Debugging Tips
+
+```sql
+-- Check connection distribution by engine
+SELECT 
+  type,
+  COUNT(*) as count,
+  AVG(strength) as avg_strength,
+  MAX(strength) as max_strength
+FROM connections
+GROUP BY type
+ORDER BY count DESC;
+
+-- Find high-quality thematic bridges
+SELECT 
+  c.id,
+  c.strength,
+  c.metadata->>'bridgeType' as bridge_type,
+  c.metadata->>'sharedConcept' as concept,
+  s.content as source_preview,
+  t.content as target_preview
+FROM connections c
+JOIN chunks s ON s.id = c.source_chunk_id
+JOIN chunks t ON t.id = c.target_chunk_id
+WHERE c.type = 'thematic_bridge'
+  AND c.strength > 0.8
+ORDER BY c.strength DESC
+LIMIT 10;
+```
+
+### Performance Monitoring
+
+```typescript
+// Monitor engine performance
+async function benchmarkEngines() {
+  const engines = [
+    new SemanticSimilarityEngine(),
+    new ContradictionDetectionEngine(), 
+    new ThematicBridgeEngine(apiKey)
+  ];
+  
+  for (const engine of engines) {
+    const start = performance.now();
+    await engine.detect(testInput);
+    const duration = performance.now() - start;
+    
+    console.log(`${engine.type}: ${duration.toFixed(2)}ms`);
   }
 }
-```
 
-## Testing Patterns
-
-### Testing Processors
-```typescript
-// worker/tests/processors/pdf-processor.test.ts
-describe('PDFProcessor', () => {
-  let processor: PDFProcessor
-  let mockAI: jest.Mocked<GoogleGenAI>
-  let mockSupabase: jest.Mocked<SupabaseClient>
-  
-  beforeEach(() => {
-    mockAI = createMockAI()
-    mockSupabase = createMockSupabase()
-    processor = new PDFProcessor(
-      mockAI,
-      mockSupabase,
-      mockJob
-    )
-  })
-  
-  it('should process PDF and return chunks', async () => {
-    // Mock Gemini response
-    mockAI.generateContent.mockResolvedValue({
-      response: {
-        text: JSON.stringify({
-          markdown: '# Test Document',
-          chunks: [
-            { content: 'Test chunk', themes: ['test'] }
-          ]
-        })
-      }
-    })
-    
-    // Process
-    const result = await processor.process()
-    
-    // Assertions
-    expect(result.markdown).toBe('# Test Document')
-    expect(result.chunks).toHaveLength(1)
-    expect(mockSupabase.storage.upload).toHaveBeenCalled()
-    expect(mockSupabase.from).toHaveBeenCalledWith('chunks')
-  })
-})
-```
-
-### Testing Collision Engines
-```typescript
-// worker/tests/engines/semantic-similarity.test.ts
-describe('SemanticSimilarityEngine', () => {
-  it('should find similar chunks', async () => {
-    const engine = new SemanticSimilarityEngine(supabase)
-    
-    const sourceChunks = [
-      { 
-        id: '1',
-        content: 'Machine learning algorithms',
-        embedding: [0.1, 0.2, 0.3, ...] // 768d
-      }
-    ]
-    
-    const targetChunks = [
-      {
-        id: '2', 
-        content: 'Deep learning models',
-        embedding: [0.1, 0.21, 0.29, ...] // Similar
-      }
-    ]
-    
-    const result = await engine.analyze(
-      sourceChunks,
-      targetChunks
-    )
-    
-    expect(result.similarities).toHaveLength(1)
-    expect(result.similarities[0].score).toBeGreaterThan(0.7)
-  })
-})
-```
-
-## Debugging Tips
-
-### Check Processing Status
-```sql
--- Check job status
-SELECT 
-  id,
-  status,
-  progress,
-  last_error,
-  created_at
-FROM background_jobs
-WHERE job_type = 'process-document'
-ORDER BY created_at DESC
-LIMIT 10;
-
--- Check document processing status
-SELECT 
-  d.id,
-  d.title,
-  d.processing_status,
-  d.processing_error,
-  COUNT(c.id) as chunk_count
-FROM documents d
-LEFT JOIN chunks c ON c.document_id = d.id
-GROUP BY d.id
-ORDER BY d.created_at DESC;
-```
-
-### Monitor Engine Performance
-```typescript
-// Add timing to engines
-const startTime = performance.now()
-const result = await engine.analyze(source, target)
-const duration = performance.now() - startTime
-
-console.log(`${engine.name} took ${duration}ms`)
-
-// Check cache hit rate
-const cacheStats = await getCacheStats()
-console.log(`Cache hit rate: ${cacheStats.hitRate}%`)
-```
-
-### Common Issues & Solutions
-
-**Issue**: Processing hangs
-```typescript
-// Add timeout to Gemini calls
-const result = await Promise.race([
-  model.generateContent(prompt),
-  new Promise((_, reject) => 
-    setTimeout(() => reject(new Error('Timeout')), 60000)
-  )
-])
-```
-
-**Issue**: Embeddings mismatch
-```typescript
-// Validate embedding dimensions
-if (embedding.length !== 768) {
-  throw new Error(`Invalid embedding dimension: ${embedding.length}`)
-}
-```
-
-**Issue**: Memory pressure with large documents
-```typescript
-// Process in batches
-const BATCH_SIZE = 50
-for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-  const batch = chunks.slice(i, i + BATCH_SIZE)
-  await insertChunksBatch(batch)
-  
-  // Allow GC between batches
-  await new Promise(resolve => setTimeout(resolve, 100))
-}
+// Expected results:
+// semantic_similarity: ~50ms (fast, no AI)
+// contradiction_detection: ~100ms (metadata processing)
+// thematic_bridge: ~2000ms (AI calls)
 ```

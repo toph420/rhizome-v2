@@ -5,9 +5,14 @@
 
 import { SourceProcessor } from './base.js'
 import type { ProcessResult } from '../types/processor.js'
-import { cleanMarkdownWithAI, textToMarkdownWithAI, rechunkMarkdown } from '../lib/ai-chunking.js'
-import { simpleMarkdownChunking, extractTimestampsWithContext } from '../lib/markdown-chunking.js'
+import { cleanMarkdownWithAI, textToMarkdownWithAI } from '../lib/ai-chunking.js'
+import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
+import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
+import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
+
+// Model configuration
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
 
 /**
  * Content format detection result.
@@ -242,19 +247,31 @@ ${pastedContent}`
       }
     }
     
-    await this.updateProgress(40, 'extract', 'chunking', 'Creating content chunks')
-    
-    // Choose chunking method based on content type and size
-    if (markdown.length < 2000 && detection.format !== 'transcript') {
-      // Small content - use simple chunking
-      chunks = simpleMarkdownChunking(markdown)
-    } else {
-      // Large content or transcript - use semantic chunking
-      chunks = await this.withRetry(
-        async () => rechunkMarkdown(this.ai, markdown),
-        'Semantic chunking'
+    await this.updateProgress(40, 'extract', 'chunking', 'Creating chunks with AI metadata extraction')
+
+    // Use AI-powered chunking and metadata extraction for all content
+    const progressCallback = (progress: MetadataExtractionProgress) => {
+      const percentage = 40 + Math.floor((progress.currentBatch / progress.totalBatches) * 30)
+      this.updateProgress(
+        percentage,
+        'extract',
+        'metadata',
+        `AI metadata: batch ${progress.currentBatch}/${progress.totalBatches}`
       )
     }
+
+    chunks = await this.withRetry(
+      async () => batchChunkAndExtractMetadata(
+        markdown,
+        {
+          apiKey: process.env.GOOGLE_AI_API_KEY,
+          modelName: GEMINI_MODEL,
+          enableProgress: true
+        },
+        progressCallback
+      ),
+      'AI metadata extraction'
+    )
     
     // Handle timestamps if present
     if (detection.hasTimestamps) {
@@ -287,34 +304,53 @@ ${pastedContent}`
     }
     
     await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} chunks`)
-    
-    // Enrich chunks with metadata extraction
-    await this.updateProgress(70, 'finalize', 'metadata', 'Extracting metadata for collision detection')
-    const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
-    
+
+    // Convert AI chunks to ProcessedChunk format
+    await this.updateProgress(70, 'finalize', 'converting', 'Converting chunks to standard format')
+    const enrichedChunks = chunks.map((aiChunk, index) => {
+      const base = {
+        content: aiChunk.content,
+        chunk_index: index,
+        themes: aiChunk.metadata.themes,
+        importance_score: aiChunk.metadata.importance,
+        summary: aiChunk.metadata.summary,
+        start_offset: 0,
+        end_offset: aiChunk.content.length,
+        word_count: aiChunk.content.split(/\s+/).length
+      }
+
+      // Re-add timestamps that were set before AI processing
+      if (detection.hasTimestamps && (aiChunk as any).timestamps) {
+        return {
+          ...base,
+          timestamps: (aiChunk as any).timestamps,
+          position_context: (aiChunk as any).position_context
+        }
+      }
+
+      return base
+    })
+
     // Extract metadata
     const wordCount = markdown.split(/\s+/).length
     const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
     const outline = headingMatches.slice(0, 10).map(h => h.replace(/^#+\s+/, ''))
-    
-    // Collect themes if semantic chunking was used
-    let documentThemes: string[] | undefined
-    if (enrichedChunks.length > 0 && 'themes' in enrichedChunks[0]) {
-      const themeFrequency = new Map<string, number>()
-      enrichedChunks.forEach(chunk => {
-        if (chunk.themes) {
-          chunk.themes.forEach((theme: string) => {
-            themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
-          })
-        }
-      })
-      
-      documentThemes = Array.from(themeFrequency.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([theme]) => theme)
-    }
-    
+
+    // Collect document themes from AI metadata
+    const themeFrequency = new Map<string, number>()
+    enrichedChunks.forEach(chunk => {
+      if (chunk.themes) {
+        chunk.themes.forEach((theme: string) => {
+          themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
+        })
+      }
+    })
+
+    const documentThemes = Array.from(themeFrequency.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([theme]) => theme)
+
     return {
       markdown,
       chunks: enrichedChunks,
@@ -326,15 +362,16 @@ ${pastedContent}`
       })) : undefined,
       metadata: {
         extra: {
-          chunk_count: chunks.length,
+          chunk_count: enrichedChunks.length,
           detected_format: detection.format,
           format_confidence: detection.confidence,
           has_timestamps: detection.hasTimestamps,
           was_transcript: wasTranscript,
           detected_language: detection.language,
-          document_themes: documentThemes,
+          document_themes: documentThemes.length > 0 ? documentThemes : undefined,
           processing_mode: 'paste',
-          original_size_kb: contentKB
+          original_size_kb: contentKB,
+          usedAIMetadata: true
         }
       }
     }

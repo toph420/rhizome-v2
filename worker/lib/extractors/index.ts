@@ -1,13 +1,7 @@
 /**
  * Central exports for all metadata extractors.
- * Part of the 7-engine collision detection system.
+ * Part of the 3-engine collision detection system.
  */
-
-// Structural patterns extractor
-export { 
-  extractStructuralPatterns,
-  type AIStructuralAnalysis 
-} from './structural-patterns'
 
 // Emotional tone analyzer
 export { 

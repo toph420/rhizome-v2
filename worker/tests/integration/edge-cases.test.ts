@@ -1,17 +1,13 @@
 /**
- * Edge case integration tests for the 7-engine collision detection system.
+ * Edge case integration tests for the 3-engine collision detection system.
  * Tests boundary conditions, error handling, and unusual input scenarios.
  */
 
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { CollisionOrchestrator } from '../../engines/orchestrator';
 import { SemanticSimilarityEngine } from '../../engines/semantic-similarity';
-import { StructuralPatternEngine } from '../../engines/structural-pattern';
-import { TemporalProximityEngine } from '../../engines/temporal-proximity';
-import { ConceptualDensityEngine } from '../../engines/conceptual-density';
-import { EmotionalResonanceEngine } from '../../engines/emotional-resonance';
-import { CitationNetworkEngine } from '../../engines/citation-network';
 import { ContradictionDetectionEngine } from '../../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../../engines/thematic-bridge';
 import { EngineType } from '../../engines/types';
 
 describe('Edge Cases Integration Tests', () => {
@@ -20,7 +16,7 @@ describe('Edge Cases Integration Tests', () => {
   beforeAll(() => {
     orchestrator = new CollisionOrchestrator({
       parallel: true,
-      maxConcurrency: 7,
+      maxConcurrency: 3,
       globalTimeout: 5000,
       cache: {
         enabled: true,
@@ -28,17 +24,13 @@ describe('Edge Cases Integration Tests', () => {
         maxSize: 1000,
       },
     });
-    
+
     const engines = [
       new SemanticSimilarityEngine(),
-      new StructuralPatternEngine(),
-      new TemporalProximityEngine(),
-      new ConceptualDensityEngine(),
-      new EmotionalResonanceEngine(),
-      new CitationNetworkEngine(),
       new ContradictionDetectionEngine(),
+      new ThematicBridgeEngine(),
     ];
-    
+
     orchestrator.registerEngines(engines);
   });
   
@@ -185,12 +177,9 @@ describe('Edge Cases Integration Tests', () => {
         candidateChunks: [invalidTimestampChunk],
       });
       
-      // Temporal engine should skip invalid dates but other engines should work
+      // Invalid timestamps should be handled gracefully by all engines
       expect(result).toBeDefined();
-      const nonTemporalCollisions = result.collisions.filter(
-        c => c.engineType !== EngineType.TEMPORAL_PROXIMITY
-      );
-      // Other engines might still find connections
+      // Engines should still work despite invalid timestamp data
       expect(result.metrics.engineMetrics.size).toBeGreaterThan(0);
     });
   });

@@ -16,9 +16,10 @@ import { SourceProcessor } from './base.js'
 import type { ProcessResult } from '../types/processor.js'
 import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
-// rechunkMarkdown will be imported from main handler or extracted to lib
 import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
+import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
+import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import type { TimestampContext } from '../types/multi-format.js'
 
 /**
@@ -79,38 +80,63 @@ export class YouTubeProcessor extends SourceProcessor {
           `Cleaning failed: ${cleaningResult.error}. Using original transcript.`)
       }
       
-      // Stage 4: Semantic chunking (25-80%)
-      await this.updateProgress(30, 'extract', 'chunking', 'Creating semantic chunks with metadata')
-      
-      // TODO: Extract rechunkMarkdown from main handler to lib
-      const chunks = await this.rechunkMarkdown(markdown)
-      
-      // Progress tracking for chunking completion
-      await this.updateProgress(80, 'extract', 'chunked', `Created ${chunks.length} semantic chunks`)
-      
-      // Stage 5: Fuzzy positioning (80-90%)
-      // Match chunks back to original source for position context
-      await this.updateProgress(85, 'extract', 'positioning', 'Applying fuzzy position matching')
-      
+      // Stage 4: AI metadata extraction with chunking (25-90%)
+      await this.updateProgress(30, 'extract', 'ai-metadata', 'Processing with AI metadata extraction')
+
+      console.log(`[YouTubeProcessor] Using AI metadata extraction for ${markdown.length} character transcript`)
+
+      const aiChunks = await batchChunkAndExtractMetadata(
+        markdown,
+        {
+          apiKey: process.env.GOOGLE_AI_API_KEY,
+          modelName: process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+          enableProgress: true
+        },
+        async (progress: MetadataExtractionProgress) => {
+          // Map AI extraction progress to overall progress (30-85%)
+          const aiProgressPercent = progress.currentBatch / progress.totalBatches
+          const overallPercent = 30 + Math.floor(aiProgressPercent * 55)
+
+          await this.updateProgress(
+            overallPercent,
+            'extract',
+            progress.stage,
+            `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches} (${progress.chunksProcessed}/${progress.totalChunks} chunks)`
+          )
+        }
+      )
+
+      await this.updateProgress(85, 'extract', 'chunked', `Created ${aiChunks.length} semantic chunks with AI metadata`)
+
+      // Stage 5: Fuzzy positioning (85-90%)
+      // Match chunks back to original source for timestamp context
+      await this.updateProgress(87, 'extract', 'positioning', 'Applying fuzzy position matching for timestamps')
+
       const enhancedChunks = []
       let highConfidenceCount = 0
       let exactMatchCount = 0
       let approximateCount = 0
-      
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i]
-        
-        // Match chunk to source for position data
-        const matchResult = fuzzyMatchChunkToSource(chunk.content, rawMarkdown, i, chunks.length)
-        
+
+      for (let i = 0; i < aiChunks.length; i++) {
+        const aiChunk = aiChunks[i]
+
+        // Match chunk to source for position data (primarily for timestamps)
+        const matchResult = fuzzyMatchChunkToSource(aiChunk.content, rawMarkdown, i, aiChunks.length)
+
         // Extract timestamps if present
-        const timestamps = extractTimestampsWithContext(chunk.content)
-        
-        // Build enhanced chunk with position context
+        const timestamps = extractTimestampsWithContext(aiChunk.content)
+
+        // Build enhanced chunk with AI metadata + position context
         const enhancedChunk = {
-          ...chunk,
+          document_id: this.job.document_id,
+          content: aiChunk.content,
+          chunk_index: i,
+          themes: aiChunk.metadata.themes,
+          importance_score: aiChunk.metadata.importance,
+          summary: aiChunk.metadata.summary,
           start_offset: matchResult.startOffset,
           end_offset: matchResult.endOffset,
+          word_count: aiChunk.content.split(/\s+/).length,
           position_context: {
             method: matchResult.method,
             confidence: matchResult.confidence,
@@ -118,30 +144,26 @@ export class YouTubeProcessor extends SourceProcessor {
             ...(timestamps.length > 0 && { timestamps })
           }
         }
-        
+
         enhancedChunks.push(enhancedChunk)
-        
+
         // Track match quality metrics
         if (matchResult.method === 'exact') exactMatchCount++
         if (matchResult.confidence >= 0.7) highConfidenceCount++
         if (matchResult.method === 'approximate') approximateCount++
       }
-      
+
       // Report positioning quality
       const positioningQuality = {
         exact: exactMatchCount,
         highConfidence: highConfidenceCount,
         approximate: approximateCount,
-        total: chunks.length
+        total: aiChunks.length
       }
-      
+
       console.log('📍 Positioning quality:', positioningQuality)
-      await this.updateProgress(90, 'extract', 'positioned', 
-        `Positioned ${highConfidenceCount}/${chunks.length} chunks with high confidence`)
-      
-      // Stage 6: Enrich chunks with metadata extraction
-      await this.updateProgress(92, 'extract', 'metadata', 'Extracting metadata for collision detection')
-      const chunksWithMetadata = await this.enrichChunksWithMetadata(enhancedChunks)
+      await this.updateProgress(90, 'extract', 'positioned',
+        `Positioned ${highConfidenceCount}/${aiChunks.length} chunks with high confidence`)
       
       // Note: Stages 7 (embeddings) and 8 (storage) are handled by the main handler
       // This processor returns the prepared data for those final stages
@@ -149,18 +171,19 @@ export class YouTubeProcessor extends SourceProcessor {
       // Prepare result with complete metadata
       return {
         markdown,
-        chunks: chunksWithMetadata,
+        chunks: enhancedChunks,
         outline: undefined, // TODO: Convert to OutlineSection[] format
         wordCount: markdown.split(/\s+/).filter(word => word.length > 0).length,
         metadata: {
           extra: {
             source_type: 'youtube',
-          video_id: videoId,
-          url: sourceUrl,
-          cleaning_applied: cleaningResult.success,
-          positioning_quality: positioningQuality,
-          timestamp_count: enhancedChunks.reduce((count, chunk) => 
-            count + (chunk.position_context?.timestamps?.length || 0), 0)
+            video_id: videoId,
+            url: sourceUrl,
+            cleaning_applied: cleaningResult.success,
+            positioning_quality: positioningQuality,
+            timestamp_count: enhancedChunks.reduce((count, chunk) =>
+              count + (chunk.position_context?.timestamps?.length || 0), 0),
+            usedAIMetadata: true
           }
         }
       }
@@ -196,53 +219,6 @@ export class YouTubeProcessor extends SourceProcessor {
   }
 
   /**
-   * Extract document outline from markdown content.
-   * TODO: Update to return OutlineSection[] format
-   * @param markdown - The markdown content to extract outline from
-   * @returns Array of heading strings representing document structure
-   */
-  private extractOutline(markdown: string): string[] {
-    const headings: string[] = []
-    const lines = markdown.split('\n')
-    
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('#')) {
-        // Extract heading text without the # symbols
-        const match = trimmed.match(/^#+\s+(.+)/)
-        if (match) {
-          headings.push(match[1])
-        }
-      }
-    }
-    
-    return headings
-  }
-
-  /**
-   * Temporary rechunkMarkdown implementation.
-   * TODO: Extract this from main handler to lib/semantic-chunking.ts
-   */
-  private async rechunkMarkdown(markdown: string): Promise<any[]> {
-    // For now, simple chunking by paragraphs as placeholder
-    // Real implementation will use Gemini for semantic chunking
-    const chunks = []
-    const paragraphs = markdown.split('\n\n').filter(p => p.trim())
-    
-    for (let i = 0; i < paragraphs.length; i++) {
-      chunks.push({
-        content: paragraphs[i],
-        chunk_index: i,
-        themes: [],
-        importance: 5,
-        summary: paragraphs[i].substring(0, 100)
-      })
-    }
-    
-    return chunks
-  }
-
-  /**
    * Create standardized error with code.
    * @param message - Error message for display
    * @param code - Error code for routing
@@ -256,13 +232,5 @@ export class YouTubeProcessor extends SourceProcessor {
       console.error(`${code}:`, originalError)
     }
     return error
-  }
-
-  /**
-   * Extract timestamps array if they exist in the chunk metadata.
-   * Helper for accessing timestamps in a type-safe way.
-   */
-  private extractTimestamps(chunk: any): TimestampContext[] | undefined {
-    return chunk.timestamps as TimestampContext[] | undefined
   }
 }

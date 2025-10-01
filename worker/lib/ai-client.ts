@@ -20,7 +20,7 @@ export function createGeminiClient(apiKey: string): GoogleGenAI {
     throw new Error('Gemini API key is required')
   }
 
-  return new GoogleGenAI(apiKey)
+  return new GoogleGenAI({ apiKey })
 }
 
 /**

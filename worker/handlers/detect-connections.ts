@@ -1,17 +1,13 @@
 /**
- * Handler for detecting connections between chunks using the 7-engine collision detection system.
+ * Handler for detecting connections between chunks using the 3-engine collision detection system.
  * This is the main entry point for collision detection requests.
  */
 
 import { createClient } from '@supabase/supabase-js';
 import { CollisionOrchestrator } from '../engines/orchestrator';
 import { SemanticSimilarityEngine } from '../engines/semantic-similarity';
-import { StructuralPatternEngine } from '../engines/structural-pattern';
-import { TemporalProximityEngine } from '../engines/temporal-proximity';
-import { ConceptualDensityEngine } from '../engines/conceptual-density';
-import { EmotionalResonanceEngine } from '../engines/emotional-resonance';
-import { CitationNetworkEngine } from '../engines/citation-network';
 import { ContradictionDetectionEngine } from '../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../engines/thematic-bridge';
 import {
   CollisionDetectionInput,
   AggregatedResults,
@@ -25,17 +21,17 @@ import {
 let orchestrator: CollisionOrchestrator | null = null;
 
 /**
- * Initializes the orchestrator with all engines.
+ * Initializes the orchestrator with the 3-engine system.
  */
 function initializeOrchestrator(weights?: WeightConfig): CollisionOrchestrator {
   if (!orchestrator) {
-    console.log('[DetectConnections] Initializing orchestrator with all engines');
+    console.log('[DetectConnections] Initializing orchestrator with 3-engine system');
     
-    // Create orchestrator with configuration
+    // Create orchestrator with configuration optimized for 3 engines
     orchestrator = new CollisionOrchestrator({
       parallel: true,
-      maxConcurrency: 7,
-      globalTimeout: 5000, // 5 seconds
+      maxConcurrency: 3, // Reduced from 7 to 3
+      globalTimeout: 10000, // Increased to 10 seconds for AI processing
       weights: weights,
       cache: {
         enabled: true,
@@ -44,20 +40,22 @@ function initializeOrchestrator(weights?: WeightConfig): CollisionOrchestrator {
       },
     });
     
-    // Initialize and register all engines
+    // Get API key for ThematicBridge engine
+    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GOOGLE_AI_API_KEY environment variable is required for ThematicBridge engine');
+    }
+    
+    // Initialize and register the 3 engines
     const engines = [
       new SemanticSimilarityEngine(),
-      new StructuralPatternEngine(),
-      new TemporalProximityEngine(),
-      new ConceptualDensityEngine(),
-      new EmotionalResonanceEngine(),
-      new CitationNetworkEngine(),
       new ContradictionDetectionEngine(),
+      new ThematicBridgeEngine({ apiKey }),
     ];
     
     orchestrator.registerEngines(engines);
     
-    console.log('[DetectConnections] Orchestrator initialized with 7 engines');
+    console.log('[DetectConnections] Orchestrator initialized with 3 engines (Semantic, Contradiction, ThematicBridge)');
   } else if (weights) {
     // Update weights if provided
     orchestrator.updateWeights(weights);
@@ -153,15 +151,17 @@ export async function detectConnections(
         weights: config.weights || currentConfig.weights,
       });
       
-      // Re-register engines with new config
+      // Get API key for ThematicBridge engine
+      const apiKey = process.env.GOOGLE_AI_API_KEY;
+      if (!apiKey) {
+        throw new Error('GOOGLE_AI_API_KEY environment variable is required for ThematicBridge engine');
+      }
+      
+      // Re-register the 3 engines with new config
       const engines = [
         new SemanticSimilarityEngine(),
-        new StructuralPatternEngine(),
-        new TemporalProximityEngine(),
-        new ConceptualDensityEngine(),
-        new EmotionalResonanceEngine(),
-        new CitationNetworkEngine(),
         new ContradictionDetectionEngine(),
+        new ThematicBridgeEngine({ apiKey }),
       ];
       
       orch.registerEngines(engines);
@@ -170,9 +170,9 @@ export async function detectConnections(
     // Prepare input for orchestrator
     const input: CollisionDetectionInput = {
       sourceChunk,
-      candidateChunks,
+      targetChunks: candidateChunks,
       config: {
-        limit: config?.limit || 50,
+        maxResults: config?.limit || 50,
         minScore: config?.minScore || 0.3,
       },
     };
@@ -192,9 +192,9 @@ export async function detectConnections(
     }
     
     // Filter by minimum score if specified
-    if (config?.minScore) {
+    if (config?.minScore !== undefined) {
       results.topConnections = results.topConnections.filter(
-        conn => conn.totalScore >= config.minScore
+        conn => conn.totalScore >= config.minScore!
       );
     }
     
@@ -291,7 +291,7 @@ export async function detectConnectionsHandler(supabase: any, job: any): Promise
     }
     
     // Filter out chunks from the current document for candidate set (avoid self-connections)
-    const candidateChunks = allUserChunks.filter(chunk => chunk.document_id !== document_id);
+    const candidateChunks = allUserChunks.filter((chunk: any) => chunk.document_id !== document_id);
     
     if (candidateChunks.length < 1) {
       console.log('[DetectConnections] Skipping - no existing chunks to connect with');

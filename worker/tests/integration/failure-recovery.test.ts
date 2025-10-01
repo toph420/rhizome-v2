@@ -1,17 +1,13 @@
 /**
- * Failure recovery integration tests for the 7-engine collision detection system.
+ * Failure recovery integration tests for the 3-engine collision detection system.
  * Tests system resilience, error handling, and recovery mechanisms.
  */
 
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { CollisionOrchestrator } from '../../engines/orchestrator';
 import { SemanticSimilarityEngine } from '../../engines/semantic-similarity';
-import { StructuralPatternEngine } from '../../engines/structural-pattern';
-import { TemporalProximityEngine } from '../../engines/temporal-proximity';
-import { ConceptualDensityEngine } from '../../engines/conceptual-density';
-import { EmotionalResonanceEngine } from '../../engines/emotional-resonance';
-import { CitationNetworkEngine } from '../../engines/citation-network';
 import { ContradictionDetectionEngine } from '../../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../../engines/thematic-bridge';
 import { EngineType } from '../../engines/types';
 
 describe('Failure Recovery Integration Tests', () => {
@@ -20,7 +16,7 @@ describe('Failure Recovery Integration Tests', () => {
   beforeAll(() => {
     orchestrator = new CollisionOrchestrator({
       parallel: true,
-      maxConcurrency: 7,
+      maxConcurrency: 3,
       globalTimeout: 5000,
       cache: {
         enabled: true,
@@ -75,7 +71,7 @@ describe('Failure Recovery Integration Tests', () => {
       });
       
       testOrchestrator.registerEngine(failOnceEngine as any);
-      testOrchestrator.registerEngine(new StructuralPatternEngine());
+      testOrchestrator.registerEngine(new ContradictionDetectionEngine());
       
       const chunk = createTestChunk('test-1');
       
@@ -94,37 +90,33 @@ describe('Failure Recovery Integration Tests', () => {
     it('should handle multiple engine failures gracefully', async () => {
       const failingEngines = [
         createFailingEngine(EngineType.SEMANTIC_SIMILARITY),
-        createFailingEngine(EngineType.TEMPORAL_PROXIMITY),
-        createFailingEngine(EngineType.CITATION_NETWORK),
+        createFailingEngine(EngineType.CONTRADICTION_DETECTION),
       ];
-      
+
       const workingEngines = [
-        new StructuralPatternEngine(),
-        new ConceptualDensityEngine(),
-        new EmotionalResonanceEngine(),
-        new ContradictionDetectionEngine(),
+        new ThematicBridgeEngine(),
       ];
-      
+
       const testOrchestrator = new CollisionOrchestrator();
       [...failingEngines, ...workingEngines].forEach(e => testOrchestrator.registerEngine(e));
-      
+
       const chunk = createTestChunk('multi-fail');
-      
+
       const result = await testOrchestrator.detectCollisions({
         sourceChunk: chunk,
         candidateChunks: [chunk],
       });
-      
+
       // Should get results from working engines
       expect(result.collisions).toBeDefined();
       const workingEngineTypes = new Set(result.collisions.map(c => c.engineType));
-      expect(workingEngineTypes.size).toBeGreaterThanOrEqual(2);
-      
+      expect(workingEngineTypes.size).toBeGreaterThanOrEqual(1);
+
       // Metrics should track failures
       const failedEngines = Array.from(result.metrics.engineMetrics.entries())
         .filter(([_, metrics]) => metrics.errors > 0);
-      expect(failedEngines.length).toBe(3);
-      
+      expect(failedEngines.length).toBe(2);
+
       await testOrchestrator.cleanup();
     });
     
@@ -146,7 +138,7 @@ describe('Failure Recovery Integration Tests', () => {
       });
       
       testOrchestrator.registerEngine(alwaysFailingEngine as any);
-      testOrchestrator.registerEngine(new StructuralPatternEngine());
+      testOrchestrator.registerEngine(new ContradictionDetectionEngine());
       
       const chunk = createTestChunk('circuit-breaker');
       
@@ -207,7 +199,7 @@ describe('Failure Recovery Integration Tests', () => {
       
       orchestrator.registerEngines([
         new SemanticSimilarityEngine(),
-        new StructuralPatternEngine(),
+        new ContradictionDetectionEngine(),
       ]);
       
       const result = await orchestrator.detectCollisions({
@@ -281,18 +273,18 @@ describe('Failure Recovery Integration Tests', () => {
       // Create slow engines
       const slowEngines = [
         createSlowEngine(EngineType.SEMANTIC_SIMILARITY, 3000),
-        createSlowEngine(EngineType.STRUCTURAL_PATTERN, 3000),
+        createSlowEngine(EngineType.CONTRADICTION_DETECTION, 3000),
       ];
-      
+
       const fastOrchestrator = new CollisionOrchestrator({
         globalTimeout: 1000, // 1 second timeout
         errorHandling: {
           timeoutFallback: true,
         },
       });
-      
+
       slowEngines.forEach(e => fastOrchestrator.registerEngine(e));
-      fastOrchestrator.registerEngine(new ConceptualDensityEngine()); // Fast engine
+      fastOrchestrator.registerEngine(new ThematicBridgeEngine()); // Fast engine
       
       const chunk = createTestChunk('timeout-test');
       
@@ -317,10 +309,10 @@ describe('Failure Recovery Integration Tests', () => {
   });
   
   describe('Network and External Dependency Failures', () => {
-    it('should handle network timeouts in citation engine', async () => {
-      // Mock citation engine with network dependency
+    it('should handle network timeouts in thematic bridge engine', async () => {
+      // Mock thematic bridge engine with network dependency
       const networkDependentEngine = {
-        type: EngineType.CITATION_NETWORK,
+        type: EngineType.THEMATIC_BRIDGE,
         canProcess: () => true,
         detect: jest.fn(async () => {
           // Simulate network timeout
@@ -329,16 +321,16 @@ describe('Failure Recovery Integration Tests', () => {
           });
         }),
       };
-      
+
       const testOrchestrator = new CollisionOrchestrator({
         errorHandling: {
           networkRetries: 2,
           networkTimeout: 50,
         },
       });
-      
+
       testOrchestrator.registerEngine(networkDependentEngine as any);
-      testOrchestrator.registerEngine(new StructuralPatternEngine());
+      testOrchestrator.registerEngine(new ContradictionDetectionEngine());
       
       const chunk = createTestChunk('network-test');
       
@@ -359,23 +351,23 @@ describe('Failure Recovery Integration Tests', () => {
     it('should handle external service unavailability', async () => {
       // Simulate external service being down
       const externalServiceEngine = {
-        type: EngineType.EMOTIONAL_RESONANCE,
+        type: EngineType.THEMATIC_BRIDGE,
         canProcess: () => true,
-        detect: jest.fn(() => 
+        detect: jest.fn(() =>
           Promise.reject(new Error('Service Unavailable'))
         ),
       };
-      
+
       const testOrchestrator = new CollisionOrchestrator({
         errorHandling: {
           fallbackMode: true,
           degradedModeThreshold: 0.5, // Allow 50% engine failures
         },
       });
-      
+
       testOrchestrator.registerEngine(externalServiceEngine as any);
       testOrchestrator.registerEngine(new SemanticSimilarityEngine());
-      testOrchestrator.registerEngine(new StructuralPatternEngine());
+      testOrchestrator.registerEngine(new ContradictionDetectionEngine());
       
       const chunk = createTestChunk('service-test');
       
@@ -407,10 +399,10 @@ describe('Failure Recovery Integration Tests', () => {
           throw new Error('Toxic failure');
         },
       };
-      
+
       // Other engines that depend on shared resource
       const dependentEngine = {
-        type: EngineType.STRUCTURAL_PATTERN,
+        type: EngineType.CONTRADICTION_DETECTION,
         canProcess: () => true,
         detect: async () => {
           // Try to use corrupted resource
@@ -421,16 +413,16 @@ describe('Failure Recovery Integration Tests', () => {
           return [];
         },
       };
-      
+
       const testOrchestrator = new CollisionOrchestrator({
         errorHandling: {
           isolationMode: true, // Isolate engine failures
         },
       });
-      
+
       testOrchestrator.registerEngine(toxicEngine as any);
       testOrchestrator.registerEngine(dependentEngine as any);
-      testOrchestrator.registerEngine(new ConceptualDensityEngine());
+      testOrchestrator.registerEngine(new ThematicBridgeEngine());
       
       const chunk = createTestChunk('cascade-test');
       
@@ -551,7 +543,7 @@ describe('Failure Recovery Integration Tests', () => {
       // Register engines
       orchestrator.registerEngines([
         new SemanticSimilarityEngine(),
-        new StructuralPatternEngine(),
+        new ContradictionDetectionEngine(),
       ]);
       
       const chunk = createTestChunk('consistency-test');

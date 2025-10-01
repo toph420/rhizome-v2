@@ -5,8 +5,13 @@
 
 import { SourceProcessor } from './base.js'
 import type { ProcessResult } from '../types/processor.js'
-import { textToMarkdownWithAI, rechunkMarkdown } from '../lib/ai-chunking.js'
+import { textToMarkdownWithAI } from '../lib/ai-chunking.js'
 import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
+import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
+import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
+
+// Model configuration
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
 
 /**
  * Processor for plain text files.
@@ -63,22 +68,40 @@ export class TextProcessor extends SourceProcessor {
       'Convert text to markdown'
     )
     
-    await this.updateProgress(40, 'extract', 'chunking', 'Creating semantic chunks')
-    
-    // Create semantic chunks
+    await this.updateProgress(40, 'extract', 'chunking', 'Creating chunks with AI metadata extraction')
+
+    // Use AI-powered chunking and metadata extraction
+    const progressCallback = (progress: MetadataExtractionProgress) => {
+      const percentage = 40 + Math.floor((progress.currentBatch / progress.totalBatches) * 30)
+      this.updateProgress(
+        percentage,
+        'extract',
+        'metadata',
+        `AI metadata: batch ${progress.currentBatch}/${progress.totalBatches}`
+      )
+    }
+
     const chunks = await this.withRetry(
-      async () => rechunkMarkdown(this.ai, markdown),
-      'Semantic chunking'
+      async () => batchChunkAndExtractMetadata(
+        markdown,
+        {
+          apiKey: process.env.GOOGLE_AI_API_KEY,
+          modelName: GEMINI_MODEL,
+          enableProgress: true
+        },
+        progressCallback
+      ),
+      'AI metadata extraction'
     )
-    
+
     // If original text had timestamps, try to preserve them
     if (hasTimestamps) {
       // Extract timestamps from converted markdown
       const convertedTimestamps = extractTimestampsWithContext(markdown)
-      
+
       if (convertedTimestamps.length > 0) {
         console.log(`✅ Preserved ${convertedTimestamps.length} timestamps after conversion`)
-        
+
         // Distribute timestamps across chunks
         chunks.forEach((chunk, index) => {
           const chunkPosition = index / chunks.length
@@ -87,12 +110,12 @@ export class TextProcessor extends SourceProcessor {
             Math.max(0, timestampIndex - 1),
             Math.min(convertedTimestamps.length, timestampIndex + 2)
           )
-          
+
           if (relevantTimestamps.length > 0) {
             Object.assign(chunk, {
               timestamps: relevantTimestamps,
               position_context: {
-                confidence: 0.9, // High confidence since timestamps were preserved
+                confidence: 0.9,
                 method: 'preserved',
                 has_timestamps: true
               }
@@ -103,49 +126,73 @@ export class TextProcessor extends SourceProcessor {
         console.warn(`⚠️  Lost timestamps during conversion. Original had ${originalTimestamps.length}`)
       }
     }
-    
-    await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} chunks from text`)
-    
-    // Enrich chunks with metadata extraction
-    await this.updateProgress(70, 'finalize', 'metadata', 'Extracting metadata for collision detection')
-    const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
-    
+
+    await this.updateProgress(70, 'finalize', 'complete', `Created ${chunks.length} chunks with AI metadata`)
+
+    // Convert AI chunks to ProcessedChunk format
+    const enrichedChunks = chunks.map((aiChunk, index) => {
+      const base = {
+        content: aiChunk.content,
+        chunk_index: index,
+        themes: aiChunk.metadata.themes,
+        importance_score: aiChunk.metadata.importance,
+        summary: aiChunk.metadata.summary,
+        start_offset: 0,
+        end_offset: aiChunk.content.length,
+        word_count: aiChunk.content.split(/\s+/).length
+      }
+
+      // Re-add timestamps that were set before AI processing
+      if (hasTimestamps && (aiChunk as any).timestamps) {
+        return {
+          ...base,
+          timestamps: (aiChunk as any).timestamps,
+          position_context: (aiChunk as any).position_context
+        }
+      }
+
+      return base
+    })
+
     // Extract metadata
     const wordCount = markdown.split(/\s+/).length
     const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
     const outline = headingMatches.slice(0, 10).map(h => h.replace(/^#+\s+/, ''))
-    
-    // Collect document themes
+
+    // Collect document themes from AI metadata
     const themeFrequency = new Map<string, number>()
     enrichedChunks.forEach(chunk => {
-      chunk.themes.forEach(theme => {
-        themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
-      })
+      if (chunk.themes) {
+        chunk.themes.forEach(theme => {
+          themeFrequency.set(theme, (themeFrequency.get(theme) || 0) + 1)
+        })
+      }
     })
-    
+
     const documentThemes = Array.from(themeFrequency.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([theme]) => theme)
-    
+
     return {
       markdown,
       chunks: enrichedChunks,
       wordCount,
-      outline: outline.length > 0 ? outline.map((title, i) => ({ 
-        title, 
-        level: 1, 
-        offset: 0 
+      outline: outline.length > 0 ? outline.map((title, i) => ({
+        title,
+        level: 1,
+        offset: 0
       })) : undefined,
       metadata: {
         extra: {
-          chunk_count: chunks.length,
+          chunk_count: enrichedChunks.length,
           has_timestamps: hasTimestamps,
           timestamp_count: hasTimestamps ? originalTimestamps.length : 0,
           document_themes: documentThemes.length > 0 ? documentThemes : undefined,
           processing_mode: 'txt',
           converted_from: 'plain_text',
-          original_size_kb: textKB
+          original_size_kb: textKB,
+          usedAIMetadata: true
         }
       }
     }

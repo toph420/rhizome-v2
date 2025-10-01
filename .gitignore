@@ -48,3 +48,5 @@ build/
 # Worker-specific (redundant with node_modules/ above, but explicit)
 worker/node_modules/
 worker/dist/
+worker/coverage/
+worker/tests/validation/reports/

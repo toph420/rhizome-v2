@@ -5,7 +5,6 @@
 
 import type { 
   ChunkMetadata, 
-  StructuralMetadata, 
   EmotionalMetadata, 
   ConceptualMetadata, 
   MethodMetadata, 
@@ -15,7 +14,6 @@ import type {
 } from '../types/metadata'
 
 // Import all extractors
-import { extractStructuralPatterns } from './extractors/structural-patterns'
 import { analyzeEmotionalTone } from './extractors/emotional-tone'
 import { extractKeyConcepts } from './extractors/key-concepts'
 import { detectMethodSignatures } from './extractors/method-signatures'
@@ -59,11 +57,6 @@ export async function extractMetadata(
     // Run all extractors in parallel with timeout protection
     const extractionPromises = [
       withTimeout(
-        extractStructuralPatterns(content, options.aiAnalysis?.structural),
-        500,
-        'structural'
-      ),
-      withTimeout(
         analyzeEmotionalTone(content, options.aiAnalysis?.emotional),
         300,
         'emotional'
@@ -102,7 +95,6 @@ export async function extractMetadata(
     
     // Extract successful results
     const [
-      structuralResult,
       emotionalResult,
       conceptsResult,
       methodsResult,
@@ -113,10 +105,6 @@ export async function extractMetadata(
     
     // Build metadata object with fallbacks for failures
     const metadata: ChunkMetadata = {
-      structural: structuralResult.status === 'fulfilled' 
-        ? structuralResult.value as StructuralMetadata
-        : createDefaultStructural(),
-      
       emotional: emotionalResult.status === 'fulfilled'
         ? emotionalResult.value as EmotionalMetadata
         : createDefaultEmotional(),
@@ -175,21 +163,6 @@ async function withTimeout<T>(
       setTimeout(() => reject(new Error(`${extractorName} timeout after ${timeoutMs}ms`)), timeoutMs)
     )
   ])
-}
-
-/**
- * Creates default structural metadata for fallback.
- */
-function createDefaultStructural() {
-  return {
-    patterns: [],
-    hierarchyDepth: 1,
-    listTypes: [],
-    hasTable: false,
-    hasCode: false,
-    templateType: undefined,
-    confidence: 0
-  }
 }
 
 /**
@@ -301,7 +274,7 @@ function calculateQualityMetrics(
   const errors: string[] = []
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
-      const extractorNames = ['structural', 'emotional', 'concepts', 'methods', 'narrative', 'references', 'domain']
+      const extractorNames = ['emotional', 'concepts', 'methods', 'narrative', 'references', 'domain']
       errors.push(`${extractorNames[index]}: ${result.reason}`)
     }
   })
@@ -313,7 +286,6 @@ function calculateQualityMetrics(
     extractedAt: new Date().toISOString(),
     extractionTime: Date.now() - startTime,
     extractorVersions: {
-      structural: '1.0.0',
       emotional: '1.0.0',
       concepts: '1.0.0',
       methods: '1.0.0',
@@ -333,7 +305,6 @@ function calculateQualityMetrics(
  */
 function createMinimalMetadata(): ChunkMetadata {
   return {
-    structural: createDefaultStructural(),
     emotional: createDefaultEmotional(),
     concepts: createDefaultConceptual(),
     methods: undefined,
@@ -368,7 +339,6 @@ export function validateMetadata(metadata: ChunkMetadata): {
   
   // Check confidence scores
   const confidences = [
-    metadata.structural.confidence,
     metadata.emotional.confidence,
     metadata.concepts.confidence,
     metadata.narrative.confidence
@@ -384,9 +354,7 @@ export function validateMetadata(metadata: ChunkMetadata): {
     issues.push('No concepts extracted')
   }
   
-  if (metadata.structural.patterns.length === 0) {
-    issues.push('No structural patterns found')
-  }
+  // Structural patterns check removed (not used in 3-engine system)
   
   return {
     isValid: issues.length === 0,

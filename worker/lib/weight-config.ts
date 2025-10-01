@@ -54,19 +54,15 @@ export class WeightConfigManager {
    * Initializes all preset configurations.
    */
   private initializePresets(): void {
-    // Default balanced configuration
+    // Default 3-engine configuration
     WeightConfigManager.presets.set(WeightPreset.DEFAULT, {
       name: 'Default',
-      description: 'Balanced configuration for general use',
+      description: 'Optimized 3-engine configuration for general use',
       weights: {
         weights: {
           [EngineType.SEMANTIC_SIMILARITY]: 0.25,
-          [EngineType.STRUCTURAL_PATTERN]: 0.15,
-          [EngineType.TEMPORAL_PROXIMITY]: 0.10,
-          [EngineType.CONCEPTUAL_DENSITY]: 0.20,
-          [EngineType.EMOTIONAL_RESONANCE]: 0.10,
-          [EngineType.CITATION_NETWORK]: 0.15,
-          [EngineType.CONTRADICTION_DETECTION]: 0.05,
+          [EngineType.CONTRADICTION_DETECTION]: 0.40,
+          [EngineType.THEMATIC_BRIDGE]: 0.35,
         },
         normalizationMethod: 'linear',
         combineMethod: 'sum',
@@ -77,16 +73,12 @@ export class WeightConfigManager {
     // Semantic-focused configuration
     WeightConfigManager.presets.set(WeightPreset.SEMANTIC_FOCUS, {
       name: 'Semantic Focus',
-      description: 'Prioritizes meaning and concept relationships',
+      description: 'Prioritizes semantic similarity and AI-powered connections',
       weights: {
         weights: {
-          [EngineType.SEMANTIC_SIMILARITY]: 0.40,
-          [EngineType.STRUCTURAL_PATTERN]: 0.10,
-          [EngineType.TEMPORAL_PROXIMITY]: 0.05,
-          [EngineType.CONCEPTUAL_DENSITY]: 0.30,
-          [EngineType.EMOTIONAL_RESONANCE]: 0.05,
-          [EngineType.CITATION_NETWORK]: 0.05,
-          [EngineType.CONTRADICTION_DETECTION]: 0.05,
+          [EngineType.SEMANTIC_SIMILARITY]: 0.50,
+          [EngineType.CONTRADICTION_DETECTION]: 0.20,
+          [EngineType.THEMATIC_BRIDGE]: 0.30,
         },
         normalizationMethod: 'sigmoid',
         combineMethod: 'average',
@@ -94,24 +86,20 @@ export class WeightConfigManager {
       recommendedFor: ['academic research', 'concept mapping', 'learning'],
     });
     
-    // Structural-focused configuration
+    // AI-focused configuration (renamed from Structural Focus)
     WeightConfigManager.presets.set(WeightPreset.STRUCTURAL_FOCUS, {
-      name: 'Structural Focus',
-      description: 'Emphasizes document structure and patterns',
+      name: 'AI Focus',
+      description: 'Emphasizes AI-powered thematic connections',
       weights: {
         weights: {
-          [EngineType.SEMANTIC_SIMILARITY]: 0.15,
-          [EngineType.STRUCTURAL_PATTERN]: 0.35,
-          [EngineType.TEMPORAL_PROXIMITY]: 0.10,
-          [EngineType.CONCEPTUAL_DENSITY]: 0.15,
-          [EngineType.EMOTIONAL_RESONANCE]: 0.05,
-          [EngineType.CITATION_NETWORK]: 0.10,
-          [EngineType.CONTRADICTION_DETECTION]: 0.10,
+          [EngineType.SEMANTIC_SIMILARITY]: 0.20,
+          [EngineType.CONTRADICTION_DETECTION]: 0.20,
+          [EngineType.THEMATIC_BRIDGE]: 0.60,
         },
         normalizationMethod: 'linear',
         combineMethod: 'max',
       },
-      recommendedFor: ['technical documentation', 'code analysis', 'structured texts'],
+      recommendedFor: ['creative analysis', 'cross-domain connections', 'innovative insights'],
     });
     
     // Research-focused configuration
@@ -120,53 +108,41 @@ export class WeightConfigManager {
       description: 'Optimized for academic and research materials',
       weights: {
         weights: {
-          [EngineType.SEMANTIC_SIMILARITY]: 0.20,
-          [EngineType.STRUCTURAL_PATTERN]: 0.10,
-          [EngineType.TEMPORAL_PROXIMITY]: 0.05,
-          [EngineType.CONCEPTUAL_DENSITY]: 0.25,
-          [EngineType.EMOTIONAL_RESONANCE]: 0.05,
-          [EngineType.CITATION_NETWORK]: 0.30,
-          [EngineType.CONTRADICTION_DETECTION]: 0.05,
+          [EngineType.SEMANTIC_SIMILARITY]: 0.35,
+          [EngineType.CONTRADICTION_DETECTION]: 0.45,
+          [EngineType.THEMATIC_BRIDGE]: 0.20,
         },
         normalizationMethod: 'linear',
         combineMethod: 'sum',
       },
-      recommendedFor: ['academic papers', 'research articles', 'citation analysis'],
+      recommendedFor: ['academic papers', 'research articles', 'debate analysis'],
     });
     
     // Creative-focused configuration
     WeightConfigManager.presets.set(WeightPreset.CREATIVE_FOCUS, {
       name: 'Creative Focus',
-      description: 'Enhances creative and emotional connections',
+      description: 'Emphasizes creative and thematic connections',
       weights: {
         weights: {
-          [EngineType.SEMANTIC_SIMILARITY]: 0.15,
-          [EngineType.STRUCTURAL_PATTERN]: 0.10,
-          [EngineType.TEMPORAL_PROXIMITY]: 0.15,
-          [EngineType.CONCEPTUAL_DENSITY]: 0.15,
-          [EngineType.EMOTIONAL_RESONANCE]: 0.35,
-          [EngineType.CITATION_NETWORK]: 0.05,
-          [EngineType.CONTRADICTION_DETECTION]: 0.05,
+          [EngineType.SEMANTIC_SIMILARITY]: 0.25,
+          [EngineType.CONTRADICTION_DETECTION]: 0.15,
+          [EngineType.THEMATIC_BRIDGE]: 0.60,
         },
         normalizationMethod: 'sigmoid',
         combineMethod: 'harmonic_mean',
       },
-      recommendedFor: ['creative writing', 'narrative analysis', 'emotional content'],
+      recommendedFor: ['creative writing', 'narrative analysis', 'artistic exploration'],
     });
     
     // Perfectly balanced configuration
     WeightConfigManager.presets.set(WeightPreset.BALANCED, {
       name: 'Perfectly Balanced',
-      description: 'Equal weight to all engines',
+      description: 'Equal weight to all 3 engines',
       weights: {
         weights: {
-          [EngineType.SEMANTIC_SIMILARITY]: 1/7,
-          [EngineType.STRUCTURAL_PATTERN]: 1/7,
-          [EngineType.TEMPORAL_PROXIMITY]: 1/7,
-          [EngineType.CONCEPTUAL_DENSITY]: 1/7,
-          [EngineType.EMOTIONAL_RESONANCE]: 1/7,
-          [EngineType.CITATION_NETWORK]: 1/7,
-          [EngineType.CONTRADICTION_DETECTION]: 1/7,
+          [EngineType.SEMANTIC_SIMILARITY]: 1/3,
+          [EngineType.CONTRADICTION_DETECTION]: 1/3,
+          [EngineType.THEMATIC_BRIDGE]: 1/3,
         },
         normalizationMethod: 'linear',
         combineMethod: 'average',

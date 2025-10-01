@@ -1,17 +1,13 @@
 /**
- * Full system integration tests for the 7-engine collision detection system.
+ * Full system integration tests for the 3-engine collision detection system.
  * Tests end-to-end workflow, all engines working together, and result aggregation.
  */
 
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { CollisionOrchestrator } from '../../engines/orchestrator';
 import { SemanticSimilarityEngine } from '../../engines/semantic-similarity';
-import { StructuralPatternEngine } from '../../engines/structural-pattern';
-import { TemporalProximityEngine } from '../../engines/temporal-proximity';
-import { ConceptualDensityEngine } from '../../engines/conceptual-density';
-import { EmotionalResonanceEngine } from '../../engines/emotional-resonance';
-import { CitationNetworkEngine } from '../../engines/citation-network';
 import { ContradictionDetectionEngine } from '../../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../../engines/thematic-bridge';
 import { EngineType } from '../../engines/types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -34,7 +30,7 @@ describe('Full System Integration Tests', () => {
     // Initialize orchestrator with production-like configuration
     orchestrator = new CollisionOrchestrator({
       parallel: true,
-      maxConcurrency: 7,
+      maxConcurrency: 3,
       globalTimeout: 5000,
       cache: {
         enabled: true,
@@ -47,18 +43,14 @@ describe('Full System Integration Tests', () => {
         metricsCollection: true,
       },
     });
-    
-    // Register all production engines
+
+    // Register all production engines (3-engine system)
     const engines = [
       new SemanticSimilarityEngine({ threshold: 0.3 }),
-      new StructuralPatternEngine({ minPatternLength: 2 }),
-      new TemporalProximityEngine({ windowSize: 86400000 }), // 24 hours
-      new ConceptualDensityEngine({ minOverlap: 2 }),
-      new EmotionalResonanceEngine({ minResonance: 0.4 }),
-      new CitationNetworkEngine({ maxDepth: 3 }),
       new ContradictionDetectionEngine({ sensitivity: 0.6 }),
+      new ThematicBridgeEngine({ minImportance: 0.6 }),
     ];
-    
+
     orchestrator.registerEngines(engines);
     
     // Generate embeddings for test data (simulate real embeddings)
@@ -118,10 +110,8 @@ describe('Full System Integration Tests', () => {
           engines: {
             enabledTypes: [
               EngineType.SEMANTIC_SIMILARITY,
-              EngineType.STRUCTURAL_PATTERN,
-              EngineType.CONCEPTUAL_DENSITY,
-              EngineType.EMOTIONAL_RESONANCE,
               EngineType.CONTRADICTION_DETECTION,
+              EngineType.THEMATIC_BRIDGE,
             ],
           },
         },
@@ -149,18 +139,18 @@ describe('Full System Integration Tests', () => {
   });
   
   describe('Engine Coordination', () => {
-    it('should coordinate all 7 engines successfully', async () => {
+    it('should coordinate all 3 engines successfully', async () => {
       const result = await orchestrator.detectCollisions({
         sourceChunk: smallDataset.sourceChunk,
         candidateChunks: smallDataset.candidateChunks,
       });
-      
+
       // Verify all engines participated
       const engineTypes = new Set(result.collisions.map(c => c.engineType));
-      expect(engineTypes.size).toBeGreaterThanOrEqual(5); // At least 5 engines should find connections
-      
+      expect(engineTypes.size).toBeGreaterThanOrEqual(2); // At least 2 engines should find connections
+
       // Check engine metrics
-      expect(result.metrics.engineMetrics.size).toBeGreaterThanOrEqual(5);
+      expect(result.metrics.engineMetrics.size).toBeGreaterThanOrEqual(2);
       
       for (const [engineType, metrics] of result.metrics.engineMetrics) {
         expect(metrics).toMatchObject({
@@ -174,9 +164,9 @@ describe('Full System Integration Tests', () => {
     it('should handle selective engine enabling', async () => {
       const selectedEngines = [
         EngineType.SEMANTIC_SIMILARITY,
-        EngineType.STRUCTURAL_PATTERN,
+        EngineType.CONTRADICTION_DETECTION,
       ];
-      
+
       const result = await orchestrator.detectCollisions({
         sourceChunk: smallDataset.sourceChunk,
         candidateChunks: smallDataset.candidateChunks,
@@ -186,7 +176,7 @@ describe('Full System Integration Tests', () => {
           },
         },
       });
-      
+
       // Only selected engines should be in results
       const usedEngines = new Set(result.collisions.map(c => c.engineType));
       usedEngines.forEach(engine => {

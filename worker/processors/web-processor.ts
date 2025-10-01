@@ -3,6 +3,8 @@ import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { isValidUrl, extractArticle } from '../lib/web-extraction.js'
 import { ERROR_PREFIXES } from '../types/multi-format.js'
 import { Type } from '@google/genai'
+import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
+import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 
 /**
  * Processes web articles by extracting content using Mozilla Readability.
@@ -109,15 +111,46 @@ ${article.textContent}`
 
       await this.updateProgress(60, 'extract', 'cleaned', 'Article cleaned and formatted')
 
-      // Stage 4: Semantic chunking (60-90%)
-      await this.updateProgress(65, 'extract', 'chunking', 'Creating semantic chunks')
-      
-      const chunks = await this.withRetry(
-        async () => await this.rechunkMarkdown(markdown),
-        'markdown chunking'
+      // Stage 4: AI metadata extraction with chunking (60-90%)
+      await this.updateProgress(65, 'extract', 'ai-metadata', 'Processing with AI metadata extraction')
+
+      console.log(`[WebProcessor] Using AI metadata extraction for ${markdown.length} character article`)
+
+      const aiChunks = await batchChunkAndExtractMetadata(
+        markdown,
+        {
+          apiKey: process.env.GOOGLE_AI_API_KEY,
+          modelName: process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+          enableProgress: true
+        },
+        async (progress: MetadataExtractionProgress) => {
+          // Map AI extraction progress to overall progress (65-90%)
+          const aiProgressPercent = progress.currentBatch / progress.totalBatches
+          const overallPercent = 65 + Math.floor(aiProgressPercent * 25)
+
+          await this.updateProgress(
+            overallPercent,
+            'extract',
+            progress.stage,
+            `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches}`
+          )
+        }
       )
 
-      await this.updateProgress(90, 'extract', 'complete', `Created ${chunks.length} chunks`)
+      // Convert AI chunks to ProcessedChunk format
+      const enrichedChunks = aiChunks.map((aiChunk, index) => ({
+        document_id: this.job.document_id,
+        content: aiChunk.content,
+        chunk_index: index,
+        themes: aiChunk.metadata.themes,
+        importance_score: aiChunk.metadata.importance,
+        summary: aiChunk.metadata.summary,
+        start_offset: 0,
+        end_offset: aiChunk.content.length,
+        word_count: aiChunk.content.split(/\s+/).length
+      }))
+
+      await this.updateProgress(90, 'extract', 'complete', `Created ${aiChunks.length} chunks with AI metadata`)
 
       // Stage 5: Prepare metadata
       const metadata = {
@@ -127,13 +160,12 @@ ${article.textContent}`
         language: article.lang || 'en',
         excerpt: article.excerpt || undefined,
         source_url: sourceUrl,
-        chunk_count: chunks.length,
-        word_count: markdown.split(/\s+/).length
+        chunk_count: aiChunks.length,
+        word_count: markdown.split(/\s+/).length,
+        extra: {
+          usedAIMetadata: true
+        }
       }
-
-      // Enrich chunks with metadata extraction
-      await this.updateProgress(90, 'finalize', 'metadata', 'Extracting metadata for collision detection')
-      const enrichedChunks = await this.enrichChunksWithMetadata(chunks)
 
       // Final progress
       await this.updateProgress(100, 'complete', 'success', 'Web article processed successfully')
@@ -165,68 +197,4 @@ ${article.textContent}`
     }
   }
 
-  /**
-   * Rechunks markdown content into semantic chunks using AI.
-   * This is a temporary implementation until rechunkMarkdown is extracted to lib.
-   * 
-   * @param markdown - Markdown content to chunk
-   * @returns Array of processed chunks with metadata
-   */
-  private async rechunkMarkdown(markdown: string): Promise<ProcessedChunk[]> {
-    const result = await this.ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
-      contents: [{
-        parts: [
-          { text: `Break this markdown document into semantic chunks (complete thoughts, 200-2000 characters).
-CRITICAL: Every chunk MUST have:
-- content: The actual chunk text (STRING, required)
-- themes: Array of 2-3 specific topics covered (e.g., ["authentication", "security"]) (ARRAY of STRINGS, required)
-- importance_score: Float 0.0-1.0 representing how central this content is to the document (NUMBER, required)
-- summary: One sentence describing what this chunk covers (STRING, required)
-Return JSON with this exact structure: {chunks: [{content, themes, importance_score, summary}]}
-${markdown}` }
-        ]
-      }],
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            chunks: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  content: { type: Type.STRING },
-                  themes: { type: Type.ARRAY, items: { type: Type.STRING }},
-                  importance_score: { type: Type.NUMBER },
-                  summary: { type: Type.STRING }
-                },
-                required: ['content', 'themes', 'importance_score', 'summary']
-              }
-            }
-          },
-          required: ['chunks']
-        }
-      }
-    })
-
-    if (!result.text) {
-      throw new Error('AI returned empty response during chunking')
-    }
-
-    const response = JSON.parse(result.text)
-    if (!response.chunks || !Array.isArray(response.chunks)) {
-      throw new Error('Invalid chunking response structure')
-    }
-
-    // Map to ProcessedChunk format
-    return response.chunks.map((chunk: any, index: number) => ({
-      content: chunk.content,
-      themes: chunk.themes,
-      importance: chunk.importance_score * 10, // Convert 0-1 to 0-10
-      summary: chunk.summary,
-      chunkIndex: index
-    }))
-  }
 }

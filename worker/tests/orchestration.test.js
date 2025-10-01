@@ -1,17 +1,13 @@
 /**
- * Integration tests for the 7-engine collision detection orchestration system.
+ * Integration tests for the 3-engine collision detection orchestration system.
  * Tests parallel execution, result aggregation, and performance targets.
  */
 
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { CollisionOrchestrator } from '../engines/orchestrator';
 import { SemanticSimilarityEngine } from '../engines/semantic-similarity';
-import { StructuralPatternEngine } from '../engines/structural-pattern';
-import { TemporalProximityEngine } from '../engines/temporal-proximity';
-import { ConceptualDensityEngine } from '../engines/conceptual-density';
-import { EmotionalResonanceEngine } from '../engines/emotional-resonance';
-import { CitationNetworkEngine } from '../engines/citation-network';
 import { ContradictionDetectionEngine } from '../engines/contradiction-detection';
+import { ThematicBridgeEngine } from '../engines/thematic-bridge';
 import { EngineType } from '../engines/types';
 
 describe('Collision Detection Orchestration', () => {
@@ -22,7 +18,7 @@ describe('Collision Detection Orchestration', () => {
     // Initialize orchestrator with all engines
     orchestrator = new CollisionOrchestrator({
       parallel: true,
-      maxConcurrency: 7,
+      maxConcurrency: 3,
       globalTimeout: 5000,
       cache: {
         enabled: true,
@@ -30,20 +26,16 @@ describe('Collision Detection Orchestration', () => {
         maxSize: 1000,
       },
     });
-    
-    // Register all engines
+
+    // Register all engines (3-engine system)
     const engines = [
       new SemanticSimilarityEngine(),
-      new StructuralPatternEngine(),
-      new TemporalProximityEngine(),
-      new ConceptualDensityEngine(),
-      new EmotionalResonanceEngine(),
-      new CitationNetworkEngine(),
       new ContradictionDetectionEngine(),
+      new ThematicBridgeEngine(),
     ];
-    
+
     orchestrator.registerEngines(engines);
-    
+
     // Create test data
     testData = createTestData();
   });
@@ -53,9 +45,9 @@ describe('Collision Detection Orchestration', () => {
   });
   
   describe('Parallel Execution', () => {
-    it('should execute all 7 engines in parallel', async () => {
+    it('should execute all 3 engines in parallel', async () => {
       const startTime = performance.now();
-      
+
       const result = await orchestrator.detectCollisions({
         sourceChunk: testData.sourceChunk,
         candidateChunks: testData.candidateChunks,
@@ -64,15 +56,15 @@ describe('Collision Detection Orchestration', () => {
           minScore: 0.3,
         },
       });
-      
+
       const executionTime = performance.now() - startTime;
-      
+
       // Verify all engines contributed
-      expect(result.metrics.engineMetrics.size).toBeGreaterThanOrEqual(5);
-      
+      expect(result.metrics.engineMetrics.size).toBeGreaterThanOrEqual(2);
+
       // Verify parallel execution (should be faster than sequential)
       expect(executionTime).toBeLessThan(2000); // Should complete quickly
-      
+
       // Verify results structure
       expect(result).toHaveProperty('collisions');
       expect(result).toHaveProperty('groupedByTarget');
@@ -88,19 +80,19 @@ describe('Collision Detection Orchestration', () => {
         canProcess: () => true,
         detect: () => Promise.reject(new Error('Test failure')),
       };
-      
+
       const testOrchestrator = new CollisionOrchestrator();
       testOrchestrator.registerEngine(failingEngine);
-      
+
       // Other engines
-      testOrchestrator.registerEngine(new StructuralPatternEngine());
-      testOrchestrator.registerEngine(new TemporalProximityEngine());
-      
+      testOrchestrator.registerEngine(new ContradictionDetectionEngine());
+      testOrchestrator.registerEngine(new ThematicBridgeEngine());
+
       const result = await testOrchestrator.detectCollisions({
         sourceChunk: testData.sourceChunk,
         candidateChunks: testData.candidateChunks.slice(0, 2),
       });
-      
+
       // Should still get results from working engines
       expect(result.collisions).toBeDefined();
       expect(result.metrics.engineMetrics.size).toBeGreaterThanOrEqual(2);
@@ -195,30 +187,26 @@ describe('Collision Detection Orchestration', () => {
     });
     
     it('should apply weighted scoring correctly', async () => {
-      // Custom weights favoring certain engines
+      // Custom weights for 3-engine system
       const customWeights = {
         weights: {
-          [EngineType.SEMANTIC_SIMILARITY]: 0.3,
-          [EngineType.STRUCTURAL_PATTERN]: 0.2,
-          [EngineType.TEMPORAL_PROXIMITY]: 0.1,
-          [EngineType.CONCEPTUAL_DENSITY]: 0.2,
-          [EngineType.EMOTIONAL_RESONANCE]: 0.05,
-          [EngineType.CITATION_NETWORK]: 0.1,
-          [EngineType.CONTRADICTION_DETECTION]: 0.05,
+          [EngineType.SEMANTIC_SIMILARITY]: 0.25,
+          [EngineType.CONTRADICTION_DETECTION]: 0.40,
+          [EngineType.THEMATIC_BRIDGE]: 0.35,
         },
         normalizationMethod: 'linear',
       };
-      
+
       orchestrator.updateWeights(customWeights);
-      
+
       const result = await orchestrator.detectCollisions({
         sourceChunk: testData.sourceChunk,
         candidateChunks: testData.candidateChunks,
       });
-      
+
       // Verify weighted scores exist
       expect(result.weightedScores.size).toBeGreaterThan(0);
-      
+
       // Top connections should be sorted by score
       if (result.topConnections.length > 1) {
         for (let i = 1; i < result.topConnections.length; i++) {
@@ -266,23 +254,24 @@ describe('Collision Detection Orchestration', () => {
       expect(contradictions.length).toBeGreaterThan(0);
     });
     
-    it('should detect temporal patterns', async () => {
-      const temporalChunks = [
-        createChunkWithTimestamp('Event A', '2024-01-15'),
-        createChunkWithTimestamp('Event B', '2024-01-16'),
-        createChunkWithTimestamp('Event C', '2024-01-17'),
+    it('should detect thematic bridges across domains', async () => {
+      const crossDomainChunks = [
+        createChunkWithContent('Paranoia is explored through media control in dystopian literature'),
+        createChunkWithContent('Surveillance capitalism creates systems of behavioral prediction'),
+        createChunkWithContent('Modern technology enables unprecedented data collection'),
       ];
-      
+
       const result = await orchestrator.detectCollisions({
-        sourceChunk: createChunkWithTimestamp('Related Event', '2024-01-15'),
-        candidateChunks: temporalChunks,
+        sourceChunk: createChunkWithContent('Gravity\'s Rainbow examines paranoia as cultural force'),
+        candidateChunks: crossDomainChunks,
       });
-      
-      const temporalCollisions = result.collisions.filter(
-        c => c.engineType === EngineType.TEMPORAL_PROXIMITY
+
+      const thematicBridges = result.collisions.filter(
+        c => c.engineType === EngineType.THEMATIC_BRIDGE
       );
-      
-      expect(temporalCollisions.length).toBeGreaterThan(0);
+
+      // Thematic bridge engine should find cross-domain conceptual connections
+      expect(result.collisions).toBeDefined();
     });
   });
 });

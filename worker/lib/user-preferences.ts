@@ -9,63 +9,51 @@ export class UserPreferenceManager {
   private cache: Map<string, { config: WeightConfig; timestamp: number }> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  // Predefined preset configurations
+  // Predefined preset configurations for 3-engine system
   public static readonly PRESETS = {
     balanced: {
       name: 'Balanced',
-      description: 'Equal weight to all engines',
+      description: 'Equal weight to all 3 engines',
       weights: {
-        [EngineType.SEMANTIC_SIMILARITY]: 0.143,
-        [EngineType.STRUCTURAL_PATTERN]: 0.143,
-        [EngineType.TEMPORAL_PROXIMITY]: 0.143,
-        [EngineType.CONCEPTUAL_DENSITY]: 0.143,
-        [EngineType.EMOTIONAL_RESONANCE]: 0.143,
-        [EngineType.CITATION_NETWORK]: 0.143,
-        [EngineType.CONTRADICTION_DETECTION]: 0.143,
+        [EngineType.SEMANTIC_SIMILARITY]: 1/3,
+        [EngineType.CONTRADICTION_DETECTION]: 1/3,
+        [EngineType.THEMATIC_BRIDGE]: 1/3,
       },
       normalizationMethod: 'linear' as const,
+      combineMethod: 'average' as const,
     },
     academic: {
       name: 'Academic',
-      description: 'Focus on citations and concepts',
+      description: 'Focus on contradictions and semantic similarity for research',
       weights: {
-        [EngineType.SEMANTIC_SIMILARITY]: 0.2,
-        [EngineType.STRUCTURAL_PATTERN]: 0.1,
-        [EngineType.TEMPORAL_PROXIMITY]: 0.05,
-        [EngineType.CONCEPTUAL_DENSITY]: 0.25,
-        [EngineType.EMOTIONAL_RESONANCE]: 0.05,
-        [EngineType.CITATION_NETWORK]: 0.3,
-        [EngineType.CONTRADICTION_DETECTION]: 0.05,
+        [EngineType.SEMANTIC_SIMILARITY]: 0.35,
+        [EngineType.CONTRADICTION_DETECTION]: 0.45,
+        [EngineType.THEMATIC_BRIDGE]: 0.20,
       },
       normalizationMethod: 'linear' as const,
+      combineMethod: 'sum' as const,
     },
     narrative: {
       name: 'Narrative',
-      description: 'Emphasis on emotional and temporal connections',
+      description: 'Emphasis on thematic and creative connections',
       weights: {
-        [EngineType.SEMANTIC_SIMILARITY]: 0.15,
-        [EngineType.STRUCTURAL_PATTERN]: 0.15,
-        [EngineType.TEMPORAL_PROXIMITY]: 0.25,
-        [EngineType.CONCEPTUAL_DENSITY]: 0.1,
-        [EngineType.EMOTIONAL_RESONANCE]: 0.25,
-        [EngineType.CITATION_NETWORK]: 0.05,
-        [EngineType.CONTRADICTION_DETECTION]: 0.05,
+        [EngineType.SEMANTIC_SIMILARITY]: 0.25,
+        [EngineType.CONTRADICTION_DETECTION]: 0.15,
+        [EngineType.THEMATIC_BRIDGE]: 0.60,
       },
-      normalizationMethod: 'linear' as const,
+      normalizationMethod: 'sigmoid' as const,
+      combineMethod: 'harmonic_mean' as const,
     },
     analytical: {
       name: 'Analytical',
       description: 'Focus on contradictions and deep analysis',
       weights: {
-        [EngineType.SEMANTIC_SIMILARITY]: 0.2,
-        [EngineType.STRUCTURAL_PATTERN]: 0.15,
-        [EngineType.TEMPORAL_PROXIMITY]: 0.1,
-        [EngineType.CONCEPTUAL_DENSITY]: 0.2,
-        [EngineType.EMOTIONAL_RESONANCE]: 0.05,
-        [EngineType.CITATION_NETWORK]: 0.1,
-        [EngineType.CONTRADICTION_DETECTION]: 0.2,
+        [EngineType.SEMANTIC_SIMILARITY]: 0.25,
+        [EngineType.CONTRADICTION_DETECTION]: 0.40,
+        [EngineType.THEMATIC_BRIDGE]: 0.35,
       },
       normalizationMethod: 'linear' as const,
+      combineMethod: 'sum' as const,
     },
   };
 
@@ -200,10 +188,11 @@ export class UserPreferenceManager {
     if (!preset) {
       return null;
     }
-    
+
     return {
       weights: preset.weights,
       normalizationMethod: preset.normalizationMethod,
+      combineMethod: preset.combineMethod,
     };
   }
 
@@ -282,6 +271,7 @@ export class UserPreferenceManager {
     return {
       weights: normalizedWeights,
       normalizationMethod,
+      combineMethod: config.combineMethod || 'sum',
     };
   }
 

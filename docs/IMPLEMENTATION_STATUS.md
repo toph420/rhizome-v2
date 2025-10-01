@@ -212,7 +212,7 @@ graph LR
 ## Development Priorities
 
 ### Immediate (This Week)
-1. Complete MDX markdown renderer
+1. Complete markdown renderer
 2. Implement text selection system
 3. Create annotation toolbar
 4. Display connections in right panel

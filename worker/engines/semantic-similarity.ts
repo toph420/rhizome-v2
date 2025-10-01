@@ -56,7 +56,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
     const results: CollisionResult[] = [];
 
     // Get or extract embedding for source chunk
-    const embedding = sourceChunk.metadata?.embedding || 
+    const embedding = sourceChunk.embedding || 
       await this.vectorClient.getChunkEmbedding(sourceChunk.id);
     
     if (!embedding) {
@@ -70,7 +70,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
       limit: this.config.maxResultsPerChunk,
       excludeDocumentId: this.config.includeSelfReferences 
         ? undefined 
-        : sourceChunk.metadata?.documentId
+        : sourceChunk.document_id
     };
 
     const matches = await this.vectorClient.searchSimilarChunks(
@@ -100,7 +100,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
       results.push({
         sourceChunkId: sourceChunk.id,
         targetChunkId: match.id,
-        engineType: 'semantic_similarity',
+        engineType: EngineType.SEMANTIC_SIMILARITY,
         score: finalScore,
         confidence: this.calculateConfidence(match.similarity),
         explanation: `Semantic similarity: ${(match.similarity * 100).toFixed(1)}%`,
@@ -122,7 +122,7 @@ export class SemanticSimilarityEngine extends BaseEngine {
    */
   protected hasRequiredMetadata(chunk: ChunkWithMetadata): boolean {
     // We need either an embedding or a valid chunk ID to fetch the embedding
-    return !!(chunk.metadata?.embedding || chunk.id);
+    return !!(chunk.embedding || chunk.id);
   }
 
   /**

@@ -29,170 +29,196 @@ background_jobs {
 
 ## Stage 2: PDF Processor Takes Over
 
-**PDFProcessor.process() gets called:**
+**PDFProcessor.process() decides: single-pass or batched?**
 
-### 2.1: Download from Storage (10-12%)
 ```typescript
-// Creates signed URL → Fetches file → Gets buffer
+const useBatched = totalPages > 200; // Threshold for batched processing
+```
+
+### For Small Documents (<200 pages): Single Pass
+
+**2.1: Download & Upload (10-20%)**
+```typescript
 const fileBuffer = await fileResponse.arrayBuffer()
-// Progress: "Downloaded 2.4 MB file"
-```
-
-### 2.2: Upload to Gemini Files API (15-20%)
-```typescript
-// Uses GeminiFileCache to avoid re-uploading same PDFs
-const fileUri = await cache.getOrUpload(fileBuffer, async (buffer) => {
-  return await this.ai.files.upload({
-    file: new Blob([buffer], { type: 'application/pdf' }),
-    config: { mimeType: 'application/pdf' }
-  })
+const fileUri = await this.ai.files.upload({
+  file: new Blob([buffer], { type: 'application/pdf' }),
+  config: { mimeType: 'application/pdf' }
 })
-// Progress: "Processing time: 3s, validating file..."
 ```
 
-### 2.3: Extract Markdown ONLY (25-40%)
-
-**Current (broken for large docs):**
+**2.2: Extract Everything (20-80%)**
 ```typescript
-// Asks AI for BOTH markdown AND chunks in one call
-// Hits 65k token limit on books
-```
-
-**Fixed approach:**
-```typescript
-// Simplified prompt - just extract text
-const SIMPLE_EXTRACTION_PROMPT = `
-Extract ALL text from this PDF and convert to clean markdown.
-Preserve headings, lists, emphasis. Focus on accurate extraction.
-Return ONLY the markdown text.
-`
-
 const result = await this.ai.models.generateContent({
-  model: GEMINI_MODEL,
+  model: 'gemini-2.0-flash-exp',
   contents: [{
     parts: [
       { fileData: { fileUri, mimeType: 'application/pdf' } },
-      { text: SIMPLE_EXTRACTION_PROMPT }
+      { text: EXTRACTION_PROMPT }
     ]
   }],
-  config: { maxOutputTokens: MAX_OUTPUT_TOKENS }
+  config: { maxOutputTokens: 65536 }
 })
 
 const markdown = result.text
-// Progress: "Extracted 150,000 words"
+// Progress: "Extracted 50,000 words"
 ```
 
-**What you get:**
-```markdown
-# Gravity's Rainbow
+### For Large Documents (500+ pages): Batched Processing
 
-## Part 1: Beyond the Zero
+**2.1: Batched Extraction (15-40%)**
 
-The opening scene of Pynchon's novel...
-
-[Full document text, properly formatted]
-```
-
-### 2.4: Local Chunking (40-60%)
+Extract 100 pages at a time with 10-page overlap:
 
 ```typescript
-// This happens LOCALLY - no AI, no token limits
-const rawChunks = simpleMarkdownChunking(markdown, {
-  targetWords: 400,
-  maxWords: 600,
-  splitOnHeadings: true
-})
-// Progress: "Created 382 chunks"
+const BATCH_SIZE = 100;
+const OVERLAP_PAGES = 10;
+const batches = [];
+
+for (let start = 0; start < totalPages; start += BATCH_SIZE - OVERLAP_PAGES) {
+  const end = Math.min(start + BATCH_SIZE, totalPages);
+  
+  console.log(`📄 Extracting pages ${start + 1}-${end} (batch ${batchNum}/${totalBatches})`);
+  
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.0-flash-exp',
+    contents: [{
+      parts: [
+        { fileData: { fileUri, mimeType: 'application/pdf' } },
+        { text: `Extract pages ${start + 1} through ${end} as clean markdown.
+                 Preserve ALL text verbatim. Return ONLY markdown.` }
+      ]
+    }],
+    config: { maxOutputTokens: 65536, temperature: 0.1 }
+  });
+  
+  batches.push(result.text);
+}
+// Cost: 6 batches × $0.02 = $0.12 for 500-page book
 ```
 
-**Chunking algorithm:**
-```
-1. Split on ## and ### headings (natural boundaries)
-2. If section > 600 words, split on paragraph breaks
-3. Each chunk: 300-500 words (complete thought units)
-4. Track: start_offset, end_offset in original markdown
+**2.2: Intelligent Stitching (40-45%)**
+
+```typescript
+let stitched = batches[0].markdown;
+
+for (let i = 1; i < batches.length; i++) {
+  const prevEnd = batches[i - 1].markdown.slice(-2000);
+  const currStart = batches[i].markdown.slice(0, 3000);
+  
+  // Find overlap using fuzzy matching
+  const overlapPoint = findBestOverlap(prevEnd, currStart);
+  
+  if (overlapPoint > 0) {
+    console.log(`🔗 Found overlap at position ${overlapPoint}`);
+    stitched += batches[i].markdown.slice(overlapPoint);
+  } else {
+    console.warn(`⚠️  No overlap found, using paragraph boundary`);
+    const paraStart = batches[i].markdown.indexOf('\n\n');
+    stitched += paraStart > 0 
+      ? batches[i].markdown.slice(paraStart)
+      : '\n\n' + batches[i].markdown;
+  }
+}
+
+// Result: Full 150k word document, overlaps removed
+// Progress: "Stitched 6 batches into 150,000 words"
 ```
 
-**Example chunk:**
+**Fuzzy matching handles:**
+- Pages split mid-sentence
+- OCR variations between batches
+- Formatting differences
+- Whitespace inconsistencies
+
+### 2.3: Batched Chunking + Metadata (45-85%)
+
+```typescript
+const allChunks = [];
+const WINDOW_SIZE = 100000; // ~25k tokens
+let position = 0;
+let chunkIndex = 0;
+
+while (position < markdown.length) {
+  const section = markdown.slice(position, position + WINDOW_SIZE);
+  const progress = Math.round((position / markdown.length) * 100);
+  
+  console.log(`🔍 Chunking: ${progress}% (${Math.round(remaining / 1000)}k chars remaining)`);
+  
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.0-flash-exp',
+    contents: [{ parts: [{ text: `
+      Extract semantic chunks (200-500 words) starting at character ${position}.
+      
+      For each chunk return:
+      - content: actual text
+      - themes: 2-3 key topics
+      - concepts: [{text, importance}] - 5-10 concepts with scores
+      - emotional_tone: {polarity: -1 to 1, primaryEmotion}
+      - importance_score: 0-1
+      - start_offset, end_offset (absolute positions)
+      
+      Return JSON: { chunks: [...], lastProcessedOffset: number }
+      
+      Markdown: ${section}
+    `}] }],
+    config: { maxOutputTokens: 65536, temperature: 0.1 }
+  });
+  
+  const response = JSON.parse(result.text);
+  
+  for (const chunk of response.chunks) {
+    allChunks.push({
+      ...chunk,
+      chunk_index: chunkIndex++,
+      word_count: chunk.content.split(/\s+/).length
+    });
+  }
+  
+  position = response.lastProcessedOffset;
+}
+
+// Result: 382 chunks with rich metadata
+// Cost: 10 batches × $0.02 = $0.20 for 500-page book
+```
+
+**What each chunk contains:**
 ```typescript
 {
   content: "The opening scene of Pynchon's novel... [400 words]",
   chunk_index: 0,
   start_offset: 0,
-  end_offset: 2847
-}
-```
-
-### 2.5: Metadata Extraction (60-85%)
-
-**This is where deep fingerprinting happens:**
-
-```typescript
-const enrichedChunks = await this.enrichChunksWithMetadata(rawChunks)
-```
-
-**For EACH chunk, run:**
-```typescript
-await extractMetadata(chunk.content, options)
-```
-
-**What extractMetadata does (per chunk):**
-```typescript
-{
+  end_offset: 2847,
   themes: ["postmodern literature", "paranoia", "entropy"],
-  tone: { primary: "complex", secondary: "darkly humorous" },
-  patterns: ["non-linear narrative", "scientific metaphors"],
-  concepts: ["V-2 rocket", "Pavlovian conditioning", "corporate control"],
-  entities: ["Tyrone Slothrop", "ACHTUNG", "Pointsman"],
-  structure: {
-    hasCode: false,
-    hasLists: false,
-    hasTables: false,
-    density: "high"
+  concepts: [
+    { text: "V-2 rocket", importance: 0.9 },
+    { text: "Pavlovian conditioning", importance: 0.8 },
+    { text: "corporate control", importance: 0.7 }
+  ],
+  emotional_tone: {
+    polarity: -0.3,  // Slightly negative
+    primaryEmotion: "anxiety"
   },
-  quality: {
-    completeness: 0.95,
-    extractedFields: 6,
-    totalFields: 7
-  }
+  importance_score: 0.85,
+  word_count: 412
 }
-```
-
-**This happens in parallel batches** (handled by your existing pipeline).
-
-Progress updates:
-```
-"Extracting metadata for 382 chunks"
-"Metadata extraction complete: 365/382 chunks with >50% completeness"
 ```
 
 ## Stage 3: Handler Takes Over (85-100%)
 
-**The processor returns to the handler:**
+**The processor returns:**
 
 ```typescript
 return {
   markdown: "# Gravity's Rainbow\n\n...",  // Full 150k word document
-  chunks: [
-    {
-      content: "chunk text",
-      chunk_index: 0,
-      themes: [...],
-      metadata: { themes, tone, patterns, concepts, entities, structure }
-    },
-    // ... 381 more chunks
-  ],
+  chunks: [/* 382 chunks with rich metadata */],
   metadata: { sourceUrl: "..." },
   wordCount: 150000,
   outline: [/* hierarchical structure */]
 }
 ```
 
-**Handler does:**
-
 ### 3.1: Save Full Markdown (85%)
 ```typescript
-// Uploads to storage
 await supabase.storage
   .from('documents')
   .upload(`${storagePath}/content.md`, markdown)
@@ -204,7 +230,7 @@ await supabase.from('documents').insert({
   id: documentId,
   title: "Gravity's Rainbow",
   storage_path: storagePath,
-  markdown_content: markdown,  // Cached for quick access
+  markdown_content: markdown,
   word_count: 150000,
   outline: [...]
 })
@@ -213,11 +239,10 @@ await supabase.from('documents').insert({
 ### 3.3: Batch Insert Chunks (90%)
 ```typescript
 await batchInsertChunks(supabase, chunks)
-// Uses optimal batch size based on chunk count
 // Inserts all 382 chunks with metadata
 ```
 
-**Database state after insert:**
+**Database state:**
 ```sql
 chunks {
   id: "chunk_0",
@@ -227,21 +252,32 @@ chunks {
   start_offset: 0,
   end_offset: 2847,
   themes: ["postmodern literature", "paranoia"],
-  tone: {...},
-  patterns: [...],
-  concepts: [...],
+  concepts: [
+    {"text": "V-2 rocket", "importance": 0.9},
+    {"text": "Pavlovian conditioning", "importance": 0.8}
+  ],
+  emotional_tone: {"polarity": -0.3, "primaryEmotion": "anxiety"},
+  importance_score: 0.85,
   embedding: null,  -- Not yet generated
-  importance: 0.8,
-  summary: "Opening scene introducing Slothrop..."
+  metadata: {...}   -- Full metadata structure
 }
 -- × 382 chunks
 ```
 
 ### 3.4: Generate Embeddings (92-95%)
 ```typescript
-// Batch process all chunks through embedding model
-// This is where semantic vectors get created
-await generateEmbeddings(chunks)
+// Batch process using Vercel AI SDK
+import { embedMany } from 'ai';
+import { google } from '@ai-sdk/google';
+
+const { embeddings } = await embedMany({
+  model: google.textEmbeddingModel('gemini-embedding-001', {
+    outputDimensionality: 768
+  }),
+  values: chunks.map(c => c.content)
+});
+
+// Cost: ~$0.02 for 382 chunks
 ```
 
 **Updated chunks:**
@@ -252,85 +288,127 @@ chunks {
 }
 ```
 
-### 3.5: Collision Detection (95-100%)
+### 3.5: 3-Engine Connection Detection (95-100%)
 
-**This is where your 7 engines run:**
+**For each chunk, run 3 distinct engines:**
+
+#### Engine 1: Semantic Similarity (Fast, No AI)
 
 ```typescript
-// For each chunk, run all 7 engines against entire corpus
-await detectConnections(chunkId, allChunks)
+// Uses pgvector cosine similarity
+const semanticMatches = await supabase.rpc('match_chunks', {
+  query_embedding: chunk.embedding,
+  threshold: 0.7,
+  exclude_document: chunk.document_id,
+  limit: 50
+});
+
+// Finds: "These say the same thing"
+// Cost: $0 (just vector math)
 ```
 
-**Engine by engine:**
+#### Engine 2: Contradiction Detection (Metadata-Enhanced)
 
-**1. Semantic Similarity**
 ```typescript
-// Uses embedding vectors
-const semanticMatches = await findSimilarEmbeddings(chunk.embedding)
-// Finds chunks with cosine similarity > threshold
-```
-
-**2. Thematic Bridges**
-```typescript
-// Compares metadata.themes
-if (hasOverlappingThemes(chunkA.themes, chunkB.themes)) {
-  // Even across different domains
-  // "paranoia" in Gravity's Rainbow ↔ "surveillance" in 1984
+for (const targetChunk of corpus) {
+  // Check: Same concepts + opposite emotional polarity?
+  const sharedConcepts = getSharedConcepts(
+    chunk.concepts,
+    targetChunk.concepts
+  );
+  
+  if (sharedConcepts.length > 0) {
+    const oppositePolarity = 
+      chunk.emotional_tone.polarity > 0.3 &&
+      targetChunk.emotional_tone.polarity < -0.3;
+    
+    if (oppositePolarity) {
+      // Found conceptual tension!
+      connections.push({
+        sourceChunkId: chunk.id,
+        targetChunkId: targetChunk.id,
+        type: 'contradiction_detection',
+        strength: 0.8,
+        metadata: {
+          sharedConcepts,
+          polarityDifference: Math.abs(
+            chunk.emotional_tone.polarity - 
+            targetChunk.emotional_tone.polarity
+          )
+        }
+      });
+    }
+  }
 }
+
+// Finds: "These disagree about the same thing"
+// Cost: $0 (uses extracted metadata)
 ```
 
-**3. Structural Isomorphisms**
-```typescript
-// Compares metadata.patterns
-// "non-linear narrative" ↔ "fragmented timeline"
-// Both chunks use similar structural approaches
-```
+#### Engine 3: Thematic Bridge (AI-Powered, Filtered)
 
-**4. Contradiction Tensions**
 ```typescript
-// Finds opposing viewpoints on same concepts
-// metadata.concepts overlap BUT tone/stance differs
-```
+// AGGRESSIVE FILTERING to reduce AI calls
 
-**5. Emotional Resonance**
-```typescript
-// Compares metadata.tone
-// "darkly humorous" ↔ "satirical"
-```
+// Filter 1: Only important chunks
+if (chunk.importance_score < 0.6) return [];
 
-**6. Methodological Echoes**
-```typescript
-// Similar analytical approaches
-// "scientific metaphors" ↔ "mathematical analogies"
-```
+// Filter 2: Cross-document only
+const crossDocCandidates = corpus.filter(
+  c => c.document_id !== chunk.document_id
+);
 
-**7. Temporal Rhythms**
-```typescript
-// metadata.structure.density and pacing
-// Both chunks follow similar narrative rhythm
+// Filter 3: Different domains
+// Filter 4: Concept overlap 0.2-0.7 (sweet spot)
+// Filter 5: Top 15 candidates
+
+// Result: ~5-15 candidates per source chunk
+const candidates = filterCandidates(chunk, crossDocCandidates);
+
+// NOW use AI to analyze bridges
+for (const candidate of candidates) {
+  const analysis = await analyzeBridge(chunk, candidate);
+  
+  if (analysis.connected && analysis.strength >= 0.6) {
+    connections.push({
+      sourceChunkId: chunk.id,
+      targetChunkId: candidate.id,
+      type: 'thematic_bridge',
+      strength: analysis.strength,
+      metadata: {
+        bridgeType: analysis.bridgeType,
+        sharedConcept: analysis.sharedConcept
+      }
+    });
+  }
+}
+
+// Finds: "These connect different domains through shared concepts"
+// Example: "paranoia" in Gravity's Rainbow ↔ "surveillance capitalism"
+// Cost: ~200 AI calls per document = ~$0.20
 ```
 
 **All engines write to:**
 ```sql
 connections {
   source_chunk_id: "chunk_0",
-  target_chunk_id: "chunk_847",  -- Maybe from different book!
+  target_chunk_id: "chunk_847",  -- From different book!
   type: "thematic_bridge",
   strength: 0.87,
   auto_detected: true,
   discovered_at: "2025-09-30T...",
   metadata: {
-    shared_themes: ["paranoia", "control"],
-    reasoning: "Both explore institutional paranoia through different lenses"
+    bridgeType: "cross_domain",
+    sharedConcept: "institutional paranoia",
+    sourceDomain: "literature",
+    targetDomain: "technology"
   }
 }
 ```
 
-**No filtering** - ALL connections stored, regardless of strength.
+**Connections stored, filtered at display time using personal weights.**
 
 ## Stage 4: Reading Experience
-
-**You open the document:**
 
 ### The Hybrid Display
 
@@ -363,10 +441,10 @@ const visibleChunks = chunks.filter(c =>
 
 ### Connection Surfacing
 
-**Sidebar shows:**
+**Sidebar shows connections for visible chunks:**
 ```
 ┌─────────────────────────────────────────┐
-│ 🔗 Connections                          │
+│ Connections                             │
 │                                         │
 │ ⚡ Contradiction (0.92)                 │
 │ ├─ "1984" - Chapter 3                  │
@@ -374,101 +452,124 @@ const visibleChunks = chunks.filter(c =>
 │    control mechanisms                   │
 │                                         │
 │ 🌉 Thematic Bridge (0.87)              │
-│ ├─ "Catch-22" - Opening                │
-│ └─ Shared: bureaucratic absurdity,     │
-│    military paranoia                    │
+│ ├─ "Surveillance Capitalism"           │
+│ └─ Cross-domain: paranoia (literature) │
+│    ↔ surveillance (technology)         │
 │                                         │
-│ 🏗️ Structural (0.79)                   │
-│ ├─ "Ulysses" - Episode 1               │
-│ └─ Non-linear narrative, stream of     │
-│    consciousness                        │
+│ 📊 Semantic (0.79)                     │
+│ ├─ "Catch-22" - Opening                │
+│ └─ Similar themes: military paranoia   │
 └─────────────────────────────────────────┘
 ```
 
-**These are chunk-to-chunk connections:**
-- Source: chunk_0 (currently visible)
-- Target: chunk from different document
-- Scored using your personal weights:
-  ```typescript
-  score = 
-    semantic_weight(0.3) * semantic_strength +
-    thematic_weight(0.9) * thematic_strength +  // You care about concepts
-    contradiction_weight(1.0) * contradiction_strength +  // Maximum
-    ...
-  ```
+**Scored using personal weights:**
+```typescript
+score = 
+  0.25 * semantic_strength +
+  0.40 * contradiction_strength +  // Highest weight
+  0.35 * thematic_bridge_strength
+```
 
 ### As You Scroll
 
 ```typescript
-// Viewport changes → visible chunks change
-// Connections update in real-time
-// New connections surface for new chunks
-
 onScroll(() => {
   const newVisibleChunks = getVisibleChunks(viewport)
   const connections = getConnectionsFor(newVisibleChunks)
-  updateSidebar(connections.sortBy(personalWeights))
+  
+  // Apply personal weights
+  const scored = connections.map(c => ({
+    ...c,
+    finalScore: 
+      0.25 * c.semantic_strength +
+      0.40 * c.contradiction_strength +
+      0.35 * c.bridge_strength
+  }))
+  
+  updateSidebar(scored.sortBy('finalScore'))
 })
 ```
+
+## Cost Breakdown
+
+### For 500-Page Book (Gravity's Rainbow)
+
+**Extraction:**
+- 6 batches × $0.02 = **$0.12**
+
+**Metadata:**
+- 10 batches × $0.02 = **$0.20**
+
+**Embeddings:**
+- 382 chunks = **$0.02**
+
+**Connection Detection:**
+- Semantic: $0 (vector math)
+- Contradiction: $0 (metadata)
+- ThematicBridge: 200 AI calls = **$0.20**
+
+**Total: ~$0.54 per 500-page book**
+
+## Processing Time
+
+**For Gravity's Rainbow (400 pages, 150k words):**
+
+- Extract (batched): ~5-7 minutes
+- Stitch: <10 seconds (local)
+- Metadata (batched): ~8-12 minutes
+- Embeddings: ~1-2 minutes
+- Connections (3 engines): ~3-5 minutes
+
+**Total: ~20-25 minutes**
 
 ## The Key Insight
 
 **Two layers working in harmony:**
 
-1. **Display Layer**: You read continuous markdown (natural flow)
-   - Source: `content.md` 
+1. **Display Layer**: You read continuous markdown
+   - Source: `content.md`
    - No chunk boundaries
    - Natural reading experience
 
-2. **Connection Layer**: System operates on chunks (semantic precision)
-   - Source: `chunks` table with metadata
-   - All 7 engines detect connections
+2. **Connection Layer**: System operates on chunks
+   - Source: `chunks` table with rich metadata
+   - 3 engines detect connections
    - Surfaces in sidebar based on viewport
 
 **The bridge:**
 - Chunks have `start_offset` and `end_offset`
-- System tracks your scroll position
+- System tracks scroll position
 - Maps position → visible chunks → their connections
 - Sidebar updates as you read
-
-**Annotations work the same way:**
-```typescript
-{
-  position: { start: 1547, end: 1623 },  // Global position in content.md
-  chunkId: "chunk_0",  // For connection lookups
-  note: "This reminds me of..."
-}
-```
-
-You annotate in the flow of reading (display layer), but the system can find connections through the chunk (connection layer).
 
 ## Summary
 
 ```
 Upload PDF
   ↓
-Extract Markdown (Gemini, simple prompt)
+Batched Extraction (100 pages at a time, 10-page overlap)
   ↓
-Chunk Locally (no AI, no limits)
+Intelligent Stitching (fuzzy matching removes duplicates)
   ↓
-Extract Metadata (per chunk, batched)
+Batched Metadata Extraction (100k char windows, rich metadata)
   ↓
-Generate Embeddings (batch)
+Generate Embeddings (batch API)
   ↓
-Detect Connections (7 engines, all pairs)
+3-Engine Detection (Semantic, Contradiction, ThematicBridge)
   ↓
-Store Everything (no filtering)
+Store Connections (filtered at display time)
   ↓
 Read & Surface (hybrid display/connection layers)
 ```
 
-**Processing time for Gravity's Rainbow:**
-- Extract: ~3-5 minutes (one Gemini call)
-- Chunk: <1 second (local algorithm)
-- Metadata: ~10-15 minutes (382 chunks × AI calls, batched)
-- Embeddings: ~2 minutes (batch API)
-- Connections: ~5 minutes (all 7 engines)
+**The 3 engines each do something distinct:**
+- Semantic: "These say the same thing" (fast baseline)
+- Contradiction: "These disagree about X" (conceptual tension)
+- ThematicBridge: "These connect across domains" (surprising insights)
 
-**Total: ~20-25 minutes** for a 400-page book with 382 chunks, all connections detected.
+**Cost-effective through:**
+- Batched processing (reduces API calls 10x)
+- Aggressive filtering (ThematicBridge: 200 calls vs 160k)
+- Smart architecture (full markdown + chunks)
 
-Any part of this pipeline you want me to dig deeper on?
+**The result:** ~$0.50 per book, meaningful connections, natural reading flow.
