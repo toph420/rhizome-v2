@@ -1,8 +1,5 @@
 import { GoogleGenAI } from '@google/genai'
-
-// Model configuration - use same as main handler
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
-const MAX_OUTPUT_TOKENS = 65536
+import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from './model-config.js'
 
 /**
  * Result from YouTube transcript cleaning operation.

@@ -270,6 +270,65 @@ export abstract class SourceProcessor {
     return enrichedChunks
   }
 
+  /**
+   * Maps AI-extracted metadata to database JSONB columns.
+   * Ensures proper storage of emotional, conceptual, and domain metadata.
+   * 
+   * @param aiChunk - Chunk with AI metadata from batchChunkAndExtractMetadata
+   * @param index - Chunk index in document
+   * @returns Database-ready chunk object with proper metadata mapping
+   */
+  protected mapAIChunkToDatabase(
+    aiChunk: {
+      content: string
+      start_offset: number
+      end_offset: number
+      chunk_index: number
+      metadata: {
+        themes: string[]
+        concepts: Array<{ text: string; importance: number }>
+        importance: number
+        summary?: string
+        domain?: string
+        emotional: {
+          polarity: number
+          primaryEmotion: string
+          intensity: number
+        }
+      }
+    }
+  ): Record<string, any> {
+    return {
+      content: aiChunk.content,
+      chunk_index: aiChunk.chunk_index,
+      // CRITICAL: Use absolute offsets from AI (already calculated)
+      start_offset: aiChunk.start_offset,
+      end_offset: aiChunk.end_offset,
+      word_count: aiChunk.content.split(/\s+/).length,
+      
+      // Legacy fields (backwards compatibility)
+      themes: aiChunk.metadata.themes,
+      importance_score: aiChunk.metadata.importance,
+      summary: aiChunk.metadata.summary || null,
+      
+      // JSONB metadata columns (CRITICAL for 3-engine system)
+      emotional_metadata: {
+        polarity: aiChunk.metadata.emotional.polarity,
+        primaryEmotion: aiChunk.metadata.emotional.primaryEmotion,
+        intensity: aiChunk.metadata.emotional.intensity
+      },
+      conceptual_metadata: {
+        concepts: aiChunk.metadata.concepts  // [{text, importance}]
+      },
+      domain_metadata: aiChunk.metadata.domain ? {
+        primaryDomain: aiChunk.metadata.domain,
+        confidence: 0.8
+      } : null,
+      
+      metadata_extracted_at: new Date().toISOString()
+    }
+  }
+
 
   /**
    * Gets storage path for document files.

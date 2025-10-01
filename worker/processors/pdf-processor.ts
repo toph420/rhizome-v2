@@ -10,10 +10,7 @@ import { GeminiFileCache } from '../lib/gemini-cache.js'
 import { extractLargePDF, DEFAULT_BATCH_CONFIG } from '../lib/pdf-batch-utils.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
-
-// Model configuration
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
-const MAX_OUTPUT_TOKENS = 65536
+import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from '../lib/model-config.js'
 
 // Thresholds for batched processing
 const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
@@ -164,17 +161,13 @@ export class PDFProcessor extends SourceProcessor {
       }
     )
 
-    // Convert AI chunks to ProcessedChunk format
+    // Convert AI chunks to ProcessedChunk format with proper metadata mapping
     const enrichedChunks = aiChunks.map((aiChunk, index) => ({
       document_id: this.job.document_id,
-      content: aiChunk.content,
-      chunk_index: index,
-      themes: aiChunk.metadata.themes,
-      importance_score: aiChunk.metadata.importance,
-      summary: aiChunk.metadata.summary,
-      start_offset: 0,
-      end_offset: aiChunk.content.length,
-      word_count: aiChunk.content.split(/\s+/).length
+      ...this.mapAIChunkToDatabase({
+        ...aiChunk,
+        chunk_index: index
+      })
     }))
 
     await this.updateProgress(
@@ -478,14 +471,13 @@ export class PDFProcessor extends SourceProcessor {
       `Extracted ${aiChunks.length} chunks with AI metadata`
     )
 
-    // Convert AI chunks to ProcessedChunk format
+    // Convert AI chunks to ProcessedChunk format with proper metadata mapping
     const enrichedChunks = aiChunks.map((aiChunk, index) => ({
       document_id: this.job.document_id,
-      content: aiChunk.content,
-      chunk_index: index,
-      themes: aiChunk.metadata.themes,
-      importance_score: aiChunk.metadata.importance,
-      summary: aiChunk.metadata.summary,
+      ...this.mapAIChunkToDatabase({
+        ...aiChunk,
+        chunk_index: index
+      }),
       // Note: AI metadata system doesn't provide offsets yet
       // These will be calculated if needed for annotation support
       start_offset: 0,

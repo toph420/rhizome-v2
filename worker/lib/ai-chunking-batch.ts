@@ -20,13 +20,14 @@ import type {
   MetadataExtractionProgress,
   ChunkWithOffsets
 } from '../types/ai-metadata'
+import { GEMINI_MODEL } from './model-config.js'
 
 /**
  * Default configuration values for batch metadata extraction.
  */
 const DEFAULT_CONFIG: Required<BatchMetadataConfig> = {
-  maxBatchSize: 100000, // 100K characters per batch
-  modelName: 'gemini-2.0-flash-exp',
+  maxBatchSize: 100000, // 100K chars per batch (gemini-2.5-flash-lite has 65K output tokens)
+  modelName: GEMINI_MODEL,
   apiKey: process.env.GOOGLE_AI_API_KEY || '',
   maxRetries: 3,
   enableProgress: true
@@ -241,6 +242,7 @@ async function callGeminiForMetadata(
     contents: [{ parts: [{ text: prompt }] }],
     config: {
       responseMimeType: 'application/json',
+      maxOutputTokens: 65536, // Gemini 2.5 Flash Lite output limit
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -299,6 +301,15 @@ async function callGeminiForMetadata(
     throw new Error('Empty response from Gemini API')
   }
 
+  // Log response for debugging (first 500 and last 500 chars)
+  console.log(`[AI Metadata] Gemini response length: ${text.length} chars`)
+  if (text.length > 1000) {
+    console.log(`[AI Metadata] Response preview (first 500 chars):\n${text.substring(0, 500)}`)
+    console.log(`[AI Metadata] Response preview (last 500 chars):\n${text.substring(text.length - 500)}`)
+  } else {
+    console.log(`[AI Metadata] Full response:\n${text}`)
+  }
+
   return parseMetadataResponse(text, batch)
 }
 
@@ -327,12 +338,11 @@ For each chunk you identify, extract:
 2. **start_offset**: Character position where chunk starts (relative to provided text, starting at 0)
 3. **end_offset**: Character position where chunk ends (relative to provided text)
 4. **themes**: 2-5 key themes/topics (e.g., ["authentication", "security"])
-5. **concepts**: 5-10 specific concepts with importance scores
-   - Format: [{"text": "JWT tokens", "importance": 0.8}, {"text": "OAuth2", "importance": 0.6}]
-   - Importance: 0.0-1.0 representing how central each concept is to this chunk
-   - Be specific - these drive cross-domain connections
-6. **importance**: 0.0-1.0 score for how significant this chunk is to the overall document
-7. **summary**: One-sentence summary of what this chunk covers
+5. **concepts**: 3-5 specific concepts with importance scores (keep concise)
+   - Format: [{"text": "JWT tokens", "importance": 0.8}]
+   - Importance: 0.0-1.0 representing how central each concept is
+6. **importance**: 0.0-1.0 score for significance
+7. **summary**: Brief one-sentence summary (max 100 chars)
 8. **domain**: Domain classification (technical, narrative, academic, business, etc.)
 9. **emotional**: Emotional metadata for contradiction detection
    - **polarity**: -1.0 (very negative) to +1.0 (very positive)
@@ -346,6 +356,8 @@ CRITICAL REQUIREMENTS:
 - start_offset and end_offset must be accurate character positions
 - content must be exact text from document (verbatim)
 - Emotional polarity is CRITICAL for detecting contradictions
+- IMPORTANT: Properly escape all JSON strings (quotes, newlines, backslashes)
+- IMPORTANT: Ensure all JSON is well-formed and complete
 
 Return JSON in this exact format:
 {
@@ -384,96 +396,125 @@ function parseMetadataResponse(
   responseText: string,
   batch: MetadataExtractionBatch
 ): ChunkWithOffsets[] {
-  try {
-    const parsed = JSON.parse(responseText.trim())
+  let parsed: any
 
-    if (!parsed.chunks || !Array.isArray(parsed.chunks)) {
-      throw new Error('Invalid response structure: missing chunks array')
+  try {
+    // Try parsing the full response
+    parsed = JSON.parse(responseText.trim())
+  } catch (parseError: any) {
+    // If parsing fails, try to extract valid JSON prefix
+    console.warn(`[AI Metadata] Initial JSON parse failed: ${parseError.message}`)
+    console.warn(`[AI Metadata] Response length: ${responseText.length} chars`)
+    console.warn(`[AI Metadata] Attempting to salvage partial response...`)
+
+    try {
+      // Strategy 1: Find last complete chunk (ends with }])
+      let lastCompleteChunk = responseText.lastIndexOf('}]')
+      if (lastCompleteChunk !== -1) {
+        const truncated = responseText.substring(0, lastCompleteChunk + 2) + '}'
+        parsed = JSON.parse(truncated)
+        console.warn(`[AI Metadata] Successfully salvaged ${parsed.chunks?.length || 0} chunks from partial response`)
+      } else {
+        // Strategy 2: Find last complete object (ends with })
+        lastCompleteChunk = responseText.lastIndexOf('},')
+        if (lastCompleteChunk !== -1) {
+          // Remove trailing comma and close the array and object
+          const truncated = responseText.substring(0, lastCompleteChunk + 1) + ']}'
+          parsed = JSON.parse(truncated)
+          console.warn(`[AI Metadata] Successfully salvaged ${parsed.chunks?.length || 0} chunks (removed incomplete chunk)`)
+        } else {
+          throw parseError
+        }
+      }
+    } catch (salvageError) {
+      console.error('[AI Metadata] Could not salvage partial response')
+      throw new Error(`JSON parsing failed: ${parseError.message}`)
+    }
+  }
+
+  if (!parsed.chunks || !Array.isArray(parsed.chunks)) {
+    throw new Error('Invalid response structure: missing chunks array')
+  }
+
+  console.log(`[AI Metadata] Batch ${batch.batchId}: AI identified ${parsed.chunks.length} semantic chunks`)
+
+  // Validate and convert to absolute offsets
+  const validated = parsed.chunks.map((chunk: any, index: number): ChunkWithOffsets => {
+    // Validate required fields
+    if (!chunk.content || typeof chunk.content !== 'string') {
+      throw new Error(`Chunk ${index}: Missing or invalid content`)
     }
 
-    console.log(`[AI Metadata] Batch ${batch.batchId}: AI identified ${parsed.chunks.length} semantic chunks`)
+    if (typeof chunk.start_offset !== 'number' || typeof chunk.end_offset !== 'number') {
+      throw new Error(`Chunk ${index}: Missing or invalid offsets`)
+    }
 
-    // Validate and convert to absolute offsets
-    const validated = parsed.chunks.map((chunk: any, index: number): ChunkWithOffsets => {
-      // Validate required fields
-      if (!chunk.content || typeof chunk.content !== 'string') {
-        throw new Error(`Chunk ${index}: Missing or invalid content`)
+    // Convert relative offsets to absolute offsets
+    const absoluteStart = batch.startOffset + chunk.start_offset
+    const absoluteEnd = batch.startOffset + chunk.end_offset
+
+    // Validate offset logic
+    if (absoluteStart >= absoluteEnd) {
+      console.warn(`[AI Metadata] Chunk ${index}: Invalid offsets (${absoluteStart} >= ${absoluteEnd})`)
+    }
+
+    // Validate themes
+    if (!chunk.themes || !Array.isArray(chunk.themes) || chunk.themes.length === 0) {
+      console.warn(`[AI Metadata] Chunk ${index}: Missing themes, defaulting to ['general']`)
+      chunk.themes = ['general']
+    }
+
+    // Validate concepts
+    if (!chunk.concepts || !Array.isArray(chunk.concepts) || chunk.concepts.length === 0) {
+      console.warn(`[AI Metadata] Chunk ${index}: Missing concepts, defaulting to empty array`)
+      chunk.concepts = []
+    } else {
+      chunk.concepts = chunk.concepts.map((c: any) => ({
+        text: c.text || 'unknown',
+        importance: typeof c.importance === 'number'
+          ? Math.max(0, Math.min(1, c.importance))
+          : 0.5
+      }))
+    }
+
+    // Validate importance
+    if (typeof chunk.importance !== 'number' || chunk.importance < 0 || chunk.importance > 1) {
+      console.warn(`[AI Metadata] Chunk ${index}: Invalid importance, defaulting to 0.5`)
+      chunk.importance = 0.5
+    }
+
+    // Validate emotional metadata
+    if (!chunk.emotional || typeof chunk.emotional !== 'object') {
+      console.warn(`[AI Metadata] Chunk ${index}: Missing emotional metadata, using defaults`)
+      chunk.emotional = { polarity: 0, primaryEmotion: 'neutral', intensity: 0 }
+    } else {
+      chunk.emotional = {
+        polarity: typeof chunk.emotional.polarity === 'number'
+          ? Math.max(-1, Math.min(1, chunk.emotional.polarity))
+          : 0,
+        primaryEmotion: chunk.emotional.primaryEmotion || 'neutral',
+        intensity: typeof chunk.emotional.intensity === 'number'
+          ? Math.max(0, Math.min(1, chunk.emotional.intensity))
+          : 0
       }
+    }
 
-      if (typeof chunk.start_offset !== 'number' || typeof chunk.end_offset !== 'number') {
-        throw new Error(`Chunk ${index}: Missing or invalid offsets`)
+    return {
+      content: chunk.content.trim(),
+      start_offset: absoluteStart,
+      end_offset: absoluteEnd,
+      metadata: {
+        themes: chunk.themes,
+        concepts: chunk.concepts,
+        importance: chunk.importance,
+        summary: chunk.summary || undefined,
+        domain: chunk.domain || undefined,
+        emotional: chunk.emotional
       }
+    }
+  })
 
-      // Convert relative offsets to absolute offsets
-      const absoluteStart = batch.startOffset + chunk.start_offset
-      const absoluteEnd = batch.startOffset + chunk.end_offset
-
-      // Validate offset logic
-      if (absoluteStart >= absoluteEnd) {
-        console.warn(`[AI Metadata] Chunk ${index}: Invalid offsets (${absoluteStart} >= ${absoluteEnd})`)
-      }
-
-      // Validate themes
-      if (!chunk.themes || !Array.isArray(chunk.themes) || chunk.themes.length === 0) {
-        console.warn(`[AI Metadata] Chunk ${index}: Missing themes, defaulting to ['general']`)
-        chunk.themes = ['general']
-      }
-
-      // Validate concepts
-      if (!chunk.concepts || !Array.isArray(chunk.concepts) || chunk.concepts.length === 0) {
-        console.warn(`[AI Metadata] Chunk ${index}: Missing concepts, defaulting to empty array`)
-        chunk.concepts = []
-      } else {
-        chunk.concepts = chunk.concepts.map((c: any) => ({
-          text: c.text || 'unknown',
-          importance: typeof c.importance === 'number'
-            ? Math.max(0, Math.min(1, c.importance))
-            : 0.5
-        }))
-      }
-
-      // Validate importance
-      if (typeof chunk.importance !== 'number' || chunk.importance < 0 || chunk.importance > 1) {
-        console.warn(`[AI Metadata] Chunk ${index}: Invalid importance, defaulting to 0.5`)
-        chunk.importance = 0.5
-      }
-
-      // Validate emotional metadata
-      if (!chunk.emotional || typeof chunk.emotional !== 'object') {
-        console.warn(`[AI Metadata] Chunk ${index}: Missing emotional metadata, using defaults`)
-        chunk.emotional = { polarity: 0, primaryEmotion: 'neutral', intensity: 0 }
-      } else {
-        chunk.emotional = {
-          polarity: typeof chunk.emotional.polarity === 'number'
-            ? Math.max(-1, Math.min(1, chunk.emotional.polarity))
-            : 0,
-          primaryEmotion: chunk.emotional.primaryEmotion || 'neutral',
-          intensity: typeof chunk.emotional.intensity === 'number'
-            ? Math.max(0, Math.min(1, chunk.emotional.intensity))
-            : 0
-        }
-      }
-
-      return {
-        content: chunk.content.trim(),
-        start_offset: absoluteStart,
-        end_offset: absoluteEnd,
-        metadata: {
-          themes: chunk.themes,
-          concepts: chunk.concepts,
-          importance: chunk.importance,
-          summary: chunk.summary || undefined,
-          domain: chunk.domain || undefined,
-          emotional: chunk.emotional
-        }
-      }
-    })
-
-    return validated
-  } catch (error: any) {
-    console.error('[AI Metadata] Failed to parse metadata response:', error)
-    throw new Error(`Metadata parsing failed: ${error.message}`)
-  }
+  return validated
 }
 
 /**

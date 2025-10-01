@@ -10,9 +10,7 @@ import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
-
-// Model configuration
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
+import { GEMINI_MODEL } from '../lib/model-config.js'
 
 /**
  * Content format detection result.
@@ -215,7 +213,7 @@ export class PasteProcessor extends SourceProcessor {
         if (pastedContent.length > 500) {
           markdown = await this.withRetry(
             async () => this.ai.models.generateContent({
-              model: 'gemini-2.0-flash-exp',
+              model: GEMINI_MODEL,
               contents: [{
                 parts: [{
                   text: `Add markdown documentation structure to this code. Include:
@@ -305,19 +303,14 @@ ${pastedContent}`
     
     await this.updateProgress(45, 'extract', 'complete', `Created ${chunks.length} chunks`)
 
-    // Convert AI chunks to ProcessedChunk format
+    // Convert AI chunks to ProcessedChunk format with proper metadata mapping
     await this.updateProgress(70, 'finalize', 'converting', 'Converting chunks to standard format')
     const enrichedChunks = chunks.map((aiChunk, index) => {
-      const base = {
-        content: aiChunk.content,
-        chunk_index: index,
-        themes: aiChunk.metadata.themes,
-        importance_score: aiChunk.metadata.importance,
-        summary: aiChunk.metadata.summary,
-        start_offset: 0,
-        end_offset: aiChunk.content.length,
-        word_count: aiChunk.content.split(/\s+/).length
-      }
+      // Use base class helper to map metadata correctly
+      const base = this.mapAIChunkToDatabase({
+        ...aiChunk,
+        chunk_index: index
+      })
 
       // Re-add timestamps that were set before AI processing
       if (detection.hasTimestamps && (aiChunk as any).timestamps) {

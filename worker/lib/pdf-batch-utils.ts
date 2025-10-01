@@ -8,6 +8,7 @@
 import { GoogleGenAI, type GenAIFile } from '@google/genai'
 import { GeminiFileCache } from './gemini-cache.js'
 import { stitchMarkdownBatches } from './fuzzy-matching.js'
+import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from './model-config.js'
 
 /**
  * Configuration for batched PDF extraction.
@@ -67,8 +68,8 @@ export interface BatchedExtractionResult {
 export const DEFAULT_BATCH_CONFIG: BatchConfig = {
   pagesPerBatch: 100,
   overlapPages: 10,
-  model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
-  maxOutputTokens: 65536
+  model: GEMINI_MODEL,
+  maxOutputTokens: MAX_OUTPUT_TOKENS
 }
 
 /**

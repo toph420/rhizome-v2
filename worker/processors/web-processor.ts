@@ -5,6 +5,7 @@ import { ERROR_PREFIXES } from '../types/multi-format.js'
 import { Type } from '@google/genai'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
+import { GEMINI_MODEL } from '../lib/model-config.js'
 
 /**
  * Processes web articles by extracting content using Mozilla Readability.
@@ -89,7 +90,7 @@ ${article.textContent}`
       const cleaningResult = await this.withRetry(
         async () => {
           const result = await this.ai.models.generateContent({
-            model: 'gemini-2.0-flash-exp',
+            model: GEMINI_MODEL,
             contents: [{
               parts: [{ text: cleaningPrompt }]
             }],
@@ -120,7 +121,7 @@ ${article.textContent}`
         markdown,
         {
           apiKey: process.env.GOOGLE_AI_API_KEY,
-          modelName: process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+          modelName: GEMINI_MODEL,
           enableProgress: true
         },
         async (progress: MetadataExtractionProgress) => {
@@ -137,17 +138,13 @@ ${article.textContent}`
         }
       )
 
-      // Convert AI chunks to ProcessedChunk format
+      // Convert AI chunks to ProcessedChunk format with proper metadata mapping
       const enrichedChunks = aiChunks.map((aiChunk, index) => ({
         document_id: this.job.document_id,
-        content: aiChunk.content,
-        chunk_index: index,
-        themes: aiChunk.metadata.themes,
-        importance_score: aiChunk.metadata.importance,
-        summary: aiChunk.metadata.summary,
-        start_offset: 0,
-        end_offset: aiChunk.content.length,
-        word_count: aiChunk.content.split(/\s+/).length
+        ...this.mapAIChunkToDatabase({
+          ...aiChunk,
+          chunk_index: index
+        })
       }))
 
       await this.updateProgress(90, 'extract', 'complete', `Created ${aiChunks.length} chunks with AI metadata`)

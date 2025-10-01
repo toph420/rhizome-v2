@@ -25,7 +25,7 @@ process.env.NODE_ENV = 'test'
 process.env.SUPABASE_URL = 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
 process.env.GOOGLE_AI_API_KEY = 'test-google-api-key'
-process.env.GEMINI_MODEL = 'gemini-1.5-pro'
+process.env.GEMINI_MODEL = 'gemini-2.5-flash-lite'
 
 // Global test utilities
 global.setupMockChain = () => {

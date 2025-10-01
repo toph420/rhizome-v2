@@ -10,6 +10,7 @@ import { BaseEngine } from './base-engine';
 import { CollisionDetectionInput, CollisionResult, EngineType, ChunkWithMetadata, BridgeAnalysis } from './types';
 import { createGeminiClient } from '../lib/ai-client';
 import type { GoogleGenAI } from '@google/genai';
+import { GEMINI_MODEL } from '../lib/model-config.js';
 
 /**
  * Configuration for ThematicBridge engine.
@@ -45,7 +46,6 @@ export class ThematicBridgeEngine extends BaseEngine {
   private static readonly DEFAULT_CONCEPT_OVERLAP_MIN = 0.2;
   private static readonly DEFAULT_CONCEPT_OVERLAP_MAX = 0.7;
   private static readonly DEFAULT_STRENGTH_THRESHOLD = 0.6;
-  private static readonly DEFAULT_MODEL = 'gemini-2.0-flash-exp';
   
   constructor(config: ThematicBridgeConfig = {}) {
     super();
@@ -60,7 +60,7 @@ export class ThematicBridgeEngine extends BaseEngine {
       },
       strengthThreshold: config.strengthThreshold ?? ThematicBridgeEngine.DEFAULT_STRENGTH_THRESHOLD,
       apiKey: config.apiKey ?? process.env.GOOGLE_AI_API_KEY ?? '',
-      modelName: config.modelName ?? ThematicBridgeEngine.DEFAULT_MODEL
+      modelName: config.modelName ?? GEMINI_MODEL
     };
     
     if (!this.config.apiKey) {

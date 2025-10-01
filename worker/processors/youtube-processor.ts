@@ -21,6 +21,7 @@ import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import type { TimestampContext } from '../types/multi-format.js'
+import { GEMINI_MODEL } from '../lib/model-config.js'
 
 /**
  * Processes YouTube videos by fetching transcripts, cleaning with AI,
@@ -89,7 +90,7 @@ export class YouTubeProcessor extends SourceProcessor {
         markdown,
         {
           apiKey: process.env.GOOGLE_AI_API_KEY,
-          modelName: process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+          modelName: GEMINI_MODEL,
           enableProgress: true
         },
         async (progress: MetadataExtractionProgress) => {
@@ -129,14 +130,14 @@ export class YouTubeProcessor extends SourceProcessor {
         // Build enhanced chunk with AI metadata + position context
         const enhancedChunk = {
           document_id: this.job.document_id,
-          content: aiChunk.content,
-          chunk_index: i,
-          themes: aiChunk.metadata.themes,
-          importance_score: aiChunk.metadata.importance,
-          summary: aiChunk.metadata.summary,
-          start_offset: matchResult.startOffset,
-          end_offset: matchResult.endOffset,
-          word_count: aiChunk.content.split(/\s+/).length,
+          ...this.mapAIChunkToDatabase({
+            ...aiChunk,
+            chunk_index: i,
+            // Override with fuzzy-matched offsets (more accurate for YouTube)
+            start_offset: matchResult.startOffset,
+            end_offset: matchResult.endOffset
+          }),
+          // Preserve YouTube-specific position context
           position_context: {
             method: matchResult.method,
             confidence: matchResult.confidence,

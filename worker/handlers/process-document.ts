@@ -5,13 +5,7 @@ import { generateEmbeddings } from '../lib/embeddings.js'
 import { enhanceThemesFromConcepts, enhanceSummaryFromConcepts } from '../lib/markdown-chunking.js'
 import type { SourceType } from '../types/multi-format.js'
 import type { ProcessResult } from '../types/processor.js'
-
-/**
- * Model configuration with fallback support.
- * Uses gemini-2.0-flash-exp as default with 65536 token limit.
- */
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
-const MAX_OUTPUT_TOKENS = 65536
+import { GEMINI_MODEL } from '../lib/model-config.js'
 
 console.log(`🤖 Using Gemini model: ${GEMINI_MODEL}`)
 

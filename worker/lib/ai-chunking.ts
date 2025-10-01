@@ -5,6 +5,7 @@
 
 import { GoogleGenAI } from '@google/genai'
 import { Type } from '@google/genai'
+import { GEMINI_MODEL } from './model-config.js'
 
 /**
  * Chunk data structure with AI-extracted metadata.
@@ -98,18 +99,18 @@ function calculateOffsetsForAIChunks(chunks: ChunkData[], originalMarkdown: stri
  * 
  * @param ai - Google Generative AI client instance
  * @param markdown - Markdown content to chunk
- * @param model - Gemini model to use (default: 'gemini-2.0-flash-exp')
+ * @param model - Gemini model to use (default: from GEMINI_MODEL config)
  * @returns Promise of array of chunks with metadata
  * @throws Error if AI response is invalid or empty
- * 
+ *
  * @example
  * const chunks = await rechunkMarkdown(ai, markdownContent)
  * // Returns chunks with themes, importance scores, and summaries
  */
 export async function rechunkMarkdown(
-  ai: GoogleGenAI, 
-  markdown: string, 
-  model: string = 'gemini-2.0-flash-exp'
+  ai: GoogleGenAI,
+  markdown: string,
+  model: string = GEMINI_MODEL
 ): Promise<ChunkData[]> {
   const result = await ai.models.generateContent({
     model,
@@ -216,10 +217,10 @@ ${markdown}` }
  * 
  * @param ai - Google Generative AI client instance
  * @param rawMarkdown - Raw markdown to clean
- * @param model - Gemini model to use (default: 'gemini-2.0-flash-exp')
+ * @param model - Gemini model to use (default: from GEMINI_MODEL config)
  * @returns Promise of cleaned markdown string
  * @throws Error if AI cleaning fails
- * 
+ *
  * @example
  * const cleaned = await cleanMarkdownWithAI(ai, messyMarkdown)
  * // Returns properly formatted markdown with improved structure
@@ -227,7 +228,7 @@ ${markdown}` }
 export async function cleanMarkdownWithAI(
   ai: GoogleGenAI,
   rawMarkdown: string,
-  model: string = 'gemini-2.0-flash-exp'
+  model: string = GEMINI_MODEL
 ): Promise<string> {
   const cleanResult = await ai.models.generateContent({
     model,
@@ -253,12 +254,12 @@ ${rawMarkdown}`
  * Converts plain text to structured markdown using AI.
  * Adds headings, lists, emphasis, and proper formatting.
  * 
- * @param ai - Google Generative AI client instance  
+ * @param ai - Google Generative AI client instance
  * @param textContent - Plain text to convert
- * @param model - Gemini model to use (default: 'gemini-2.0-flash-exp')
+ * @param model - Gemini model to use (default: from GEMINI_MODEL config)
  * @returns Promise of markdown-formatted string
  * @throws Error if AI conversion fails
- * 
+ *
  * @example
  * const markdown = await textToMarkdownWithAI(ai, plainText)
  * // Returns structured markdown with headings and formatting
@@ -266,7 +267,7 @@ ${rawMarkdown}`
 export async function textToMarkdownWithAI(
   ai: GoogleGenAI,
   textContent: string,
-  model: string = 'gemini-2.0-flash-exp'
+  model: string = GEMINI_MODEL
 ): Promise<string> {
   const result = await ai.models.generateContent({
     model,
