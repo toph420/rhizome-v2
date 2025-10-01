@@ -149,14 +149,14 @@ export class PDFProcessor extends SourceProcessor {
       },
       async (progress: MetadataExtractionProgress) => {
         // Map AI extraction progress to overall progress (45-85%)
-        const aiProgressPercent = progress.currentBatch / progress.totalBatches
+        const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
         const overallPercent = 45 + Math.floor(aiProgressPercent * 40)
 
         await this.updateProgress(
           overallPercent,
           'metadata',
-          progress.stage,
-          `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches} (${progress.chunksProcessed}/${progress.totalChunks} chunks)`
+          progress.phase,
+          `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
         )
       }
     )
@@ -452,14 +452,14 @@ export class PDFProcessor extends SourceProcessor {
       },
       async (progress: MetadataExtractionProgress) => {
         // Map AI extraction progress to overall progress (45-85%)
-        const aiProgressPercent = progress.currentBatch / progress.totalBatches
+        const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
         const overallPercent = 45 + Math.floor(aiProgressPercent * 40)
 
         await this.updateProgress(
           overallPercent,
           'metadata',
-          progress.stage,
-          `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches} (${progress.chunksProcessed}/${progress.totalChunks} chunks)`
+          progress.phase,
+          `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
         )
       }
     )

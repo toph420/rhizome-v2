@@ -16,21 +16,21 @@ import { SourceProcessor } from './base.js'
 import type { ProcessResult } from '../types/processor.js'
 import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
-import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
-import type { TimestampContext } from '../types/multi-format.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
 
 /**
  * Processes YouTube videos by fetching transcripts, cleaning with AI,
- * and creating semantic chunks with timestamp preservation.
+ * and creating semantic chunks.
+ *
+ * Timestamps are stored at document level in source_metadata, not at chunk level.
  */
 export class YouTubeProcessor extends SourceProcessor {
   /**
    * Process YouTube video through 7-stage pipeline.
-   * @returns Processed markdown and chunks with timestamps and metadata
+   * @returns Processed markdown, chunks, and source_metadata with timestamps
    */
   async process(): Promise<ProcessResult> {
     try {
@@ -95,14 +95,14 @@ export class YouTubeProcessor extends SourceProcessor {
         },
         async (progress: MetadataExtractionProgress) => {
           // Map AI extraction progress to overall progress (30-85%)
-          const aiProgressPercent = progress.currentBatch / progress.totalBatches
+          const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
           const overallPercent = 30 + Math.floor(aiProgressPercent * 55)
 
           await this.updateProgress(
             overallPercent,
             'extract',
-            progress.stage,
-            `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches} (${progress.chunksProcessed}/${progress.totalChunks} chunks)`
+            progress.phase,
+            `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
           )
         }
       )
@@ -110,8 +110,8 @@ export class YouTubeProcessor extends SourceProcessor {
       await this.updateProgress(85, 'extract', 'chunked', `Created ${aiChunks.length} semantic chunks with AI metadata`)
 
       // Stage 5: Fuzzy positioning (85-90%)
-      // Match chunks back to original source for timestamp context
-      await this.updateProgress(87, 'extract', 'positioning', 'Applying fuzzy position matching for timestamps')
+      // Match chunks back to original source for accurate character offsets
+      await this.updateProgress(87, 'extract', 'positioning', 'Applying fuzzy position matching')
 
       const enhancedChunks = []
       let highConfidenceCount = 0
@@ -121,13 +121,11 @@ export class YouTubeProcessor extends SourceProcessor {
       for (let i = 0; i < aiChunks.length; i++) {
         const aiChunk = aiChunks[i]
 
-        // Match chunk to source for position data (primarily for timestamps)
+        // Match chunk to source for position data
         const matchResult = fuzzyMatchChunkToSource(aiChunk.content, rawMarkdown, i, aiChunks.length)
 
-        // Extract timestamps if present
-        const timestamps = extractTimestampsWithContext(aiChunk.content)
-
         // Build enhanced chunk with AI metadata + position context
+        // NOTE: Timestamps are NOT stored at chunk level - they're in document.source_metadata
         const enhancedChunk = {
           document_id: this.job.document_id,
           ...this.mapAIChunkToDatabase({
@@ -137,12 +135,11 @@ export class YouTubeProcessor extends SourceProcessor {
             start_offset: matchResult.startOffset,
             end_offset: matchResult.endOffset
           }),
-          // Preserve YouTube-specific position context
+          // Position context for fuzzy matching quality (NO timestamps here)
           position_context: {
             method: matchResult.method,
             confidence: matchResult.confidence,
-            originalSnippet: matchResult.contextBefore + '...' + matchResult.contextAfter,
-            ...(timestamps.length > 0 && { timestamps })
+            originalSnippet: matchResult.contextBefore + '...' + matchResult.contextAfter
           }
         }
 
@@ -168,7 +165,21 @@ export class YouTubeProcessor extends SourceProcessor {
       
       // Note: Stages 7 (embeddings) and 8 (storage) are handled by the main handler
       // This processor returns the prepared data for those final stages
-      
+
+      // Build YouTube source metadata for document-level storage
+      // This includes original transcript segments with timestamps
+      const source_metadata = {
+        videoId: videoId,
+        videoUrl: sourceUrl,
+        duration: transcript.reduce((total, seg) => Math.max(total, seg.offset + seg.duration), 0),
+        isTranscript: true as const,
+        timestamps: transcript.map(seg => ({
+          start_seconds: seg.offset,
+          end_seconds: seg.offset + seg.duration,
+          text: seg.text
+        }))
+      }
+
       // Prepare result with complete metadata
       return {
         markdown,
@@ -176,14 +187,14 @@ export class YouTubeProcessor extends SourceProcessor {
         outline: undefined, // TODO: Convert to OutlineSection[] format
         wordCount: markdown.split(/\s+/).filter(word => word.length > 0).length,
         metadata: {
+          source_metadata,
           extra: {
             source_type: 'youtube',
             video_id: videoId,
             url: sourceUrl,
             cleaning_applied: cleaningResult.success,
             positioning_quality: positioningQuality,
-            timestamp_count: enhancedChunks.reduce((count, chunk) =>
-              count + (chunk.position_context?.timestamps?.length || 0), 0),
+            timestamp_count: transcript.length,
             usedAIMetadata: true
           }
         }

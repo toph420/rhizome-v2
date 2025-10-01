@@ -249,12 +249,12 @@ ${pastedContent}`
 
     // Use AI-powered chunking and metadata extraction for all content
     const progressCallback = (progress: MetadataExtractionProgress) => {
-      const percentage = 40 + Math.floor((progress.currentBatch / progress.totalBatches) * 30)
+      const percentage = 40 + Math.floor(((progress.batchesProcessed + 1) / progress.totalBatches) * 30)
       this.updateProgress(
         percentage,
         'extract',
         'metadata',
-        `AI metadata: batch ${progress.currentBatch}/${progress.totalBatches}`
+        `AI metadata: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
       )
     }
 
@@ -271,33 +271,19 @@ ${pastedContent}`
       'AI metadata extraction'
     )
     
-    // Handle timestamps if present
-    if (detection.hasTimestamps) {
+    // Extract timestamps for document-level storage (if YouTube transcript detected)
+    // NOTE: Timestamps are NOT stored at chunk level anymore
+    let timestampsForDocument: any[] | undefined
+    if (detection.hasTimestamps && detection.isYouTubeTranscript) {
       const timestamps = extractTimestampsWithContext(markdown)
-      
+
       if (timestamps.length > 0) {
-        console.log(`⏰ Preserved ${timestamps.length} timestamps`)
-        
-        // Add timestamps to chunks
-        chunks.forEach((chunk, index) => {
-          const chunkPosition = index / chunks.length
-          const timestampIndex = Math.floor(chunkPosition * timestamps.length)
-          const relevantTimestamps = timestamps.slice(
-            Math.max(0, timestampIndex - 1),
-            Math.min(timestamps.length, timestampIndex + 2)
-          )
-          
-          if (relevantTimestamps.length > 0) {
-            Object.assign(chunk, {
-              timestamps: relevantTimestamps,
-              position_context: {
-                confidence: wasTranscript ? 0.95 : 0.8,
-                method: wasTranscript ? 'transcript_preserved' : 'timestamp_detected',
-                has_timestamps: true
-              }
-            })
-          }
-        })
+        console.log(`⏰ Detected ${timestamps.length} YouTube transcript timestamps`)
+        timestampsForDocument = timestamps.map(t => ({
+          start_seconds: t.time,
+          end_seconds: t.time, // Approximate - we don't have exact segment boundaries
+          text: `${t.context_before} ${t.context_after}`.trim()
+        }))
       }
     }
     
@@ -307,21 +293,10 @@ ${pastedContent}`
     await this.updateProgress(70, 'finalize', 'converting', 'Converting chunks to standard format')
     const enrichedChunks = chunks.map((aiChunk, index) => {
       // Use base class helper to map metadata correctly
-      const base = this.mapAIChunkToDatabase({
+      return this.mapAIChunkToDatabase({
         ...aiChunk,
         chunk_index: index
       })
-
-      // Re-add timestamps that were set before AI processing
-      if (detection.hasTimestamps && (aiChunk as any).timestamps) {
-        return {
-          ...base,
-          timestamps: (aiChunk as any).timestamps,
-          position_context: (aiChunk as any).position_context
-        }
-      }
-
-      return base
     })
 
     // Extract metadata
@@ -344,17 +319,25 @@ ${pastedContent}`
       .slice(0, 5)
       .map(([theme]) => theme)
 
+    // Build source_metadata if this is a YouTube transcript
+    const source_metadata = timestampsForDocument ? {
+      isTranscript: true as const,
+      timestamps: timestampsForDocument
+    } : undefined
+
     return {
       markdown,
       chunks: enrichedChunks,
       wordCount,
-      outline: outline.length > 0 ? outline.map((title, i) => ({ 
-        title, 
-        level: 1, 
-        offset: 0 
+      outline: outline.length > 0 ? outline.map((title, i) => ({
+        title,
+        level: 1,
+        offset: 0
       })) : undefined,
       metadata: {
+        source_metadata,
         extra: {
+          source_type: detection.isYouTubeTranscript ? 'youtube_transcript' : 'paste',
           chunk_count: enrichedChunks.length,
           detected_format: detection.format,
           format_confidence: detection.confidence,

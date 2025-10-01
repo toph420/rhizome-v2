@@ -188,8 +188,17 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       console.log(`📭 Skipping collision detection - need at least 2 chunks (found ${chunksWithEmbeddings.length})`)
     }
     
-    // Update document status to completed with availability flags
-    await updateDocumentStatus(supabase, document_id, 'completed', true, true)
+    // Update document status to completed with availability flags and source_metadata
+    await updateDocumentStatus(
+      supabase,
+      document_id,
+      'completed',
+      true,
+      true,
+      undefined, // No error message
+      result.metadata?.source_metadata, // YouTube timestamps if applicable
+      result.metadata?.extra?.source_type || sourceType // Explicit source type
+    )
     
     // Final progress update
     await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Processing completed successfully')
@@ -258,32 +267,46 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
 
 /**
  * Updates document processing status in database.
- * 
+ *
  * @param supabase - Supabase client
  * @param documentId - Document ID to update
  * @param status - New processing status
  * @param markdownAvailable - Whether markdown content is available in storage
  * @param embeddingsAvailable - Whether chunk embeddings have been generated
  * @param errorMessage - Optional error message if failed
+ * @param sourceMetadata - Optional source-specific metadata (e.g., YouTube timestamps)
+ * @param sourceType - Optional explicit source type
  */
 async function updateDocumentStatus(
-  supabase: any, 
-  documentId: string, 
-  status: string, 
+  supabase: any,
+  documentId: string,
+  status: string,
   markdownAvailable: boolean = false,
   embeddingsAvailable: boolean = false,
-  errorMessage?: string
+  errorMessage?: string,
+  sourceMetadata?: any,
+  sourceType?: string
 ) {
   const updateData: any = {
     processing_status: status,
     markdown_available: markdownAvailable,
     embeddings_available: embeddingsAvailable
   }
-  
+
   if (errorMessage) {
     updateData.processing_error = errorMessage
   }
-  
+
+  // Store source_metadata if provided (YouTube timestamps, etc.)
+  if (sourceMetadata) {
+    updateData.source_metadata = sourceMetadata
+  }
+
+  // Store explicit source_type if provided
+  if (sourceType) {
+    updateData.source_type = sourceType
+  }
+
   const { error } = await supabase
     .from('documents')
     .update(updateData)

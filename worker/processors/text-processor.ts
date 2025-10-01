@@ -6,7 +6,6 @@
 import { SourceProcessor } from './base.js'
 import type { ProcessResult } from '../types/processor.js'
 import { textToMarkdownWithAI } from '../lib/ai-chunking.js'
-import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
@@ -14,19 +13,18 @@ import { GEMINI_MODEL } from '../lib/model-config.js'
 /**
  * Processor for plain text files.
  * Converts unstructured text to well-formatted markdown with AI.
- * 
+ *
  * Processing stages:
  * 1. Download text file from storage (10%)
  * 2. Convert to markdown with AI (25%)
  * 3. Create semantic chunks (40%)
- * 
+ *
  * Features:
  * - AI-powered structure generation
  * - Automatic heading creation
  * - List and emphasis detection
- * - Timestamp preservation if present
  * - Semantic chunking with metadata
- * 
+ *
  * @example
  * const processor = new TextProcessor(ai, supabase, job)
  * const result = await processor.process()
@@ -51,31 +49,23 @@ export class TextProcessor extends SourceProcessor {
     
     const textKB = Math.round(textContent.length / 1024)
     await this.updateProgress(25, 'extract', 'formatting', `Converting ${textKB}KB to markdown with AI`)
-    
-    // Check for timestamps before conversion
-    const originalTimestamps = extractTimestampsWithContext(textContent)
-    const hasTimestamps = originalTimestamps.length > 0
-    
-    if (hasTimestamps) {
-      console.log(`⏰ Found ${originalTimestamps.length} timestamps in plain text`)
-    }
-    
+
     // Convert text to markdown with AI
     const markdown = await this.withRetry(
       async () => textToMarkdownWithAI(this.ai, textContent),
       'Convert text to markdown'
     )
-    
+
     await this.updateProgress(40, 'extract', 'chunking', 'Creating chunks with AI metadata extraction')
 
     // Use AI-powered chunking and metadata extraction
     const progressCallback = (progress: MetadataExtractionProgress) => {
-      const percentage = 40 + Math.floor((progress.currentBatch / progress.totalBatches) * 30)
+      const percentage = 40 + Math.floor(((progress.batchesProcessed + 1) / progress.totalBatches) * 30)
       this.updateProgress(
         percentage,
         'extract',
         'metadata',
-        `AI metadata: batch ${progress.currentBatch}/${progress.totalBatches}`
+        `AI metadata: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
       )
     }
 
@@ -92,59 +82,15 @@ export class TextProcessor extends SourceProcessor {
       'AI metadata extraction'
     )
 
-    // If original text had timestamps, try to preserve them
-    if (hasTimestamps) {
-      // Extract timestamps from converted markdown
-      const convertedTimestamps = extractTimestampsWithContext(markdown)
-
-      if (convertedTimestamps.length > 0) {
-        console.log(`✅ Preserved ${convertedTimestamps.length} timestamps after conversion`)
-
-        // Distribute timestamps across chunks
-        chunks.forEach((chunk, index) => {
-          const chunkPosition = index / chunks.length
-          const timestampIndex = Math.floor(chunkPosition * convertedTimestamps.length)
-          const relevantTimestamps = convertedTimestamps.slice(
-            Math.max(0, timestampIndex - 1),
-            Math.min(convertedTimestamps.length, timestampIndex + 2)
-          )
-
-          if (relevantTimestamps.length > 0) {
-            Object.assign(chunk, {
-              timestamps: relevantTimestamps,
-              position_context: {
-                confidence: 0.9,
-                method: 'preserved',
-                has_timestamps: true
-              }
-            })
-          }
-        })
-      } else {
-        console.warn(`⚠️  Lost timestamps during conversion. Original had ${originalTimestamps.length}`)
-      }
-    }
-
     await this.updateProgress(70, 'finalize', 'complete', `Created ${chunks.length} chunks with AI metadata`)
 
     // Convert AI chunks to ProcessedChunk format with proper metadata mapping
     const enrichedChunks = chunks.map((aiChunk, index) => {
       // Use base class helper to map metadata correctly
-      const base = this.mapAIChunkToDatabase({
+      return this.mapAIChunkToDatabase({
         ...aiChunk,
         chunk_index: index
       })
-
-      // Re-add timestamps that were set before AI processing
-      if (hasTimestamps && (aiChunk as any).timestamps) {
-        return {
-          ...base,
-          timestamps: (aiChunk as any).timestamps,
-          position_context: (aiChunk as any).position_context
-        }
-      }
-
-      return base
     })
 
     // Extract metadata
@@ -179,8 +125,6 @@ export class TextProcessor extends SourceProcessor {
       metadata: {
         extra: {
           chunk_count: enrichedChunks.length,
-          has_timestamps: hasTimestamps,
-          timestamp_count: hasTimestamps ? originalTimestamps.length : 0,
           document_themes: documentThemes.length > 0 ? documentThemes : undefined,
           processing_mode: 'txt',
           converted_from: 'plain_text',

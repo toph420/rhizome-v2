@@ -5,7 +5,6 @@
 
 import { SourceProcessor } from './base.js'
 import type { ProcessResult } from '../types/processor.js'
-import { extractTimestampsWithContext } from '../lib/markdown-chunking.js'
 import { cleanMarkdownWithAI } from '../lib/ai-chunking.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
@@ -51,22 +50,14 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
     const markdownKB = Math.round(markdown.length / 1024)
     await this.updateProgress(30, 'extract', 'chunking', `Processing ${markdownKB}KB with AI metadata extraction`)
 
-    // Extract timestamps before AI processing (for video transcripts)
-    const timestamps = extractTimestampsWithContext(markdown)
-    const hasTimestamps = timestamps.length > 0
-
-    if (hasTimestamps) {
-      console.log(`📝 Found ${timestamps.length} timestamps in markdown`)
-    }
-
     // Use AI-powered chunking and metadata extraction
     const progressCallback = (progress: MetadataExtractionProgress) => {
-      const percentage = 30 + Math.floor((progress.currentBatch / progress.totalBatches) * 40)
+      const percentage = 30 + Math.floor(((progress.batchesProcessed + 1) / progress.totalBatches) * 40)
       this.updateProgress(
         percentage,
         'extract',
         'metadata',
-        `AI metadata: batch ${progress.currentBatch}/${progress.totalBatches}`
+        `AI metadata: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
       )
     }
 
@@ -83,50 +74,15 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
       'AI metadata extraction'
     )
 
-    // Add timestamp data to chunks if available
-    if (hasTimestamps) {
-      const chunkCount = chunks.length
-      const timestampsPerChunk = Math.ceil(timestamps.length / chunkCount)
-
-      chunks.forEach((chunk, index) => {
-        const startIdx = index * timestampsPerChunk
-        const endIdx = Math.min((index + 1) * timestampsPerChunk, timestamps.length)
-        const chunkTimestamps = timestamps.slice(startIdx, endIdx)
-
-        if (chunkTimestamps.length > 0) {
-          // Add timestamp context to chunk
-          Object.assign(chunk, {
-            timestamps: chunkTimestamps,
-            position_context: {
-              confidence: 0.8,
-              method: 'distribution',
-              has_timestamps: true
-            }
-          })
-        }
-      })
-    }
-
     await this.updateProgress(70, 'finalize', 'complete', `Created ${chunks.length} chunks with AI metadata`)
 
     // Convert AI chunks to ProcessedChunk format with proper metadata mapping
     const enrichedChunks = chunks.map((aiChunk, index) => {
       // Use base class helper to map metadata correctly
-      const base = this.mapAIChunkToDatabase({
+      return this.mapAIChunkToDatabase({
         ...aiChunk,
         chunk_index: index
       })
-
-      // Re-add timestamps that were set before AI processing
-      if (hasTimestamps && (aiChunk as any).timestamps) {
-        return {
-          ...base,
-          timestamps: (aiChunk as any).timestamps,
-          position_context: (aiChunk as any).position_context
-        }
-      }
-
-      return base
     })
 
     // Extract basic metadata
@@ -146,8 +102,6 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
       metadata: {
         extra: {
           chunk_count: enrichedChunks.length,
-          has_timestamps: hasTimestamps,
-          timestamp_count: timestamps.length,
           processing_mode: 'markdown_asis',
           usedAIMetadata: true
         }
@@ -205,22 +159,14 @@ export class MarkdownCleanProcessor extends SourceProcessor {
     
     await this.updateProgress(40, 'extract', 'chunking', 'Creating semantic chunks with AI metadata')
 
-    // Extract timestamps before AI processing
-    const timestamps = extractTimestampsWithContext(markdown)
-    const hasTimestamps = timestamps.length > 0
-
-    if (hasTimestamps) {
-      console.log(`📝 Found ${timestamps.length} timestamps in cleaned markdown`)
-    }
-
     // Use AI-powered chunking and metadata extraction
     const progressCallback = (progress: MetadataExtractionProgress) => {
-      const percentage = 40 + Math.floor((progress.currentBatch / progress.totalBatches) * 30)
+      const percentage = 40 + Math.floor(((progress.batchesProcessed + 1) / progress.totalBatches) * 30)
       this.updateProgress(
         percentage,
         'extract',
         'metadata',
-        `AI metadata: batch ${progress.currentBatch}/${progress.totalBatches}`
+        `AI metadata: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
       )
     }
 
@@ -237,50 +183,15 @@ export class MarkdownCleanProcessor extends SourceProcessor {
       'AI metadata extraction'
     )
 
-    // If timestamps exist, try to match them to chunks
-    if (hasTimestamps) {
-      chunks.forEach((chunk, index) => {
-        // Find closest timestamps based on chunk position
-        const chunkPosition = index / chunks.length
-        const timestampIndex = Math.floor(chunkPosition * timestamps.length)
-        const relevantTimestamps = timestamps.slice(
-          Math.max(0, timestampIndex - 1),
-          Math.min(timestamps.length, timestampIndex + 2)
-        )
-
-        if (relevantTimestamps.length > 0) {
-          Object.assign(chunk, {
-            timestamps: relevantTimestamps,
-            position_context: {
-              confidence: 0.7,
-              method: 'cleaned_fuzzy',
-              has_timestamps: true
-            }
-          })
-        }
-      })
-    }
-
     await this.updateProgress(70, 'finalize', 'complete', `Created ${chunks.length} chunks with AI metadata`)
 
     // Convert AI chunks to ProcessedChunk format with proper metadata mapping
     const enrichedChunks = chunks.map((aiChunk, index) => {
       // Use base class helper to map metadata correctly
-      const base = this.mapAIChunkToDatabase({
+      return this.mapAIChunkToDatabase({
         ...aiChunk,
         chunk_index: index
       })
-
-      // Re-add timestamps that were set before AI processing
-      if (hasTimestamps && (aiChunk as any).timestamps) {
-        return {
-          ...base,
-          timestamps: (aiChunk as any).timestamps,
-          position_context: (aiChunk as any).position_context
-        }
-      }
-
-      return base
     })
 
     // Extract enhanced metadata
@@ -319,8 +230,6 @@ export class MarkdownCleanProcessor extends SourceProcessor {
       metadata: {
         extra: {
           chunk_count: enrichedChunks.length,
-          has_timestamps: hasTimestamps,
-          timestamp_count: timestamps.length,
           document_themes: documentThemes,
           avg_importance: Math.round(avgImportance * 100) / 100,
           processing_mode: 'markdown_clean',

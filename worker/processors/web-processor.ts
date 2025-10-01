@@ -126,14 +126,14 @@ ${article.textContent}`
         },
         async (progress: MetadataExtractionProgress) => {
           // Map AI extraction progress to overall progress (65-90%)
-          const aiProgressPercent = progress.currentBatch / progress.totalBatches
+          const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
           const overallPercent = 65 + Math.floor(aiProgressPercent * 25)
 
           await this.updateProgress(
             overallPercent,
             'extract',
-            progress.stage,
-            `AI extraction: batch ${progress.currentBatch}/${progress.totalBatches}`
+            progress.phase,
+            `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
           )
         }
       )
