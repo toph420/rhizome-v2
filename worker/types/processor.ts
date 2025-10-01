@@ -25,6 +25,10 @@ export interface ProcessResult {
 /**
  * Processed chunk with content and metadata.
  * Represents a semantic unit of text for embedding and search.
+ *
+ * NOTE: YouTube timestamps are NOT stored at chunk level.
+ * They belong in document.source_metadata and are calculated at display time
+ * using character offsets (start_offset/end_offset).
  */
 export interface ProcessedChunk {
   /** Chunk text content */
@@ -43,10 +47,8 @@ export interface ProcessedChunk {
   summary?: string
   /** Word count for the chunk */
   word_count?: number
-  /** Position context for fuzzy matching */
+  /** Position context for fuzzy matching (confidence, method, snippets only) */
   positionContext?: PositionContext
-  /** YouTube timestamps if applicable */
-  timestamps?: Array<{ time: number; context_before: string; context_after: string }>
   /** Rich metadata extracted for 7-engine collision detection */
   metadata?: ChunkMetadata | PartialChunkMetadata
 }
@@ -63,8 +65,38 @@ export interface DocumentMetadata {
   date?: string
   /** Source URL if applicable */
   sourceUrl?: string
+  /** Source-specific metadata (e.g., YouTube timestamps, video IDs) */
+  source_metadata?: YouTubeSourceMetadata | Record<string, any>
   /** Additional format-specific metadata */
   extra?: Record<string, any>
+}
+
+/**
+ * YouTube-specific source metadata.
+ * Stored at document level in documents.source_metadata JSONB column.
+ *
+ * Used for both:
+ * - Real YouTube videos (source_type: 'youtube')
+ * - Pasted transcripts (source_type: 'youtube_transcript')
+ */
+export interface YouTubeSourceMetadata {
+  /** Video ID (11-char) - only present for real YouTube URLs */
+  videoId?: string
+  /** Full YouTube URL - only present for real YouTube URLs */
+  videoUrl?: string
+  /** Video duration in seconds - only present for real YouTube URLs */
+  duration?: number
+  /** Flag indicating this document has timestamps */
+  isTranscript: true
+  /** Timestamp segments from original transcript */
+  timestamps: Array<{
+    /** Start time in seconds */
+    start_seconds: number
+    /** End time in seconds (approximate for pasted transcripts) */
+    end_seconds: number
+    /** Text content of this segment */
+    text: string
+  }>
 }
 
 /**
