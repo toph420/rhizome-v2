@@ -3,6 +3,7 @@ import { DocumentList } from '@/components/library/DocumentList'
 import { ProcessingDock } from '@/components/layout/ProcessingDock'
 import { AdminPanel } from '@/components/admin/AdminPanel'
 import { GeminiDebugPanel } from '@/components/admin/GeminiDebugPanel'
+import { TaskManager } from '@/components/admin/TaskManager'
 import { createClient } from '@/lib/supabase/server'
 
 /**
@@ -41,6 +42,7 @@ export default async function Home() {
 
             <div className="space-y-4">
               <h2 className="text-2xl font-semibold">Admin</h2>
+              <TaskManager />
               <AdminPanel documents={documents || []} />
               <GeminiDebugPanel />
             </div>

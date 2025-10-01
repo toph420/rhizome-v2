@@ -6,7 +6,8 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, type LucideIcon } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, AlertTriangle, Trash2, type LucideIcon } from 'lucide-react'
+import { forceFailJob, forceFailAllProcessing, clearFailedJobs } from '@/app/actions/admin'
 
 const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?: Record<string, string> }> = {
   download: { 
@@ -80,6 +81,8 @@ export function ProcessingDock() {
   const [userId, setUserId] = useState<string | null>(null)
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
   const [isClearingCompleted, setIsClearingCompleted] = useState(false)
+  const [isClearingFailed, setIsClearingFailed] = useState(false)
+  const [isForceFailingAll, setIsForceFailingAll] = useState(false)
   
   useEffect(() => {
     const supabase = createClient()
@@ -219,26 +222,26 @@ export function ProcessingDock() {
   
   async function clearCompleted() {
     const supabase = createClient()
-    
+
     // Get all completed job IDs
     const completedJobIds = jobs
       .filter(j => j.status === 'completed')
       .map(j => j.id)
-    
+
     if (completedJobIds.length === 0) return
-    
+
     // Mark button as loading
     setIsClearingCompleted(true)
-    
+
     // Mark all as deleting for UI feedback
     setDeletingIds(prev => new Set([...prev, ...completedJobIds]))
-    
+
     // Delete all completed jobs from database
     const { error } = await supabase
       .from('background_jobs')
       .delete()
       .in('id', completedJobIds)
-    
+
     if (error) {
       console.error('Failed to clear completed jobs:', error)
       // Remove deleting state on error
@@ -250,19 +253,53 @@ export function ProcessingDock() {
       setIsClearingCompleted(false)
       return
     }
-    
+
     // Local state will be updated by realtime subscription
     // But update immediately for better UX
     setJobs(prev => prev.filter(j => j.status !== 'completed'))
-    
+
     // Clear deleting state
     setDeletingIds(prev => {
       const next = new Set(prev)
       completedJobIds.forEach(id => next.delete(id))
       return next
     })
-    
+
     setIsClearingCompleted(false)
+  }
+
+  async function handleClearFailed() {
+    setIsClearingFailed(true)
+    const result = await clearFailedJobs()
+
+    if (result.success) {
+      setJobs(prev => prev.filter(j => j.status !== 'failed'))
+    }
+
+    setIsClearingFailed(false)
+  }
+
+  async function handleForceFailAll() {
+    if (!confirm('Force fail all processing jobs? They will retry immediately.')) return
+
+    setIsForceFailingAll(true)
+    const result = await forceFailAllProcessing()
+
+    if (result.success) {
+      // Jobs will be updated by realtime subscription
+      console.log('Force failed all processing jobs')
+    }
+
+    setIsForceFailingAll(false)
+  }
+
+  async function handleForceFailJob(jobId: string) {
+    const result = await forceFailJob(jobId)
+
+    if (result.success) {
+      // Job will be updated by realtime subscription
+      console.log('Force failed job:', jobId)
+    }
   }
   
   const getJobTitle = (job: Job): string => {
@@ -274,22 +311,52 @@ export function ProcessingDock() {
   
   if (jobs.length === 0) return null
   
+  const hasCompleted = jobs.some(j => j.status === 'completed')
+  const hasFailed = jobs.some(j => j.status === 'failed')
+  const hasProcessing = jobs.some(j => j.status === 'processing')
+
   return (
     <div className="fixed bottom-0 left-0 right-0 border-t bg-background shadow-lg z-50">
       <div className="container mx-auto p-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium">Processing Jobs</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearCompleted}
-            disabled={!jobs.some(j => j.status === 'completed') || isClearingCompleted}
-          >
-            {isClearingCompleted && (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            )}
-            Clear Completed
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleForceFailAll}
+              disabled={!hasProcessing || isForceFailingAll}
+            >
+              {isForceFailingAll && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              <AlertTriangle className="h-4 w-4 mr-1" />
+              Force Fail All
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClearFailed}
+              disabled={!hasFailed || isClearingFailed}
+            >
+              {isClearingFailed && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              <Trash2 className="h-4 w-4 mr-1" />
+              Clear Failed
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearCompleted}
+              disabled={!hasCompleted || isClearingCompleted}
+            >
+              {isClearingCompleted && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              Clear Completed
+            </Button>
+          </div>
         </div>
         
         <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -363,6 +430,16 @@ export function ProcessingDock() {
                   </div>
                   
                   <div className="flex-shrink-0 flex gap-2">
+                    {job.status === 'processing' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleForceFailJob(job.id)}
+                      >
+                        <AlertTriangle className="h-4 w-4 mr-1" />
+                        Force Fail
+                      </Button>
+                    )}
                     {job.status === 'failed' && (
                       <Button
                         variant="outline"
