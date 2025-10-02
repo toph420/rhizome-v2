@@ -3,6 +3,7 @@
  * Tests URL validation, article content extraction with Readability, and HTML sanitization.
  */
 
+import { jest } from '@jest/globals'
 import { isValidUrl, extractArticle, sanitizeHtml } from '../web-extraction'
 import { ERROR_PREFIXES } from '../../types/multi-format'
 import type { Article } from '../../types/multi-format'

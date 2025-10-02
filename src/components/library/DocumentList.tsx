@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Eye, Loader2 } from 'lucide-react'
+import { FileText, Eye, Loader2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { deleteDocument } from '@/app/actions/admin'
 
 interface Document {
   id: string
@@ -26,6 +28,7 @@ export function DocumentList() {
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -78,23 +81,38 @@ export function DocumentList() {
     }
   }, [userId])
 
-  async function loadDocuments(supabase: any, userId: string) {
+  async function loadDocuments(supabase: SupabaseClient, userId: string) {
     setLoading(true)
     const { data } = await supabase
       .from('documents')
       .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-    
+
     if (data) {
       setDocuments(data)
     }
     setLoading(false)
   }
 
+  async function handleDelete(documentId: string, title: string) {
+    if (!confirm(`Delete "${title}"? This will remove the document and all associated data.`)) {
+      return
+    }
+
+    setDeleting(documentId)
+    const result = await deleteDocument(documentId)
+
+    if (!result.success) {
+      alert(`Failed to delete: ${result.error}`)
+    }
+
+    setDeleting(null)
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
+      <div className="flex items-center justify-center p-8" data-testid="library-loading">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     )
@@ -102,7 +120,7 @@ export function DocumentList() {
 
   if (documents.length === 0) {
     return (
-      <Card>
+      <Card data-testid="library-empty">
         <CardContent className="p-8 text-center text-muted-foreground">
           No documents yet. Upload one to get started!
         </CardContent>
@@ -118,18 +136,18 @@ export function DocumentList() {
         const isFailed = doc.processing_status === 'failed'
         
         return (
-          <Card key={doc.id}>
+          <Card key={doc.id} data-testid="document-card">
             <CardHeader>
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
-                  <CardTitle className="truncate">{doc.title}</CardTitle>
+                  <CardTitle className="truncate" data-testid="document-title">{doc.title}</CardTitle>
                   <CardDescription className="flex items-center gap-2 mt-1">
                     <Badge variant={
                       isCompleted ? 'default' : 
                       isProcessing ? 'secondary' : 
                       isFailed ? 'destructive' : 
                       'outline'
-                    }>
+                    } data-testid="status-badge">
                       {doc.processing_status}
                     </Badge>
                     {doc.processing_stage && (
@@ -141,13 +159,13 @@ export function DocumentList() {
                   {isCompleted && doc.markdown_available && (
                     <>
                       <Link href={`/documents/${doc.id}/preview`}>
-                        <Button variant="outline" size="sm">
+                        <Button variant="outline" size="sm" data-testid="preview-button">
                           <Eye className="h-4 w-4 mr-2" />
                           Preview
                         </Button>
                       </Link>
                       <Link href={`/read/${doc.id}`}>
-                        <Button size="sm">
+                        <Button size="sm" data-testid="read-button">
                           <FileText className="h-4 w-4 mr-2" />
                           Read
                         </Button>
@@ -155,27 +173,36 @@ export function DocumentList() {
                     </>
                   )}
                   {isProcessing && (
-                    <Button variant="outline" size="sm" disabled>
+                    <Button variant="outline" size="sm" disabled data-testid="processing-button">
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Processing
                     </Button>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDelete(doc.id, doc.title)}
+                    disabled={deleting === doc.id}
+                    data-testid="delete-button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span>Created {new Date(doc.created_at).toLocaleDateString()}</span>
+                <span data-testid="document-created">Created {new Date(doc.created_at).toLocaleDateString()}</span>
                 {doc.markdown_available && (
                   <>
                     <span>•</span>
-                    <span>✓ Markdown</span>
+                    <span data-testid="markdown-available">✓ Markdown</span>
                   </>
                 )}
                 {doc.embeddings_available && (
                   <>
                     <span>•</span>
-                    <span>✓ Embeddings</span>
+                    <span data-testid="embeddings-available">✓ Embeddings</span>
                   </>
                 )}
               </div>

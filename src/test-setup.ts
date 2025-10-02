@@ -19,6 +19,9 @@ if (!global.fetch) {
 
 // Mock TextEncoder/TextDecoder for jsdom
 if (!global.TextEncoder) {
-  global.TextEncoder = require('util').TextEncoder
-  global.TextDecoder = require('util').TextDecoder
+  // Using dynamic import with type assertion for test environment
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const util = require('util')
+  global.TextEncoder = util.TextEncoder
+  global.TextDecoder = util.TextDecoder
 }

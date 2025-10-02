@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai'
 import { config } from 'dotenv'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { GEMINI_MODEL } from './lib/model-config.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -29,22 +30,22 @@ async function testGeminiAPI() {
     })
     
     // Test 1: Simple text generation
-    console.log('📝 Test 1: Simple text generation')
+    console.log(`📝 Test 1: Simple text generation (using ${GEMINI_MODEL})`)
     const startTime1 = Date.now()
     const result1 = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: GEMINI_MODEL,
       contents: 'Say "Hello from Gemini!" and nothing else.'
     })
     const elapsed1 = Date.now() - startTime1
     console.log('   ✅ Response:', result1.text)
     console.log('   ⏱️  Time:', elapsed1 + 'ms')
     console.log('')
-    
+
     // Test 2: JSON structured output
-    console.log('📊 Test 2: JSON structured output')
+    console.log(`📊 Test 2: JSON structured output (using ${GEMINI_MODEL})`)
     const startTime2 = Date.now()
     const result2 = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: GEMINI_MODEL,
       contents: 'Return a JSON object with fields: status (string), timestamp (number)',
       config: {
         responseMimeType: 'application/json'

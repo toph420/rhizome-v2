@@ -1,0 +1,8 @@
+# Worker-specific gitignore (defense in depth)
+# Even if root .gitignore fails, this prevents committing dependencies
+
+node_modules/
+dist/
+*.log
+.env*
+*.tsbuildinfo

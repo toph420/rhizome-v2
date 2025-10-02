@@ -57,7 +57,7 @@ export function UploadZone() {
     if (url.includes('youtube.com') || url.includes('youtu.be')) {
       setUrlType('youtube')
     } else if (url.startsWith('http://') || url.startsWith('https://')) {
-      setUrlType('web')
+      setUrlType('web_url')
     } else {
       setUrlType(null)
     }

@@ -4,8 +4,7 @@ import { createClient } from '@supabase/supabase-js'
  * Creates a Supabase client with service role privileges.
  * Use this for admin operations that bypass RLS.
  * NEVER expose this to the client side.
- * 
- * @returns Supabase client with admin privileges
+ * @returns Supabase client with admin privileges.
  */
 export function createAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL

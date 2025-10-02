@@ -3,11 +3,19 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
 import { getDocumentJob } from '@/app/actions/documents'
+import { getAnnotations } from '@/app/actions/annotations'
+import { ReaderLayout } from '@/components/reader/ReaderLayout'
 
 interface ReaderPageProps {
   params: Promise<{ id: string }>
 }
 
+/**
+ * Reader page component for viewing documents with annotations.
+ * @param root0 - Component props.
+ * @param root0.params - Route parameters.
+ * @returns Reader page JSX.
+ */
 export default async function ReaderPage({ params }: ReaderPageProps) {
   const { id } = await params
   const supabase = await createClient()
@@ -33,6 +41,70 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     )
   }
   
+  // Check processing status first
+  if (doc.processing_status === 'failed') {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Processing Failed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-destructive mb-4">
+              Document processing failed. Please try uploading the document again.
+            </p>
+            {doc.processing_stage && (
+              <p className="text-sm text-muted-foreground">
+                Failed at stage: {doc.processing_stage}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Check if processing is still in progress
+  if (doc.processing_status === 'processing' || doc.processing_status === 'pending') {
+    const job = await getDocumentJob(id)
+    
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Processing Document</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              
+              {job && (
+                <div className="text-center w-full">
+                  <p className="text-sm font-medium mb-2">
+                    {job.progress?.stage || 'Pending'}
+                  </p>
+                  <p className="text-2xl font-bold mb-2">
+                    {job.progress?.percent || 0}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Status: {job.status}
+                  </p>
+                </div>
+              )}
+              
+              {!job && (
+                <p className="text-sm text-muted-foreground">
+                  Initializing processing...
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Processing is complete - check if markdown is available
   if (doc.markdown_available) {
     // Use admin client to bypass RLS for signed URL creation
     const adminClient = createAdminClient()
@@ -63,10 +135,43 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     const signedUrl = data.signedUrl
     const job = await getDocumentJob(id)
     
+    // Query chunks ordered by index
+    const { data: chunks, error: chunksError } = await supabase
+      .from('chunks')
+      .select('id, content, chunk_index, start_offset, end_offset')
+      .eq('document_id', id)
+      .order('chunk_index', { ascending: true })
+    
+    if (chunksError) {
+      console.error('Failed to load chunks:', chunksError)
+      return (
+        <div className="p-8 text-center">
+          <p className="text-destructive">Failed to load document chunks</p>
+          <p className="text-sm text-muted-foreground mt-2">
+            {chunksError.message}
+          </p>
+        </div>
+      )
+    }
+    
+    if (!chunks || chunks.length === 0) {
+      return (
+        <div className="p-8 text-center">
+          <p className="text-muted-foreground">
+            Document has no chunks. Processing may still be in progress.
+          </p>
+        </div>
+      )
+    }
+    
+    // Query annotations for this document
+    const annotationsResult = await getAnnotations(id)
+    const annotations = annotationsResult.success ? annotationsResult.data : []
+    
     return (
-      <div className="flex flex-col h-screen">
+      <>
         {!doc.embeddings_available && job && (
-          <div className="bg-blue-50 border-b border-blue-200 px-4 py-3">
+          <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 fixed top-0 left-0 right-0 z-50">
             <div className="flex items-center gap-3">
               <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
               <div className="flex-1">
@@ -80,62 +185,31 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
             </div>
           </div>
         )}
-        
-        <div className="flex-1 overflow-auto p-8">
-          <div className="max-w-4xl mx-auto">
-            <h1 className="text-3xl font-bold mb-6">{doc.title}</h1>
-            
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground mb-4">
-                  Document reader with markdown content from: {signedUrl}
-                </p>
-                <div className="prose prose-sm max-w-none">
-                  <p className="italic">
-                    Full markdown rendering will be implemented in the reader component.
-                    The signed URL above provides access to the processed markdown content.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
+
+        <ReaderLayout
+          documentId={id}
+          markdownUrl={signedUrl}
+          chunks={chunks}
+          annotations={annotations}
+        />
+      </>
     )
   }
   
-  const job = await getDocumentJob(id)
-  
+  // Processing complete but no markdown available - could be an error state
   return (
     <div className="flex items-center justify-center h-screen">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Processing Document</CardTitle>
+          <CardTitle>Document Not Available</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            
-            {job && (
-              <div className="text-center w-full">
-                <p className="text-sm font-medium mb-2">
-                  {job.progress?.stage || 'Pending'}
-                </p>
-                <p className="text-2xl font-bold mb-2">
-                  {job.progress?.percent || 0}%
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Status: {job.status}
-                </p>
-              </div>
-            )}
-            
-            {!job && (
-              <p className="text-sm text-muted-foreground">
-                Initializing processing...
-              </p>
-            )}
-          </div>
+          <p className="text-muted-foreground mb-4">
+            The document has been processed but the content is not available for viewing.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Status: {doc.processing_status || 'Unknown'}
+          </p>
         </CardContent>
       </Card>
     </div>

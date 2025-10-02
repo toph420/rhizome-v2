@@ -80,18 +80,19 @@ export interface Article {
 /**
  * Source type enum for document processing routing.
  * Determines which processing pipeline to use for a document.
- * 
+ *
  * @example
  * const sourceType: SourceType = 'youtube'
  */
-export type SourceType = 
-  | 'pdf'              // Existing PDF processing via Gemini Files API
-  | 'markdown_asis'    // Save markdown as-is, chunk by headings
-  | 'markdown_clean'   // Clean markdown with AI + semantic chunking
-  | 'txt'              // Convert text to markdown with AI
-  | 'youtube'          // Fetch YouTube transcript + preserve timestamps
-  | 'web_url'          // Extract web article + clean with AI
-  | 'paste'            // Generic pasted text processing
+export type SourceType =
+  | 'pdf'                  // Existing PDF processing via Gemini Files API
+  | 'markdown_asis'        // Save markdown as-is, chunk by headings
+  | 'markdown_clean'       // Clean markdown with AI + semantic chunking
+  | 'txt'                  // Convert text to markdown with AI
+  | 'youtube'              // Fetch YouTube transcript + preserve timestamps (has videoId)
+  | 'youtube_transcript'   // Pasted YouTube transcript (no videoId, just timestamps)
+  | 'web_url'              // Extract web article + clean with AI
+  | 'paste'                // Generic pasted text processing
 
 /**
  * Error types for structured error handling and recovery guidance.

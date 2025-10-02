@@ -9,6 +9,7 @@
  * - Format-specific processing logic
  */
 
+import { jest } from '@jest/globals'
 import { processDocumentHandler } from '../handlers/process-document'
 import { ERROR_PREFIXES } from '../types/multi-format'
 import type { TranscriptSegment } from '../types/multi-format'

@@ -1,5 +1,8 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 
+// ComponentData intentionally uses 'any' for maximum ECS flexibility
+// Different component types have different data structures (flashcard, annotation, study, etc.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ComponentData = Record<string, any>
 
 export interface Entity {
@@ -25,10 +28,10 @@ export class ECS {
   constructor(private supabase: SupabaseClient) {}
 
   /**
-   * Create a new entity with components
-   * @param userId - The user ID who owns this entity
-   * @param components - Object with component types as keys and data as values
-   * @returns The created entity ID
+   * Create a new entity with components.
+   * @param userId - The user ID who owns this entity.
+   * @param components - Object with component types as keys and data as values.
+   * @returns The created entity ID.
    */
   async createEntity(
     userId: string,
@@ -73,11 +76,14 @@ export class ECS {
   }
 
   /**
-   * Query entities by component types
-   * @param componentTypes - Array of component types to filter by
-   * @param userId - User ID to filter by
-   * @param filters - Additional filters
-   * @returns Array of entities with their components
+   * Query entities by component types.
+   * @param componentTypes - Array of component types to filter by.
+   * @param userId - User ID to filter by.
+   * @param filters - Additional filters.
+   * @param filters.document_id - Optional document ID filter.
+   * @param filters.chunk_id - Optional chunk ID filter.
+   * @param filters.deck_id - Optional deck ID filter.
+   * @returns Array of entities with their components.
    */
   async query(
     componentTypes: string[],
@@ -88,14 +94,51 @@ export class ECS {
       deck_id?: string
     }
   ): Promise<Entity[]> {
-    let query = this.supabase
+    // STEP 1: Find entity IDs that match the filters
+    // This avoids the PostgREST !inner join issue where filtering components
+    // returns only matching components instead of all components for matching entities
+    let entityIdQuery = this.supabase
+      .from('components')
+      .select('entity_id, entities!inner(user_id)')
+      .eq('entities.user_id', userId)
+
+    // Filter by component types if provided
+    if (componentTypes.length > 0) {
+      entityIdQuery = entityIdQuery.in('component_type', componentTypes)
+    }
+
+    // Apply additional filters
+    if (filters?.document_id) {
+      entityIdQuery = entityIdQuery.eq('document_id', filters.document_id)
+    }
+    if (filters?.chunk_id) {
+      entityIdQuery = entityIdQuery.eq('chunk_id', filters.chunk_id)
+    }
+
+    const { data: entityIdData, error: entityIdError } = await entityIdQuery
+
+    if (entityIdError) {
+      throw new Error(`Failed to query entity IDs: ${entityIdError.message}`)
+    }
+
+    if (!entityIdData || entityIdData.length === 0) {
+      return []
+    }
+
+    // Get unique entity IDs
+    const entityIds = Array.from(
+      new Set(entityIdData.map((row) => row.entity_id))
+    )
+
+    // STEP 2: Fetch full entities with ALL components
+    const { data, error } = await this.supabase
       .from('entities')
       .select(`
         id,
         user_id,
         created_at,
         updated_at,
-        components!inner (
+        components (
           id,
           entity_id,
           component_type,
@@ -106,22 +149,8 @@ export class ECS {
           updated_at
         )
       `)
+      .in('id', entityIds)
       .eq('user_id', userId)
-
-    // Filter by component types if provided
-    if (componentTypes.length > 0) {
-      query = query.in('components.component_type', componentTypes)
-    }
-
-    // Apply additional filters
-    if (filters?.document_id) {
-      query = query.eq('components.document_id', filters.document_id)
-    }
-    if (filters?.chunk_id) {
-      query = query.eq('components.chunk_id', filters.chunk_id)
-    }
-
-    const { data, error } = await query
 
     if (error) {
       throw new Error(`Failed to query entities: ${error.message}`)
@@ -131,10 +160,10 @@ export class ECS {
   }
 
   /**
-   * Get a single entity by ID with all its components
-   * @param entityId - The entity ID
-   * @param userId - User ID for security
-   * @returns The entity with components or null
+   * Get a single entity by ID with all its components.
+   * @param entityId - The entity ID.
+   * @param userId - User ID for security.
+   * @returns The entity with components or null.
    */
   async getEntity(
     entityId: string,
@@ -173,10 +202,10 @@ export class ECS {
   }
 
   /**
-   * Update a component's data
-   * @param componentId - The component ID
-   * @param data - New data for the component
-   * @param userId - User ID for security
+   * Update a component's data.
+   * @param componentId - The component ID.
+   * @param data - New data for the component.
+   * @param userId - User ID for security.
    */
   async updateComponent(
     componentId: string,
@@ -209,9 +238,9 @@ export class ECS {
   }
 
   /**
-   * Delete an entity and all its components (cascade)
-   * @param entityId - The entity ID to delete
-   * @param userId - User ID for security
+   * Delete an entity and all its components (cascade).
+   * @param entityId - The entity ID to delete.
+   * @param userId - User ID for security.
    */
   async deleteEntity(entityId: string, userId: string): Promise<void> {
     const { error } = await this.supabase
@@ -226,11 +255,12 @@ export class ECS {
   }
 
   /**
-   * Add a component to an existing entity
-   * @param entityId - The entity to add component to
-   * @param componentType - Type of component
-   * @param data - Component data
-   * @param userId - User ID for security
+   * Add a component to an existing entity.
+   * @param entityId - The entity to add component to.
+   * @param componentType - Type of component.
+   * @param data - Component data.
+   * @param userId - User ID for security.
+   * @returns The created component ID.
    */
   async addComponent(
     entityId: string,
@@ -271,9 +301,9 @@ export class ECS {
   }
 
   /**
-   * Remove a component from an entity
-   * @param componentId - The component ID to remove
-   * @param userId - User ID for security
+   * Remove a component from an entity.
+   * @param componentId - The component ID to remove.
+   * @param userId - User ID for security.
    */
   async removeComponent(componentId: string, userId: string): Promise<void> {
     // Verify ownership through entity

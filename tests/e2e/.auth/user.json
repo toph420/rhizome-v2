@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:3000",
+      "localStorage": [
+        {
+          "name": "auth-user",
+          "value": "{\"id\":\"test-user-id\",\"email\":\"test@example.com\"}"
+        }
+      ]
+    }
+  ]
+}

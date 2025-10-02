@@ -1,6 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
+node_modules/
 /node_modules
 /.pnp
 .pnp.*
@@ -39,3 +40,20 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Build outputs (all locations)
+dist/
+build/
+
+# Worker-specific (redundant with node_modules/ above, but explicit)
+worker/node_modules/
+worker/dist/
+worker/coverage/
+worker/tests/validation/reports/
+
+# IDE configs
+.vscode/
+.idea/
+
+# Test files (keep out of version control)
+test-files/

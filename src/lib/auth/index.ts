@@ -11,7 +11,7 @@ const DEV_USER_ID = process.env.NEXT_PUBLIC_DEV_USER_ID || '00000000-0000-0000-0
 
 /**
  * Gets the current user in both dev and production environments.
- * @returns The current user object or null if not authenticated
+ * @returns The current user object or null if not authenticated.
  */
 export async function getCurrentUser() {
   if (IS_DEV) {
@@ -28,7 +28,7 @@ export async function getCurrentUser() {
 
 /**
  * Gets the appropriate Supabase client based on environment.
- * @returns Admin client in dev (bypasses RLS), regular client in production
+ * @returns Admin client in dev (bypasses RLS), regular client in production.
  */
 export function getSupabaseClient() {
   // In dev, use admin client to bypass RLS
@@ -42,8 +42,8 @@ export function getSupabaseClient() {
 
 /**
  * Requires a user to be authenticated.
- * @returns The current user
- * @throws {Error} If no user is authenticated
+ * @returns The current user.
+ * @throws {Error} If no user is authenticated.
  */
 export async function requireUser() {
   const user = await getCurrentUser()

@@ -1,0 +1,122 @@
+{
+  "name": "Small Dataset",
+  "description": "Minimal dataset for quick testing with 5 chunks",
+  "sourceChunk": {
+    "id": "source-small-1",
+    "content": "Machine learning algorithms are revolutionizing data analysis and pattern recognition in modern computing systems",
+    "embedding": [],
+    "metadata": {
+      "themes": ["machine learning", "data analysis", "pattern recognition", "computing"],
+      "key_concepts": ["ML algorithms", "data analysis", "pattern recognition"],
+      "emotional_tone": {
+        "sentiment": "positive",
+        "emotions": ["optimistic", "innovative"]
+      },
+      "structural_type": "statement",
+      "importance_score": 0.85,
+      "timestamp": "2024-01-15T10:00:00Z",
+      "word_count": 14
+    }
+  },
+  "candidateChunks": [
+    {
+      "id": "small-candidate-1",
+      "content": "Deep learning neural networks form the backbone of artificial intelligence systems",
+      "embedding": [],
+      "metadata": {
+        "themes": ["deep learning", "neural networks", "AI"],
+        "key_concepts": ["deep learning", "neural networks", "AI systems"],
+        "emotional_tone": {
+          "sentiment": "neutral",
+          "emotions": ["informative"]
+        },
+        "structural_type": "explanation",
+        "importance_score": 0.8,
+        "timestamp": "2024-01-15T10:30:00Z",
+        "word_count": 11
+      }
+    },
+    {
+      "id": "small-candidate-2",
+      "content": "Statistical models fail to capture the complexity that machine learning handles effortlessly",
+      "embedding": [],
+      "metadata": {
+        "themes": ["statistics", "machine learning", "complexity"],
+        "key_concepts": ["statistical models", "ML superiority"],
+        "emotional_tone": {
+          "sentiment": "critical",
+          "emotions": ["dismissive"]
+        },
+        "structural_type": "comparison",
+        "importance_score": 0.7,
+        "timestamp": "2024-01-15T11:00:00Z",
+        "word_count": 12
+      }
+    },
+    {
+      "id": "small-candidate-3",
+      "content": "The ethical implications of AI and machine learning require careful consideration and regulation",
+      "embedding": [],
+      "metadata": {
+        "themes": ["ethics", "AI", "regulation", "machine learning"],
+        "key_concepts": ["AI ethics", "regulation", "ethical implications"],
+        "emotional_tone": {
+          "sentiment": "cautious",
+          "emotions": ["concerned", "thoughtful"]
+        },
+        "structural_type": "warning",
+        "importance_score": 0.9,
+        "timestamp": "2024-01-16T09:00:00Z",
+        "word_count": 13
+      }
+    },
+    {
+      "id": "small-candidate-4",
+      "content": "Computer vision algorithms can now identify patterns invisible to human observers",
+      "embedding": [],
+      "metadata": {
+        "themes": ["computer vision", "pattern recognition", "algorithms"],
+        "key_concepts": ["computer vision", "pattern detection", "human limitations"],
+        "emotional_tone": {
+          "sentiment": "positive",
+          "emotions": ["amazed", "excited"]
+        },
+        "structural_type": "capability",
+        "importance_score": 0.75,
+        "timestamp": "2024-01-15T10:15:00Z",
+        "word_count": 11
+      }
+    },
+    {
+      "id": "small-candidate-5",
+      "content": "Traditional computing approaches are obsolete compared to modern machine learning techniques",
+      "embedding": [],
+      "metadata": {
+        "themes": ["traditional computing", "machine learning", "obsolescence"],
+        "key_concepts": ["traditional vs modern", "ML superiority"],
+        "emotional_tone": {
+          "sentiment": "dismissive",
+          "emotions": ["confident"]
+        },
+        "structural_type": "contrast",
+        "importance_score": 0.65,
+        "timestamp": "2024-01-15T10:45:00Z",
+        "word_count": 11
+      }
+    }
+  ],
+  "expectedConnections": [
+    {
+      "sourceId": "source-small-1",
+      "targetId": "small-candidate-1",
+      "expectedEngines": ["semantic-similarity", "conceptual-density"],
+      "minExpectedScore": 0.7
+    },
+    {
+      "sourceId": "source-small-1",
+      "targetId": "small-candidate-4",
+      "expectedEngines": ["semantic-similarity", "structural-pattern"],
+      "minExpectedScore": 0.6
+    }
+  ]
+}

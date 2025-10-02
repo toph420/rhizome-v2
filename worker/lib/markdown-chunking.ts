@@ -13,6 +13,16 @@ interface Chunk {
   importance_score: number
   /** Brief summary of chunk content */
   summary: string
+  /** Start position in original markdown */
+  start_offset: number
+  /** End position in original markdown */
+  end_offset: number
+  /** Word count for the chunk */
+  word_count: number
+  /** Index of chunk in document sequence */
+  chunk_index?: number
+  /** Heading hierarchy path (e.g., "Chapter 1/Section A") */
+  heading_path?: string
   /** Timestamp contexts for YouTube videos (optional) */
   timestamps?: TimestampContext[]
 }
@@ -48,14 +58,17 @@ export function simpleMarkdownChunking(markdown: string): Chunk[] {
   const headingRegex = /^(#{1,6})\s+(.+)$/gm
   
   // Find all heading positions
-  const headings: Array<{ level: number; text: string; index: number }> = []
+  const headings: Array<{ level: number; text: string; index: number; lineEnd: number }> = []
   let match: RegExpExecArray | null
   
   while ((match = headingRegex.exec(markdown)) !== null) {
+    // Find the end of the heading line
+    const lineEnd = markdown.indexOf('\n', match.index)
     headings.push({
       level: match[1].length,
       text: match[2].trim(),
-      index: match.index
+      index: match.index,
+      lineEnd: lineEnd === -1 ? markdown.length : lineEnd
     })
   }
   
@@ -64,14 +77,37 @@ export function simpleMarkdownChunking(markdown: string): Chunk[] {
     const content = markdown.trim()
     if (content.length >= 200) {
       // Split long content without headings
-      return splitLongContent(content, ['Document Content'])
+      return splitLongContent(content, ['Document Content'], 0, 'Document Content')
     }
     return [{
       content,
       themes: ['Document Content'],
       importance_score: 0.5,
-      summary: content.slice(0, 100) + (content.length > 100 ? '...' : '')
+      summary: content.slice(0, 100) + (content.length > 100 ? '...' : ''),
+      start_offset: 0,
+      end_offset: content.length,
+      word_count: content.split(/\s+/).filter(word => word.length > 0).length,
+      chunk_index: 0,
+      heading_path: 'Document Content'
     }]
+  }
+  
+  // Build heading hierarchy paths
+  const headingPaths: string[] = []
+  const pathStack: Array<{ level: number; text: string }> = []
+  
+  for (const heading of headings) {
+    // Pop levels higher than current
+    while (pathStack.length > 0 && pathStack[pathStack.length - 1].level >= heading.level) {
+      pathStack.pop()
+    }
+    
+    // Add current heading to path
+    pathStack.push({ level: heading.level, text: heading.text })
+    
+    // Build path string
+    const path = pathStack.map(h => h.text).join('/')
+    headingPaths.push(path)
   }
   
   // Process each section defined by headings
@@ -84,7 +120,15 @@ export function simpleMarkdownChunking(markdown: string): Chunk[] {
     const endIndex = nextHeading ? nextHeading.index : markdown.length
     const sectionContent = markdown.slice(startIndex, endIndex).trim()
     
-    // Remove the heading line from content
+    // Calculate content start position (after heading line + newlines)
+    const contentStart = currentHeading.lineEnd + 1 // Skip past heading line
+    // Skip any additional newlines after heading
+    let contentStartActual = contentStart
+    while (contentStartActual < endIndex && markdown[contentStartActual] === '\n') {
+      contentStartActual++
+    }
+    
+    // Remove the heading line from content for processing
     const contentWithoutHeading = sectionContent
       .replace(/^#{1,6}\s+.+$/m, '')
       .trim()
@@ -95,28 +139,46 @@ export function simpleMarkdownChunking(markdown: string): Chunk[] {
     }
     
     const theme = currentHeading.text
+    const headingPath = headingPaths[i]
     
     // Check if section is too long and needs splitting
     if (sectionContent.length > 2000) {
-      const subChunks = splitLongContent(contentWithoutHeading, [theme])
+      const subChunks = splitLongContent(
+        contentWithoutHeading, 
+        [theme], 
+        contentStartActual,
+        headingPath
+      )
       chunks.push(...subChunks)
     } else if (sectionContent.length >= 200) {
       // Add as single chunk
+      const wordCount = sectionContent.split(/\s+/).filter(word => word.length > 0).length
       chunks.push({
         content: sectionContent,
         themes: [theme],
         importance_score: calculateImportance(currentHeading.level),
-        summary: contentWithoutHeading.slice(0, 100) + (contentWithoutHeading.length > 100 ? '...' : '')
+        summary: contentWithoutHeading.slice(0, 100) + (contentWithoutHeading.length > 100 ? '...' : ''),
+        start_offset: startIndex,
+        end_offset: endIndex,
+        word_count: wordCount,
+        chunk_index: chunks.length,
+        heading_path: headingPath
       })
     } else {
       // Combine short sections with next section or previous
       // For now, add as-is if meets minimum threshold
       if (sectionContent.length >= 200) {
+        const wordCount = sectionContent.split(/\s+/).filter(word => word.length > 0).length
         chunks.push({
           content: sectionContent,
           themes: [theme],
           importance_score: calculateImportance(currentHeading.level),
-          summary: contentWithoutHeading.slice(0, 100)
+          summary: contentWithoutHeading.slice(0, 100),
+          start_offset: startIndex,
+          end_offset: endIndex,
+          word_count: wordCount,
+          chunk_index: chunks.length,
+          heading_path: headingPath
         })
       }
     }
@@ -126,57 +188,112 @@ export function simpleMarkdownChunking(markdown: string): Chunk[] {
 }
 
 /**
- * Splits long content into chunks by paragraph breaks.
- * Ensures no chunk exceeds 2000 characters.
+ * Splits long content into chunks by paragraph breaks with accurate offset tracking.
+ * Ensures no chunk exceeds 2000 characters while maintaining precise character positions.
  * 
- * @param content - Content to split
+ * @param content - Content to split (without heading)
  * @param themes - Themes to apply to all chunks
- * @returns Array of chunks
+ * @param baseOffset - Starting character position in original markdown
+ * @param headingPath - Heading hierarchy path
+ * @param originalMarkdown - Full original markdown for position verification
+ * @returns Array of chunks with accurate start_offset and end_offset
  */
-function splitLongContent(content: string, themes: string[]): Chunk[] {
+function splitLongContent(
+  content: string, 
+  themes: string[], 
+  baseOffset: number = 0, 
+  headingPath?: string
+): Chunk[] {
   const chunks: Chunk[] = []
   const paragraphs = content.split(/\n\n+/)
   
   let currentChunk = ''
+  let currentChunkStart = baseOffset
+  let currentPosition = baseOffset
+  let chunkIndex = 0
   
   for (const paragraph of paragraphs) {
     const trimmedParagraph = paragraph.trim()
     
-    if (!trimmedParagraph) continue
+    if (!trimmedParagraph) {
+      // Skip empty paragraphs but account for their space
+      currentPosition += 2 // Account for paragraph break
+      continue
+    }
+    
+    // Calculate what the new chunk would look like
+    const newChunk = currentChunk + (currentChunk ? '\n\n' : '') + trimmedParagraph
     
     // If adding this paragraph would exceed limit, save current chunk
-    if (currentChunk.length + trimmedParagraph.length + 2 > 2000 && currentChunk.length > 0) {
+    if (newChunk.length > 2000 && currentChunk.length > 0) {
+      const wordCount = currentChunk.split(/\s+/).filter(word => word.length > 0).length
       chunks.push({
         content: currentChunk.trim(),
         themes,
         importance_score: 0.5,
-        summary: currentChunk.slice(0, 100) + (currentChunk.length > 100 ? '...' : '')
+        summary: currentChunk.slice(0, 100) + (currentChunk.length > 100 ? '...' : ''),
+        start_offset: currentChunkStart,
+        end_offset: currentPosition,
+        word_count: wordCount,
+        chunk_index: chunkIndex++,
+        heading_path: headingPath
       })
-      currentChunk = ''
+      
+      // Start new chunk
+      currentChunk = trimmedParagraph
+      currentChunkStart = currentPosition
+      currentPosition += trimmedParagraph.length
+    } else {
+      // Add paragraph to current chunk
+      if (currentChunk) {
+        currentPosition += 2 // Account for \n\n between paragraphs
+      }
+      currentChunk = newChunk
+      currentPosition += trimmedParagraph.length
     }
     
-    // Add paragraph to current chunk
-    currentChunk += (currentChunk ? '\n\n' : '') + trimmedParagraph
-    
-    // If this paragraph alone exceeds limit, split it further
+    // If current chunk still exceeds limit after adding paragraph, split at character boundary
     if (currentChunk.length > 2000) {
+      // Split at safe character boundary (try to avoid breaking words)
+      let splitPoint = 2000
+      while (splitPoint > 1800 && currentChunk[splitPoint] !== ' ' && currentChunk[splitPoint] !== '\n') {
+        splitPoint--
+      }
+      
+      const chunkContent = currentChunk.slice(0, splitPoint)
+      const wordCount = chunkContent.split(/\s+/).filter(word => word.length > 0).length
       chunks.push({
-        content: currentChunk.slice(0, 2000),
+        content: chunkContent,
         themes,
         importance_score: 0.5,
-        summary: currentChunk.slice(0, 100) + '...'
+        summary: chunkContent.slice(0, 100) + '...',
+        start_offset: currentChunkStart,
+        end_offset: currentChunkStart + splitPoint,
+        word_count: wordCount,
+        chunk_index: chunkIndex++,
+        heading_path: headingPath
       })
-      currentChunk = currentChunk.slice(2000)
+      
+      // Continue with remainder
+      currentChunk = currentChunk.slice(splitPoint).trim()
+      currentChunkStart = currentChunkStart + splitPoint
+      currentPosition = currentChunkStart + currentChunk.length
     }
   }
   
-  // Add remaining content
+  // Add remaining content if substantial enough
   if (currentChunk.trim().length >= 200) {
+    const wordCount = currentChunk.split(/\s+/).filter(word => word.length > 0).length
     chunks.push({
       content: currentChunk.trim(),
       themes,
       importance_score: 0.5,
-      summary: currentChunk.slice(0, 100) + (currentChunk.length > 100 ? '...' : '')
+      summary: currentChunk.slice(0, 100) + (currentChunk.length > 100 ? '...' : ''),
+      start_offset: currentChunkStart,
+      end_offset: currentPosition,
+      word_count: wordCount,
+      chunk_index: chunkIndex++,
+      heading_path: headingPath
     })
   }
   
@@ -201,6 +318,78 @@ function calculateImportance(level: number): number {
     6: 0.3
   }
   return scores[level] || 0.5
+}
+
+/**
+ * Enhances themes extraction using concept analysis metadata.
+ * Replaces generic themes with meaningful concepts from AI analysis.
+ * 
+ * @param chunk - Chunk with metadata containing concept analysis
+ * @returns Enhanced themes array based on concept importance
+ */
+export function enhanceThemesFromConcepts(chunk: any): string[] {
+  // If no concept metadata, keep existing themes
+  if (!chunk.metadata?.concepts?.concepts) {
+    return chunk.themes || ['Document Content']
+  }
+  
+  const concepts = chunk.metadata.concepts.concepts
+  
+  // Extract high-importance concepts as themes
+  const meaningfulConcepts = concepts
+    .filter((concept: any) => 
+      concept.importance > 0.35 && 
+      concept.text.length > 2 && 
+      !['in', 'its', 'certain', 'written'].includes(concept.text.toLowerCase())
+    )
+    .slice(0, 3) // Limit to top 3 concepts
+    .map((concept: any) => concept.text)
+  
+  // Fallback to original themes if no meaningful concepts found
+  if (meaningfulConcepts.length === 0) {
+    return chunk.themes || ['Document Content']
+  }
+  
+  return meaningfulConcepts
+}
+
+/**
+ * Enhances summary generation using concept relationships.
+ * Creates meaningful summaries from concept analysis instead of content truncation.
+ * 
+ * @param chunk - Chunk with metadata containing concept analysis
+ * @returns Enhanced summary based on key concepts and relationships
+ */
+export function enhanceSummaryFromConcepts(chunk: any): string {
+  // If no concept metadata, keep existing summary
+  if (!chunk.metadata?.concepts?.concepts || !chunk.metadata?.concepts?.relationships) {
+    return chunk.summary || chunk.content.slice(0, 100) + '...'
+  }
+  
+  const concepts = chunk.metadata.concepts.concepts
+  const relationships = chunk.metadata.concepts.relationships
+  
+  // Get top 2 most important concepts
+  const topConcepts = concepts
+    .filter((concept: any) => concept.importance > 0.3)
+    .slice(0, 2)
+    .map((concept: any) => concept.text)
+  
+  // Find key relationships between concepts
+  const keyRelationships = relationships
+    .filter((rel: any) => rel.strength >= 0.7)
+    .slice(0, 2)
+  
+  // Build meaningful summary
+  if (topConcepts.length >= 2 && keyRelationships.length > 0) {
+    const rel = keyRelationships[0]
+    return `Discusses ${topConcepts.join(' and ')}, exploring how ${rel.from} ${rel.type} ${rel.to}.`
+  } else if (topConcepts.length > 0) {
+    return `Covers ${topConcepts.join(', ')} and related concepts.`
+  }
+  
+  // Fallback to content truncation
+  return chunk.content.slice(0, 100) + '...'
 }
 
 /**

@@ -11,9 +11,32 @@ interface PageProps {
   params: Promise<{ id: string }>
 }
 
+interface Chunk {
+  id: string
+  content: string
+  chunk_index: number
+  importance_score?: number | null
+  summary?: string | null
+  themes?: string[] | null
+  start_offset?: number | null
+  end_offset?: number | null
+  embedding?: number[] | null
+  timestamps?: unknown | null
+}
+
+/**
+ * Document preview page showing processing results.
+ * @param params - Route parameters containing document ID.
+ * @returns Preview page component.
+ */
+
 export default async function DocumentPreviewPage({ params }: PageProps) {
   const { id } = await params
   const user = await getCurrentUser()
+  if (!user) {
+    return <div className="container mx-auto p-8">Authentication required</div>
+  }
+  
   const supabase = await createClient()
 
   // Get document metadata
@@ -29,7 +52,7 @@ export default async function DocumentPreviewPage({ params }: PageProps) {
   }
 
   // Get chunks
-  const { data: chunks, error: chunksError } = await supabase
+  const { data: chunks } = await supabase
     .from('chunks')
     .select('*')
     .eq('document_id', id)
@@ -124,7 +147,7 @@ export default async function DocumentPreviewPage({ params }: PageProps) {
 
         <TabsContent value="chunks" className="space-y-4">
           {chunks && chunks.length > 0 ? (
-            chunks.map((chunk: any, index: number) => (
+            chunks.map((chunk: Chunk, index: number) => (
               <Card key={chunk.id}>
                 <CardHeader>
                   <div className="flex items-start justify-between">

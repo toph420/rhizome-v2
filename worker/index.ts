@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createClient } from '@supabase/supabase-js'
 import { processDocumentHandler } from './handlers/process-document.js'
+import { detectConnectionsHandler } from './handlers/detect-connections.js'
 import { getUserFriendlyError } from './lib/errors.js'
 
 // ES modules compatibility: get __dirname equivalent
@@ -14,6 +15,7 @@ config({ path: resolve(__dirname, '../.env.local') })
 
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,
+  'detect-connections': detectConnectionsHandler,
 }
 
 let isShuttingDown = false
@@ -53,15 +55,6 @@ async function processNextJob() {
   }
   
   const job = jobs && jobs.length > 0 ? jobs[0] : null
-  const error = null
-
-  if (error) {
-    // PGRST116 is "no rows returned" - not an actual error
-    if (error.code !== 'PGRST116') {
-      console.error('Error fetching job:', error)
-    }
-    return
-  }
 
   if (!job) {
     return

@@ -1,0 +1,90 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install worker dependencies
+        run: cd worker && npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase local development
+        run: |
+          supabase start --exclude edge-runtime,logflyte,vector
+          sleep 10
+
+      - name: Run database migrations
+        run: supabase db reset --local
+
+      - name: Run performance benchmarks
+        run: cd worker && npm run benchmark:all
+        env:
+          NODE_ENV: test
+          SUPABASE_URL: http://localhost:54321
+          SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+          GEMINI_MODEL: gemini-2.5-flash-lite
+
+      - name: Generate benchmark report
+        run: cd worker && npm run benchmark:report
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: worker/benchmarks/results/
+          retention-days: 30
+
+      - name: Check performance regression
+        run: |
+          # Basic performance checks
+          cd worker
+          
+          # Unit tests should complete in <5 minutes
+          UNIT_TIME=$(npm test 2>&1 | grep -o "Time:.*" | grep -o "[0-9.]*" | head -1)
+          if (( $(echo "$UNIT_TIME > 300" | bc -l) )); then
+            echo "Unit tests took ${UNIT_TIME}s, exceeding 5 minute limit"
+            exit 1
+          fi
+          
+          echo "Performance checks passed"
