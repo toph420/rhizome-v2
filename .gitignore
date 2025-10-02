@@ -50,3 +50,10 @@ worker/node_modules/
 worker/dist/
 worker/coverage/
 worker/tests/validation/reports/
+
+# IDE configs
+.vscode/
+.idea/
+
+# Test files (keep out of version control)
+test-files/
