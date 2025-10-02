@@ -781,8 +781,19 @@ function fuzzySearchMarkdown(
 
   const startIndex = markdown.indexOf(contentStart, startFrom)
   if (startIndex !== -1) {
-    const endIndex = markdown.indexOf(contentEnd, startIndex)
-    if (endIndex !== -1) {
+    // Search for end marker AFTER the start, with reasonable distance limit
+    // Assume chunk is at most 5x the target length (handles AI rewording)
+    const searchLimit = Math.min(
+      startIndex + targetContent.length * 5,
+      markdown.length
+    )
+
+    // Search from startIndex forward, not from beginning
+    const searchRegion = markdown.slice(startIndex, searchLimit)
+    const endRelativeIndex = searchRegion.indexOf(contentEnd)
+
+    if (endRelativeIndex !== -1) {
+      const endIndex = startIndex + endRelativeIndex
       return {
         start: startIndex,
         end: endIndex + contentEnd.length,
@@ -792,7 +803,80 @@ function fuzzySearchMarkdown(
     }
   }
 
+  // Strategy 4: Sliding window with character-level similarity (last resort)
+  // When content is heavily rewritten, find the best matching region
+  const windowSize = targetContent.length
+  const maxDistance = targetContent.length * 2 // Allow up to 2x length variation
+
+  let bestMatch: FuzzyMatch | null = null
+  let bestSimilarity = 0.7 // Minimum 70% similarity threshold
+
+  // Start from hint and search forward with sliding window
+  for (let i = startFrom; i < markdown.length - windowSize && i < startFrom + maxDistance; i += Math.floor(windowSize / 4)) {
+    const window = markdown.slice(i, i + windowSize)
+    const similarity = calculateStringSimilarity(targetContent, window)
+
+    if (similarity > bestSimilarity) {
+      bestSimilarity = similarity
+      bestMatch = {
+        start: i,
+        end: i + windowSize,
+        confidence: 'approximate',
+        similarity: Math.round(similarity * 100)
+      }
+    }
+  }
+
+  if (bestMatch) {
+    return bestMatch
+  }
+
   return null // Failed to locate
+}
+
+/**
+ * Calculate character-level similarity between two strings (Levenshtein-based).
+ * Returns value between 0 and 1.
+ */
+function calculateStringSimilarity(str1: string, str2: string): number {
+  const longer = str1.length > str2.length ? str1 : str2
+  const shorter = str1.length > str2.length ? str2 : str1
+
+  if (longer.length === 0) return 1.0
+
+  const editDistance = levenshteinDistance(shorter, longer)
+  return (longer.length - editDistance) / longer.length
+}
+
+/**
+ * Calculate Levenshtein distance (edit distance) between two strings.
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix: number[][] = []
+
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i]
+  }
+
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j
+  }
+
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        )
+      }
+    }
+  }
+
+  return matrix[str2.length][str1.length]
 }
 
 /**
@@ -911,6 +995,8 @@ function correctContentAndOffsets(
     if (!fuzzyMatch) {
       stats.failed++
       console.error(`[AI Metadata] ❌ Chunk ${i}: Cannot locate content`)
+      console.error(`[AI Metadata]    First 200 chars: ${chunk.content.slice(0, 200)}`)
+      console.error(`[AI Metadata]    Last 100 chars: ${chunk.content.slice(-100)}`)
       return chunk
     }
 
