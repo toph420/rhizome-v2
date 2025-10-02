@@ -36,7 +36,9 @@ export function VirtualizedReader({
         if (block) visibleChunkIds.add(block.chunkId)
       }
 
-      onVisibleChunksChange(Array.from(visibleChunkIds))
+      const chunkIdArray = Array.from(visibleChunkIds)
+      console.log('[VirtualizedReader] Visible chunks changed:', chunkIdArray)
+      onVisibleChunksChange(chunkIdArray)
     },
     [blocks, onVisibleChunksChange]
   )

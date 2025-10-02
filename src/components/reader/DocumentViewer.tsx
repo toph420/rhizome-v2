@@ -16,6 +16,7 @@ interface DocumentViewerProps {
   markdownUrl: string
   chunks: Chunk[]
   annotations: StoredAnnotation[]
+  onVisibleChunksChange?: (chunkIds: string[]) => void
 }
 
 /**
@@ -28,12 +29,12 @@ export function DocumentViewer({
   markdownUrl,
   chunks,
   annotations,
+  onVisibleChunksChange,
 }: DocumentViewerProps) {
   const [markdown, setMarkdown] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedText, setSelectedText] = useState<TextSelection | null>(null)
-  const [visibleChunkIds, setVisibleChunkIds] = useState<string[]>([])
   const [retryCount, setRetryCount] = useState(0)
 
   // Load markdown from signed URL
@@ -171,7 +172,7 @@ export function DocumentViewer({
       <VirtualizedReader
         markdown={markdown}
         chunks={chunks}
-        onVisibleChunksChange={setVisibleChunkIds}
+        onVisibleChunksChange={onVisibleChunksChange}
       />
 
       {selectedText && (

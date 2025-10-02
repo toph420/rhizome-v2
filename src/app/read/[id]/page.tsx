@@ -4,8 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
 import { getDocumentJob } from '@/app/actions/documents'
 import { getAnnotations } from '@/app/actions/annotations'
-import { DocumentViewer } from '@/components/reader/DocumentViewer'
-import { RightPanel } from '@/components/sidebar/RightPanel'
+import { ReaderLayout } from '@/components/reader/ReaderLayout'
 
 interface ReaderPageProps {
   params: Promise<{ id: string }>
@@ -170,9 +169,9 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     const annotations = annotationsResult.success ? annotationsResult.data : []
     
     return (
-      <div className="flex flex-col h-screen">
+      <>
         {!doc.embeddings_available && job && (
-          <div className="bg-blue-50 border-b border-blue-200 px-4 py-3">
+          <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 fixed top-0 left-0 right-0 z-50">
             <div className="flex items-center gap-3">
               <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
               <div className="flex-1">
@@ -186,19 +185,14 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
             </div>
           </div>
         )}
-        
-        <div className="flex-1 overflow-hidden">
-          <DocumentViewer
-            documentId={id}
-            markdownUrl={signedUrl}
-            chunks={chunks}
-            annotations={annotations}
-          />
-        </div>
-        
-        {/* Right panel with connections and annotations */}
-        <RightPanel documentId={id} />
-      </div>
+
+        <ReaderLayout
+          documentId={id}
+          markdownUrl={signedUrl}
+          chunks={chunks}
+          annotations={annotations}
+        />
+      </>
     )
   }
   
