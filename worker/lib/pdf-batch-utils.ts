@@ -85,11 +85,28 @@ IMPORTANT:
 - Do not summarize or skip any content from these pages
 - Convert to clean markdown format
 
+LINE BREAK HANDLING:
+- Merge lines WITHIN paragraphs into continuous text
+- Only preserve line breaks for semantic boundaries:
+  - Paragraph breaks (use \n\n for new paragraphs)
+  - Headings
+  - List items
+  - Code blocks
+  - Block quotes
+
+DO NOT preserve PDF formatting line wraps (lines that end because of page width).
+
+Example of WRONG (preserves PDF line wrapping):
+"This is a sentence that wraps\nat 80 characters because of the\nPDF page width."
+
+Example of CORRECT (continuous paragraph):
+"This is a sentence that wraps at 80 characters because of the PDF page width."
+
 Format the output as clean markdown with:
 - Proper heading hierarchy (# ## ###)
 - Organized lists and paragraphs
-- Preserved structure and formatting
-- Clear section breaks
+- Clear section breaks with \n\n between paragraphs
+- Continuous text flow within paragraphs
 
 Return only the markdown text, no JSON wrapper needed.
 `

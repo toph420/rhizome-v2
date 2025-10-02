@@ -26,11 +26,28 @@ You are a PDF extraction assistant. Your task is to extract ALL text from this P
 IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text.
 Do not summarize or skip any content. Return the COMPLETE document text.
 
+LINE BREAK HANDLING:
+- Merge lines WITHIN paragraphs into continuous text
+- Only preserve line breaks for semantic boundaries:
+  - Paragraph breaks (use \n\n for new paragraphs)
+  - Headings
+  - List items
+  - Code blocks
+  - Block quotes
+
+DO NOT preserve PDF formatting line wraps (lines that end because of page width).
+
+Example of WRONG (preserves PDF line wrapping):
+"This is a sentence that wraps\nat 80 characters because of the\nPDF page width."
+
+Example of CORRECT (continuous paragraph):
+"This is a sentence that wraps at 80 characters because of the PDF page width."
+
 Format the output as clean markdown with:
 - Proper heading hierarchy (# ## ###)
-- Organized lists and paragraphs
-- Preserved structure and formatting
-- Clear section breaks
+- Organized lists and paragraphs  
+- Clear section breaks with \n\n between paragraphs
+- Continuous text flow within paragraphs
 
 Return only the markdown text, no JSON wrapper needed.
 `

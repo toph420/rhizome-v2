@@ -104,7 +104,7 @@ export interface BatchMetadataConfig {
   /** Maximum characters per batch (default: 100000) */
   maxBatchSize?: number
 
-  /** Gemini model to use (default: 'gemini-2.0-flash-exp') */
+  /** Gemini model to use (default: 'gemini-2.5-flash-lite') */
   modelName?: string
 
   /** API key for Gemini (defaults to env var) */

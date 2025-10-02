@@ -117,51 +117,17 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     // Insert chunks with embeddings to database
     console.log(`💾 Saving chunks with embeddings to database`)
     const validChunks = result.chunks.filter(chunk => chunk.content && chunk.content.trim().length > 0)
-    const chunksWithEmbeddings = validChunks.map((chunk, i) => {
-      // Enhance themes from concept analysis if available, otherwise use existing themes
-      let enhancedThemes = chunk.themes || ['general']
-      
-      // Use conceptual metadata if available for much better themes
-      if (chunk.metadata?.concepts?.concepts && Array.isArray(chunk.metadata.concepts.concepts)) {
-        const meaningfulConcepts = chunk.metadata.concepts.concepts
-          .slice(0, 5) // Top 5 concepts
-          .map((concept: any) => concept.text || concept)
-          .filter((text: string) => text && text.length > 2)
-        
-        if (meaningfulConcepts.length > 0) {
-          enhancedThemes = meaningfulConcepts
-        }
-      }
-      
-      // Enhance summary from concept analysis if available
-      const enhancedSummary = enhanceSummaryFromConcepts(chunk)
-      
-      return {
-        ...chunk,
-        document_id,
-        embedding: embeddings[i],
-        
-        // Use enhanced themes and summary
-        themes: enhancedThemes,
-        summary: enhancedSummary,
-        
-        // Ensure required fields are present with proper names
-        chunk_index: chunk.chunk_index ?? i,
-        start_offset: chunk.start_offset ?? null,
-        end_offset: chunk.end_offset ?? null,
-        word_count: chunk.word_count || chunk.content.split(/\s+/).filter(w => w.length > 0).length,
-        importance_score: chunk.importance_score || 0.5,
-        
-        // Use only the consolidated metadata structure (no duplication)
-        metadata: chunk.metadata || null,
-        metadata_extracted_at: chunk.metadata ? new Date().toISOString() : null
-      }
-    })
-    
+
+    const chunksWithEmbeddings = validChunks.map((chunk, i) => ({
+      ...chunk,  // Processor already mapped metadata correctly via mapAIChunkToDatabase
+      document_id,  // CRITICAL: Set document_id AFTER spread to prevent undefined override
+      embedding: embeddings[i]
+    }))
+
     const { error: chunkError } = await supabase
       .from('chunks')
       .insert(chunksWithEmbeddings)
-    
+
     if (chunkError) {
       throw new Error(`Failed to save chunks: ${chunkError.message}`)
     }

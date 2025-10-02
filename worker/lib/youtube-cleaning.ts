@@ -65,11 +65,12 @@ export async function cleanYoutubeTranscript(
         error: 'Empty transcript provided'
       }
     }
-    
+
     const originalLength = rawMarkdown.length
-    
-    // Call Gemini API for cleaning
-    const result = await ai.models.generateContent({
+    console.log(`🧹 Starting AI cleaning for ${originalLength} character transcript...`)
+
+    // Call Gemini API for cleaning with timeout protection
+    const cleaningPromise = ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: [{
         parts: [{
@@ -81,7 +82,15 @@ export async function cleanYoutubeTranscript(
         maxOutputTokens: MAX_OUTPUT_TOKENS
       }
     })
-    
+
+    // Add 60-second timeout to prevent hanging
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('AI cleaning timeout after 60 seconds')), 60000)
+    })
+
+    const result = await Promise.race([cleaningPromise, timeoutPromise])
+    console.log(`✅ AI cleaning completed successfully`)
+
     const cleanedText = result.text
     
     // Check for empty response
@@ -147,8 +156,14 @@ export async function cleanYoutubeTranscript(
   } catch (error) {
     // Graceful degradation: Always return original on error
     const err = error instanceof Error ? error : new Error('Unknown error')
-    console.error('YouTube cleaning failed, using original transcript:', err.message)
-    
+    const isTimeout = err.message.includes('timeout')
+
+    console.error(
+      `❌ YouTube cleaning ${isTimeout ? 'TIMEOUT' : 'ERROR'}: ${err.message}`,
+      isTimeout ? '(Gemini API took >60s to respond)' : ''
+    )
+    console.warn('⚠️  Falling back to original transcript without cleaning')
+
     return {
       cleaned: rawMarkdown,
       success: false,

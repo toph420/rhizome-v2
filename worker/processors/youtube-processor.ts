@@ -13,7 +13,7 @@
  */
 
 import { SourceProcessor } from './base.js'
-import type { ProcessResult } from '../types/processor.js'
+import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
 import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
@@ -113,43 +113,31 @@ export class YouTubeProcessor extends SourceProcessor {
       // Match chunks back to original source for accurate character offsets
       await this.updateProgress(87, 'extract', 'positioning', 'Applying fuzzy position matching')
 
-      const enhancedChunks = []
       let highConfidenceCount = 0
       let exactMatchCount = 0
       let approximateCount = 0
 
-      for (let i = 0; i < aiChunks.length; i++) {
-        const aiChunk = aiChunks[i]
-
+      // Convert AI chunks to ProcessedChunk format with fuzzy-matched offsets
+      const enhancedChunks = aiChunks.map((aiChunk, i) => {
         // Match chunk to source for position data
         const matchResult = fuzzyMatchChunkToSource(aiChunk.content, rawMarkdown, i, aiChunks.length)
-
-        // Build enhanced chunk with AI metadata + position context
-        // NOTE: Timestamps are NOT stored at chunk level - they're in document.source_metadata
-        const enhancedChunk = {
-          document_id: this.job.document_id,
-          ...this.mapAIChunkToDatabase({
-            ...aiChunk,
-            chunk_index: i,
-            // Override with fuzzy-matched offsets (more accurate for YouTube)
-            start_offset: matchResult.startOffset,
-            end_offset: matchResult.endOffset
-          }),
-          // Position context for fuzzy matching quality (NO timestamps here)
-          position_context: {
-            method: matchResult.method,
-            confidence: matchResult.confidence,
-            originalSnippet: matchResult.contextBefore + '...' + matchResult.contextAfter
-          }
-        }
-
-        enhancedChunks.push(enhancedChunk)
 
         // Track match quality metrics
         if (matchResult.method === 'exact') exactMatchCount++
         if (matchResult.confidence >= 0.7) highConfidenceCount++
         if (matchResult.method === 'approximate') approximateCount++
-      }
+
+        // Build enhanced chunk with AI metadata + fuzzy-matched offsets
+        // NOTE: Timestamps are NOT stored at chunk level - they're in document.source_metadata
+        // NOTE: document_id is added by process-document handler, not here
+        return this.mapAIChunkToDatabase({
+          ...aiChunk,
+          chunk_index: i,
+          // Override with fuzzy-matched offsets (more accurate for YouTube)
+          start_offset: matchResult.startOffset,
+          end_offset: matchResult.endOffset
+        }) as ProcessedChunk
+      })
 
       // Report positioning quality
       const positioningQuality = {

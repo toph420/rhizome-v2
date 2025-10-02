@@ -428,7 +428,7 @@ describe('PDF Batch Utils', () => {
       const result = await extractLargePDF(mockAI, fileBuffer, undefined, {
         pagesPerBatch: 150,
         overlapPages: 20,
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash-lite',
         maxOutputTokens: 32768
       })
 
