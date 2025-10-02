@@ -218,7 +218,7 @@ npm start
 SUPABASE_URL=http://localhost:54321
 SUPABASE_SERVICE_ROLE_KEY=<from supabase start>
 GOOGLE_AI_API_KEY=<your Gemini API key>
-GEMINI_MODEL=gemini-2.0-flash-exp
+GEMINI_MODEL=gemini-2.5-flash-lite
 ```
 
 ## Common Issues

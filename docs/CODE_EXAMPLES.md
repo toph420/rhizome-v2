@@ -178,7 +178,7 @@ ${start > 0 ? '- This continues from previous pages, start immediately with the 
 Return ONLY the markdown text, no JSON, no code blocks.`;
 
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash-lite',
       contents: [{
         parts: [
           { fileData: { fileUri, mimeType: 'application/pdf' } },
@@ -327,7 +327,7 @@ Markdown section:
 ${section}`;
 
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash-lite',
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -722,7 +722,7 @@ Respond ONLY with valid JSON (no markdown, no code blocks):
 
     try {
       const result = await this.ai.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash-lite',
         contents: [{ parts: [{ text: prompt }] }],
         config: {
           temperature: 0.3,

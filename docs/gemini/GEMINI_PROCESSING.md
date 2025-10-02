@@ -593,7 +593,7 @@ async function robustEmbedContent(ai: GoogleGenAI, text: string, retries = 3) {
 |-------|-------|---------|---------|----------|
 | `gemini-2.5-flash` | Fast | Good | 1M tokens | Production, real-time |
 | `gemini-2.5-pro` | Slower | Excellent | 2M tokens | Complex analysis |
-| `gemini-2.0-flash-exp` | Fast | Good | 1M tokens | Experimental features |
+| `gemini-2.5-flash-lite` | Fast | Good | 1M tokens | Experimental features |
 
 ### Embedding Models
 | Model | Dimensions | Languages | Status |

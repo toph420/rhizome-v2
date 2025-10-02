@@ -202,7 +202,7 @@ async function extractLargePDF(fileUri: string, totalPages: number) {
     const end = Math.min(start + BATCH_SIZE, totalPages);
     
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash-lite',
       contents: [{
         parts: [
           { fileData: { fileUri, mimeType: 'application/pdf' } },
@@ -257,7 +257,7 @@ async function batchChunkAndExtractMetadata(
     const section = markdown.slice(position, position + WINDOW_SIZE);
     
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash-lite',
       contents: [{ parts: [{ text: `
         Extract semantic chunks (200-500 words) from this markdown.
         

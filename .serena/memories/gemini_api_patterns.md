@@ -140,8 +140,8 @@ const vectors = result.embeddings.map(e => e.values)
 
 ### Generation Models
 - `gemini-2.5-flash` - Fast, general purpose
+- `gemini-2.5-flash-lite` - Fast, general purpose
 - `gemini-2.5-pro` - More capable, slower
-- `gemini-2.0-flash-exp` - Experimental features
 
 ### Embedding Models
 - `text-embedding-004` - Current recommended (being deprecated 2026-01-14)

@@ -9,7 +9,7 @@ The `gemini-2.5-flash` model, while technically available (no 404 error), return
 
 ## Solution Implemented
 
-Added a configurable model system with automatic fallback to `gemini-2.0-flash-exp`, which supports the same 65536 token limit.
+Added a configurable model system with automatic fallback to `gemini-2.5-flash-lite`, which supports the same 65536 token limit.
 
 ## Changes Made
 
@@ -20,7 +20,7 @@ Added a configurable model system with automatic fallback to `gemini-2.0-flash-e
 ### 2. Fallback Logic
 ```typescript
 // Model configuration with fallback
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
 const MAX_OUTPUT_TOKENS = 65536 // Both models support this limit
 ```
 
@@ -35,13 +35,13 @@ Added detailed error logging for:
 | Model | Status | Max Tokens | Notes |
 |-------|--------|------------|-------|
 | `gemini-2.5-flash` | ⚠️ Returns undefined | 65536 | Regional availability issues |
-| `gemini-2.0-flash-exp` | ✅ Working | 65536 | Stable experimental model |
+| `gemini-2.5-flash-lite` | ✅ Working | 65536 | Stable experimental model |
 | `gemini-2.0-flash` | ✅ Working | 8192 | Lower token limit |
 
 ## How to Use
 
 ### Default (Automatic Fallback)
-No action needed. The system automatically uses `gemini-2.0-flash-exp`.
+No action needed. The system automatically uses `gemini-2.5-flash-lite`.
 
 ### Override Model (Optional)
 Set the `GEMINI_MODEL` environment variable in `.env.local`:
@@ -60,7 +60,7 @@ npm run dev:worker
 
 ## Benefits
 
-1. **Immediate Fix**: Processing works now with `gemini-2.0-flash-exp`
+1. **Immediate Fix**: Processing works now with `gemini-2.5-flash-lite`
 2. **Future Ready**: Easy switch to `gemini-2.5-flash` when available
 3. **Same Capability**: Both models support 65536 tokens (8x increase)
 4. **Better Debugging**: Enhanced error logging for API issues
@@ -95,4 +95,4 @@ When this returns actual text instead of `undefined`, the model is ready.
 
 ---
 
-**Note**: The `gemini-2.0-flash-exp` model provides identical functionality with the same 65536 token limit, so there's no feature loss with this fallback.
+**Note**: The `gemini-2.5-flash-lite` model provides identical functionality with the same 65536 token limit, so there's no feature loss with this fallback.

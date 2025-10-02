@@ -88,7 +88,7 @@ Dropped from 7 engines to 3. Each does something distinct:
   "ai": {
     "@google/genai": "Native Gemini SDK (document processing)",
     "ai": "^5.x + @ai-sdk/google (embeddings, future features)",
-    "model": "gemini-2.0-flash-exp (65K tokens)"
+    "model": "gemini-2.5-flash (65K tokens)"
   },
   "ui": {
     "tailwindcss": "^4.0.0",
@@ -116,8 +116,11 @@ Dropped from 7 engines to 3. Each does something distinct:
 - Background job system with progress tracking
 - Comprehensive error handling and recovery
 
-#### Collision Detection System  
-- 7 specialized engines for connection discovery
+#### Collision Detection System
+- 3 specialized engines for connection discovery (refined from 7)
+  - Semantic Similarity (embeddings-based, 25% weight)
+  - Contradiction Detection (metadata-based, 40% weight)
+  - Thematic Bridge (AI-powered cross-domain, 35% weight)
 - Orchestrator for engine coordination
 - Score normalization and ranking
 - User-configurable weights
@@ -125,12 +128,13 @@ Dropped from 7 engines to 3. Each does something distinct:
 - Batch processing optimizations
 
 #### Database & Storage
-- 16 migrations applied
+- 20+ migrations applied (latest: chunk-based connections, timestamp cleanup)
 - ECS tables (entities, components)
 - Chunks with embeddings and metadata
 - User preferences for weight tuning
 - Hybrid storage (files + database)
 - Background jobs table
+- Chunk connections table (3-engine system)
 
 #### Worker Module
 - Modular processor architecture
@@ -195,13 +199,13 @@ NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<from supabase start>
 SUPABASE_SERVICE_ROLE_KEY=<from supabase start>
 GOOGLE_AI_API_KEY=<your Gemini API key>
-GEMINI_MODEL=gemini-2.0-flash-exp  # Or gemini-1.5-pro
+GEMINI_MODEL=gemini-2.5-flash-lite # Or gemini-1.5-pro
 
 # worker/.env (worker module)
 SUPABASE_URL=http://localhost:54321
 SUPABASE_SERVICE_ROLE_KEY=<same as above>
 GOOGLE_AI_API_KEY=<same as above>
-GEMINI_MODEL=gemini-2.0-flash-exp
+GEMINI_MODEL=gemini-2.5-flash-lite
 
 # Local development ports (from supabase/config.toml)
 # API: 54321, DB: 54322, Studio: 54323, Inbucket: 54324
@@ -321,7 +325,11 @@ src/
 
 worker/                   # Document processing module (separate Node.js app)
 ├── processors/           # Format-specific processors (pdf, youtube, web, etc.)
-├── engines/             # 7 collision detection engines
+├── engines/             # 3 collision detection engines (semantic-similarity, contradiction-detection, thematic-bridge)
+│   ├── base-engine.ts   # Shared engine interface
+│   ├── orchestrator.ts  # Coordinates all engines
+│   ├── scoring.ts       # Score normalization
+│   └── types.ts         # Shared types
 ├── handlers/            # Background job handlers
 ├── lib/                 # Utilities (cache, monitoring, gemini client)
 ├── tests/               # Comprehensive test suite with validation
@@ -364,6 +372,12 @@ cd worker && npm run test:web-articles    # Test web scraping changes
 # For engine changes, validate semantic accuracy
 cd worker && npm run validate:semantic-accuracy
 
+# Test individual engines (have test scripts for all 3)
+npx tsx worker/test-semantic-similarity.ts <document_id>
+npx tsx worker/test-contradiction-detection.ts <document_id>
+npx tsx worker/test-thematic-bridge.ts <document_id>
+npx tsx worker/test-orchestrator.ts <document_id>
+
 # Before committing, run full validation
 cd worker && npm run test:full-validation
 ```
@@ -383,7 +397,7 @@ npm run dev:next             # Next.js on port 3000
 ### Common Pitfalls to Avoid
 
 1. **Never use modals** - Always use docks/panels/overlays
-2. **Never store markdown in DB** - Use Supabase Storage  
+2. **Never store markdown in DB** - Use Supabase Storage
 3. **Never parse PDFs directly** - Use Gemini Files API
 4. **Never create service classes** - Use ECS for entities
 5. **Never mix storage patterns** - Files OR database, not both
@@ -391,13 +405,102 @@ npm run dev:next             # Next.js on port 3000
 7. **Never test without mocks in CI** - Use `validate:metadata` not `validate:metadata:real`
 8. **Never commit node_modules** - Check .gitignore in both root and worker/
 9. **Never modify worker deps without testing** - Worker has strict ESM requirements
+10. **Never add chunk-level timestamps** - YouTube timestamps are document-level only (see migration 018)
+11. **Never bypass the orchestrator** - All 3 engines run through `processDocument()` in orchestrator.ts
+
 
 ## Testing Guidelines
 
 ### Testing Philosophy
-- **Pragmatic Coverage**: Target 70% on critical paths rather than 100% everywhere
-- **Test What Matters**: Focus on user journeys and critical functionality
-- **Use Test Factories**: Consistent test data generation via `tests/factories/`
+Rhizome uses a **data-loss-aware, cost-conscious** testing strategy optimized for a single-user personal tool.
+
+#### Core Principles
+1. **Data Loss Hierarchy**: Test based on replaceability
+   - **Annotations** (manual work) → Test exhaustively, never lose
+   - **Documents** (source files) → Test preservation and recovery
+   - **Chunks** (cost $0.20 to regenerate) → Test critical algorithms
+   - **Connections** (auto-generated) → Light testing, can recompute
+
+2. **Cost-Aware Testing**: Processing costs real money
+   - Mock AI API calls in tests
+   - Use small fixtures (<20 pages) for integration tests
+   - Validate filtering logic prevents cost explosions
+
+3. **Test What's Expensive to Debug**
+   - ✅ Stitching (silent corruption)
+   - ✅ Fuzzy position recovery (annotation loss)
+   - ✅ Chunk remapping (annotation orphaning)
+   - ✅ Filtering logic (cost control)
+   - ❌ UI rendering (just look at it)
+   - ❌ Simple CRUD (breaks obviously)
+
+4. **Use Real Data**: Fake data doesn't catch real bugs
+   - Process actual books → export chunks → use as fixtures
+   - Test with real embeddings, real metadata, real content
+
+### Test Categories
+- **Critical** (`tests/critical/`): Must always pass, blocks deployment
+- **Stable** (`tests/stable/`): Fix when broken, tracks quality
+- **Flexible** (`tests/flexible/`): Skip during rapid development
+
+
+### Test Structure
+```
+tests/
+├── critical/      # Must-pass: annotations, stitching, filtering
+├── stable/        # Important: API contracts, integration
+├── flexible/      # Optional: utilities, components
+├── fixtures/      # Real chunks from processed books
+├── factories/     # Test data generators
+└── mocks/         # MSW handlers
+
+src/lib/ecs/__tests__/    # ECS unit tests
+worker/tests/             # Worker tests with real fixtures
+```
+
+### Quick Examples
+
+#### Using Test Factories
+```typescript
+import { factories } from '@/tests/factories'
+
+const doc = factories.document.createProcessed()
+const chunks = factories.chunk.createMany(10, 'doc-id')
+
+beforeEach(() => factories.document.reset())
+```
+
+#### Using Real Fixtures (Critical Tests)
+```typescript
+import { realChunks } from '@/tests/fixtures/chunks'
+
+test('finds cross-domain bridge', () => {
+  const literary = realChunks.gravityRainbow_chunk0
+  const tech = realChunks.surveillanceCapitalism_chunk5
+  
+  const connection = detectThematicBridge(literary, tech)
+  expect(connection.detected).toBe(true)
+})
+```
+
+#### Cost-Aware Testing
+```typescript
+test('stays under budget', async () => {
+  const costTracker = new CostTracker()
+  await processDocument(smallTestDoc, { costTracker })
+  
+  expect(costTracker.totalCost).toBeLessThan(0.60) // $0.60 budget
+})
+```
+
+### Critical Test Checklist
+When implementing features, ensure these are tested:
+- [ ] Annotation position recovery after edits
+- [ ] Chunk remapping after reprocessing
+- [ ] Batch stitching with fuzzy matching
+- [ ] ThematicBridge filtering (<300 AI calls per book)
+- [ ] Connection scoring with personal weights
+- [ ] Cost tracking per processing stage
 
 ### Quick Test Commands
 ```bash
@@ -440,52 +543,81 @@ npm run benchmark:cache        # Cache performance benchmarks
 npm run benchmark:report       # Detailed benchmark report
 ```
 
-### Test Structure
-```
-tests/
-├── factories/     # Test data generators (documents, chunks, entities)
-├── fixtures/      # Static test files
-├── mocks/         # MSW handlers for API mocking
-└── e2e/          # Playwright E2E tests (future)
-
-src/lib/ecs/__tests__/    # ECS unit tests
-worker/tests/             # Worker module tests
-```
-
-### Using Test Factories
-```typescript
-import { factories } from '@/tests/factories'
-
-// Create test data
-const doc = factories.document.createProcessed()
-const chunks = factories.chunk.createMany(10, 'doc-id')
-const flashcard = factories.entity.createFlashcard()
-
-// Reset between tests
-beforeEach(() => {
-  factories.document.reset()
-})
-```
 
 ### Testing Documentation
-- **[docs/testing/README.md](docs/testing/README.md)** - Primary testing guide and quick start
-- **[docs/testing/development-workflow.md](docs/testing/development-workflow.md)** - Comprehensive strategy and team workflows  
-- **[docs/testing/patterns.md](docs/testing/patterns.md)** - Code examples and testing patterns
-- **[docs/testing/TROUBLESHOOTING.md](docs/testing/TROUBLESHOOTING.md)** - Common issues and solutions
-- **[docs/testing/.archive/](docs/testing/.archive/)** - Historical documentation and task reports
+- **[docs/testing/TESTING_RULES.md](docs/testing/TESTING_RULES.md)** - Primary testing rules for ai agents
+- **[docs/testing/critical-patterns.md](docs/testing/critical-patterns.md)** - Code examples and testing patterns
+- **[docs/testing/general-patterns.md](docs/testing/general-patterns.md)** - Code examples and testing patterns
+- **[docs/testing/TESTING_README.md](docs/testing/TESTING_README.md)** - Primary testing guide and quick start
+
+
 
 ## Monitoring & Performance
 
-### Key Metrics
-- Document processing time: <2 min per hour of content
-- Collision detection: <500ms for 100 chunks
-- Cache hit rate: >70% for repeated queries
-- Embedding generation: ~1000 chunks/minute
-- Database queries: <50ms p95
+### Philosophy
+For a personal tool, "performance" means:
+1. **Does processing annoy me?** (subjective wait time)
+2. **Am I spending too much?** (cost per book)
+3. **Did I lose work?** (data integrity)
+
+Production metrics (p95 latency, cache hit rates) don't matter for one user.
+
+### Processing Time Targets
+**Goal**: Process a book while making coffee (~15-25 minutes)
+
+- **Small PDFs (<50 pages)**: <5 minutes
+  - Single-pass extraction
+  - Local or AI chunking
+  - ~$0.10 cost
+
+- **Large PDFs (500 pages)**: <25 minutes
+  - Batched extraction (6 batches)
+  - Batched metadata (10 batches)
+  - ~$0.55 cost
+
+**Why batching**: Gemini 2.0 Flash has 65k output token limit. 500-page book = 200k tokens of output. Must batch.
+
+### Cost Budget (Primary Performance Metric)
+```typescript
+// Target: <$0.60 per 500-page book
+const budget = {
+  extraction: 0.12,      // 6 batches @ $0.02
+  metadata: 0.20,        // 10 batches @ $0.02
+  embeddings: 0.02,      // 382 chunks
+  thematicBridge: 0.20,  // <300 AI calls
+  total: 0.54            // Under budget ✓
+}
+
+// Red flags
+if (cost > 1.00) throw new Error('Processing too expensive')
+if (aiCalls > 500) throw new Error('Filtering failed')
+```
+
+### Batched Processing Strategy
+```typescript
+// Small documents: Single pass
+if (pages < 200) {
+  return singlePassExtraction(pdf)
+}
+
+// Large documents: Batch with overlap
+const BATCH_SIZE = 100
+const OVERLAP = 10
+
+for (let start = 0; start < totalPages; start += BATCH_SIZE - OVERLAP) {
+  const end = Math.min(start + BATCH_SIZE, totalPages)
+  batches.push(await extractBatch(pdf, start, end))
+}
+
+// Stitch with fuzzy matching
+const stitched = stitchBatches(batches)
+```
 
 ### Performance Patterns
+
+#### Storage Access
 ```typescript
-// ✅ Stream from storage
+// ✅ Stream large files from storage
 const url = await getSignedUrl(markdownPath)
 const response = await fetch(url)
 const reader = response.body.getReader()
@@ -493,24 +625,183 @@ const reader = response.body.getReader()
 // ❌ Don't load into memory
 const { markdown } = await supabase
   .from('documents')
-  .select('markdown_content')  // NO!
+  .select('markdown_content')  // NO! 150k words in DB
+```
 
-// ✅ Use pgvector for similarity
+#### Vector Search
+```typescript
+// ✅ Use pgvector for large corpus (>1000 chunks)
 const similar = await supabase.rpc('match_chunks', {
   query_embedding: embedding,
-  match_threshold: 0.7
+  match_threshold: 0.7,
+  match_count: 50
 })
 
-// ❌ Don't filter in JavaScript
-const chunks = await getAllChunks()
-const similar = chunks.filter(...)  // NO!
+// ✅ Filter in-memory when corpus is small (<500 chunks) AND already loaded
+const importantChunks = loadedChunks.filter(c => c.importance_score > 0.6)
+// Avoids extra DB query, chunks already in memory
+
+// ❌ Don't fetch all chunks to filter in JS
+const allChunks = await supabase.from('chunks').select('*') // 100k chunks!
+const filtered = allChunks.filter(c => c.similarity > 0.7)
+```
+
+#### AI Call Batching
+```typescript
+// ✅ Batch AI calls (5 at a time)
+const batches = chunk(candidates, 5)
+for (const batch of batches) {
+  const results = await Promise.all(
+    batch.map(c => analyzeBridge(source, c))
+  )
+}
+
+// ❌ Don't call AI sequentially
+for (const candidate of candidates) {
+  await analyzeBridge(source, candidate) // Slow! 300 seconds for 300 calls
+}
+
+// ❌ Don't call AI without filtering
+// 382 chunks × 382 candidates = 145,924 AI calls = $145
+for (const chunk of allChunks) {
+  for (const candidate of allChunks) {
+    await analyzeBridge(chunk, candidate) // NEVER DO THIS
+  }
+}
+```
+
+### What to Monitor in Dev
+
+#### Subjective Metrics (Most Important)
+- Does processing feel slow? (**> 30 minutes = annoying**)
+- Does the app feel laggy? (**> 1 second wait = annoying**)
+- Did I lose data? (**ANY data loss = critical**)
+
+#### Cost Metrics (Track These)
+```bash
+# Log cost breakdown after processing
+console.log(`
+Extraction: $${extractionCost.toFixed(2)}
+Metadata: $${metadataCost.toFixed(2)}
+Embeddings: $${embeddingCost.toFixed(2)}
+Connections: $${connectionCost.toFixed(2)}
+Total: $${totalCost.toFixed(2)}
+`)
+```
+
+#### Failure Metrics (Only These Matter)
+- Stitching failures (corrupted documents)
+- Annotation recovery failures (data loss)
+- Filtering failures (cost explosion)
+- Batch failures (incomplete processing)
+
+### Performance Anti-Patterns
+
+```typescript
+// ❌ Premature optimization
+// Don't optimize until it personally annoys you
+
+// ❌ Caching without measurement
+// Only cache after you've measured that retrieval is slow
+
+// ❌ Production metrics
+// No need for p95, p99, cache hit rates for one user
+
+// ✅ Optimize when it hurts
+if (processingTime > 30 * 60 * 1000) {
+  // Only optimize if > 30 minutes
+}
+```
+
+### When to Optimize
+
+**Optimize when:**
+- Processing takes >30 minutes (annoying during coffee break)
+- Cost exceeds $1 per book (monthly budget concern)
+- Data loss occurs (critical bug)
+
+**Don't optimize when:**
+- Theoretical performance concerns
+- Production best practices say you should
+- Code doesn't look "clean" but works fine
+
+
+
+## Engine Architecture (3-Engine System)
+
+### Recent Refactoring (Sept 2024)
+The collision detection system was simplified from 7 engines to 3 focused engines:
+
+**Removed Engines**: Conceptual Density, Structural Pattern, Citation Network, Temporal Proximity, Emotional Resonance
+**Kept**: Semantic Similarity, Contradiction Detection, Thematic Bridge
+
+### Engine Coordination Pattern
+
+All engines follow the same interface:
+```typescript
+// Every engine implements this pattern
+export async function run<EngineName>(
+  documentId: string,
+  config?: Config
+): Promise<ChunkConnection[]>
+
+// Shared save function (from semantic-similarity.ts)
+export async function saveChunkConnections(
+  connections: ChunkConnection[]
+): Promise<void>
+```
+
+### Orchestrator Flow
+```typescript
+// worker/engines/orchestrator.ts
+// 1. Run all 3 engines sequentially (can be parallelized later)
+// 2. Aggregate results
+// 3. Save to database via saveChunkConnections()
+// 4. Return stats (totalConnections, byEngine, executionTime)
+
+import { processDocument } from './engines/orchestrator'
+
+const result = await processDocument(documentId, {
+  enabledEngines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge']
+})
+// result.byEngine = { semantic_similarity: 47, contradiction_detection: 23, thematic_bridge: 15 }
+```
+
+### Integration Point
+Orchestrator is called from `worker/handlers/detect-connections.ts` after document processing completes.
+
+### Querying Connections
+```typescript
+// Get all connections for a document
+const { data: connections } = await supabase
+  .from('chunk_connections')
+  .select(`
+    *,
+    source_chunk:chunks!source_chunk_id(id, content, summary),
+    target_chunk:chunks!target_chunk_id(id, content, summary)
+  `)
+  .eq('source_chunk.document_id', documentId)
+  .order('strength', { ascending: false })
+
+// Get by engine type
+const { data: semantic } = await supabase
+  .from('chunk_connections')
+  .select('*')
+  .eq('connection_type', 'semantic_similarity')
+  .gte('strength', 0.7)
+
+// Get cross-document connections only
+const { data: crossDoc } = await supabase
+  .from('chunk_connections')
+  .select('*')
+  .neq('source_chunk.document_id', 'target_chunk.document_id')
 ```
 
 ## Next Steps
 
 1. **Continue Reader UI**: Markdown renderer, virtual scrolling, selection system
 2. **Implement Annotations**: Text selection → ECS persistence
-3. **Build Connection Panel**: Display collision detection results
+3. **Build Connection Panel**: Display collision detection results from 3 engines
 4. **Add Study System**: Flashcards with FSRS algorithm
 5. **Create Export System**: ZIP bundles with markdown + annotations
 
@@ -539,5 +830,9 @@ const similar = chunks.filter(...)  // NO!
 ### Module Documentation
 - **Worker Module**: `worker/README.md` - Document processing system
 - **Gemini Processing**: `docs/GEMINI_PROCESSING.md` - AI processing patterns
+
+## Other Docs
+
+- Virtuoso - Virtual Scrolling for our reader - https://virtuoso.dev/
 
 Remember: This is an AI-first personal tool. Prioritize connection discovery and knowledge synthesis over traditional features.

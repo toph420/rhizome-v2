@@ -268,8 +268,10 @@ npm run test:all
 
 ## Documentation Navigation
 
+- **[TESTING_RULES.md](./TESTING_RULES.md)** - Rules for testing
 - **[development-workflow.md](./development-workflow.md)** - Comprehensive strategy guide with examples
-- **[patterns.md](./patterns.md)** - Code examples and testing patterns
+- **[critical-patterns.md](./critical-patterns.md)** - Critical Code examples and testing patterns
+- **[general-patterns.md](./general-patterns.md)** - General Code examples and testing patterns
 - **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
 - **[.archive/](./.archive/)** - Historical documentation and task reports
 

@@ -49,7 +49,7 @@ const fileUri = await this.ai.files.upload({
 **2.2: Extract Everything (20-80%)**
 ```typescript
 const result = await this.ai.models.generateContent({
-  model: 'gemini-2.0-flash-exp',
+  model: 'gemini-2.5-flash-lite',
   contents: [{
     parts: [
       { fileData: { fileUri, mimeType: 'application/pdf' } },
@@ -80,7 +80,7 @@ for (let start = 0; start < totalPages; start += BATCH_SIZE - OVERLAP_PAGES) {
   console.log(`📄 Extracting pages ${start + 1}-${end} (batch ${batchNum}/${totalBatches})`);
   
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.5-flash-lite',
     contents: [{
       parts: [
         { fileData: { fileUri, mimeType: 'application/pdf' } },
@@ -145,7 +145,7 @@ while (position < markdown.length) {
   console.log(`🔍 Chunking: ${progress}% (${Math.round(remaining / 1000)}k chars remaining)`);
   
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.5-flash-lite',
     contents: [{ parts: [{ text: `
       Extract semantic chunks (200-500 words) starting at character ${position}.
       
