@@ -167,19 +167,20 @@ export abstract class BaseEngine implements CollisionEngine {
   
   /**
    * Helper to calculate similarity between two arrays of concepts.
+   * Updated for flat metadata structure: {text, importance}
    */
   protected calculateConceptOverlap(
-    concepts1: Array<{ term: string; importance: number }>,
-    concepts2: Array<{ term: string; importance: number }>
+    concepts1: Array<{ text: string; importance: number }>,
+    concepts2: Array<{ text: string; importance: number }>
   ): number {
     if (!concepts1?.length || !concepts2?.length) return 0;
-    
-    const set1 = new Set(concepts1.map(c => c.term.toLowerCase()));
-    const set2 = new Set(concepts2.map(c => c.term.toLowerCase()));
-    
+
+    const set1 = new Set(concepts1.map(c => c.text.toLowerCase()));
+    const set2 = new Set(concepts2.map(c => c.text.toLowerCase()));
+
     const intersection = new Set([...set1].filter(x => set2.has(x)));
     const union = new Set([...set1, ...set2]);
-    
+
     return intersection.size / union.size; // Jaccard similarity
   }
   

@@ -110,7 +110,8 @@ export interface CollisionDetectionInput {
 }
 
 /**
- * Chunk data with enriched metadata from Week 2.
+ * Chunk data with flat metadata structure for 3-engine system.
+ * Matches database schema after migration 019.
  */
 export interface ChunkWithMetadata {
   id: string;
@@ -118,67 +119,34 @@ export interface ChunkWithMetadata {
   content: string;
   chunk_index: number;
   embedding?: number[];
-  
-  // Enriched metadata from Week 2
-  metadata: {
-    // Structural patterns
-    structural_patterns?: {
-      headings?: string[];
-      lists?: { type: string; count: number }[];
-      sections?: { level: number; title: string }[];
-      template_type?: string;
-    };
-    
-    // Emotional tone
-    emotional_tone?: {
-      primary_emotion?: string;
-      polarity?: number; // -1 to 1
-      emotions?: { name: string; strength: number }[];
-      complexity?: number;
-    };
-    
-    // Key concepts
-    key_concepts?: {
-      concepts: { term: string; importance: number }[];
-      relationships?: { from: string; to: string; type: string }[];
-      domain?: string;
-    };
-    
-    // Method signatures (for code)
-    method_signatures?: {
-      functions?: { name: string; params: string[]; returns?: string }[];
-      language?: string;
-      complexity?: number;
-    };
-    
-    // Narrative rhythm
-    narrative_rhythm?: {
-      sentence_variation?: number;
-      paragraph_length_avg?: number;
-      rhythm_score?: number;
-      style_fingerprint?: string;
-    };
-    
-    // Temporal information
-    temporal_info?: {
-      timestamp?: string;
-      date_references?: string[];
-      time_period?: string;
-    };
-    
-    // Citations/references
-    citations?: {
-      references?: string[];
-      cited_by?: string[];
-      citation_count?: number;
-    };
-    
-    // Additional fields
-    themes?: string[];
-    importance?: number;
-    summary?: string;
-    position_context?: Record<string, unknown>;
+  word_count?: number;
+  start_offset?: number;
+  end_offset?: number;
+  created_at?: string;
+
+  // Active metadata fields (used by engines)
+  themes?: string[]; // SemanticSimilarity
+  importance_score?: number; // ThematicBridge filtering (0-1)
+  summary?: string; // Display/context
+
+  // Flat JSONB metadata (3-engine system)
+  emotional_metadata?: {
+    polarity: number; // -1 to 1
+    primaryEmotion: string;
+    intensity: number;
   };
+
+  conceptual_metadata?: {
+    concepts: Array<{ text: string; importance: number }>;
+  };
+
+  domain_metadata?: {
+    primaryDomain: string;
+    confidence: number;
+  };
+
+  // Tracking
+  metadata_extracted_at?: string;
 }
 
 /**
