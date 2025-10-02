@@ -18,11 +18,6 @@ COMMENT ON TABLE chunks IS
    NOTE: YouTube timestamps are stored in documents.source_metadata, NOT here.
    This table remains generic across all document formats.';
 
--- Verify chunks.position_context is for fuzzy matching ONLY
-COMMENT ON COLUMN chunks.position_context IS
-  'Fuzzy matching metadata ONLY: {confidence: float, method: string, originalSnippet: string}.
-   NOT for timestamps - those are in documents.source_metadata for YouTube videos.';
-
 -- Migration verification
 DO $$
 DECLARE
