@@ -7,10 +7,43 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { toast } from 'sonner'
 import { ExternalLink, Check, X, Star } from 'lucide-react'
-import type { MockConnection, ConnectionFeedback } from '@/types/annotations'
+import type { SynthesisEngine } from '@/types/annotations'
+
+/**
+ * Real connection interface from database (chunk_connections table).
+ */
+interface Connection {
+  id: string
+  source_chunk_id: string
+  target_chunk_id: string
+  connection_type: SynthesisEngine
+  strength: number
+  auto_detected: boolean
+  discovered_at: string
+  metadata: {
+    explanation?: string
+    target_document_title?: string
+    target_snippet?: string
+    [key: string]: unknown
+  }
+}
+
+/**
+ * Connection validation feedback (captured via hotkeys).
+ * Stored in localStorage for MVP (migrate to database in Phase 3).
+ */
+interface ConnectionFeedback {
+  connection_id: string
+  feedback_type: 'validate' | 'reject' | 'star'
+  context: {
+    time_of_day: string // ISO timestamp
+    document_id: string
+    mode: string // 'reading' | 'study' | 'research'
+  }
+}
 
 interface ConnectionCardProps {
-  connection: MockConnection & { weightedStrength?: number }
+  connection: Connection & { weightedStrength?: number }
   documentId: string
   isActive: boolean
   onClick: () => void
@@ -171,7 +204,7 @@ export function ConnectionCard({ connection, documentId, isActive, onClick }: Co
                 {feedbackType === 'star' && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
               </div>
             </div>
-            <h4 className="text-sm font-medium">{connection.target_document_title}</h4>
+            <h4 className="text-sm font-medium">{connection.metadata.target_document_title || 'Unknown Document'}</h4>
           </div>
           <Button
             variant="ghost"
@@ -186,14 +219,16 @@ export function ConnectionCard({ connection, documentId, isActive, onClick }: Co
           </Button>
         </div>
       </CardHeader>
-      
+
       <CardContent className="pb-3">
         <p className="text-sm text-muted-foreground line-clamp-2">
-          {connection.target_snippet}
+          {connection.metadata.target_snippet || 'No snippet available'}
         </p>
-        <p className="text-xs text-muted-foreground mt-2 italic">
-          {connection.explanation}
-        </p>
+        {connection.metadata.explanation && (
+          <p className="text-xs text-muted-foreground mt-2 italic">
+            {connection.metadata.explanation}
+          </p>
+        )}
         
         {/* Hotkey hints (only visible when active) */}
         {isActive && (

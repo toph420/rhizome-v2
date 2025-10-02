@@ -7,7 +7,6 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { createClient } from '@/lib/supabase/client'
 import { ConnectionCard } from './ConnectionCard'
 import { CollapsibleSection } from './CollapsibleSection'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import type { SynthesisEngine } from '@/types/annotations'
 
 /**
@@ -70,7 +69,10 @@ export function ConnectionsList({ documentId, visibleChunkIds }: ConnectionsList
   // Fetch connections for visible chunks (debounced)
   useEffect(() => {
     async function fetchConnections() {
+      console.log('[ConnectionsList] Fetching connections for chunks:', debouncedChunkIds)
+
       if (debouncedChunkIds.length === 0) {
+        console.log('[ConnectionsList] No visible chunks, clearing connections')
         setConnections([])
         return
       }
@@ -80,7 +82,7 @@ export function ConnectionsList({ documentId, visibleChunkIds }: ConnectionsList
 
       try {
         const { data, error } = await supabase
-          .from('chunk_connections')
+          .from('connections')
           .select('*')
           .in('source_chunk_id', debouncedChunkIds)
           .order('strength', { ascending: false })
@@ -90,6 +92,7 @@ export function ConnectionsList({ documentId, visibleChunkIds }: ConnectionsList
           console.error('[ConnectionsList] Failed to fetch connections:', error)
           setConnections([])
         } else {
+          console.log('[ConnectionsList] Fetched connections:', data?.length || 0, 'connections')
           setConnections(data || [])
         }
       } catch (err) {
@@ -201,44 +204,42 @@ export function ConnectionsList({ documentId, visibleChunkIds }: ConnectionsList
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-4 p-4">
-        {Object.entries(groupedConnections).map(([engineType, conns]) => (
-          <CollapsibleSection
-            key={engineType}
-            title={engineLabels[engineType as SynthesisEngine]}
-            count={conns.length}
-            color={engineColors[engineType as SynthesisEngine]}
-            defaultOpen={true}
-          >
-            <AnimatePresence mode="popLayout">
-              <div className="space-y-2">
-                {conns.map(connection => (
-                  <motion.div
-                    key={connection.id}
-                    layout  // Enable automatic layout animation
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{
-                      layout: { type: 'spring', damping: 25, stiffness: 300 },
-                      opacity: { duration: 0.2 },
-                      y: { duration: 0.2 }
-                    }}
-                  >
-                    <ConnectionCard
-                      connection={connection}
-                      documentId={documentId}
-                      isActive={activeConnectionId === connection.id}
-                      onClick={() => setActiveConnectionId(connection.id)}
-                    />
-                  </motion.div>
-                ))}
-              </div>
-            </AnimatePresence>
-          </CollapsibleSection>
-        ))}
-      </div>
-    </ScrollArea>
+    <div className="space-y-4 p-4">
+      {Object.entries(groupedConnections).map(([engineType, conns]) => (
+        <CollapsibleSection
+          key={engineType}
+          title={engineLabels[engineType as SynthesisEngine]}
+          count={conns.length}
+          color={engineColors[engineType as SynthesisEngine]}
+          defaultOpen={true}
+        >
+          <AnimatePresence mode="popLayout">
+            <div className="space-y-2">
+              {conns.map(connection => (
+                <motion.div
+                  key={connection.id}
+                  layout  // Enable automatic layout animation
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{
+                    layout: { type: 'spring', damping: 25, stiffness: 300 },
+                    opacity: { duration: 0.2 },
+                    y: { duration: 0.2 }
+                  }}
+                >
+                  <ConnectionCard
+                    connection={connection}
+                    documentId={documentId}
+                    isActive={activeConnectionId === connection.id}
+                    onClick={() => setActiveConnectionId(connection.id)}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          </AnimatePresence>
+        </CollapsibleSection>
+      ))}
+    </div>
   )
 }

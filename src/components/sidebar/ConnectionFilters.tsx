@@ -7,23 +7,15 @@ import { useAnnotationStore } from '@/stores/annotation-store'
 import type { EngineWeights } from '@/types/annotations'
 
 const ENGINE_LABELS: Record<keyof EngineWeights, string> = {
-  semantic: 'Semantic',
-  thematic: 'Thematic',
-  structural: 'Structural',
-  contradiction: 'Contradiction',
-  emotional: 'Emotional',
-  methodological: 'Methodological',
-  temporal: 'Temporal'
+  semantic_similarity: 'Semantic Similarity',
+  thematic_bridge: 'Thematic Bridges',
+  contradiction_detection: 'Contradictions'
 }
 
 const ENGINE_COLORS: Record<keyof EngineWeights, string> = {
-  semantic: 'bg-blue-500',
-  thematic: 'bg-purple-500',
-  structural: 'bg-green-500',
-  contradiction: 'bg-red-500',
-  emotional: 'bg-pink-500',
-  methodological: 'bg-orange-500',
-  temporal: 'bg-yellow-500'
+  semantic_similarity: 'bg-blue-500',
+  thematic_bridge: 'bg-purple-500',
+  contradiction_detection: 'bg-red-500'
 }
 
 /**

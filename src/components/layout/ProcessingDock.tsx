@@ -306,6 +306,9 @@ export function ProcessingDock() {
     if (job.job_type === 'process_document') {
       return `Processing Document ${job.input_data.document_id?.slice(0, 8)}...`
     }
+    if (job.job_type === 'detect-connections') {
+      return `Detecting Connections ${job.input_data.document_id?.slice(0, 8)}...`
+    }
     return job.job_type
   }
   

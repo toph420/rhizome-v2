@@ -13,6 +13,7 @@ import { ConnectionFilters } from './ConnectionFilters'
 
 interface RightPanelProps {
   documentId: string
+  visibleChunkIds?: string[]
 }
 
 /**
@@ -23,7 +24,7 @@ interface RightPanelProps {
  * @param props.documentId - Document identifier for filtering connections and annotations.
  * @returns React element with collapsible right panel.
  */
-export function RightPanel({ documentId }: RightPanelProps) {
+export function RightPanel({ documentId, visibleChunkIds = [] }: RightPanelProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<'connections' | 'annotations' | 'weights'>('connections')
   
@@ -72,13 +73,13 @@ export function RightPanel({ documentId }: RightPanelProps) {
                 <TabsTrigger value="weights">Weights</TabsTrigger>
               </TabsList>
               
-              <TabsContent value="connections" className="flex-1 overflow-hidden m-0 flex flex-col">
-                <div className="border-b">
+              <TabsContent value="connections" className="flex-1 m-0 flex flex-col h-full">
+                <div className="border-b flex-shrink-0">
                   <ConnectionFilters />
                 </div>
-                <ScrollArea className="flex-1">
-                  <ConnectionsList documentId={documentId} />
-                </ScrollArea>
+                <div className="flex-1 overflow-auto scrollbar-hide">
+                  <ConnectionsList documentId={documentId} visibleChunkIds={visibleChunkIds} />
+                </div>
               </TabsContent>
               
               <TabsContent value="annotations" className="flex-1 overflow-hidden m-0">

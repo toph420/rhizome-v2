@@ -8,18 +8,20 @@ import { useAnnotationStore } from '@/stores/annotation-store'
 import type { EngineWeights } from '@/types/annotations'
 
 const ENGINE_LABELS: Record<keyof EngineWeights, string> = {
-  semantic: 'Semantic',
-  thematic: 'Thematic',
-  structural: 'Structural',
-  contradiction: 'Contradiction',
-  emotional: 'Emotional',
-  methodological: 'Methodological',
-  temporal: 'Temporal',
+  semantic_similarity: 'Semantic Similarity',
+  thematic_bridge: 'Thematic Bridges',
+  contradiction_detection: 'Contradictions',
+}
+
+const ENGINE_DESCRIPTIONS: Record<keyof EngineWeights, string> = {
+  semantic_similarity: 'Embedding-based matching (fast, baseline)',
+  thematic_bridge: 'AI-powered cross-domain connections',
+  contradiction_detection: 'Opposing viewpoints and tensions',
 }
 
 /**
  * Weight tuning interface for connection synthesis engines.
- * Provides 7 weight sliders (0.0-1.0) and 4 preset configurations.
+ * Provides 3 weight sliders (0.0-1.0) and 4 preset configurations.
  * Triggers real-time connection re-ranking via Zustand store.
  * @returns React element with weight sliders and preset buttons.
  */
@@ -42,6 +44,9 @@ export function WeightTuning() {
                 {value.toFixed(2)}
               </span>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {ENGINE_DESCRIPTIONS[engine]}
+            </p>
             <Slider
               id={`weight-${engine}`}
               value={[value]}
@@ -85,9 +90,9 @@ export function WeightTuning() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => applyPreset('chaos')}
+            onClick={() => applyPreset('semantic-only')}
           >
-            Chaos
+            Semantic Only
           </Button>
         </div>
       </div>
