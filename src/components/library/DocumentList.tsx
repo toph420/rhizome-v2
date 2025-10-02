@@ -6,8 +6,9 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Eye, Loader2 } from 'lucide-react'
+import { FileText, Eye, Loader2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { deleteDocument } from '@/app/actions/admin'
 
 interface Document {
   id: string
@@ -27,6 +28,7 @@ export function DocumentList() {
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -86,11 +88,26 @@ export function DocumentList() {
       .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-    
+
     if (data) {
       setDocuments(data)
     }
     setLoading(false)
+  }
+
+  async function handleDelete(documentId: string, title: string) {
+    if (!confirm(`Delete "${title}"? This will remove the document and all associated data.`)) {
+      return
+    }
+
+    setDeleting(documentId)
+    const result = await deleteDocument(documentId)
+
+    if (!result.success) {
+      alert(`Failed to delete: ${result.error}`)
+    }
+
+    setDeleting(null)
   }
 
   if (loading) {
@@ -161,6 +178,15 @@ export function DocumentList() {
                       Processing
                     </Button>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDelete(doc.id, doc.title)}
+                    disabled={deleting === doc.id}
+                    data-testid="delete-button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </CardHeader>

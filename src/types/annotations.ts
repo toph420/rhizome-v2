@@ -96,34 +96,34 @@ export interface Chunk {
 }
 
 /**
- * Synthesis engine types (7 engines from APP_VISION.md).
+ * Synthesis engine types (3-engine system matching worker output).
+ * Reduced from 7 engines to 3 focused engines for better precision.
+ *
+ * @see docs/APP_VISION.md - 3-Engine System
  */
 export type SynthesisEngine =
-  | 'semantic'
-  | 'thematic'
-  | 'structural'
-  | 'contradiction'
-  | 'emotional'
-  | 'methodological'
-  | 'temporal'
+  | 'semantic_similarity'      // Embedding-based matching (25% default weight)
+  | 'thematic_bridge'          // AI-powered cross-domain connections (35% default weight)
+  | 'contradiction_detection'  // Metadata-based conceptual tensions (40% default weight)
 
 /**
  * Engine weight configuration (0.0-1.0 per engine).
+ * Weights determine connection priority in the sidebar.
  */
 export interface EngineWeights {
-  semantic: number
-  thematic: number
-  structural: number
-  contradiction: number
-  emotional: number
-  methodological: number
-  temporal: number
+  semantic_similarity: number
+  thematic_bridge: number
+  contradiction_detection: number
 }
 
 /**
  * Weight preset names.
+ * - max-friction: Prioritizes contradictions (40%)
+ * - thematic-focus: Prioritizes cross-domain bridges (60%)
+ * - balanced: Equal weights across all engines (33%)
+ * - semantic-only: Prioritizes embedding similarity (70%)
  */
-export type WeightPreset = 'max-friction' | 'thematic-focus' | 'balanced' | 'chaos'
+export type WeightPreset = 'max-friction' | 'thematic-focus' | 'balanced' | 'semantic-only'
 
 /**
  * Connection type (how the target relates to the source).

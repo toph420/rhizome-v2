@@ -139,7 +139,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     // Query chunks ordered by index
     const { data: chunks, error: chunksError } = await supabase
       .from('chunks')
-      .select('id, content, chunk_index, position_context, start_offset, end_offset')
+      .select('id, content, chunk_index, start_offset, end_offset')
       .eq('document_id', id)
       .order('chunk_index', { ascending: true })
     
@@ -187,7 +187,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           </div>
         )}
         
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-hidden">
           <DocumentViewer
             documentId={id}
             markdownUrl={signedUrl}

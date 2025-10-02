@@ -94,14 +94,51 @@ export class ECS {
       deck_id?: string
     }
   ): Promise<Entity[]> {
-    let query = this.supabase
+    // STEP 1: Find entity IDs that match the filters
+    // This avoids the PostgREST !inner join issue where filtering components
+    // returns only matching components instead of all components for matching entities
+    let entityIdQuery = this.supabase
+      .from('components')
+      .select('entity_id, entities!inner(user_id)')
+      .eq('entities.user_id', userId)
+
+    // Filter by component types if provided
+    if (componentTypes.length > 0) {
+      entityIdQuery = entityIdQuery.in('component_type', componentTypes)
+    }
+
+    // Apply additional filters
+    if (filters?.document_id) {
+      entityIdQuery = entityIdQuery.eq('document_id', filters.document_id)
+    }
+    if (filters?.chunk_id) {
+      entityIdQuery = entityIdQuery.eq('chunk_id', filters.chunk_id)
+    }
+
+    const { data: entityIdData, error: entityIdError } = await entityIdQuery
+
+    if (entityIdError) {
+      throw new Error(`Failed to query entity IDs: ${entityIdError.message}`)
+    }
+
+    if (!entityIdData || entityIdData.length === 0) {
+      return []
+    }
+
+    // Get unique entity IDs
+    const entityIds = Array.from(
+      new Set(entityIdData.map((row) => row.entity_id))
+    )
+
+    // STEP 2: Fetch full entities with ALL components
+    const { data, error } = await this.supabase
       .from('entities')
       .select(`
         id,
         user_id,
         created_at,
         updated_at,
-        components!inner (
+        components (
           id,
           entity_id,
           component_type,
@@ -112,22 +149,8 @@ export class ECS {
           updated_at
         )
       `)
+      .in('id', entityIds)
       .eq('user_id', userId)
-
-    // Filter by component types if provided
-    if (componentTypes.length > 0) {
-      query = query.in('components.component_type', componentTypes)
-    }
-
-    // Apply additional filters
-    if (filters?.document_id) {
-      query = query.eq('components.document_id', filters.document_id)
-    }
-    if (filters?.chunk_id) {
-      query = query.eq('components.chunk_id', filters.chunk_id)
-    }
-
-    const { data, error } = await query
 
     if (error) {
       throw new Error(`Failed to query entities: ${error.message}`)

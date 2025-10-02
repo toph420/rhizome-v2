@@ -189,6 +189,29 @@ export async function clearCompletedJobs() {
 }
 
 /**
+ * Delete a specific job by ID.
+ * Useful for clearing individual jobs during testing.
+ */
+export async function deleteJob(jobId: string) {
+  const supabase = await createClient()
+
+  try {
+    const { error } = await supabase
+      .from('background_jobs')
+      .delete()
+      .eq('id', jobId)
+
+    if (error) throw error
+
+    revalidatePath('/')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Error deleting job:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+/**
  * Force fail all stuck processing jobs.
  * Useful when multiple jobs are hung and need to be reset.
  */

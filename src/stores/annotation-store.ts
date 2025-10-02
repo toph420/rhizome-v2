@@ -8,44 +8,34 @@ import type {
 } from '@/types/annotations'
 
 /**
- * Weight presets for connection synthesis (from APP_VISION.md).
+ * Weight presets for 3-engine connection synthesis system.
+ * Based on APP_VISION.md specifications.
+ *
+ * Weights explained:
+ * - semantic_similarity: Fast embedding-based matching (baseline connections)
+ * - thematic_bridge: AI-powered cross-domain concept matching (surprising insights)
+ * - contradiction_detection: Metadata-based conceptual tensions (friction/debate)
  */
 const WEIGHT_PRESETS: Record<WeightPreset, EngineWeights> = {
   'max-friction': {
-    semantic: 0.3,
-    thematic: 0.9,
-    structural: 0.7,
-    contradiction: 1.0,
-    emotional: 0.4,
-    methodological: 0.8,
-    temporal: 0.2,
+    semantic_similarity: 0.25,
+    thematic_bridge: 0.35,
+    contradiction_detection: 0.40,  // Highest - prioritizes conceptual tensions
   },
   'thematic-focus': {
-    semantic: 0.4,
-    thematic: 1.0,
-    structural: 0.5,
-    contradiction: 0.6,
-    emotional: 0.3,
-    methodological: 0.7,
-    temporal: 0.2,
+    semantic_similarity: 0.20,
+    thematic_bridge: 0.60,          // Highest - prioritizes cross-domain insights
+    contradiction_detection: 0.20,
   },
   'balanced': {
-    semantic: 0.5,
-    thematic: 0.5,
-    structural: 0.5,
-    contradiction: 0.5,
-    emotional: 0.5,
-    methodological: 0.5,
-    temporal: 0.5,
+    semantic_similarity: 0.33,
+    thematic_bridge: 0.34,
+    contradiction_detection: 0.33,  // Equal weighting across all engines
   },
-  'chaos': {
-    semantic: 0.8,
-    thematic: 0.8,
-    structural: 0.8,
-    contradiction: 0.8,
-    emotional: 0.8,
-    methodological: 0.8,
-    temporal: 0.8,
+  'semantic-only': {
+    semantic_similarity: 0.70,      // Highest - fast similarity-based connections
+    thematic_bridge: 0.20,
+    contradiction_detection: 0.10,
   },
 }
 
@@ -160,13 +150,9 @@ export const useAnnotationStore = create<AnnotationState>((set) => ({
     set({ strengthThreshold: Math.max(0, Math.min(1, threshold)) }),
 
   enabledEngines: new Set([
-    'semantic',
-    'thematic',
-    'structural',
-    'contradiction',
-    'emotional',
-    'methodological',
-    'temporal',
+    'semantic_similarity',
+    'thematic_bridge',
+    'contradiction_detection',
   ]),
   /**
    * Toggles an engine on/off in the enabled set.
