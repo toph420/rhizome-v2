@@ -16,6 +16,7 @@ export interface OrchestratorConfig {
   semanticSimilarity?: any;
   contradictionDetection?: any;
   thematicBridge?: any;
+  onProgress?: (percent: number, stage: string, details: string) => Promise<void>;
 }
 
 export interface OrchestratorResult {
@@ -36,7 +37,8 @@ export async function processDocument(
   config: OrchestratorConfig = {}
 ): Promise<OrchestratorResult> {
   const {
-    enabledEngines = ['semantic_similarity', 'contradiction_detection', 'thematic_bridge']
+    enabledEngines = ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+    onProgress
   } = config;
 
   console.log(`[Orchestrator] Processing document ${documentId}`);
@@ -49,6 +51,7 @@ export async function processDocument(
   // Run engines in sequence (can parallelize later if needed)
   if (enabledEngines.includes('semantic_similarity')) {
     console.log('\n[Orchestrator] Running SemanticSimilarity...');
+    await onProgress?.(25, 'semantic-similarity', 'Finding semantic similarities');
     const connections = await runSemanticSimilarity(documentId, config.semanticSimilarity);
     allConnections.push(...connections);
     byEngine.semantic_similarity = connections.length;
@@ -56,6 +59,7 @@ export async function processDocument(
 
   if (enabledEngines.includes('contradiction_detection')) {
     console.log('\n[Orchestrator] Running ContradictionDetection...');
+    await onProgress?.(50, 'contradiction-detection', 'Detecting contradictions');
     const connections = await runContradictionDetection(documentId, config.contradictionDetection);
     allConnections.push(...connections);
     byEngine.contradiction_detection = connections.length;
@@ -63,6 +67,7 @@ export async function processDocument(
 
   if (enabledEngines.includes('thematic_bridge')) {
     console.log('\n[Orchestrator] Running ThematicBridge...');
+    await onProgress?.(75, 'thematic-bridge', 'Finding thematic bridges');
     const connections = await runThematicBridge(documentId, config.thematicBridge);
     allConnections.push(...connections);
     byEngine.thematic_bridge = connections.length;
@@ -70,6 +75,7 @@ export async function processDocument(
 
   // Save all connections
   console.log(`\n[Orchestrator] Saving ${allConnections.length} total connections...`);
+  await onProgress?.(90, 'saving', 'Saving connections to database');
   await saveChunkConnections(allConnections);
 
   const executionTime = Date.now() - startTime;

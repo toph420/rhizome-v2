@@ -44,14 +44,21 @@ export async function runThematicBridge(
   console.log(`[ThematicBridge] AI filtering: importance>${minImportance}, strength>${minStrength}`);
 
   const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
   // Get high-importance chunks from source document
   const { data: sourceChunks, error } = await supabase
     .from('chunks')
-    .select('id, document_id, content, summary, domain_metadata, importance_score')
+    .select(`
+      id,
+      document_id,
+      content,
+      summary,
+      domain_metadata,
+      importance_score
+    `)
     .eq('document_id', documentId)
     .gte('importance_score', minImportance)
     .not('domain_metadata', 'is', null)
@@ -74,10 +81,18 @@ export async function runThematicBridge(
     const sourceDomain = chunk.domain_metadata?.primaryDomain;
     if (!sourceDomain) continue;
 
-    // Get candidates from different domains
+    // Get candidates from different domains with document titles
     const { data: candidates } = await supabase
       .from('chunks')
-      .select('id, document_id, content, summary, domain_metadata, importance_score')
+      .select(`
+        id,
+        document_id,
+        content,
+        summary,
+        domain_metadata,
+        importance_score,
+        documents!inner(title)
+      `)
       .neq('document_id', chunk.document_id)
       .gte('importance_score', minImportance)
       .not('domain_metadata', 'is', null)
@@ -140,7 +155,10 @@ Only include bridges with strength > ${minStrength}. Be selective.`;
               bridge_concepts: bridge.bridgeConcepts,
               source_domain: sourceDomain,
               target_domain: targetChunk.domain_metadata?.primaryDomain,
-              engine_version: 'v2'
+              engine_version: 'v2',
+              // NEW: UI metadata
+              target_document_title: (targetChunk.documents as any)?.title || 'Unknown Document',
+              target_snippet: targetChunk.content?.slice(0, 200) || targetChunk.summary?.slice(0, 200) || 'No preview available'
             }
           });
         }

@@ -19,10 +19,28 @@ export async function detectConnectionsHandler(supabase: any, job: any): Promise
 
   console.log(`[DetectConnections] Starting handler for document ${document_id} with ${chunk_count} chunks (${trigger})`);
 
+  // Helper to update progress
+  async function updateProgress(percent: number, stage: string, details?: string) {
+    await supabase
+      .from('background_jobs')
+      .update({
+        progress: {
+          percent,
+          stage,
+          details: details || `${stage}: ${percent}%`
+        },
+        status: 'processing'
+      })
+      .eq('id', job.id);
+  }
+
   try {
+    await updateProgress(0, 'detect-connections', 'Starting connection detection');
+
     // Use the function-based orchestrator to process the document
     const result = await processDocument(document_id, {
       enabledEngines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+      onProgress: updateProgress,
       semanticSimilarity: {
         threshold: 0.7,
         maxResultsPerChunk: 50,
@@ -46,17 +64,18 @@ export async function detectConnectionsHandler(supabase: any, job: any): Promise
     console.log(`[DetectConnections] Successfully created ${result.totalConnections} connections`);
     console.log(`[DetectConnections] Breakdown:`, result.byEngine);
 
+    // Update progress to 100% before marking complete
+    await updateProgress(100, 'complete', 'Connection detection complete');
+
     // Update job with success result
     await supabase
       .from('background_jobs')
       .update({
         status: 'completed',
-        output_data: {
-          success: true,
-          document_id,
-          totalConnections: result.totalConnections,
-          byEngine: result.byEngine,
-          executionTime: result.executionTime
+        progress: {
+          percent: 100,
+          stage: 'complete',
+          details: `Found ${result.totalConnections} connections`
         },
         completed_at: new Date().toISOString()
       })
@@ -70,11 +89,6 @@ export async function detectConnectionsHandler(supabase: any, job: any): Promise
       .from('background_jobs')
       .update({
         status: 'failed',
-        output_data: {
-          success: false,
-          document_id,
-          error: error.message
-        },
         last_error: error.message,
         completed_at: new Date().toISOString()
       })

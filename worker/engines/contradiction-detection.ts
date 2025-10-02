@@ -39,14 +39,14 @@ export async function runContradictionDetection(
   console.log(`[ContradictionDetection] Processing document ${documentId}`);
 
   const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
   // Get chunks with conceptual and emotional metadata
   const { data: sourceChunks, error } = await supabase
     .from('chunks')
-    .select('id, document_id, conceptual_metadata, emotional_metadata, importance_score')
+    .select('id, document_id, conceptual_metadata, emotional_metadata, importance_score, content, summary')
     .eq('document_id', documentId)
     .not('conceptual_metadata', 'is', null)
     .not('emotional_metadata', 'is', null);
@@ -68,11 +68,20 @@ export async function runContradictionDetection(
     }
 
     // Find contradicting chunks
-    // Strategy: Get all chunks, filter in-memory for prototype
+    // Strategy: Get all chunks with document titles, filter in-memory for prototype
     // TODO: Optimize with custom RPC function for production
     const { data: candidates } = await supabase
       .from('chunks')
-      .select('id, document_id, conceptual_metadata, emotional_metadata, importance_score')
+      .select(`
+        id,
+        document_id,
+        conceptual_metadata,
+        emotional_metadata,
+        importance_score,
+        content,
+        summary,
+        documents!inner(title)
+      `)
       .not('conceptual_metadata', 'is', null)
       .not('emotional_metadata', 'is', null)
       .neq('id', chunk.id);
@@ -105,6 +114,9 @@ export async function runContradictionDetection(
       const importanceWeight = ((chunk.importance_score || 0) + (candidate.importance_score || 0)) / 2 * 0.2;
       const strength = Math.min(1.0, conceptWeight + polarityWeight + importanceWeight);
 
+      // Extract shared concepts for explanation
+      const sharedConcepts = concepts.filter((c: string) => candidateConcepts.includes(c));
+
       connections.push({
         source_chunk_id: chunk.id,
         target_chunk_id: candidate.id,
@@ -117,8 +129,12 @@ export async function runContradictionDetection(
           polarity_distance: polarityDistance,
           source_polarity: polarity,
           target_polarity: candidatePolarity,
-          shared_concepts: concepts.filter((c: string) => candidateConcepts.includes(c)),
-          engine_version: 'v2'
+          shared_concepts: sharedConcepts,
+          engine_version: 'v2',
+          // NEW: UI metadata
+          target_document_title: (candidate.documents as any)?.title || 'Unknown Document',
+          target_snippet: candidate.content?.slice(0, 200) || candidate.summary?.slice(0, 200) || 'No preview available',
+          explanation: `Discussing ${sharedConcepts.slice(0, 3).join(', ')} with opposing stances (polarity difference: ${polarityDistance.toFixed(2)})`
         }
       });
     }

@@ -136,9 +136,10 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     // Stage 3.5: Create collision detection job (95-100%)
     if (chunksWithEmbeddings.length >= 2) {
       console.log(`🔍 Creating collision detection job for ${chunksWithEmbeddings.length} chunks`)
-      await supabase
+      const { error: jobError } = await supabase
         .from('background_jobs')
         .insert({
+          user_id: userId,  // Required field in background_jobs table
           job_type: 'detect-connections',
           status: 'pending',
           input_data: {
@@ -149,7 +150,12 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
           },
           created_at: new Date().toISOString()
         })
-      console.log(`🔍 Collision detection job queued`)
+
+      if (jobError) {
+        console.error(`❌ Failed to create collision detection job: ${jobError.message}`)
+      } else {
+        console.log(`🔍 Collision detection job queued`)
+      }
     } else {
       console.log(`📭 Skipping collision detection - need at least 2 chunks (found ${chunksWithEmbeddings.length})`)
     }

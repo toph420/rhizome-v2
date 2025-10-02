@@ -58,8 +58,8 @@ export async function runSemanticSimilarity(
 
   // Initialize Supabase client
   const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
   // Get all chunks from this document with embeddings
@@ -97,6 +97,7 @@ export async function runSemanticSimilarity(
     }
 
     // Use pgvector's match_chunks function for efficient similarity search
+    // Then enrich with document titles via JOIN
     const { data: matches, error: searchError } = await supabase.rpc('match_chunks', {
       query_embedding: embedding,
       match_threshold: threshold,
@@ -114,6 +115,15 @@ export async function runSemanticSimilarity(
     }
 
     totalMatches += matches.length;
+
+    // Enrich matches with document titles (batch fetch for efficiency)
+    const matchIds = matches.map(m => m.document_id);
+    const { data: docTitles } = await supabase
+      .from('documents')
+      .select('id, title')
+      .in('id', matchIds);
+
+    const titleMap = new Map((docTitles || []).map(d => [d.id, d.title]));
 
     // Convert matches to connections
     for (const match of matches) {
@@ -138,7 +148,11 @@ export async function runSemanticSimilarity(
           importance_score: match.importance_score || 0,
           threshold_used: threshold,
           engine_version: 'v2',
-          target_document_id: match.document_id
+          target_document_id: match.document_id,
+          // NEW: UI metadata
+          target_document_title: titleMap.get(match.document_id) || 'Unknown Document',
+          target_snippet: match.content?.slice(0, 200) || match.summary?.slice(0, 200) || 'No preview available',
+          explanation: `Semantic similarity: ${(match.similarity * 100).toFixed(1)}%`
         }
       });
     }
@@ -168,8 +182,8 @@ export async function saveChunkConnections(connections: ChunkConnection[]): Prom
   }
 
   const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
   console.log(`[SemanticSimilarity] Saving ${connections.length} connections to database`);
