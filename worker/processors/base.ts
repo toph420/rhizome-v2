@@ -50,7 +50,7 @@ export abstract class SourceProcessor {
   /** Google AI client for content processing */
   protected readonly ai: GoogleGenAI
   /** Supabase client for database operations */
-  protected readonly supabase: SupabaseClient
+  protected supabase: SupabaseClient
   /** Background job being processed */
   protected readonly job: BackgroundJob
   /** Processing configuration options */
@@ -58,7 +58,7 @@ export abstract class SourceProcessor {
 
   /**
    * Creates a new source processor instance.
-   * 
+   *
    * @param ai - Google Generative AI client
    * @param supabase - Supabase client for database operations
    * @param job - Background job record with document metadata
@@ -79,6 +79,21 @@ export abstract class SourceProcessor {
       cleanWithAI: true,
       ...options
     }
+  }
+
+  /**
+   * Refreshes the Supabase client connection.
+   * Call this before long-running storage operations to prevent stale connections.
+   *
+   * Critical for processors with long AI processing phases (e.g., EPUB with 93-minute chunking).
+   * Supabase connections timeout after periods of inactivity.
+   */
+  protected async refreshConnection(): Promise<void> {
+    const { createClient } = await import('@supabase/supabase-js')
+    this.supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
   }
 
   /**

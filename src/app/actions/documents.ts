@@ -69,7 +69,7 @@ export async function uploadDocument(formData: FormData): Promise<{
     const coverImage = formData.get('cover_image') as File | null
     
     // Validate source type
-    const validSourceTypes = ['pdf', 'markdown_asis', 'markdown_clean', 'txt', 'youtube', 'web_url', 'paste']
+    const validSourceTypes = ['pdf', 'epub', 'markdown_asis', 'markdown_clean', 'txt', 'youtube', 'web_url', 'paste']
     if (!validSourceTypes.includes(sourceType)) {
       return { success: false, error: 'Invalid source type' }
     }
@@ -90,8 +90,17 @@ export async function uploadDocument(formData: FormData): Promise<{
       return { success: false, error: 'No file provided' }
     }
     
-    if (file && !file.type.includes('pdf') && !file.type.includes('text') && !file.type.includes('markdown')) {
-      return { success: false, error: 'Only PDF, text, and markdown files are supported' }
+    if (file) {
+      const isValidType =
+        file.type.includes('pdf') ||
+        file.type === 'application/epub+zip' ||
+        file.name.endsWith('.epub') ||
+        file.type.includes('text') ||
+        file.type.includes('markdown')
+
+      if (!isValidType) {
+        return { success: false, error: 'Only PDF, EPUB, text, and markdown files are supported' }
+      }
     }
     
     const user = await getCurrentUser()
@@ -107,7 +116,9 @@ export async function uploadDocument(formData: FormData): Promise<{
     if (file) {
       // Determine file extension based on source type
       let fileExtension = '.pdf'
-      if (sourceType === 'markdown_asis' || sourceType === 'markdown_clean') {
+      if (sourceType === 'epub') {
+        fileExtension = '.epub'
+      } else if (sourceType === 'markdown_asis' || sourceType === 'markdown_clean') {
         fileExtension = '.md'
       } else if (sourceType === 'txt') {
         fileExtension = '.txt'

@@ -1,5 +1,6 @@
 import { SourceProcessor } from './base.js'
 import { PDFProcessor } from './pdf-processor.js'
+import { EPUBProcessor } from './epub-processor.js'
 import { YouTubeProcessor } from './youtube-processor.js'
 import { WebProcessor } from './web-processor.js'
 import { MarkdownAsIsProcessor, MarkdownCleanProcessor } from './markdown-processor.js'
@@ -35,33 +36,37 @@ export class ProcessorRouter {
       case 'pdf':
         console.log('📄 Using PDFProcessor')
         return new PDFProcessor(ai, supabase, job)
-        
+
+      case 'epub':
+        console.log('📚 Using EPUBProcessor')
+        return new EPUBProcessor(ai, supabase, job)
+
       case 'youtube':
         console.log('🎬 Using YouTubeProcessor')
         return new YouTubeProcessor(ai, supabase, job)
-        
+
       case 'web_url':
         console.log('🌐 Using WebProcessor')
         return new WebProcessor(ai, supabase, job)
-        
+
       case 'markdown_asis':
         console.log('📝 Using MarkdownAsIsProcessor (no AI)')
         return new MarkdownAsIsProcessor(ai, supabase, job)
-        
+
       case 'markdown_clean':
         console.log('✨ Using MarkdownCleanProcessor (with AI)')
         return new MarkdownCleanProcessor(ai, supabase, job)
-        
+
       case 'txt':
         console.log('📄 Using TextProcessor')
         return new TextProcessor(ai, supabase, job)
-        
+
       case 'paste':
         console.log('📋 Using PasteProcessor')
         return new PasteProcessor(ai, supabase, job)
-        
+
       default:
-        const validTypes = ['pdf', 'youtube', 'web_url', 'markdown_asis', 'markdown_clean', 'txt', 'paste']
+        const validTypes = ['pdf', 'epub', 'youtube', 'web_url', 'markdown_asis', 'markdown_clean', 'txt', 'paste']
         throw new Error(
           `Unknown source type: ${sourceType}. Valid types are: ${validTypes.join(', ')}`
         )
@@ -75,7 +80,7 @@ export class ProcessorRouter {
    * @returns True if valid, false otherwise
    */
   static isValidSourceType(sourceType: string): sourceType is SourceType {
-    const validTypes: SourceType[] = ['pdf', 'youtube', 'web_url', 'markdown_asis', 'markdown_clean', 'txt', 'paste']
+    const validTypes: SourceType[] = ['pdf', 'epub', 'youtube', 'web_url', 'markdown_asis', 'markdown_clean', 'txt', 'paste']
     return validTypes.includes(sourceType as SourceType)
   }
   
@@ -88,6 +93,7 @@ export class ProcessorRouter {
   static getSourceTypeName(sourceType: SourceType): string {
     const names: Record<SourceType, string> = {
       pdf: 'PDF Document',
+      epub: 'EPUB Book',
       youtube: 'YouTube Video',
       web_url: 'Web Article',
       markdown_asis: 'Markdown (As-Is)',

@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2 } from 'lucide-react'
 import { DocumentPreview, type DetectedMetadata } from '@/components/upload/DocumentPreview'
 
-type SourceType = 'pdf' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
+type SourceType = 'pdf' | 'epub' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
 type TabType = 'file' | 'url' | 'paste'
 type UploadPhase = 'idle' | 'detecting' | 'preview' | 'uploading'
 
@@ -144,19 +144,35 @@ export function UploadZone() {
    * @returns Source type.
    */
   const getSourceTypeForFile = useCallback((file: File): SourceType => {
+    // Prefer MIME type
+    if (file.type === 'application/epub+zip') {
+      return 'epub'
+    }
+
     if (file.type.includes('pdf')) {
       return 'pdf'
     }
-    
+
+    // Fallback to extension (EPUB files sometimes have incorrect MIME type)
+    const ext = file.name.split('.').pop()?.toLowerCase()
+
+    if (ext === 'epub') {
+      return 'epub'
+    }
+
+    if (ext === 'pdf') {
+      return 'pdf'
+    }
+
     if (file.name.endsWith('.md')) {
       return markdownProcessing === 'asis' ? 'markdown_asis' : 'markdown_clean'
     }
-    
+
     if (file.type.includes('text') || file.name.endsWith('.txt')) {
       return 'txt'
     }
-    
-    return 'pdf'
+
+    throw new Error(`Unsupported file type: ${file.type}`)
   }, [markdownProcessing])
 
   /**
@@ -388,12 +404,12 @@ export function UploadZone() {
               {!selectedFile ? (
                 <>
                   <div>
-                    <p className="text-lg font-medium">Drop PDF, Markdown, or text file here</p>
+                    <p className="text-lg font-medium">Drop PDF, EPUB, Markdown, or text file here</p>
                     <p className="text-sm text-muted-foreground">or click to browse</p>
                   </div>
                   <input
                     type="file"
-                    accept=".pdf,.txt,.md"
+                    accept=".pdf,.epub,.txt,.md"
                     onChange={handleFileInputChange}
                     className="hidden"
                     id="file-input"

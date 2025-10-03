@@ -86,6 +86,7 @@ export interface Article {
  */
 export type SourceType =
   | 'pdf'                  // Existing PDF processing via Gemini Files API
+  | 'epub'                 // EPUB book processing with chapter-based batching
   | 'markdown_asis'        // Save markdown as-is, chunk by headings
   | 'markdown_clean'       // Clean markdown with AI + semantic chunking
   | 'txt'                  // Convert text to markdown with AI
