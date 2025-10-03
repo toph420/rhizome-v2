@@ -57,3 +57,4 @@ worker/tests/validation/reports/
 
 # Test files (keep out of version control)
 test-files/
+supabase/.temp/
