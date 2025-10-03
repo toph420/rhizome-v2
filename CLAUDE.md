@@ -833,6 +833,12 @@ const { data: crossDoc } = await supabase
 
 ## Other Docs
 
-- Virtuoso - Virtual Scrolling for our reader - https://virtuoso.dev/
+- Virtuoso - https://virtuoso.dev/ - Virtual Scrolling for our document reader
+- AI SDK - https://ai-sdk.dev/docs/introduction - The AI SDK is the TypeScript toolkit designed to help developers build AI-powered applications and agents with React, Next.js, Vue, Svelte, Node.js, and more.
+- Marked.js - https://marked.js.org/ - a low-level markdown compiler for parsing markdown without caching or blocking for long periods of time.
+
+## Miscellaneous Rules
+- Always check database migration number and increment by one, ie if the last one is 024, yours should be named 025 (see migrations folder for examples) 
+
 
 Remember: This is an AI-first personal tool. Prioritize connection discovery and knowledge synthesis over traditional features.
