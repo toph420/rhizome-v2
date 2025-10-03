@@ -155,6 +155,12 @@ export class PDFProcessor extends SourceProcessor {
     // ALWAYS use AI metadata extraction (no conditional logic)
     console.log(`[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document`)
 
+    // Extract document type from job input_data
+    const documentType = this.job.metadata?.input_data?.document_type || null
+    if (documentType) {
+      console.log(`[PDFProcessor] Using type-specific chunking for: ${documentType}`)
+    }
+
     await this.updateProgress(45, 'metadata', 'ai-extraction', 'Processing with AI metadata extraction...')
 
     const aiChunks = await batchChunkAndExtractMetadata(
@@ -175,7 +181,8 @@ export class PDFProcessor extends SourceProcessor {
           progress.phase,
           `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
         )
-      }
+      },
+      documentType // Pass document type for type-specific chunking
     )
 
     // Convert AI chunks to ProcessedChunk format with proper metadata mapping
@@ -455,6 +462,12 @@ export class PDFProcessor extends SourceProcessor {
     // Stage 3: Create chunks with AI metadata extraction
     await this.updateProgress(45, 'chunking', 'processing', 'Processing with AI metadata extraction...')
 
+    // Extract document type from job input_data
+    const documentType = this.job.metadata?.input_data?.document_type || null
+    if (documentType) {
+      console.log(`[PDFProcessor] Using type-specific chunking for: ${documentType} (batched processing)`)
+    }
+
     console.log(
       `[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document ` +
       `(batched processing)`
@@ -478,7 +491,8 @@ export class PDFProcessor extends SourceProcessor {
           progress.phase,
           `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
         )
-      }
+      },
+      documentType // Pass document type for type-specific chunking
     )
 
     await this.updateProgress(
