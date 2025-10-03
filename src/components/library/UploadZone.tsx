@@ -9,10 +9,12 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe } from 'lucide-react'
+import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2 } from 'lucide-react'
+import { DocumentPreview, type DetectedMetadata } from '@/components/upload/DocumentPreview'
 
 type SourceType = 'pdf' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
 type TabType = 'file' | 'url' | 'paste'
+type UploadPhase = 'idle' | 'detecting' | 'preview' | 'uploading'
 
 /**
  * Multi-method upload interface with tabs for file upload, URL fetching, and content pasting.
@@ -21,20 +23,22 @@ type TabType = 'file' | 'url' | 'paste'
  */
 export function UploadZone() {
   const [activeTab, setActiveTab] = useState<TabType>('file')
-  
+
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [markdownProcessing, setMarkdownProcessing] = useState<'asis' | 'clean'>('asis')
-  
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
+  const [detectedMetadata, setDetectedMetadata] = useState<DetectedMetadata | null>(null)
+
   // URL fetch state
   const [urlInput, setUrlInput] = useState('')
-  const [urlType, setUrlType] = useState<'youtube' | 'web' | null>(null)
-  
+  const [urlType, setUrlType] = useState<'youtube' | 'web_url' | null>(null)
+
   // Paste content state
   const [pastedContent, setPastedContent] = useState('')
   const [pasteSourceUrl, setPasteSourceUrl] = useState('')
-  
+
   // Shared state
   const [costEstimate, setCostEstimate] = useState<{
     tokens: number
@@ -65,14 +69,46 @@ export function UploadZone() {
 
   /**
    * Handles file selection and generates cost estimate.
+   * For PDFs, triggers metadata detection.
    * @param file - Selected file.
    */
   const handleFileSelect = useCallback(async (file: File) => {
     setSelectedFile(file)
     setError(null)
-    
+
     const estimate = await estimateProcessingCost(file.size)
     setCostEstimate(estimate)
+
+    // For PDFs, automatically start metadata detection
+    if (file.type.includes('pdf')) {
+      setUploadPhase('detecting')
+
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        console.log('🔍 Extracting metadata from first 10 pages...')
+        const response = await fetch('/api/extract-metadata', {
+          method: 'POST',
+          body: formData
+        })
+
+        if (!response.ok) {
+          throw new Error('Metadata extraction failed')
+        }
+
+        const metadata = await response.json()
+        console.log('✅ Metadata detected:', metadata)
+
+        setDetectedMetadata(metadata)
+        setUploadPhase('preview')
+      } catch (err) {
+        console.error('❌ Metadata detection error:', err)
+        setError(err instanceof Error ? err.message : 'Failed to detect metadata')
+        setUploadPhase('idle')
+        setSelectedFile(null)
+      }
+    }
   }, [])
 
   /**
@@ -124,24 +160,94 @@ export function UploadZone() {
   }, [markdownProcessing])
 
   /**
-   * Uploads file with appropriate source type.
+   * Handles metadata preview confirmation.
+   * Uploads cover image and document with metadata.
+   */
+  const handlePreviewConfirm = useCallback(async (
+    editedMetadata: DetectedMetadata,
+    coverImage: File | null
+  ) => {
+    if (!selectedFile) return
+
+    setUploadPhase('uploading')
+    setIsUploading(true)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      formData.append('source_type', 'pdf')
+
+      // Add detected/edited metadata
+      formData.append('document_type', editedMetadata.type)
+      formData.append('author', editedMetadata.author)
+      formData.append('title', editedMetadata.title)
+      if (editedMetadata.year) {
+        formData.append('publication_year', editedMetadata.year.toString())
+      }
+      if (editedMetadata.publisher) {
+        formData.append('publisher', editedMetadata.publisher)
+      }
+
+      // Add cover image if provided
+      if (coverImage) {
+        formData.append('cover_image', coverImage)
+      }
+
+      console.log('📤 Uploading document with metadata...')
+      const result = await uploadDocument(formData)
+      console.log('📤 Upload result:', result)
+
+      if (result.success && result.documentId) {
+        console.log('✅ Document uploaded with metadata, job created:', result.jobId)
+        // Reset state
+        setSelectedFile(null)
+        setCostEstimate(null)
+        setDetectedMetadata(null)
+        setUploadPhase('idle')
+      } else {
+        setError(result.error || 'Upload failed')
+        setUploadPhase('preview') // Return to preview on error
+      }
+    } catch (err) {
+      console.error('❌ Upload error:', err)
+      setError(err instanceof Error ? err.message : 'Upload failed')
+      setUploadPhase('preview')
+    } finally {
+      setIsUploading(false)
+    }
+  }, [selectedFile])
+
+  /**
+   * Handles metadata preview cancellation.
+   */
+  const handlePreviewCancel = useCallback(() => {
+    setSelectedFile(null)
+    setCostEstimate(null)
+    setDetectedMetadata(null)
+    setUploadPhase('idle')
+    setError(null)
+  }, [])
+
+  /**
+   * Uploads file with appropriate source type (non-PDF files).
    */
   const handleFileUpload = useCallback(async () => {
     if (!selectedFile) return
-    
+
     setIsUploading(true)
     setError(null)
-    
+
     try {
       const formData = new FormData()
       formData.append('file', selectedFile)
       formData.append('source_type', getSourceTypeForFile(selectedFile))
       formData.append('processing_requested', markdownProcessing === 'clean' ? 'true' : 'false')
-      
+
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
       console.log('📤 Upload result:', result)
-      
+
       if (result.success && result.documentId) {
         console.log('✅ Document uploaded and job created:', result.jobId)
         setSelectedFile(null)
@@ -245,17 +351,35 @@ export function UploadZone() {
         </TabsList>
 
         <TabsContent value="file">
-          <Card
-            className={`border-2 border-dashed p-8 text-center transition-colors ${
-              isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
-            }`}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setIsDragging(true)
-            }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-          >
+          {/* Show metadata preview for PDFs */}
+          {uploadPhase === 'preview' && detectedMetadata ? (
+            <DocumentPreview
+              metadata={detectedMetadata}
+              onConfirm={handlePreviewConfirm}
+              onCancel={handlePreviewCancel}
+            />
+          ) : uploadPhase === 'detecting' ? (
+            <Card className="p-12 text-center">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
+                <div>
+                  <p className="text-lg font-medium">Analyzing document...</p>
+                  <p className="text-sm text-muted-foreground">Extracting metadata from first 10 pages (~15 seconds)</p>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <Card
+              className={`border-2 border-dashed p-8 text-center transition-colors ${
+                isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setIsDragging(true)
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+            >
             <div className="flex flex-col items-center gap-4">
               <div className="rounded-full bg-muted p-4">
                 {selectedFile ? <FileText className="h-8 w-8" /> : <Upload className="h-8 w-8" />}
@@ -329,7 +453,7 @@ export function UploadZone() {
                   <div className="flex gap-2">
                     <Button
                       onClick={handleFileUpload}
-                      disabled={isUploading}
+                      disabled={isUploading || selectedFile?.type.includes('pdf')}
                       className="flex-1"
                     >
                       {isUploading ? 'Processing...' : 'Process Document'}
@@ -345,10 +469,16 @@ export function UploadZone() {
                       Cancel
                     </Button>
                   </div>
+                  {selectedFile?.type.includes('pdf') && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      PDFs are processed after metadata confirmation
+                    </p>
+                  )}
                 </div>
               )}
             </div>
           </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="url">

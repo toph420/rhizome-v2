@@ -60,6 +60,13 @@ export async function uploadDocument(formData: FormData): Promise<{
     const sourceUrl = formData.get('source_url') as string | null
     const processingRequested = formData.get('processing_requested') === 'true'
     const pastedContent = formData.get('pasted_content') as string | null
+
+    // Extract document metadata (from preview)
+    const documentType = formData.get('document_type') as string | null
+    const author = formData.get('author') as string | null
+    const publicationYear = formData.get('publication_year') ? parseInt(formData.get('publication_year') as string) : null
+    const publisher = formData.get('publisher') as string | null
+    const coverImage = formData.get('cover_image') as File | null
     
     // Validate source type
     const validSourceTypes = ['pdf', 'markdown_asis', 'markdown_clean', 'txt', 'youtube', 'web_url', 'paste']
@@ -116,14 +123,39 @@ export async function uploadDocument(formData: FormData): Promise<{
       }
     }
     
-    // Determine document title
-    let title = 'Untitled Document'
-    if (file) {
-      title = file.name.replace(/\.[^/.]+$/, '')
-    } else if (sourceUrl) {
-      title = sourceUrl.split('/').pop() || sourceUrl
+    // Determine document title (from metadata or fallback)
+    let title = formData.get('title') as string | null
+    if (!title) {
+      if (file) {
+        title = file.name.replace(/\.[^/.]+$/, '')
+      } else if (sourceUrl) {
+        title = sourceUrl.split('/').pop() || sourceUrl
+      } else {
+        title = 'Untitled Document'
+      }
     }
-    
+
+    // Upload cover image if provided
+    let coverImageUrl: string | null = null
+    if (coverImage) {
+      const coverPath = `${baseStoragePath}/cover.jpg`
+      const { error: coverError } = await supabase.storage
+        .from('documents')
+        .upload(coverPath, coverImage, {
+          contentType: coverImage.type,
+          upsert: true
+        })
+
+      if (!coverError) {
+        const { data: publicUrl } = supabase.storage
+          .from('documents')
+          .getPublicUrl(coverPath)
+        coverImageUrl = publicUrl.publicUrl
+      } else {
+        console.warn('Cover image upload failed:', coverError.message)
+      }
+    }
+
     const { error: dbError } = await supabase
       .from('documents')
       .insert({
@@ -134,7 +166,13 @@ export async function uploadDocument(formData: FormData): Promise<{
         source_type: sourceType,
         source_url: sourceUrl,
         processing_requested: processingRequested,
-        processing_status: 'pending'
+        processing_status: 'pending',
+        // Metadata fields
+        document_type: documentType,
+        author: author,
+        publication_year: publicationYear,
+        publisher: publisher,
+        cover_image_url: coverImageUrl
       })
     
     if (dbError) {
@@ -152,7 +190,7 @@ export async function uploadDocument(formData: FormData): Promise<{
     }
     
     // Create background job for processing
-    const { data: job, error: jobError } = await supabase
+    const { data: job, error: jobError} = await supabase
       .from('background_jobs')
       .insert({
         user_id: user.id,
@@ -165,7 +203,9 @@ export async function uploadDocument(formData: FormData): Promise<{
           source_type: sourceType,
           source_url: sourceUrl,
           processing_requested: processingRequested,
-          pasted_content: pastedContent
+          pasted_content: pastedContent,
+          // Include document metadata for worker
+          document_type: documentType
         }
       })
       .select()

@@ -1,6 +1,13 @@
 import { marked } from 'marked'
 import type { Chunk } from '@/types/annotations'
+import {
+  injectHighlights,
+  type AnnotationForInjection,
+} from './highlight-injector'
 
+/**
+ * Renderable block with chunk mapping and optional highlights.
+ */
 export interface Block {
   id: string
   type: 'heading' | 'paragraph' | 'code' | 'blockquote' | 'list' | 'table'
@@ -14,11 +21,17 @@ export interface Block {
 
 /**
  * Parse markdown into renderable blocks with chunk mappings.
+ *
  * Uses marked.lexer() to get tokens with precise positions.
+ * @param markdown - Markdown content to parse.
+ * @param chunks - Chunks with offset ranges.
+ * @param annotations - Optional annotations to inject as highlights.
+ * @returns Array of blocks with injected highlights if annotations provided.
  */
 export function parseMarkdownToBlocks(
   markdown: string,
-  chunks: Chunk[]
+  chunks: Chunk[],
+  annotations: AnnotationForInjection[] = []
 ): Block[] {
   const tokens = marked.lexer(markdown)
   const blocks: Block[] = []
@@ -53,10 +66,26 @@ export function parseMarkdownToBlocks(
       html = `<p>${raw}</p>`
     }
 
+    // Inject highlights if annotations provided
+    if (annotations.length > 0) {
+      html = injectHighlights({
+        html,
+        blockStartOffset: offset,
+        blockEndOffset: endOffset,
+        annotations,
+      })
+    }
+
+    // Extract depth for heading tokens
+    const depth =
+      'depth' in token && typeof token.depth === 'number'
+        ? token.depth
+        : undefined
+
     blocks.push({
       id: `block_${blockIndex}`,
       type: mapTokenType(token.type),
-      level: (token as any).depth || undefined,
+      level: depth,
       html,
       startOffset: offset,
       endOffset,
@@ -85,6 +114,9 @@ export function parseMarkdownToBlocks(
 
 /**
  * Binary search to find chunk containing offset.
+ * @param chunks - Sorted array of chunks.
+ * @param offset - Character offset to find.
+ * @returns Chunk containing the offset, or null if not found.
  */
 function findChunkForOffset(chunks: Chunk[], offset: number): Chunk | null {
   let left = 0
@@ -110,6 +142,8 @@ function findChunkForOffset(chunks: Chunk[], offset: number): Chunk | null {
 
 /**
  * Map marked token type to simplified block type.
+ * @param tokenType - Marked.js token type.
+ * @returns Simplified block type for rendering.
  */
 function mapTokenType(tokenType: string): Block['type'] {
   switch (tokenType) {
