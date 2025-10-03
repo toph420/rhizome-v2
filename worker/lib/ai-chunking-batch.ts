@@ -91,7 +91,7 @@ export async function batchChunkAndExtractMetadata(
     console.log(`[AI Metadata] Using type-specific chunking for document type: ${documentType}`)
   }
 
-  // Step 1: Create simple windowed batches
+  // Step 1: Create batches (custom for EPUBs, windowed for others)
   if (onProgress) {
     await onProgress({
       phase: 'batching',
@@ -101,8 +101,19 @@ export async function batchChunkAndExtractMetadata(
     })
   }
 
-  const batches = createBatches(markdown, finalConfig.maxBatchSize)
-  console.log(`[AI Metadata] Created ${batches.length} batches with ${OVERLAP_SIZE} char overlap`)
+  const batches = finalConfig.customBatches
+    ? finalConfig.customBatches.map((batch, i) => ({
+        batchId: `custom-${i}`,
+        content: batch.content,
+        startOffset: batch.startOffset,
+        endOffset: batch.endOffset
+      }))
+    : createBatches(markdown, finalConfig.maxBatchSize)
+
+  console.log(
+    `[AI Metadata] Created ${batches.length} batches` +
+    (finalConfig.customBatches ? ' (custom EPUB chapters)' : ` with ${OVERLAP_SIZE} char overlap`)
+  )
 
   // Initialize Gemini client
   const geminiClient = createGeminiClient(finalConfig.apiKey)

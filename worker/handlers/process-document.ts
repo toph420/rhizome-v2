@@ -84,7 +84,15 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     // Handler saves markdown to storage
     const userId = doc.user_id
     const markdownPath = `${userId}/${document_id}/content.md`
-    
+
+    // Refresh connection after long processing (prevents stale connection)
+    console.log(`🔄 Refreshing Supabase connection after processing`)
+    const { createClient } = await import('@supabase/supabase-js')
+    supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
     // Upload markdown to storage
     console.log(`💾 Saving markdown to storage: ${markdownPath}`)
     const { error: uploadError } = await supabase.storage
@@ -93,7 +101,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         contentType: 'text/markdown',
         upsert: true
       })
-    
+
     if (uploadError) {
       throw new Error(`Failed to save markdown: ${uploadError.message}`)
     }

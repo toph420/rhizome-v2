@@ -59,6 +59,12 @@ export interface BatchMetadataConfig {
   apiKey?: string
   maxRetries?: number
   enableProgress?: boolean
+  /** Custom batches for EPUB chapters or other structured content */
+  customBatches?: Array<{
+    content: string
+    startOffset: number
+    endOffset: number
+  }>
 }
 
 /**

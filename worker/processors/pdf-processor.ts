@@ -23,25 +23,56 @@ const LARGE_PDF_SIZE_MB_THRESHOLD = 10 // Or files larger than 10MB
 const EXTRACTION_PROMPT = `
 You are a PDF extraction assistant. Your task is to extract ALL text from this PDF document and convert it to clean markdown format.
 
-IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text.
-Do not summarize or skip any content. Return the COMPLETE document text.
+IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text. Do not summarize or skip any content. Return the COMPLETE document text.
+
+REMOVE THESE ARTIFACTS:
+- Page numbers (standalone numbers, "Page X", "X of Y", etc.)
+- Running headers and footers (repeated text at top/bottom of pages)
+- PDF metadata (file paths, timestamps)
+- Margin notes or annotations that aren't part of the main text
+
+PRESERVE THESE ELEMENTS (CRITICAL):
+- Footnotes and endnotes - preserve ALL footnote content
+- Citations and references
+- Figure captions
+- Table contents
+- Block quotes
+- Epigraphs
+
+FOOTNOTE HANDLING:
+- Keep inline markers: [1], ¹, (1), etc.
+- Keep footnote content at bottom of pages
+- Format as markdown footnotes:
+  - Inline: "text with citation[^1]"
+  - Definition: "[^1]: Footnote content here"
+- Preserve ALL footnote text verbatim
+- If footnote spans pages, merge into single footnote
+
+HEADING DETECTION:
+Detect headings by these signals (even if poorly formatted):
+- ALL CAPS TEXT followed by content = heading
+- Bold or larger font followed by content = heading
+- Centered text followed by content = heading
+- Short lines (< 80 chars) followed by paragraphs = likely heading
+- Numbered sections (1., 1.1, Chapter 1, etc.) = heading
+
+Convert to proper markdown hierarchy:
+- Main titles: #
+- Chapter/section headings: ##
+- Subsections: ###
+- Minor headings: ####
 
 LINE BREAK HANDLING:
 - Merge lines WITHIN paragraphs into continuous text
 - Only preserve line breaks for semantic boundaries:
-  - Paragraph breaks (use \n\n for new paragraphs)
+  - Paragraph breaks (use \n\n between paragraphs)
   - Headings
   - List items
+  - Footnotes
   - Code blocks
   - Block quotes
 
 DO NOT preserve PDF formatting line wraps (lines that end because of page width).
-
-Example of WRONG (preserves PDF line wrapping):
-"This is a sentence that wraps\nat 80 characters because of the\nPDF page width."
-
-Example of CORRECT (continuous paragraph):
-"This is a sentence that wraps at 80 characters because of the PDF page width."
 
 Format the output as clean markdown with:
 - Proper heading hierarchy (# ## ###)
@@ -50,7 +81,7 @@ Format the output as clean markdown with:
 - Continuous text flow within paragraphs
 
 Return only the markdown text, no JSON wrapper needed.
-`
+`.trim()
 
 // No schema needed - expecting plain markdown text response
 
@@ -447,9 +478,16 @@ export class PDFProcessor extends SourceProcessor {
       )
     }
 
-    // Note: Stitching will be handled in T-006
-    // For now, batches are concatenated with separators
-    const markdown = result.markdown
+   // Deduplicate footnotes after stitching
+    let markdown = result.markdown
+    
+    const footnotesBefore = (markdown.match(/\[\^\d+\]:/g) || []).length
+    if (footnotesBefore > 0) {
+      console.log(`[PDFProcessor] 📝 Deduplicating footnotes (found ${footnotesBefore} definitions)...`)
+      markdown = this.deduplicateFootnotes(markdown)
+      const footnotesAfter = (markdown.match(/\[\^\d+\]:/g) || []).length
+      console.log(`[PDFProcessor] 📝 Deduplicated ${footnotesBefore} → ${footnotesAfter} footnotes`)
+    }
 
     const markdownKB = Math.round(markdown.length / 1024)
     await this.updateProgress(
@@ -543,5 +581,51 @@ export class PDFProcessor extends SourceProcessor {
       wordCount,
       outline
     }
+  }
+  
+  /**
+   * Removes duplicate footnote definitions from stitched batches.
+   * Keeps the longer version if duplicates found (more complete from overlap).
+   * Moves all footnotes to end of document for consistency.
+   */
+  private deduplicateFootnotes(markdown: string): string {
+    // Find all footnote definitions
+    // Pattern stops at: next footnote, heading, horizontal rule, or end of string
+    const footnotePattern = /\[\^(\d+)\]:\s*(.+?)(?=\n\[\^|\n\n#{1,6}\s|\n\n---|\n\n\*\*\*|$)/gs
+    const footnotes = new Map<string, string>()
+    
+    let match
+    while ((match = footnotePattern.exec(markdown)) !== null) {
+      const [, num, content] = match
+      const existing = footnotes.get(num)
+      
+      // Keep longer version (likely more complete from batch overlap)
+      if (!existing || content.length > existing.length) {
+        footnotes.set(num, content.trim())
+      }
+    }
+    
+    if (footnotes.size === 0) {
+      return markdown // No footnotes to process
+    }
+    
+    // Remove all footnote definitions from body
+    let cleaned = markdown.replace(footnotePattern, '')
+    
+    // Remove excessive whitespace that may result from removal
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n')
+    
+    // Append deduplicated footnotes at end
+    cleaned += '\n\n---\n\n## Notes\n\n'
+    
+    // Sort footnotes numerically
+    const sortedNotes = Array.from(footnotes.entries())
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+    
+    sortedNotes.forEach(([num, content]) => {
+      cleaned += `[^${num}]: ${content}\n\n`
+    })
+    
+    return cleaned.trim()
   }
 }
