@@ -54,8 +54,8 @@ export function DocumentList() {
     if (!userId) return
 
     const supabase = createClient()
-    
-    // Subscribe to document changes
+
+    // Subscribe to document changes (real-time)
     const channel = supabase
       .channel('document-updates')
       .on('postgres_changes', {
@@ -64,10 +64,11 @@ export function DocumentList() {
         table: 'documents',
         filter: `user_id=eq.${userId}`
       }, (payload) => {
+        console.log('[DocumentList] Realtime update:', payload.eventType, payload.new)
         if (payload.eventType === 'INSERT') {
           setDocuments(prev => [payload.new as Document, ...prev])
         } else if (payload.eventType === 'UPDATE') {
-          setDocuments(prev => prev.map(doc => 
+          setDocuments(prev => prev.map(doc =>
             doc.id === (payload.new as Document).id ? payload.new as Document : doc
           ))
         } else if (payload.eventType === 'DELETE') {
@@ -76,10 +77,38 @@ export function DocumentList() {
       })
       .subscribe()
 
+    // Fallback polling for processing documents (every 5 seconds)
+    // In case realtime doesn't trigger for status updates
+    const pollInterval = setInterval(async () => {
+      const hasProcessing = documents.some(doc => doc.processing_status === 'processing')
+      if (hasProcessing) {
+        console.log('[DocumentList] Polling for processing updates...')
+        const { data } = await supabase
+          .from('documents')
+          .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
+          .eq('user_id', userId)
+          .eq('processing_status', 'processing')
+
+        if (data && data.length > 0) {
+          // Check if any completed
+          const completedDocs = documents.filter(doc =>
+            doc.processing_status === 'processing' &&
+            !data.find(d => d.id === doc.id)
+          )
+
+          if (completedDocs.length > 0) {
+            console.log('[DocumentList] Documents completed, refreshing all...')
+            loadDocuments(supabase, userId)
+          }
+        }
+      }
+    }, 5000)
+
     return () => {
       supabase.removeChannel(channel)
+      clearInterval(pollInterval)
     }
-  }, [userId])
+  }, [userId, documents])
 
   async function loadDocuments(supabase: SupabaseClient, userId: string) {
     setLoading(true)
