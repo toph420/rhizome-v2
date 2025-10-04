@@ -1781,28 +1781,27 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-### 6.2 Review Modal Component with Pagination
+### 6.2 Review Tab Integration with Existing RightPanel
 
-**File**: `src/components/review/AnnotationReviewModal.tsx` (CREATE)
+**Note**: Integrate with existing `RightPanel.tsx` rather than creating separate sidebar
 
-**Note**: Includes pagination for large review queues (>50 items)
+**Why integrate with RightPanel:**
+- Consistent UI pattern (already has collapse/expand behavior)
+- No z-index conflicts or overlapping panels
+- Natural location for annotation workflows (already has Annotations tab)
+- Reuses existing Framer Motion animations
+
+**File**: `src/components/sidebar/AnnotationReviewTab.tsx` (CREATE)
 
 ```tsx
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle, AlertCircle, XCircle } from 'lucide-react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter
-} from '@/components/ui/dialog'
+import { CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
 
 interface ReviewItem {
   annotation: {
@@ -1818,34 +1817,22 @@ interface ReviewItem {
   }
 }
 
-interface ReviewModalProps {
+interface AnnotationReviewTabProps {
   documentId: string
   results: {
     success: any[]
     needsReview: ReviewItem[]
     lost: any[]
   }
-  open: boolean
-  onClose: () => void
+  onHighlightAnnotation?: (startOffset: number, endOffset: number) => void
 }
 
-export function AnnotationReviewModal({
-  documentId,
+export function AnnotationReviewTab({
   results,
-  open,
-  onClose
-}: ReviewModalProps) {
+  onHighlightAnnotation
+}: AnnotationReviewTabProps) {
   const [pending, setPending] = useState(results.needsReview)
-  const [currentPage, setCurrentPage] = useState(0)
   const { toast } = useToast()
-
-  // Pagination for large review queues
-  const ITEMS_PER_PAGE = 10
-  const totalPages = Math.ceil(pending.length / ITEMS_PER_PAGE)
-  const paginatedItems = pending.slice(
-    currentPage * ITEMS_PER_PAGE,
-    (currentPage + 1) * ITEMS_PER_PAGE
-  )
 
   const acceptAll = async () => {
     try {
@@ -1939,130 +1926,110 @@ export function AnnotationReviewModal({
     }
   }
 
+  // Tab content (no collapse logic - handled by RightPanel)
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Annotation Recovery Results</DialogTitle>
-        </DialogHeader>
+    <div className="h-full flex flex-col">
+      {/* Stats Summary */}
+      <div className="grid grid-cols-3 gap-2 p-4 border-b text-sm flex-shrink-0">
+        <div className="text-center">
+          <CheckCircle className="h-4 w-4 text-green-600 mx-auto mb-1" />
+          <div className="font-medium">{results.success.length}</div>
+          <div className="text-xs text-muted-foreground">Restored</div>
+        </div>
+        <div className="text-center">
+          <AlertCircle className="h-4 w-4 text-yellow-600 mx-auto mb-1" />
+          <div className="font-medium">{pending.length}</div>
+          <div className="text-xs text-muted-foreground">Review</div>
+        </div>
+        <div className="text-center">
+          <XCircle className="h-4 w-4 text-red-600 mx-auto mb-1" />
+          <div className="font-medium">{results.lost.length}</div>
+          <div className="text-xs text-muted-foreground">Lost</div>
+        </div>
+      </div>
 
-        <div className="space-y-6">
-          {/* Summary Stats */}
-          <div className="grid grid-cols-3 gap-4">
-            <StatCard
-              icon={CheckCircle}
-              label="Automatically Restored"
-              value={results.success.length}
-              variant="success"
-            />
-            <StatCard
-              icon={AlertCircle}
-              label="Need Your Review"
-              value={pending.length}
-              variant="warning"
-            />
-            <StatCard
-              icon={XCircle}
-              label="Could Not Recover"
-              value={results.lost.length}
-              variant="destructive"
-            />
-          </div>
-
-          {/* Review Items with Pagination */}
-          {pending.length > 0 && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-medium">Review These Matches</h3>
-                {totalPages > 1 && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                      disabled={currentPage === 0}
-                    >
-                      Previous
-                    </Button>
-                    <span>Page {currentPage + 1} of {totalPages}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-                      disabled={currentPage === totalPages - 1}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                )}
+      {/* Review Queue - Scrollable */}
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-3">
+          {pending.map((item, idx) => (
+            <div
+              key={idx}
+              className="border rounded-lg p-3 space-y-2 hover:bg-muted/50 cursor-pointer transition-colors"
+              onClick={() => {
+                // Highlight annotation in document
+                onHighlightAnnotation?.(
+                  item.suggestedMatch.startOffset,
+                  item.suggestedMatch.endOffset
+                )
+              }}
+            >
+              <div className="flex items-start justify-between">
+                <Badge variant="secondary" className="text-xs">
+                  {Math.round(item.suggestedMatch.confidence * 100)}%
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  Click to view
+                </span>
               </div>
 
-              {paginatedItems.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="border rounded-lg p-4 space-y-3"
+              <div className="text-sm">
+                <p className="text-muted-foreground mb-1">Original:</p>
+                <p className="bg-muted/50 p-2 rounded text-xs line-clamp-2">
+                  "{item.annotation.text}"
+                </p>
+              </div>
+
+              <div className="text-sm">
+                <p className="text-muted-foreground mb-1">Suggested:</p>
+                <p className="bg-muted/50 p-2 rounded text-xs line-clamp-2">
+                  "{item.suggestedMatch.text}"
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    acceptMatch(item)
+                  }}
                 >
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      Original Text
-                    </p>
-                    <p className="text-sm bg-muted p-2 rounded mt-1">
-                      "{item.annotation.text}"
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      Suggested Match
-                    </p>
-                    <p className="text-sm bg-muted p-2 rounded mt-1">
-                      "{item.suggestedMatch.text}"
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2">
-                    <Badge variant="secondary">
-                      {Math.round(item.suggestedMatch.confidence * 100)}% confidence
-                    </Badge>
-
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => acceptMatch(item)}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => discardMatch(item)}
-                      >
-                        Discard
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                  Accept
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    discardMatch(item)
+                  }}
+                >
+                  Discard
+                </Button>
+              </div>
             </div>
-          )}
+          ))}
 
-          {/* Lost Items */}
+          {/* Lost Items Section */}
           {results.lost.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-lg font-medium text-destructive">
+            <div className="mt-6 pt-6 border-t space-y-2">
+              <h3 className="text-sm font-medium text-destructive flex items-center gap-2">
+                <XCircle className="h-4 w-4" />
                 Could Not Recover ({results.lost.length})
               </h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 These annotations could not be matched to the edited document.
               </p>
-              <details className="text-sm">
+              <details className="text-xs">
                 <summary className="cursor-pointer hover:underline">
                   Show lost annotations
                 </summary>
                 <ul className="mt-2 space-y-1 pl-4">
                   {results.lost.map((item: any, idx: number) => (
                     <li key={idx} className="text-muted-foreground">
-                      "{item.text?.slice(0, 60)}..."
+                      "{item.text?.slice(0, 50)}..."
                     </li>
                   ))}
                 </ul>
@@ -2070,55 +2037,265 @@ export function AnnotationReviewModal({
             </div>
           )}
         </div>
+      </ScrollArea>
 
-        <DialogFooter>
-          {pending.length > 0 && (
-            <div className="flex gap-2 w-full pt-4 border-t">
-              <Button onClick={acceptAll} className="flex-1">
-                Accept All ({pending.length})
-              </Button>
-              <Button
-                onClick={discardAll}
-                variant="destructive"
-                className="flex-1"
-              >
-                Discard All ({pending.length})
-              </Button>
-            </div>
-          )}
-          <Button onClick={onClose} variant="outline">
-            {pending.length > 0 ? 'Review Later' : 'Close'}
+      {/* Batch Actions Footer */}
+      {pending.length > 0 && (
+        <div className="border-t p-4 space-y-2 flex-shrink-0">
+          <Button
+            onClick={acceptAll}
+            className="w-full"
+          >
+            Accept All ({pending.length})
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <Button
+            onClick={discardAll}
+            variant="destructive"
+            className="w-full"
+          >
+            Discard All ({pending.length})
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
+```
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  variant
-}: {
-  icon: any
-  label: string
-  value: number
-  variant: 'success' | 'warning' | 'destructive'
-}) {
-  const colors = {
-    success: 'text-green-600',
-    warning: 'text-yellow-600',
-    destructive: 'text-red-600'
+### 6.3 RightPanel Integration
+
+**File**: `src/components/sidebar/RightPanel.tsx` (MODIFY)
+
+```tsx
+'use client'
+
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ConnectionsList } from './ConnectionsList'
+import { AnnotationsList } from './AnnotationsList'
+import { WeightTuning } from './WeightTuning'
+import { ConnectionFilters } from './ConnectionFilters'
+import { AnnotationReviewTab } from './AnnotationReviewTab'
+
+interface RightPanelProps {
+  documentId: string
+  visibleChunkIds?: string[]
+  reviewResults?: {
+    success: any[]
+    needsReview: any[]
+    lost: any[]
+  } | null
+  onHighlightAnnotation?: (start: number, end: number) => void
+}
+
+export function RightPanel({
+  documentId,
+  visibleChunkIds = [],
+  reviewResults,
+  onHighlightAnnotation
+}: RightPanelProps) {
+  const [collapsed, setCollapsed] = useState(false)
+  const [activeTab, setActiveTab] = useState<'connections' | 'annotations' | 'weights' | 'review'>('connections')
+
+  // Auto-switch to review tab when results arrive
+  useEffect(() => {
+    if (reviewResults?.needsReview && reviewResults.needsReview.length > 0) {
+      setActiveTab('review')
+    }
+  }, [reviewResults])
+
+  const reviewCount = reviewResults?.needsReview?.length || 0
+
+  return (
+    <motion.div
+      className="fixed right-0 top-0 bottom-0 border-l z-40 bg-background"
+      initial={false}
+      animate={{
+        width: collapsed ? 48 : 384 // w-12 : w-96
+      }}
+      transition={{
+        type: 'spring',
+        damping: 25,
+        stiffness: 300
+      }}
+    >
+      {/* Toggle button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute -left-4 top-8 z-50 rounded-full border bg-background shadow-md"
+        onClick={() => setCollapsed(!collapsed)}
+        aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+      >
+        {collapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      </Button>
+
+      {/* Panel content (hidden when collapsed) */}
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            className="h-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => setActiveTab(v as any)}
+              className="h-full flex flex-col"
+            >
+              <TabsList className="grid w-full grid-cols-4 m-4">
+                <TabsTrigger value="connections">Connections</TabsTrigger>
+                <TabsTrigger value="annotations">Annotations</TabsTrigger>
+                <TabsTrigger value="weights">Weights</TabsTrigger>
+                <TabsTrigger value="review" className="relative">
+                  Review
+                  {reviewCount > 0 && (
+                    <Badge
+                      variant="destructive"
+                      className="ml-1 h-5 w-5 rounded-full p-0 text-xs"
+                    >
+                      {reviewCount}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="connections" className="flex-1 m-0 flex flex-col h-full">
+                <div className="border-b flex-shrink-0">
+                  <ConnectionFilters />
+                </div>
+                <div className="flex-1 overflow-auto scrollbar-hide">
+                  <ConnectionsList documentId={documentId} visibleChunkIds={visibleChunkIds} />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="annotations" className="flex-1 overflow-hidden m-0">
+                <ScrollArea className="h-full">
+                  <AnnotationsList documentId={documentId} />
+                </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="weights" className="flex-1 overflow-hidden m-0">
+                <ScrollArea className="h-full">
+                  <WeightTuning />
+                </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="review" className="flex-1 overflow-hidden m-0">
+                {reviewResults && reviewResults.needsReview.length > 0 ? (
+                  <AnnotationReviewTab
+                    documentId={documentId}
+                    results={reviewResults}
+                    onHighlightAnnotation={onHighlightAnnotation}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No annotations need review
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  )
+}
+```
+
+### 6.4 Document Reader Integration
+
+**File**: `src/components/reader/DocumentReader.tsx` (MODIFY)
+
+```tsx
+'use client'
+
+import { useState } from 'react'
+import { RightPanel } from '@/components/sidebar/RightPanel'
+
+export function DocumentReader({ documentId }: { documentId: string }) {
+  const [reviewResults, setReviewResults] = useState(null)
+  const [highlightedRange, setHighlightedRange] = useState<{
+    start: number
+    end: number
+  } | null>(null)
+
+  const handleHighlightAnnotation = (startOffset: number, endOffset: number) => {
+    // Scroll to annotation location
+    const element = document.getElementById(`offset-${startOffset}`)
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+    // Highlight temporarily (3 seconds)
+    setHighlightedRange({ start: startOffset, end: endOffset })
+    setTimeout(() => setHighlightedRange(null), 3000)
+  }
+
+  // Trigger after Obsidian sync
+  const handleSyncComplete = (result: any) => {
+    if (result.changed && result.results?.annotations?.needsReview > 0) {
+      setReviewResults(result.results)
+    }
   }
 
   return (
-    <div className="border rounded-lg p-4">
-      <div className="flex items-center gap-2">
-        <Icon className={cn('w-5 h-5', colors[variant])} />
-        <p className="text-2xl font-bold">{value}</p>
+    <div className="relative">
+      {/* Main content area - already has mr-96 for RightPanel */}
+      <div>
+        <DocumentHeader
+          documentId={documentId}
+          onSyncComplete={handleSyncComplete}
+        />
+
+        <MarkdownRenderer
+          content={markdown}
+          highlightedRange={highlightedRange}
+        />
       </div>
-      <p className="text-sm text-muted-foreground mt-1">{label}</p>
+
+      {/* RightPanel with review integration */}
+      <RightPanel
+        documentId={documentId}
+        reviewResults={reviewResults}
+        onHighlightAnnotation={handleHighlightAnnotation}
+      />
+    </div>
+  )
+}
+```
+
+### 6.4 Markdown Renderer with Highlight Support
+
+**File**: `src/components/reader/MarkdownRenderer.tsx` (MODIFY)
+
+```tsx
+interface MarkdownRendererProps {
+  content: string
+  highlightedRange?: { start: number; end: number } | null
+}
+
+export function MarkdownRenderer({ content, highlightedRange }: MarkdownRendererProps) {
+  // Add offset markers for scroll targeting
+  const contentWithMarkers = useMemo(() => {
+    if (!highlightedRange) return content
+
+    const { start, end } = highlightedRange
+    return (
+      content.slice(0, start) +
+      `<span id="offset-${start}" class="bg-yellow-200 dark:bg-yellow-900 animate-pulse">${content.slice(start, end)}</span>` +
+      content.slice(end)
+    )
+  }, [content, highlightedRange])
+
+  return (
+    <div className="prose dark:prose-invert max-w-none">
+      <ReactMarkdown>{contentWithMarkers}</ReactMarkdown>
     </div>
   )
 }
@@ -2525,24 +2702,26 @@ npm run benchmark:annotation-recovery
 
 ## Files Summary
 
-### New Files (17)
+### New Files (19)
 1. `worker/types/recovery.ts` - Type definitions
-2. `supabase/migrations/031_fuzzy_matching_fields.sql`
-3. `supabase/migrations/032_obsidian_settings.sql`
-4. `worker/lib/fuzzy-match.ts` - Core fuzzy matching
-5. `worker/handlers/recover-annotations.ts`
-6. `worker/handlers/remap-connections.ts`
-7. `worker/handlers/reprocess-document.ts`
-8. `worker/handlers/obsidian-sync.ts`
-9. `worker/handlers/readwise-import.ts`
-10. `worker/jobs/export-annotations.ts`
-11. `src/components/review/AnnotationReviewModal.tsx`
-12. `src/components/reader/DocumentHeader.tsx`
-13. `src/app/api/annotations/accept-match/route.ts`
-14. `src/app/api/annotations/discard/route.ts`
-15. `src/app/api/annotations/batch-accept/route.ts`
-16. `src/app/api/annotations/batch-discard/route.ts`
-17. `src/app/api/obsidian/export/route.ts`
+2. `supabase/migrations/030b_document_paths.sql` - File path fields (if missing)
+3. `supabase/migrations/030c_chunk_versioning.sql` - is_current flag for rollback
+4. `supabase/migrations/031_fuzzy_matching_fields.sql`
+5. `supabase/migrations/032_obsidian_settings.sql`
+6. `worker/lib/fuzzy-match.ts` - Core fuzzy matching
+7. `worker/handlers/recover-annotations.ts`
+8. `worker/handlers/remap-connections.ts`
+9. `worker/handlers/reprocess-document.ts`
+10. `worker/handlers/obsidian-sync.ts`
+11. `worker/handlers/readwise-import.ts`
+12. `worker/jobs/export-annotations.ts`
+13. `src/components/review/AnnotationReviewSidebar.tsx` - Sidebar (not modal)
+14. `src/components/reader/DocumentReader.tsx` - Integration
+15. `src/components/reader/MarkdownRenderer.tsx` - Highlight support
+16. `src/app/api/annotations/accept-match/route.ts`
+17. `src/app/api/annotations/discard/route.ts`
+18. `src/app/api/annotations/batch-accept/route.ts`
+19. `src/app/api/annotations/batch-discard/route.ts`
 
 ### Modified Files (4)
 1. `src/lib/ecs/components.ts` - Add fuzzy matching fields
