@@ -10,6 +10,7 @@ import { GeminiFileCache } from './gemini-cache.js'
 import { stitchMarkdownBatches } from './fuzzy-matching.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from './model-config.js'
 import { generateBatchedPdfExtractionPrompt } from './prompts/pdf-extraction.js'
+import { cleanPageArtifacts } from './text-cleanup.js'
 
 /**
  * Configuration for batched PDF extraction.
@@ -223,6 +224,9 @@ export async function extractBatch(
     if (!markdown || markdown.length < 20) {
       throw new Error(`Insufficient content extracted (${markdown.length} chars)`)
     }
+
+    // Apply post-processing cleanup to remove page artifacts Gemini might have missed
+    markdown = cleanPageArtifacts(markdown)
 
     const extractionTime = Date.now() - startTime
 

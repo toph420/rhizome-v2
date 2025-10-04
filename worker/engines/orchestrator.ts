@@ -73,6 +73,40 @@ export async function processDocument(
     byEngine.thematic_bridge = connections.length;
   }
 
+  // Debug: Check for duplicates before saving
+  const connectionKeys = allConnections.map(c =>
+    `${c.source_chunk_id}→${c.target_chunk_id}:${c.connection_type}`
+  );
+
+  const seen = new Set<string>();
+  const duplicates = connectionKeys.filter(key => {
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+
+  if (duplicates.length > 0) {
+    console.log('[Orchestrator] ⚠️  Duplicate connections detected BEFORE database insert:');
+    console.log(`[Orchestrator] Total: ${allConnections.length}, Unique: ${seen.size}, Duplicates: ${duplicates.length}`);
+
+    // Show first 5 duplicates with full details
+    const dupeExamples = duplicates.slice(0, 5).map(key => {
+      const matches = allConnections.filter(c =>
+        `${c.source_chunk_id}→${c.target_chunk_id}:${c.connection_type}` === key
+      );
+      return {
+        key,
+        count: matches.length,
+        strengths: matches.map(m => m.strength),
+        engines: matches.map(m => m.connection_type)
+      };
+    });
+
+    console.log('[Orchestrator] Example duplicates:', JSON.stringify(dupeExamples, null, 2));
+  } else {
+    console.log('[Orchestrator] ✅ No duplicates detected in connections array');
+  }
+
   // Save all connections
   console.log(`\n[Orchestrator] Saving ${allConnections.length} total connections...`);
   await onProgress?.(90, 'saving', 'Saving connections to database');

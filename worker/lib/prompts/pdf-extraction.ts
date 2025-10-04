@@ -21,11 +21,49 @@ export function generatePdfExtractionPrompt(): string {
   return `You are a PDF extraction assistant. Your task is to extract ALL text from this PDF document and convert it to clean markdown format.
 
 CRITICAL - JOIN SPLIT SENTENCES:
-If a sentence continues across a page break, JOIN it into one flowing line.
-- Remove page numbers that interrupt sentences
-- Remove headers/footers (author names, chapter titles, page numbers)
-- Example WRONG: "without\\n\\n302 Author Name\\n\\nfuss"
-- Example CORRECT: "without fuss"
+Your PRIMARY job is removing page artifacts that interrupt sentences.
+
+Examples of what to fix:
+
+BAD (what the PDF contains):
+"...in terms of
+
+303 Author Name
+
+strict laws..."
+
+GOOD (what you output):
+"...in terms of strict laws..."
+
+BAD:
+"without
+
+302 Henry Somers-Hall
+
+fuss. This explanation"
+
+GOOD:
+"without fuss. This explanation"
+
+BAD:
+"...the concept of
+
+Page 47
+
+difference as such..."
+
+GOOD:
+"...the concept of difference as such..."
+
+BAD:
+"...discussing the theory
+
+153 Chapter Title Here
+
+which continues in the next..."
+
+GOOD:
+"...discussing the theory which continues in the next..."
 
 IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text. Do not summarize or skip any content. Return the COMPLETE document text.
 
@@ -117,11 +155,39 @@ IMPORTANT:
 - Convert to clean markdown format
 
 CRITICAL - JOIN SPLIT SENTENCES:
-If a sentence continues across a page break (even at batch boundaries), JOIN it into one flowing line.
-- Remove page numbers that interrupt sentences
-- Remove headers/footers (author names, chapter titles, page numbers)
-- Example WRONG: "without\\n\\n302 Author Name\\n\\nfuss"
-- Example CORRECT: "without fuss"
+Your PRIMARY job is removing page artifacts that interrupt sentences.
+
+Examples of what to fix:
+
+BAD (what the PDF contains):
+"...in terms of
+
+303 Author Name
+
+strict laws..."
+
+GOOD (what you output):
+"...in terms of strict laws..."
+
+BAD:
+"without
+
+302 Henry Somers-Hall
+
+fuss. This explanation"
+
+GOOD:
+"without fuss. This explanation"
+
+BAD:
+"...the concept of
+
+Page 47
+
+difference as such..."
+
+GOOD:
+"...the concept of difference as such..."
 
 UNDERSTAND TWO TYPES OF BREAKS:
 

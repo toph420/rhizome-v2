@@ -12,6 +12,7 @@ import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from '../lib/model-config.js'
 import { generatePdfExtractionPrompt } from '../lib/prompts/pdf-extraction.js'
+import { cleanPageArtifacts } from '../lib/text-cleanup.js'
 
 // Thresholds for batched processing
 const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
@@ -283,7 +284,7 @@ export class PDFProcessor extends SourceProcessor {
     if (!result || !result.text) {
       throw new Error('AI returned empty response. Please try again.')
     }
-    
+
     // Clean up the markdown text (remove any code block wrappers)
     let markdown = result.text.trim()
     if (markdown.startsWith('```markdown')) {
@@ -291,10 +292,13 @@ export class PDFProcessor extends SourceProcessor {
     } else if (markdown.startsWith('```')) {
       markdown = markdown.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
     }
-    
+
     if (!markdown || markdown.length < 50) {
       throw new Error('AI returned insufficient content. Please try again.')
     }
+
+    // Apply post-processing cleanup to remove page artifacts Gemini might have missed
+    markdown = cleanPageArtifacts(markdown)
     
     // Use local chunking algorithm (same as MarkdownAsIsProcessor)
     const chunks = simpleMarkdownChunking(markdown)
