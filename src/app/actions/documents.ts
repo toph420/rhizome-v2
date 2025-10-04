@@ -1,6 +1,7 @@
 'use server'
 
 import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
+import { base64ToBlob } from '@/types/metadata'
 
 /**
  * Job progress structure for tracking processing stages.
@@ -66,7 +67,9 @@ export async function uploadDocument(formData: FormData): Promise<{
     const author = formData.get('author') as string | null
     const publicationYear = formData.get('publication_year') ? parseInt(formData.get('publication_year') as string) : null
     const publisher = formData.get('publisher') as string | null
+    const isbn = formData.get('isbn') as string | null
     const coverImage = formData.get('cover_image') as File | null
+    const coverImageData = formData.get('cover_image_data') as string | null // base64 or URL
     
     // Validate source type
     const validSourceTypes = ['pdf', 'epub', 'markdown_asis', 'markdown_clean', 'txt', 'youtube', 'web_url', 'paste']
@@ -146,9 +149,11 @@ export async function uploadDocument(formData: FormData): Promise<{
       }
     }
 
-    // Upload cover image if provided
+    // Handle cover image (three types: File upload, base64 from EPUB, URL from YouTube)
     let coverImageUrl: string | null = null
+
     if (coverImage) {
+      // Case 1: Manual file upload from DocumentPreview
       const coverPath = `${baseStoragePath}/cover.jpg`
       const { error: coverError } = await supabase.storage
         .from('documents')
@@ -163,7 +168,32 @@ export async function uploadDocument(formData: FormData): Promise<{
           .getPublicUrl(coverPath)
         coverImageUrl = publicUrl.publicUrl
       } else {
-        console.warn('Cover image upload failed:', coverError.message)
+        console.warn('Cover image upload failed (non-blocking):', coverError.message)
+      }
+    } else if (coverImageData) {
+      if (coverImageData.startsWith('data:image')) {
+        // Case 2: Base64 from EPUB - decode and upload to storage
+        console.log('Converting base64 cover image to storage')
+        const coverBlob = base64ToBlob(coverImageData)
+        const coverPath = `${baseStoragePath}/cover.jpg`
+
+        const { error: coverError } = await supabase.storage
+          .from('documents')
+          .upload(coverPath, coverBlob, { upsert: true })
+
+        if (!coverError) {
+          const { data } = supabase.storage
+            .from('documents')
+            .getPublicUrl(coverPath)
+
+          coverImageUrl = data.publicUrl
+        } else {
+          console.warn('Cover upload failed (non-blocking):', coverError)
+        }
+      } else if (coverImageData.startsWith('http')) {
+        // Case 3: URL from YouTube - use directly
+        console.log('Using HTTP cover image URL')
+        coverImageUrl = coverImageData
       }
     }
 
@@ -183,7 +213,14 @@ export async function uploadDocument(formData: FormData): Promise<{
         author: author,
         publication_year: publicationYear,
         publisher: publisher,
-        cover_image_url: coverImageUrl
+        cover_image_url: coverImageUrl,
+        detected_metadata: documentType ? {
+          type: documentType,
+          author,
+          publisher,
+          year: publicationYear?.toString(),
+          isbn
+        } : null
       })
     
     if (dbError) {

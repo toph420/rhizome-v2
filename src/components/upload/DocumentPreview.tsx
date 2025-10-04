@@ -13,23 +13,7 @@ import {
 } from '@/components/ui/select'
 import { Upload, X } from 'lucide-react'
 import Image from 'next/image'
-
-export type DocumentType =
-  | 'fiction'
-  | 'nonfiction_book'
-  | 'academic_paper'
-  | 'technical_manual'
-  | 'article'
-  | 'essay'
-
-export interface DetectedMetadata {
-  title: string
-  author: string
-  type: DocumentType
-  year?: number
-  publisher?: string
-  description?: string
-}
+import type { DetectedMetadata, DocumentType } from '@/types/metadata'
 
 interface DocumentPreviewProps {
   metadata: DetectedMetadata
@@ -53,7 +37,10 @@ export function DocumentPreview({
 }: DocumentPreviewProps) {
   const [edited, setEdited] = useState(metadata)
   const [coverImage, setCoverImage] = useState<File | null>(null)
-  const [coverPreview, setCoverPreview] = useState<string | null>(null)
+  const [coverPreview, setCoverPreview] = useState<string | null>(
+    // Initialize with metadata cover if available (EPUB base64 or YouTube URL)
+    metadata.coverImage || null
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,12 +157,12 @@ export function DocumentPreview({
               <Label htmlFor="year">Year (Optional)</Label>
               <Input
                 id="year"
-                type="number"
+                type="text"
                 value={edited.year || ''}
                 onChange={(e) =>
                   setEdited({
                     ...edited,
-                    year: e.target.value ? parseInt(e.target.value) : undefined,
+                    year: e.target.value || undefined,
                   })
                 }
                 placeholder="2024"

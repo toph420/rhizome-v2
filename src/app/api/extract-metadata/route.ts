@@ -1,25 +1,9 @@
 import { NextRequest } from 'next/server'
 import { GoogleGenAI } from '@google/genai'
+import type { DetectedMetadata } from '@/types/metadata'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60 // 1 minute timeout
-
-export type DocumentType =
-  | 'fiction'
-  | 'nonfiction_book'
-  | 'academic_paper'
-  | 'technical_manual'
-  | 'article'
-  | 'essay'
-
-export interface DetectedMetadata {
-  title: string
-  author: string
-  type: DocumentType
-  year?: number
-  publisher?: string
-  description?: string
-}
 
 /**
  * Extract first N pages from PDF using Gemini Files API
@@ -90,21 +74,27 @@ async function detectDocumentMetadata(markdown: string): Promise<DetectedMetadat
 
   const prompt = `Analyze these first pages and extract document metadata.
 
-Return JSON with:
-- title: Full document title (STRING, required)
-- author: Author name(s) or "Unknown" (STRING, required)
-- type: One of: "fiction" | "nonfiction_book" | "academic_paper" | "technical_manual" | "article" | "essay" (STRING, required)
-- year: Publication year as integer or null (NUMBER or NULL)
-- publisher: Publisher name or null (STRING or NULL)
-- description: 1-2 sentence description of what this document is about (STRING, required)
+Return a SINGLE JSON object (not an array) with these exact fields:
+{
+  "title": "Full document title",
+  "author": "Author name(s) or Unknown",
+  "type": "fiction | nonfiction_book | academic_paper | technical_manual | article | essay",
+  "year": "1848" or null (as string),
+  "publisher": "Publisher name or null",
+  "description": "1-2 sentence description of what this document is about"
+}
+
+IMPORTANT:
+- Return ONLY the JSON object itself, NOT wrapped in an array or markdown code blocks
+- year must be a string, not a number
 
 Document text:
-${markdown.slice(0, 5000)}
+${markdown.slice(0, 5000)}`
 
-Return ONLY valid JSON, no markdown formatting.`
+  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
 
   const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-exp',
+    model,
     contents: [{ parts: [{ text: prompt }] }],
     config: {
       responseMimeType: 'application/json',
@@ -113,11 +103,37 @@ Return ONLY valid JSON, no markdown formatting.`
     }
   })
 
-  const metadata = JSON.parse(result.text || '{}')
+  console.log('[extract-metadata] AI raw response:', result.text?.slice(0, 500))
 
-  // Validation
+  let metadata
+  try {
+    metadata = JSON.parse(result.text || '{}')
+  } catch (parseError) {
+    console.error('[extract-metadata] JSON parse error:', parseError)
+    console.error('[extract-metadata] Raw text:', result.text)
+    throw new Error('Failed to parse AI response as JSON')
+  }
+
+  // Handle edge case where AI returns array instead of object
+  if (Array.isArray(metadata)) {
+    console.log('[extract-metadata] AI returned array, extracting first element')
+    if (metadata.length === 0) {
+      throw new Error('AI returned empty array')
+    }
+    metadata = metadata[0]
+  }
+
+  console.log('[extract-metadata] Parsed metadata:', metadata)
+
+  // Validation with better error message
   if (!metadata.title || !metadata.author || !metadata.type) {
-    throw new Error('Invalid metadata response from AI')
+    console.error('[extract-metadata] Missing required fields:', {
+      hasTitle: !!metadata.title,
+      hasAuthor: !!metadata.author,
+      hasType: !!metadata.type,
+      metadata
+    })
+    throw new Error(`Invalid metadata response from AI - missing required fields. Got: ${JSON.stringify(metadata)}`)
   }
 
   return metadata as DetectedMetadata

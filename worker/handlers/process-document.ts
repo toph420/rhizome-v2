@@ -55,22 +55,71 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
   }
 
   console.log(`📄 Processing document ${document_id} as ${ProcessorRouter.getSourceTypeName(sourceType)}`)
-  
+
   let processor = null
-  
+
   try {
-    // Create processor using router
-    processor = ProcessorRouter.createProcessor(sourceType, ai, supabase, job)
-    
-    // Process document
-    console.log(`🚀 Starting processing with ${processor.constructor.name}`)
-    const result: ProcessResult = await processor.process()
-    
-    // Validate result
+    // ✅ STEP 1: CHECK FOR CACHED RESULTS (avoid re-running AI)
+    const cachedChunks = job.metadata?.cached_chunks
+    const cachedMarkdown = job.metadata?.cached_markdown
+    const cachedMetadata = job.metadata?.cached_metadata
+    const cachedWordCount = job.metadata?.cached_word_count
+    const cachedOutline = job.metadata?.cached_outline
+
+    let result: ProcessResult
+
+    if (cachedChunks && cachedMarkdown) {
+      // Use cached results from previous attempt
+      console.log(`♻️  Using cached processing result from previous attempt`)
+      console.log(`   - Cached chunks: ${cachedChunks.length}`)
+      console.log(`   - Word count: ${cachedWordCount || 'unknown'}`)
+      console.log(`💰 Saved ~$0.40 by skipping AI re-processing`)
+
+      result = {
+        markdown: cachedMarkdown,
+        chunks: cachedChunks,
+        metadata: cachedMetadata,
+        wordCount: cachedWordCount,
+        outline: cachedOutline
+      }
+    } else {
+      // ✅ STEP 2: NO CACHE, RUN AI PROCESSING
+      console.log(`🤖 No cache found, running AI processing`)
+
+      // Create processor using router
+      processor = ProcessorRouter.createProcessor(sourceType, ai, supabase, job)
+
+      // Process document with AI
+      console.log(`🚀 Starting processing with ${processor.constructor.name}`)
+      result = await processor.process()
+
+      // ✅ STEP 3: CACHE IMMEDIATELY AFTER AI PROCESSING (before database operations)
+      console.log(`💾 Caching processing result for retry safety`)
+      console.log(`   - Chunks to cache: ${result.chunks.length}`)
+      console.log(`   - Markdown size: ${Math.round(result.markdown.length / 1024)}KB`)
+
+      await supabase
+        .from('background_jobs')
+        .update({
+          metadata: {
+            cached_chunks: result.chunks,
+            cached_markdown: result.markdown,
+            cached_metadata: result.metadata,
+            cached_word_count: result.wordCount,
+            cached_outline: result.outline,
+            cache_created_at: new Date().toISOString()
+          }
+        })
+        .eq('id', job.id)
+
+      console.log(`✅ Processing complete and cached`)
+    }
+
+    // Validate result (same as before)
     if (!result) {
       throw new Error('Processor returned empty result')
     }
-    
+
     if (!result.markdown || !result.chunks) {
       throw new Error('Processor result missing required fields (markdown, chunks)')
     }
@@ -88,8 +137,12 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     // Refresh connection after long processing (prevents stale connection)
     console.log(`🔄 Refreshing Supabase connection after processing`)
     const { createClient } = await import('@supabase/supabase-js')
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (!supabaseUrl) {
+      throw new Error('SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL must be set')
+    }
     supabase = createClient(
-      process.env.SUPABASE_URL!,
+      supabaseUrl,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
@@ -132,6 +185,22 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       embedding: embeddings[i]
     }))
 
+    // ✅ STEP 1: CLEAN SLATE - Delete existing chunks for this document
+    // Why: If AI re-chunking produces fewer chunks (350 vs 366), we don't want orphans
+    // The unique constraint prevents race conditions between concurrent retries
+    console.log(`🧹 Cleaning existing chunks for document ${document_id}`)
+    const { error: deleteError } = await supabase
+      .from('chunks')
+      .delete()
+      .eq('document_id', document_id)
+
+    if (deleteError) {
+      // Log warning but continue - delete might fail if no chunks exist yet
+      console.warn(`⚠️ Failed to clean existing chunks: ${deleteError.message}`)
+    }
+
+    // ✅ STEP 2: INSERT FRESH CHUNKS
+    // Unique constraint on (document_id, chunk_index) prevents duplicates
     const { error: chunkError } = await supabase
       .from('chunks')
       .insert(chunksWithEmbeddings)
@@ -143,26 +212,40 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     
     // Stage 3.5: Create collision detection job (95-100%)
     if (chunksWithEmbeddings.length >= 2) {
-      console.log(`🔍 Creating collision detection job for ${chunksWithEmbeddings.length} chunks`)
-      const { error: jobError } = await supabase
+      // Check for existing pending/processing jobs to avoid duplicates
+      const { data: existingJobs } = await supabase
         .from('background_jobs')
-        .insert({
-          user_id: userId,  // Required field in background_jobs table
-          job_type: 'detect-connections',
-          status: 'pending',
-          input_data: {
-            document_id,
-            user_id: userId,
-            chunk_count: chunksWithEmbeddings.length,
-            trigger: 'document-processing-complete'
-          },
-          created_at: new Date().toISOString()
-        })
+        .select('id, status')
+        .eq('job_type', 'detect-connections')
+        .eq('user_id', userId)
+        .in('status', ['pending', 'processing'])
+        .contains('input_data', { document_id })
+        .limit(1)
 
-      if (jobError) {
-        console.error(`❌ Failed to create collision detection job: ${jobError.message}`)
+      if (existingJobs && existingJobs.length > 0) {
+        console.log(`🔍 Collision detection job already exists (${existingJobs[0].status}) - skipping duplicate`)
       } else {
-        console.log(`🔍 Collision detection job queued`)
+        console.log(`🔍 Creating collision detection job for ${chunksWithEmbeddings.length} chunks`)
+        const { error: jobError } = await supabase
+          .from('background_jobs')
+          .insert({
+            user_id: userId,  // Required field in background_jobs table
+            job_type: 'detect-connections',
+            status: 'pending',
+            input_data: {
+              document_id,
+              user_id: userId,
+              chunk_count: chunksWithEmbeddings.length,
+              trigger: 'document-processing-complete'
+            },
+            created_at: new Date().toISOString()
+          })
+
+        if (jobError) {
+          console.error(`❌ Failed to create collision detection job: ${jobError.message}`)
+        } else {
+          console.log(`🔍 Collision detection job queued`)
+        }
       }
     } else {
       console.log(`📭 Skipping collision detection - need at least 2 chunks (found ${chunksWithEmbeddings.length})`)

@@ -90,8 +90,13 @@ export abstract class SourceProcessor {
    */
   protected async refreshConnection(): Promise<void> {
     const { createClient } = await import('@supabase/supabase-js')
+    // Use NEXT_PUBLIC_SUPABASE_URL if SUPABASE_URL is not set (worker loads from parent .env.local)
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (!supabaseUrl) {
+      throw new Error('SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL must be set')
+    }
     this.supabase = createClient(
-      process.env.SUPABASE_URL!,
+      supabaseUrl,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
   }

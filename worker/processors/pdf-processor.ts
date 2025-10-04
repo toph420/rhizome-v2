@@ -11,79 +11,12 @@ import { extractLargePDF, DEFAULT_BATCH_CONFIG } from '../lib/pdf-batch-utils.js
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from '../lib/model-config.js'
+import { generatePdfExtractionPrompt } from '../lib/prompts/pdf-extraction.js'
 
 // Thresholds for batched processing
 const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
 const LARGE_PDF_SIZE_MB_THRESHOLD = 10 // Or files larger than 10MB
 
-/**
- * Extraction prompt for PDF processing.
- * Instructs Gemini to extract only markdown text for local chunking.
- */
-const EXTRACTION_PROMPT = `
-You are a PDF extraction assistant. Your task is to extract ALL text from this PDF document and convert it to clean markdown format.
-
-IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text. Do not summarize or skip any content. Return the COMPLETE document text.
-
-REMOVE THESE ARTIFACTS:
-- Page numbers (standalone numbers, "Page X", "X of Y", etc.)
-- Running headers and footers (repeated text at top/bottom of pages)
-- PDF metadata (file paths, timestamps)
-- Margin notes or annotations that aren't part of the main text
-
-PRESERVE THESE ELEMENTS (CRITICAL):
-- Footnotes and endnotes - preserve ALL footnote content
-- Citations and references
-- Figure captions
-- Table contents
-- Block quotes
-- Epigraphs
-
-FOOTNOTE HANDLING:
-- Keep inline markers: [1], ¹, (1), etc.
-- Keep footnote content at bottom of pages
-- Format as markdown footnotes:
-  - Inline: "text with citation[^1]"
-  - Definition: "[^1]: Footnote content here"
-- Preserve ALL footnote text verbatim
-- If footnote spans pages, merge into single footnote
-
-HEADING DETECTION:
-Detect headings by these signals (even if poorly formatted):
-- ALL CAPS TEXT followed by content = heading
-- Bold or larger font followed by content = heading
-- Centered text followed by content = heading
-- Short lines (< 80 chars) followed by paragraphs = likely heading
-- Numbered sections (1., 1.1, Chapter 1, etc.) = heading
-
-Convert to proper markdown hierarchy:
-- Main titles: #
-- Chapter/section headings: ##
-- Subsections: ###
-- Minor headings: ####
-
-LINE BREAK HANDLING:
-- Merge lines WITHIN paragraphs into continuous text
-- Only preserve line breaks for semantic boundaries:
-  - Paragraph breaks (use \n\n between paragraphs)
-  - Headings
-  - List items
-  - Footnotes
-  - Code blocks
-  - Block quotes
-
-DO NOT preserve PDF formatting line wraps (lines that end because of page width).
-
-Format the output as clean markdown with:
-- Proper heading hierarchy (# ## ###)
-- Organized lists and paragraphs  
-- Clear section breaks with \n\n between paragraphs
-- Continuous text flow within paragraphs
-
-Return only the markdown text, no JSON wrapper needed.
-`.trim()
-
-// No schema needed - expecting plain markdown text response
 
 /**
  * PDF processor for extracting content using Gemini Files API.
@@ -321,7 +254,7 @@ export class PDFProcessor extends SourceProcessor {
         contents: [{
           parts: [
             { fileData: { fileUri: uploadedFile.uri || uploadedFile.name, mimeType: 'application/pdf' } },
-            { text: EXTRACTION_PROMPT }
+            { text: generatePdfExtractionPrompt() }
           ]
         }],
         config: generationConfig

@@ -163,10 +163,11 @@ function extractMetadata(opfData: any): EPUBMetadata {
 
   let isbn: string | undefined
   for (const id of identifiers) {
-    const text = typeof id === 'string' ? id : id?.['#text'] || ''
-    const scheme = typeof id === 'object' ? id?.['@_opf:scheme'] : ''
+    const text = typeof id === 'string' ? id : (id?.['#text'] || '')
+    const scheme = typeof id === 'object' ? (id?.['@_opf:scheme'] || '') : ''
 
-    if (scheme?.toLowerCase() === 'isbn' || text.match(/^(97[89])?\d{9}[\dX]$/i)) {
+    // Ensure text is a string before calling string methods
+    if (typeof text === 'string' && (scheme?.toLowerCase() === 'isbn' || text.match(/^(97[89])?\d{9}[\dX]$/i))) {
       isbn = text.replace(/[^0-9X]/gi, '')
       break
     }

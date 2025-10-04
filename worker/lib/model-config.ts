@@ -25,7 +25,7 @@
  * Override via environment variable:
  *   GEMINI_MODEL=gemini-2.0-flash-exp npm run dev
  */
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
 
 /**
  * Maximum output tokens for Gemini responses.
