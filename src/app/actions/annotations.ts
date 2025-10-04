@@ -13,15 +13,17 @@ import type {
 
 /**
  * Zod schema for annotation creation.
+ * Updated to support multi-chunk annotations with chunkIds array.
  */
 const CreateAnnotationSchema = z.object({
   text: z.string().min(1).max(5000),
-  chunkId: z.string().uuid(),
+  chunkIds: z.array(z.string().uuid()).min(1).max(5), // Array of chunk IDs (max 5)
   documentId: z.string().uuid(),
   startOffset: z.number().int().min(0),
   endOffset: z.number().int().min(0),
-  color: z.enum(['yellow', 'green', 'blue', 'red', 'purple']),
+  color: z.enum(['yellow', 'green', 'blue', 'red', 'purple', 'orange', 'pink']),
   note: z.string().max(10000).optional(),
+  tags: z.array(z.string()).optional(),
   textContext: z.object({
     before: z.string(),
     content: z.string(),
@@ -50,21 +52,25 @@ export async function createAnnotation(
     // Create ECS instance
     const ecs = createECS()
 
+    // Get primary chunk (first in array)
+    const primaryChunkId = validated.chunkIds[0]
+
     // Create entity with 3 components
     const entityId = await ecs.createEntity(user.id, {
       annotation: {
         text: validated.text,
         note: validated.note,
+        tags: validated.tags || [],
         color: validated.color,
         range: {
           startOffset: validated.startOffset,
           endOffset: validated.endOffset,
-          chunkId: validated.chunkId,
+          chunkIds: validated.chunkIds, // Array of chunk IDs
         },
         textContext: validated.textContext,
       },
       position: {
-        chunkId: validated.chunkId,
+        chunkIds: validated.chunkIds, // Array of chunk IDs
         startOffset: validated.startOffset,
         endOffset: validated.endOffset,
         confidence: 1.0, // Exact match on creation
@@ -75,7 +81,8 @@ export async function createAnnotation(
         },
       },
       source: {
-        chunk_id: validated.chunkId,
+        chunk_id: primaryChunkId, // Primary chunk for ECS filtering
+        chunk_ids: validated.chunkIds, // All chunks for connection graph queries
         document_id: validated.documentId,
       },
     })

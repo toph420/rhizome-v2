@@ -173,3 +173,70 @@ export function calculateOffsetsFromCurrentSelection(
 
   return calculateOffsetsFromRange(range, snapToWord)
 }
+
+/**
+ * Calculate markdown offsets for multi-block selections.
+ *
+ * Handles selections spanning multiple blocks (e.g., paragraph 1 to paragraph 3).
+ * Independently finds start/end blocks and calculates absolute offsets.
+ * @param range - DOM Range from window.getSelection().
+ * @param snapToWord - Whether to snap to word boundaries.
+ * @returns Offset result with absolute start/end positions.
+ */
+export function calculateMultiBlockOffsets(
+  range: Range,
+  snapToWord = true
+): OffsetResult {
+  // Find start and end blocks independently
+  const startBlock = findBlockElement(range.startContainer)
+  const endBlock = findBlockElement(range.endContainer)
+
+  if (!startBlock) {
+    throw new Error('Start of selection must be within a block with data-start-offset')
+  }
+
+  if (!endBlock) {
+    throw new Error('End of selection must be within a block with data-start-offset')
+  }
+
+  // Get block start offsets (markdown-absolute)
+  const startBlockOffset = parseInt(startBlock.dataset.startOffset || '0', 10)
+  const endBlockOffset = parseInt(endBlock.dataset.startOffset || '0', 10)
+
+  // Calculate offset within start block
+  const startRange = document.createRange()
+  startRange.selectNodeContents(startBlock)
+  startRange.setEnd(range.startContainer, range.startOffset)
+  const offsetInStartBlock = startRange.toString().length
+
+  // Calculate offset within end block
+  const endRange = document.createRange()
+  endRange.selectNodeContents(endBlock)
+  endRange.setEnd(range.endContainer, range.endOffset)
+  const offsetInEndBlock = endRange.toString().length
+
+  // Calculate markdown-absolute offsets
+  let startOffset = startBlockOffset + offsetInStartBlock
+  let endOffset = endBlockOffset + offsetInEndBlock
+
+  // Get selected text
+  const selectedText = range.toString()
+
+  // Snap to word boundaries if requested
+  let snapped = false
+  if (snapToWord && selectedText.length > 0) {
+    const snappedResult = snapToWordBoundaries(selectedText, startOffset)
+    if (snappedResult) {
+      startOffset = snappedResult.startOffset
+      endOffset = snappedResult.endOffset
+      snapped = true
+    }
+  }
+
+  return {
+    startOffset,
+    endOffset,
+    selectedText: selectedText.trim(),
+    snapped,
+  }
+}

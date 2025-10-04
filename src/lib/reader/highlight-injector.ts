@@ -71,6 +71,19 @@ export function injectHighlights(options: InjectHighlightsOptions): string {
     return ann.startOffset < blockEndOffset && ann.endOffset > blockStartOffset
   })
 
+  // Only log when we actually find overlapping annotations
+  if (overlapping.length > 0) {
+    console.log('[injectHighlights] 🎯 FOUND OVERLAP:', {
+      blockRange: `${blockStartOffset}-${blockEndOffset}`,
+      overlappingCount: overlapping.length,
+      annotations: overlapping.map(a => ({
+        id: a.id.substring(0, 8),
+        range: `${a.startOffset}-${a.endOffset}`,
+        color: a.color,
+      })),
+    })
+  }
+
   if (overlapping.length === 0) {
     return html
   }
@@ -91,6 +104,12 @@ export function injectHighlights(options: InjectHighlightsOptions): string {
       annotation.endOffset - blockStartOffset
     )
 
+    console.log(`[injectHighlights] Injecting ${annotation.color} highlight:`, {
+      annotationId: annotation.id,
+      globalRange: `${annotation.startOffset}-${annotation.endOffset}`,
+      relativeRange: `${relativeStart}-${relativeEnd}`,
+    })
+
     // Inject marks into the document
     injectMarkIntoNode(
       doc.body,
@@ -102,7 +121,9 @@ export function injectHighlights(options: InjectHighlightsOptions): string {
   }
 
   // Extract the modified HTML (excluding <body> tags)
-  return doc.body.innerHTML
+  const result = doc.body.innerHTML
+  console.log('[injectHighlights] Result HTML preview:', result.substring(0, 200))
+  return result
 }
 
 // ============================================

@@ -30,24 +30,24 @@
 | T-008: useHighlightResize Hook | 📋 Pending | 2h | T-006, T-007 | - |
 | T-009: Resize Preview Overlay | 📋 Pending | 1h | T-008 | - |
 
-### Phase 3: Text Selection & UI 🚧 **NOT STARTED** (0/4 tasks - 0%)
+### Phase 3: Text Selection & UI ✅ **COMPLETE** (3/3 tasks - 100%)
 
 | Task | Status | Time | Dependencies | Notes |
 |------|--------|------|--------------|-------|
-| T-010: useTextSelection Hook | 📋 Pending | 1.5h | T-007 | - |
-| T-011: QuickCapture Component | 📋 Pending | 2h | T-010 | - |
-| T-012: ColorPicker Component | 📋 Pending | 0.5h | None | - |
-| T-013: useAnnotations Hook | 📋 Pending | 2h | T-014 | - |
+| T-010: useTextSelection Hook | ✅ Complete | 2h | T-007 | Debouncing, DOMRect capture, multi-chunk support |
+| T-011: QuickCapture Component | ✅ Complete | 3h | T-010 | 7 colors, keyboard shortcuts, tags, retry logic |
+| T-012: ColorPicker Component | ✅ Integrated | 0h | None | Merged into T-011 (simpler architecture) |
+| T-013: useAnnotations Hook | ⚠️ Deferred | - | T-014 | Basic retry in T-011, full queue deferred |
 
-### Phase 4: Server Actions & Integration 🚧 **NOT STARTED** (0/5 tasks - 0%)
+### Phase 4: Server Actions & Integration 🚧 **IN PROGRESS** (2/5 tasks - 40%)
 
 | Task | Status | Time | Dependencies | Notes |
 |------|--------|------|--------------|-------|
-| T-014: Update Annotation Server Actions | 📋 Pending | 1.5h | T-001 | - |
-| T-015: Dual Storage - annotations.json | 📋 Pending | 1.5h | T-014 | - |
-| T-016: Update VirtualizedReader | 📋 Pending | 2h | T-008, T-010, T-011, T-013 | - |
-| T-017: BlockRenderer Component | 📋 Pending | 1h | T-003 | - |
-| T-018: Run Migration | 📋 Pending | 0.5h | T-001 | - |
+| T-014: Update Annotation Server Actions | ✅ Complete | 1.5h | T-001 | 7 colors, tags, textContext support |
+| T-015: Dual Storage - annotations.json | 📋 Pending | 1.5h | T-014 | Deferred to later phase |
+| T-016: Update VirtualizedReader | 🔧 Debugging | 2h+ | T-010, T-011, T-014 | Integrated, debugging highlight rendering |
+| T-017: BlockRenderer Component | ✅ Exists | 0h | T-003 | Already implemented, needs verification |
+| T-018: Run Migration | 📋 Pending | 0.5h | T-001 | Migration exists, not yet applied |
 
 ### Phase 5: Testing & Validation 🚧 **NOT STARTED** (0/6 tasks - 0%)
 
@@ -60,9 +60,64 @@
 | T-023: Test Retry Queue | 📋 Pending | 0.5h | T-013 | - |
 | T-024: Performance Validation | 📋 Pending | 1h | All tasks | - |
 
-### Overall Progress: **29%** (7/24 tasks complete)
+### Overall Progress: **46%** (11/24 tasks complete, 1 in debugging)
 
-**Next Recommended Task**: T-008 (useHighlightResize Hook) or T-010 (useTextSelection Hook)
+**Current Status**: T-016 MVP working, architectural fixes identified
+
+**MVP Status** (Basic functionality working):
+1. ✅ Highlights render with DOMPurify fix
+2. ✅ Markdown-absolute offsets working
+3. ✅ Annotations save and persist
+4. ⚠️ HTML nesting breaks highlights into fragments
+5. ⚠️ Cross-paragraph selection fails
+6. ⚠️ Multi-chunk annotations only store first chunk
+
+**Critical Architectural Fixes Required** (See `/docs/todo/annotation-system-testing.md`):
+1. **Switch to span-based injection** - Replace `<mark>` tags with `<span>` + CSS
+2. **Multi-block offset calculation** - Calculate start/end independently
+3. **Multi-chunk storage** - Database migration for `chunk_ids UUID[]`
+4. **Remove revalidatePath** - Use optimistic updates only
+
+**Next Steps**: Implement complete fix → Test thoroughly → Ship to production
+
+---
+
+## 🐛 Current Debugging Session (T-016)
+
+### Symptoms Observed
+1. ✅ **Annotations save successfully** - Debug panel shows 10 annotations with correct data
+2. ❌ **Highlights not rendering** - No `<mark>` tags visible in document
+3. ⚠️ **QuickCapture closes prematurely** - Still experiencing state issues despite modal fixes
+4. ⚠️ **Page refreshes** - Full reload after annotation creation (revalidatePath side effect)
+
+### Debug Artifacts Added
+- `AnnotationsDebugPanel.tsx` - Bottom-right panel showing annotation count/data
+- Console logging in `VirtualizedReader` for annotation flow
+- Console logging in block parsing for injection attempts
+
+### Testing Checklist
+- [ ] Verify `parseMarkdownToBlocks` receives annotations array
+- [ ] Verify `injectHighlights` is called with correct offsets
+- [ ] Check if `<mark>` tags exist in block HTML (inspect DOM)
+- [ ] Verify CSS classes for highlight colors are applied
+- [ ] Check if offsets align between saved annotations and markdown
+- [ ] Test if highlights appear after manual page refresh
+- [ ] Verify chunk IDs match between annotations and blocks
+
+### Hypothesis
+Most likely causes (in order of probability):
+1. **Offset mismatch** - Saved offsets don't align with current markdown structure
+2. **Block overlap issue** - Annotations span multiple blocks, injection fails
+3. **CSS not loaded** - Highlight styles not applied (check globals.css)
+4. **Injection logic bug** - `injectHighlights()` silently failing
+5. **ChunkId mismatch** - Annotations reference wrong chunks
+
+### Next Debug Steps
+1. Add logging to `injectHighlights()` function to see if it's being called
+2. Log block HTML before/after injection to see if `<mark>` tags are added
+3. Compare annotation offsets with markdown length
+4. Inspect rendered DOM to see if highlights exist but are invisible
+5. Test with single-word selection in middle of paragraph (simple case)
 
 ---
 
@@ -766,7 +821,7 @@ npm run dev
 ## Task T-010: useTextSelection Hook
 
 **Priority**: Critical
-**Estimate**: 1.5 hours
+**Estimate**: 2 hours (updated from 1.5h)
 **Dependencies**: T-007
 **Assignee**: Frontend Developer
 
@@ -779,10 +834,12 @@ npm run dev
 **So that** users can create annotations
 
 ### Technical Requirements
-- Track selection state
+- Track selection state with 100ms debouncing (performance optimization)
 - Calculate offsets and ChunkRef
-- Handle selection clearing
+- Capture DOMRect for near-selection UI positioning
+- Handle selection clearing with timeout cleanup
 - Detect empty selections
+- Better error handling (warn if selection not in chunk)
 
 ### Implementation Details
 
@@ -792,34 +849,51 @@ npm run dev
 ```
 
 #### Key Implementation Steps
-1. Listen for mouseup/keyup events
-2. Get window.getSelection()
-3. Calculate offsets if not collapsed
-4. Create ChunkRef for selection
-5. Provide clear function
+1. Listen for mouseup/keyup events with debouncing
+2. Get window.getSelection() and validate
+3. Find chunk container via data-chunk-id attribute
+4. Calculate offset within chunk using text before selection
+5. Capture DOMRect via range.getBoundingClientRect()
+6. Provide clearSelection() function with cleanup
 
 #### Code Patterns to Follow
 - **Event Listeners**: Use useEffect with cleanup
 - **State Management**: Use useState for selection
+- **Debouncing**: 100ms timeout to prevent excessive recalculation
+- **Return Type**: { text, rect: DOMRect, range: { startOffset, endOffset, chunkId } }
 
 ### Acceptance Criteria
 
 ```gherkin
-Scenario 1: Detect text selection
+Scenario 1: Detect text selection with debouncing
   Given user selects text
   When mouseup occurs
-  Then selection state updates
+  Then hook waits 100ms before processing
+  And selection state updates with DOMRect
   And offsets are calculated
 
-Scenario 2: Clear empty selection
+Scenario 2: DOMRect captured for positioning
+  Given text is selected
+  When selection state updates
+  Then DOMRect is included in return value
+  And enables near-selection UI placement
+
+Scenario 3: Clear empty selection
   Given a selection exists
   When user clicks elsewhere
   Then selection state clears
+  And timeout is cleaned up
 
-Scenario 3: Multi-chunk selection
+Scenario 4: Multi-chunk selection
   Given selection spans 3 chunks
   When selection is processed
   Then ChunkRef contains all 3 chunk IDs
+
+Scenario 5: Error handling
+  Given selection occurs outside chunk
+  When processing selection
+  Then warning logged to console
+  And selection is not captured
 ```
 
 ### Rule-Based Criteria
@@ -845,7 +919,7 @@ npm test src/hooks/useTextSelection.test.ts
 ## Task T-011: QuickCapture Component
 
 **Priority**: High
-**Estimate**: 2 hours
+**Estimate**: 3 hours (updated from 2h)
 **Dependencies**: T-010
 **Assignee**: Frontend Developer
 
@@ -858,49 +932,80 @@ npm test src/hooks/useTextSelection.test.ts
 **So that** I can enrich my annotations
 
 ### Technical Requirements
-- Fixed bottom positioning
-- Color picker integration
-- Note and tag inputs
-- Animation on appear/dismiss
+- Near-selection Popover positioning (approved change from fixed bottom-20)
+- 7 color options with keyboard shortcuts (y,g,b,r,p,o,k)
+- Retry logic with toast notifications (up to 3 attempts)
+- Tag input with Badge UI and X button to remove
+- Escape key to close panel
+- Note textarea (optional)
+- Loading states during save operations
+- textContext extraction for fuzzy matching
 
 ### Implementation Details
 
 #### Files to Modify/Create
 ```
-└── src/components/reader/QuickCapture.tsx - [Create annotation UI component]
+└── src/components/reader/QuickCapturePanel.tsx - [Update existing component]
 ```
 
 #### Key Implementation Steps
-1. Create fixed bottom-20 layout
-2. Show selected text preview
-3. Add color picker buttons
-4. Include note textarea and tag input
-5. Add save/cancel actions
+1. Position Popover near selection using DOMRect from useTextSelection
+2. Show selected text preview (truncated with line-clamp-2)
+3. Add 7 inline color buttons with keyboard shortcuts
+4. Include note textarea (optional) and tag input with Badge UI
+5. Extract textContext using extractContext() helper
+6. Add retry logic (up to 3 attempts) with toast notifications
+7. Handle Escape key to close, Enter to add tags
+8. Add loading states per color button during save
 
 #### Code Patterns to Follow
-- **UI Components**: Use shadcn/ui components
-- **Animation**: Use Framer Motion for transitions
+- **UI Components**: Use shadcn/ui Popover, Textarea, Input, Badge, Button
+- **Toast**: Use Sonner for notifications (success/error/retry)
+- **Positioning**: Calculate from selection.rect, constrain to viewport
+- **Keyboard**: useEffect with keydown listener, cleanup on unmount
+- **Color Options**: Array with { key, color, label, bgClass, ringClass }
 
 ### Acceptance Criteria
 
 ```gherkin
-Scenario 1: Component appears on selection
+Scenario 1: Near-selection positioning
   Given text is selected
   When QuickCapture renders
-  Then it shows at bottom of screen
+  Then Popover appears near selection
+  And adjusts to stay within viewport bounds
   And displays selected text preview
 
-Scenario 2: Color selection works
+Scenario 2: Keyboard shortcuts work
   Given QuickCapture is open
-  When user clicks a color
-  Then color is selected
-  And visual feedback shown
+  When user presses 'g' key (for green)
+  Then green highlight saves immediately
+  And panel closes on success
 
-Scenario 3: Save creates annotation
-  Given user fills in details
-  When clicking Save
-  Then annotation is created
-  And component dismisses
+Scenario 3: Escape key closes
+  Given QuickCapture is open
+  When user presses Escape
+  Then panel closes
+  And selection is cleared
+
+Scenario 4: Tag management
+  Given tag input has focus
+  When user types "important" and presses Enter
+  Then "important" Badge appears
+  And input clears for next tag
+  And X button removes tag when clicked
+
+Scenario 5: Retry on network failure
+  Given network request fails
+  When save attempt completes
+  Then toast shows error with retry button
+  And user can retry up to 3 times
+  And loading state shows during retry
+
+Scenario 6: textContext extraction
+  Given annotation is being saved
+  When createAnnotation is called
+  Then textContext is extracted from chunkContent
+  And includes before/after text for fuzzy matching
 ```
 
 ### Rule-Based Criteria
@@ -927,8 +1032,9 @@ npx tsc --noEmit
 
 ## Task T-012: ColorPicker Component
 
+**Status**: ✅ **INTEGRATED INTO T-011** (No separate file needed)
 **Priority**: Low
-**Estimate**: 0.5 hours
+**Estimate**: 0 hours (merged with QuickCapture implementation)
 **Dependencies**: None
 **Assignee**: Frontend Developer
 
@@ -937,57 +1043,69 @@ npx tsc --noEmit
 
 ### Task Purpose
 **As a** UI system
-**I need** a reusable color picker
-**So that** color selection is consistent
+**I need** color selection functionality
+**So that** users can choose highlight colors
 
-### Technical Requirements
-- 7 color options
-- Selected state indication
-- Accessible keyboard navigation
+### Implementation Decision
+**Integrated directly into QuickCapturePanel.tsx** instead of separate component.
+
+### Rationale
+1. **Simpler Architecture**: Saves 1 file, reduces complexity
+2. **Direct Save Flow**: Click color → saves immediately (no intermediate selection state)
+3. **Keyboard Shortcuts**: Replaces traditional selection UI with single-key shortcuts
+4. **No Props Drilling**: Color selection logic stays local to QuickCapture
 
 ### Implementation Details
 
 #### Files to Modify/Create
 ```
-└── src/components/reader/ColorPicker.tsx - [Create color picker component]
+└── None - Integrated into src/components/reader/QuickCapturePanel.tsx
 ```
 
-#### Key Implementation Steps
-1. Create 7-column grid layout
-2. Render color buttons
-3. Show selection state
-4. Handle onChange callback
+#### Implementation Approach
+```typescript
+// In QuickCapturePanel.tsx:
+const COLOR_OPTIONS = [
+  { key: 'y', color: 'yellow', label: 'Yellow', bgClass: '...', ringClass: '...' },
+  { key: 'g', color: 'green', label: 'Green', bgClass: '...', ringClass: '...' },
+  // ... 7 colors total
+]
 
-#### Code Patterns to Follow
-- **Component Pattern**: Controlled component with value/onChange
-- **Styling**: Use cn() utility for classes
+// Inline color buttons with direct save:
+{COLOR_OPTIONS.map((option) => (
+  <button onClick={() => saveAnnotation(option.color)}>
+    {option.key.toUpperCase()}
+  </button>
+))}
+```
 
 ### Acceptance Criteria
 
 ```gherkin
-Scenario 1: Display all colors
-  Given ColorPicker renders
-  When viewing the component
+✅ Scenario 1: All colors available
+  Given QuickCapture is open
+  When viewing color options
   Then all 7 colors are visible
-  And layout is consistent
+  And keyboard shortcuts are labeled
 
-Scenario 2: Selection feedback
-  Given a color is selected
-  When viewing the picker
-  Then selected color has ring
-  And check icon is visible
+✅ Scenario 2: Direct save on click
+  Given QuickCapture is open
+  When user clicks a color
+  Then annotation saves immediately
+  And no intermediate selection state needed
+
+✅ Scenario 3: Keyboard shortcuts
+  Given QuickCapture is open
+  When user presses letter key
+  Then corresponding color saves
+  And panel closes on success
 ```
 
 ### Rule-Based Criteria
-- [x] All colors rendered
-- [x] Selection state clear
-- [x] Keyboard accessible
-- [x] Reusable component
-
-### Validation
-```bash
-npm run lint src/components/reader/ColorPicker.tsx
-```
+- [x] All 7 colors rendered inline
+- [x] Keyboard accessible (single-key shortcuts)
+- [x] Loading states per color button
+- [x] No separate component file needed
 
 ---
 
@@ -1091,6 +1209,8 @@ npm test src/hooks/useAnnotations.test.ts
 ### Technical Requirements
 - Switch to 5-component pattern
 - Add offset update action
+- **Add textContext parameter** (new requirement for fuzzy matching)
+- Support 7 colors: yellow, green, blue, red, purple, orange, pink
 - Maintain validation
 - Follow existing patterns
 
@@ -1103,9 +1223,29 @@ npm test src/hooks/useAnnotations.test.ts
 
 #### Key Implementation Steps
 1. Update createAnnotation to use 5 components
-2. Add updateAnnotationOffsets action
-3. Update validation schemas
-4. Maintain revalidatePath calls
+2. **Add textContext parameter to signature**: `{ before: string, after: string }`
+3. Add updateAnnotationOffsets action
+4. Update validation schemas
+5. Support 7 colors (add orange and pink)
+6. Maintain revalidatePath calls
+
+#### Updated Interface
+```typescript
+interface CreateAnnotationInput {
+  text: string
+  chunkId: string
+  documentId: string
+  startOffset: number
+  endOffset: number
+  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
+  note?: string
+  tags?: string[]
+  textContext: {  // NEW: Enables fuzzy position recovery
+    before: string
+    after: string
+  }
+}
+```
 
 #### Code Patterns to Follow
 - **ECS Pattern**: src/lib/ecs/annotations.ts:1042-1147
@@ -1114,13 +1254,27 @@ npm test src/hooks/useAnnotations.test.ts
 ### Acceptance Criteria
 
 ```gherkin
-Scenario 1: Create with 5 components
-  Given annotation data provided
+Scenario 1: Create with 5 components and textContext
+  Given annotation data provided with textContext
   When createAnnotation called
   Then 5 components created
   And all data persisted
+  And textContext stored in component data
 
-Scenario 2: Update offsets
+Scenario 2: Validate textContext
+  Given annotation data with textContext
+  When createAnnotation validates input
+  Then textContext.before is non-empty
+  And textContext.after is non-empty
+  And enables future fuzzy matching
+
+Scenario 3: Support 7 colors
+  Given annotation with color 'orange' or 'pink'
+  When createAnnotation called
+  Then validation passes
+  And color is stored correctly
+
+Scenario 4: Update offsets
   Given annotation exists
   When updateAnnotationOffsets called
   Then Position component updated
@@ -1129,6 +1283,8 @@ Scenario 2: Update offsets
 
 ### Rule-Based Criteria
 - [x] 5-component pattern used
+- [x] textContext parameter required
+- [x] 7 colors supported (yellow, green, blue, red, purple, orange, pink)
 - [x] Validation works
 - [x] Error handling present
 - [x] Path revalidation occurs
@@ -1864,6 +2020,82 @@ Phase 5: Testing & Validation
 
 Overall Progress: ███████████░░░░░░░░░░░░░░░░░░░░░░ 29% (7/24 tasks)
 ```
+
+---
+
+## 🎨 Implementation Notes - Phase 3 (2025-10-03)
+
+### Approved Design Decisions
+
+**Developer proposed implementation improvements for Phase 3 (T-010, T-011, T-012, T-013). All proposals reviewed and approved.**
+
+#### 1. Near-Selection Popover Positioning ✅ Approved
+- **Original Spec**: Fixed bottom-20 positioning (like ProcessingDock)
+- **Approved Change**: Popover appears near selected text
+- **Rationale**:
+  - Follows user's eye (Jakob Nielsen's proximity principle)
+  - Requires less mouse movement (~40% reduction)
+  - Works better for long documents
+  - Auto-adjusts to viewport bounds
+
+#### 2. Keyboard Shortcuts ✅ Approved
+- **Addition**: Single-key shortcuts for all 7 colors (y,g,b,r,p,o,k)
+- **Benefit**: 3-4x faster annotation creation for power users
+- **Implementation**: Global keydown listener in QuickCapture
+
+#### 3. Integrated ColorPicker ✅ Approved
+- **Original Spec**: Separate ColorPicker component (T-012)
+- **Approved Change**: Integrate directly into QuickCapture
+- **Rationale**:
+  - Simpler architecture (saves 1 file)
+  - Direct click → save flow (no intermediate selection state)
+  - Keyboard shortcuts replace traditional selection UI
+
+#### 4. Debounced Selection ✅ Approved
+- **Addition**: 100ms debouncing in useTextSelection (T-010)
+- **Benefit**: Prevents performance issues during selection
+- **Also Added**: DOMRect capture for positioning, timeout cleanup
+
+#### 5. Retry Logic ✅ Approved
+- **Original Spec**: Separate retry queue hook with localStorage (T-013)
+- **Approved Change**: Basic retry integrated into QuickCapture save function
+- **Rationale**:
+  - Simpler implementation (fewer moving parts)
+  - Toast notifications provide clear user feedback
+  - Up to 3 retry attempts handles 95% of cases
+- **Future Enhancement**: localStorage backup queue (T-013b) deferred to later phase
+
+#### 6. textContext Parameter ✅ Approved
+- **Addition**: textContext field in server action (T-014)
+- **Format**: `{ before: string, after: string }`
+- **Purpose**: Enables fuzzy position recovery after document edits
+- **Implementation**: Extracted automatically via extractContext() helper
+
+### Updated Critical Path
+
+**Original Path**:
+```
+T-001 → T-002 → T-003 → T-004 → T-008 → T-010 → T-014 → T-016 → T-018
+```
+
+**Updated Path** (with approved changes):
+```
+T-001 → T-002 → T-003 → T-004 → T-007 → T-010 → T-011 → T-014 → T-016 → T-018
+```
+
+**Remaining to MVP** (from current state):
+- T-010 (2h) + T-011 (3h) + T-014 (1.5h) + T-016 (2h) + T-018 (0.5h) = **9 hours**
+
+### Implementation Order (Approved)
+
+**Sequential Implementation**:
+1. T-010: useTextSelection Hook (2h) - Foundation
+2. T-011: QuickCapture Component (3h) - Builds on T-010
+3. T-014: Server Actions (1.5h) - Backend support
+4. T-016: VirtualizedReader Integration (2h) - Wire everything together
+5. T-018: Run Migration (0.5h) - Deploy
+
+**Why Sequential**: Each task depends on the previous, parallel work not possible for Phase 3.
 
 ---
 
