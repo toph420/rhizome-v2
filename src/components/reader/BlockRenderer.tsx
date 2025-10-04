@@ -76,7 +76,6 @@ export const BlockRenderer = memo(function BlockRenderer({
     if (annotationSpan) {
       const annotationId = annotationSpan.getAttribute('data-annotation-id')
       if (annotationId) {
-        console.log('[BlockRenderer] Annotation clicked:', annotationId)
         onAnnotationClick(annotationId, annotationSpan as HTMLElement)
       }
     }

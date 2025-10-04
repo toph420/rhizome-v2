@@ -42,15 +42,9 @@ const COLOR_OPTIONS: Array<{
 ]
 
 /**
- * Portal-based quick capture panel for creating annotations.
- * Uses React Portal directly (not Popover) to avoid click-capture issues.
- * Implements optimistic updates for instant feedback.
- * @param root0
- * @param root0.selection
- * @param root0.documentId
- * @param root0.onClose
- * @param root0.chunks
- * @param root0.onAnnotationCreated
+ * Portal-based panel for creating and editing annotations.
+ * Supports both create mode (new annotations) and edit mode (existing annotations).
+ * Uses optimistic updates for instant feedback.
  */
 export function QuickCapturePanel({
   selection,
@@ -71,12 +65,12 @@ export function QuickCapturePanel({
     existingAnnotation?.components.annotation?.color || 'yellow'
   )
 
-  // Derived state - no re-renders when toggling
-  const saving = savingColor !== null
-
   const panelRef = useRef<HTMLDivElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
+
+  // Derived state
+  const saving = savingColor !== null
 
   // Click-outside detection only - no event stopping inside panel
   useEffect(() => {
@@ -86,28 +80,18 @@ export function QuickCapturePanel({
 
       const target = e.target as HTMLElement
 
-      console.log('[QuickCapture] Click detected:', {
-        target: target.tagName,
-        isInsidePanel: panel.contains(target),
-      })
-
       // Only close if click is outside panel
       if (!panel.contains(target)) {
-        console.log('[QuickCapture] Click outside - closing panel')
         onClose()
-      } else {
-        console.log('[QuickCapture] Click inside - keeping panel open')
       }
     }
 
     // Delay to avoid capturing the click that opened the panel
     const timeoutId = setTimeout(() => {
-      console.log('[QuickCapture] Click-outside listener attached')
       document.addEventListener('mousedown', handleClickOutside)
     }, 200)
 
     return () => {
-      console.log('[QuickCapture] Cleanup - removing click-outside listener')
       clearTimeout(timeoutId)
       document.removeEventListener('mousedown', handleClickOutside)
     }
@@ -115,21 +99,13 @@ export function QuickCapturePanel({
 
   const saveAnnotation = useCallback(
     async (color: HighlightColor, shouldClose: boolean = false) => {
-      console.log('[QuickCapture] saveAnnotation called, color:', color, 'shouldClose:', shouldClose, 'mode:', mode)
-      if (savingColor) {
-        console.log('[QuickCapture] Already saving, skipping')
-        return
-      }
+      if (savingColor) return
 
       setSavingColor(color)
 
       try {
         if (mode === 'edit' && existingAnnotation) {
-          // ========================================
           // EDIT MODE: Update existing annotation
-          // ========================================
-          console.log('[QuickCapture] Updating annotation:', existingAnnotation.id)
-
           // Update annotation via server action
           const result = await updateAnnotation(existingAnnotation.id, {
             color,
@@ -173,9 +149,7 @@ export function QuickCapturePanel({
             })
           }
         } else {
-          // ========================================
           // CREATE MODE: New annotation
-          // ========================================
           // Extract context from primary chunk
           const primaryChunkId = selection.range.chunkIds[0]
           const primaryChunk = chunks.find((c) => c.id === primaryChunkId)
@@ -358,6 +332,31 @@ export function QuickCapturePanel({
     zIndex: 50,
   }), [selection.rect])
 
+  // Memoize color buttons to prevent re-render
+  const colorButtons = useMemo(() => (
+    COLOR_OPTIONS.map((option) => (
+      <button
+        key={option.color}
+        onClick={() => void saveAnnotation(option.color, false)}
+        disabled={saving}
+        title={`${option.label} (${option.key})`}
+        className={cn(
+          'w-8 h-8 rounded-md transition-all flex items-center justify-center border border-border',
+          option.bgClass,
+          saving && 'opacity-50 cursor-not-allowed'
+        )}
+      >
+        {saving && savingColor === option.color ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <span className="text-xs font-semibold">
+            {option.key.toUpperCase()}
+          </span>
+        )}
+      </button>
+    ))
+  ), [saving, savingColor, saveAnnotation])
+
   const panelContent = (
     <div
       ref={panelRef}
@@ -398,27 +397,7 @@ export function QuickCapturePanel({
             <span className="text-sm font-medium">Highlight Color</span>
           </div>
           <div className="flex gap-1.5">
-            {COLOR_OPTIONS.map((option) => (
-              <button
-                key={option.color}
-                onClick={() => void saveAnnotation(option.color, false)}
-                disabled={saving}
-                title={`${option.label} (${option.key})`}
-                className={cn(
-                  'w-8 h-8 rounded-md transition-all flex items-center justify-center border border-border',
-                  option.bgClass,
-                  saving && 'opacity-50 cursor-not-allowed'
-                )}
-              >
-                {saving && savingColor === option.color ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <span className="text-xs font-semibold">
-                    {option.key.toUpperCase()}
-                  </span>
-                )}
-              </button>
-            ))}
+            {colorButtons}
           </div>
         </div>
 
@@ -486,7 +465,7 @@ export function QuickCapturePanel({
               onClick={() => void saveAnnotation(selectedColor, true)}
               disabled={saving}
             >
-              {saving ? (
+              {saving && savingColor === selectedColor ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   Saving...

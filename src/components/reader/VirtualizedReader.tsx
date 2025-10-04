@@ -82,10 +82,7 @@ export function VirtualizedReader({
 
   // Parse markdown into blocks (without annotations - injection happens in BlockRenderer)
   const blocks = useMemo(() => {
-    console.time('parse-blocks')
-    const parsed = parseMarkdownToBlocks(markdown, chunks)
-    console.timeEnd('parse-blocks')
-    return parsed
+    return parseMarkdownToBlocks(markdown, chunks)
   }, [markdown, chunks])
 
   // Merge server annotations with optimistic ones
@@ -164,7 +161,6 @@ export function VirtualizedReader({
       }
 
       const chunkIdArray = Array.from(visibleChunkIds)
-      console.log('[VirtualizedReader] Visible chunks changed:', chunkIdArray)
       onVisibleChunksChange(chunkIdArray)
     },
     [blocks, onVisibleChunksChange]
@@ -177,7 +173,6 @@ export function VirtualizedReader({
 
       // Handle deletion (error rollback)
       if (annotation._deleted) {
-        console.log('[VirtualizedReader] Removing failed annotation:', annotation.id)
         next.delete(annotation.id)
         return next
       }
@@ -187,8 +182,6 @@ export function VirtualizedReader({
 
       // Clean up temp annotations when real ID arrives
       if (!annotation.id.startsWith('temp-')) {
-        console.log('[VirtualizedReader] Real ID received:', annotation.id)
-
         // Remove any temp annotations with matching offsets
         Array.from(next.entries()).forEach(([id, ann]) => {
           if (
@@ -196,7 +189,6 @@ export function VirtualizedReader({
             ann.start_offset === annotation.start_offset &&
             ann.end_offset === annotation.end_offset
           ) {
-            console.log('[VirtualizedReader] Cleaning up temp annotation:', id)
             next.delete(id)
           }
         })
@@ -206,7 +198,7 @@ export function VirtualizedReader({
           // Convert OptimisticAnnotation to StoredAnnotation format
           const storedAnnotation: StoredAnnotation = {
             id: annotation.id,
-            user_id: '', // Will be set by server
+            user_id: '',
             created_at: annotation.created_at,
             updated_at: annotation.created_at,
             components: {
@@ -222,23 +214,17 @@ export function VirtualizedReader({
                 },
                 textContext: annotation.text_context,
               },
-              position: undefined, // Not needed for UI
-              source: undefined, // Not needed for UI
+              position: undefined,
+              source: undefined,
             },
           }
 
           // Check if already exists (avoid duplicates)
           const exists = prevServer.some(a => a.id === annotation.id)
-          if (exists) {
-            console.log('[VirtualizedReader] Annotation already in serverAnnotations:', annotation.id)
-            return prevServer
-          }
+          if (exists) return prevServer
 
-          console.log('[VirtualizedReader] Adding annotation to serverAnnotations:', annotation.id)
           return [...prevServer, storedAnnotation]
         })
-      } else {
-        console.log('[VirtualizedReader] Optimistic annotation added:', annotation.id)
       }
 
       return next
@@ -247,7 +233,6 @@ export function VirtualizedReader({
 
   // Handle annotation updates (for editing existing annotations)
   const handleAnnotationUpdated = useCallback((annotation: StoredAnnotation) => {
-    console.log('[VirtualizedReader] Annotation updated:', annotation.id)
     setServerAnnotations(prev => prev.map(ann =>
       ann.id === annotation.id ? annotation : ann
     ))
@@ -255,21 +240,8 @@ export function VirtualizedReader({
 
   // Handle annotation click to enter edit mode
   const handleAnnotationEdit = useCallback((annotationId: string, element: HTMLElement) => {
-    console.log('[VirtualizedReader] Editing annotation:', annotationId)
-
     // Check if this is an optimistic annotation (temp ID)
     if (annotationId.startsWith('temp-')) {
-      const optimisticAnnotation = optimisticAnnotations.get(annotationId)
-      if (!optimisticAnnotation) {
-        console.error('[VirtualizedReader] Optimistic annotation not found:', annotationId)
-        toast.error('Cannot edit annotation yet', {
-          description: 'Please wait for the annotation to finish saving',
-          duration: 3000,
-        })
-        return
-      }
-
-      // Show toast that editing is not available yet
       toast.info('Annotation still saving', {
         description: 'Please wait a moment before editing',
         duration: 2000,
@@ -280,7 +252,6 @@ export function VirtualizedReader({
     // Find annotation in serverAnnotations
     const annotation = serverAnnotations.find(a => a.id === annotationId)
     if (!annotation || !annotation.components.annotation) {
-      console.error('[VirtualizedReader] Annotation not found:', annotationId)
       toast.error('Annotation not found', {
         description: 'This annotation may have been deleted',
         duration: 3000,
@@ -301,8 +272,7 @@ export function VirtualizedReader({
     // Set edit mode
     setEditingAnnotation(annotation)
     setCaptureSelection(textSelection)
-    console.log('[VirtualizedReader] Edit mode activated for:', annotationId)
-  }, [serverAnnotations, optimisticAnnotations])
+  }, [serverAnnotations])
 
   if (blocks.length === 0) {
     return (
@@ -336,8 +306,6 @@ export function VirtualizedReader({
           selection={captureSelection}
           documentId={documentId}
           onClose={() => {
-            console.log('[VirtualizedReader] onClose called')
-            console.trace() // Show call stack
             setCaptureSelection(null)
             setEditingAnnotation(null)
             clearSelection()
