@@ -28,9 +28,11 @@ async function processNextJob() {
 
   // Query for jobs that need processing:
   // 1. pending jobs
-  // 2. failed jobs ready for retry  
-  // 3. processing jobs that have been stuck for >10 minutes (stale)
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+  // 2. failed jobs ready for retry
+  // 3. processing jobs that have been stuck for >30 minutes (stale)
+  // Note: 30-minute timeout allows large documents (500+ pages) to complete
+  // Jobs send heartbeats every 5 minutes to reset started_at timestamp
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
   
   // First try to get pending or retry-ready failed jobs
   let { data: jobs, error: queryError } = await supabase
@@ -48,7 +50,7 @@ async function processNextJob() {
       .from('background_jobs')
       .select('*')
       .eq('status', 'processing')
-      .lt('started_at', tenMinutesAgo)
+      .lt('started_at', thirtyMinutesAgo)
       .order('created_at', { ascending: true })
       .limit(1)
     jobs = result.data

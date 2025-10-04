@@ -89,9 +89,30 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       // Create processor using router
       processor = ProcessorRouter.createProcessor(sourceType, ai, supabase, job)
 
-      // Process document with AI
-      console.log(`🚀 Starting processing with ${processor.constructor.name}`)
-      result = await processor.process()
+      // ✅ START HEARTBEAT: Update job timestamp every 5 minutes during long processing
+      const heartbeatInterval = setInterval(async () => {
+        console.log('[Heartbeat] Updating job timestamp to prevent stale detection...')
+        try {
+          await supabase
+            .from('background_jobs')
+            .update({
+              started_at: new Date().toISOString() // Reset timeout clock
+            })
+            .eq('id', job.id)
+        } catch (error) {
+          console.error('[Heartbeat] Failed to update timestamp:', error)
+        }
+      }, 5 * 60 * 1000) // Every 5 minutes
+
+      try {
+        // Process document with AI
+        console.log(`🚀 Starting processing with ${processor.constructor.name}`)
+        result = await processor.process()
+      } finally {
+        // ✅ ALWAYS CLEANUP: Stop heartbeat when processing completes or fails
+        clearInterval(heartbeatInterval)
+        console.log('[Heartbeat] Stopped')
+      }
 
       // ✅ STEP 3: CACHE IMMEDIATELY AFTER AI PROCESSING (before database operations)
       console.log(`💾 Caching processing result for retry safety`)
@@ -102,17 +123,25 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         .from('background_jobs')
         .update({
           metadata: {
+            // Existing caching (keep this)
             cached_chunks: result.chunks,
             cached_markdown: result.markdown,
             cached_metadata: result.metadata,
             cached_word_count: result.wordCount,
             cached_outline: result.outline,
-            cache_created_at: new Date().toISOString()
+            cache_created_at: new Date().toISOString(),
+
+            // NEW: Stage tracking for idempotent retry
+            processing_stage: 'extracted',
+            completed_stages: ['extracting'],
+            stage_timestamps: {
+              extracting: new Date().toISOString()
+            }
           }
         })
         .eq('id', job.id)
 
-      console.log(`✅ Processing complete and cached`)
+      console.log(`✅ Processing complete and cached (stage: extracted)`)
     }
 
     // Validate result (same as before)
@@ -159,6 +188,9 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       throw new Error(`Failed to save markdown: ${uploadError.message}`)
     }
     console.log(`✅ Markdown saved to storage`)
+
+    // Update stage after markdown saved
+    await updateStage(supabase, job.id, 'markdown_saved')
     
     // Generate embeddings for chunks
     console.log(`🔢 Generating embeddings for ${result.chunks.length} chunks`)
@@ -185,18 +217,27 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       embedding: embeddings[i]
     }))
 
-    // ✅ STEP 1: CLEAN SLATE - Delete existing chunks for this document
-    // Why: If AI re-chunking produces fewer chunks (350 vs 366), we don't want orphans
-    // The unique constraint prevents race conditions between concurrent retries
-    console.log(`🧹 Cleaning existing chunks for document ${document_id}`)
-    const { error: deleteError } = await supabase
-      .from('chunks')
-      .delete()
-      .eq('document_id', document_id)
+    // ✅ CONDITIONAL CHUNK DELETION: Stage-aware cleanup to prevent FK violations
+    // Only delete chunks if starting fresh, not if resuming from a checkpoint
+    const stage = job.metadata?.processing_stage || 'pending'
+    const isResume = ['chunked', 'embedded', 'complete'].includes(stage)
 
-    if (deleteError) {
-      // Log warning but continue - delete might fail if no chunks exist yet
-      console.warn(`⚠️ Failed to clean existing chunks: ${deleteError.message}`)
+    if (isResume) {
+      console.log(`♻️  Resuming from stage: ${stage}, keeping existing chunks`)
+      console.log(`   This prevents FK violations in collision detection`)
+    } else {
+      // Fresh processing: Clean slate for consistent chunk_index ordering
+      // Why: If AI re-chunking produces fewer chunks (350 vs 366), we don't want orphans
+      console.log(`🧹 Cleaning existing chunks for fresh processing`)
+      const { error: deleteError } = await supabase
+        .from('chunks')
+        .delete()
+        .eq('document_id', document_id)
+
+      if (deleteError) {
+        // Log warning but continue - delete might fail if no chunks exist yet
+        console.warn(`⚠️ Failed to clean existing chunks: ${deleteError.message}`)
+      }
     }
 
     // ✅ STEP 2: INSERT FRESH CHUNKS
@@ -209,16 +250,21 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       throw new Error(`Failed to save chunks: ${chunkError.message}`)
     }
     console.log(`✅ Saved ${chunksWithEmbeddings.length} chunks to database`)
-    
-    // Stage 3.5: Create collision detection job (95-100%)
+
+    // Update stage after chunks inserted
+    await updateStage(supabase, job.id, 'chunked')
+
+    // ✅ ASYNC CONNECTION DETECTION: Queued as separate job (doesn't block document completion)
+    // This prevents the main processing job from timing out during connection detection
     if (chunksWithEmbeddings.length >= 2) {
-      // Check for existing pending/processing jobs to avoid duplicates
+      // Check for existing jobs (any status except failed) to avoid duplicates
+      // Include 'completed' to prevent re-creating after successful detection
       const { data: existingJobs } = await supabase
         .from('background_jobs')
         .select('id, status')
         .eq('job_type', 'detect-connections')
         .eq('user_id', userId)
-        .in('status', ['pending', 'processing'])
+        .in('status', ['pending', 'processing', 'completed'])
         .contains('input_data', { document_id })
         .limit(1)
 
@@ -250,7 +296,10 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     } else {
       console.log(`📭 Skipping collision detection - need at least 2 chunks (found ${chunksWithEmbeddings.length})`)
     }
-    
+
+    // Update stage after embeddings complete (document ready for use)
+    await updateStage(supabase, job.id, 'embedded')
+
     // Update document status to completed with availability flags and source_metadata
     await updateDocumentStatus(
       supabase,
@@ -326,6 +375,45 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         .eq('id', job.id)
     }
   }
+}
+
+/**
+ * Updates processing stage in job metadata for idempotent retry.
+ *
+ * @param supabase - Supabase client
+ * @param jobId - Job ID to update
+ * @param stage - Current processing stage
+ */
+async function updateStage(
+  supabase: any,
+  jobId: string,
+  stage: string
+) {
+  const { data: job } = await supabase
+    .from('background_jobs')
+    .select('metadata')
+    .eq('id', jobId)
+    .single()
+
+  const metadata = job?.metadata || {}
+  const completedStages = metadata.completed_stages || []
+
+  await supabase
+    .from('background_jobs')
+    .update({
+      metadata: {
+        ...metadata,
+        processing_stage: stage,
+        completed_stages: [...completedStages, stage],
+        stage_timestamps: {
+          ...metadata.stage_timestamps,
+          [stage]: new Date().toISOString()
+        }
+      }
+    })
+    .eq('id', jobId)
+
+  console.log(`📍 Stage updated: ${stage}`)
 }
 
 /**
@@ -416,4 +504,4 @@ async function updateProgress(
 }
 
 // Export for testing
-export { updateDocumentStatus, updateProgress }
+export { updateDocumentStatus, updateProgress, updateStage }
