@@ -1,6 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createECS } from '@/lib/ecs'
 import { getCurrentUser } from '@/lib/auth'
@@ -87,9 +86,7 @@ export async function createAnnotation(
       },
     })
 
-    // Revalidate document page
-    revalidatePath(`/read/${validated.documentId}`)
-
+    // No revalidation needed - client handles optimistic updates
     return { success: true, id: entityId }
   } catch (error) {
     console.error('Failed to create annotation:', error)
@@ -101,16 +98,17 @@ export async function createAnnotation(
 }
 
 /**
- * Updates annotation component data (note, color).
+ * Updates annotation component data (note, color, tags).
  * @param entityId - Entity ID.
  * @param updates - Partial annotation data.
  * @param updates.note - Optional note text.
  * @param updates.color - Optional color value.
+ * @param updates.tags - Optional tags array.
  * @returns Success or error.
  */
 export async function updateAnnotation(
   entityId: string,
-  updates: { note?: string; color?: string }
+  updates: { note?: string; color?: string; tags?: string[] }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser()
@@ -142,13 +140,7 @@ export async function updateAnnotation(
 
     await ecs.updateComponent(annotationComponent.id, updatedData, user.id)
 
-    // Revalidate document page
-    const sourceComponent = entity.components?.find(
-      (c) => c.component_type === 'source'
-    )
-    if (sourceComponent?.data.document_id) {
-      revalidatePath(`/read/${sourceComponent.data.document_id}`)
-    }
+    // No revalidation needed - client handles optimistic updates
 
     return { success: true }
   } catch (error) {

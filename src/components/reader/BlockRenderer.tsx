@@ -13,6 +13,7 @@ interface BlockRendererProps {
     endOffset: number
     color: string
   }>
+  onAnnotationClick?: (annotationId: string, element: HTMLElement) => void
 }
 
 const ALLOWED_TAGS = [
@@ -35,7 +36,8 @@ const ALLOWED_ATTR = [
 
 export const BlockRenderer = memo(function BlockRenderer({
   block,
-  annotations
+  annotations,
+  onAnnotationClick
 }: BlockRendererProps) {
   // Find annotations that overlap this block
   const overlappingAnnotations = annotations.filter(
@@ -64,6 +66,22 @@ export const BlockRenderer = memo(function BlockRenderer({
       ? 'not-prose'
       : 'prose prose-sm lg:prose-base dark:prose-invert max-w-none'
 
+  // Handle annotation clicks via event delegation
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onAnnotationClick) return
+
+    const target = e.target as HTMLElement
+    const annotationSpan = target.closest('[data-annotation-id]')
+
+    if (annotationSpan) {
+      const annotationId = annotationSpan.getAttribute('data-annotation-id')
+      if (annotationId) {
+        console.log('[BlockRenderer] Annotation clicked:', annotationId)
+        onAnnotationClick(annotationId, annotationSpan as HTMLElement)
+      }
+    }
+  }
+
   return (
     <div
       data-block-id={block.id}
@@ -71,6 +89,7 @@ export const BlockRenderer = memo(function BlockRenderer({
       data-start-offset={block.startOffset}
       data-end-offset={block.endOffset}
       className={`${proseClass} py-2 min-h-[1rem]`}
+      onClick={handleClick}
       dangerouslySetInnerHTML={{ __html: cleanHtml }}
     />
   )

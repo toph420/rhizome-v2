@@ -80,6 +80,29 @@ export interface StoredAnnotation {
 }
 
 /**
+ * Optimistic annotation for immediate UI updates.
+ * Simpler flat structure for client-side state management.
+ */
+export interface OptimisticAnnotation {
+  id: string // Temp ID: `temp-${Date.now()}` or real UUID
+  text: string
+  chunk_ids: string[]
+  document_id: string
+  start_offset: number
+  end_offset: number
+  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
+  note?: string
+  tags?: string[]
+  text_context?: {
+    before: string
+    content: string
+    after: string
+  }
+  created_at: string
+  _deleted?: boolean // Flag for error rollback
+}
+
+/**
  * Chunk data structure from database.
  */
 export interface Chunk {
