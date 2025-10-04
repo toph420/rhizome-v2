@@ -122,6 +122,155 @@
   }
 }
 
+@layer components {
+  /* ============================================
+     Annotation Highlighting Styles (Span-Based)
+     ============================================ */
+
+  /* Yellow */
+  [data-annotation-color="yellow"] {
+    background-color: rgba(254, 240, 138, 0.4);
+    border-bottom: 2px solid rgba(234, 179, 8, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Green */
+  [data-annotation-color="green"] {
+    background-color: rgba(187, 247, 208, 0.4);
+    border-bottom: 2px solid rgba(34, 197, 94, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Blue */
+  [data-annotation-color="blue"] {
+    background-color: rgba(191, 219, 254, 0.4);
+    border-bottom: 2px solid rgba(59, 130, 246, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Red */
+  [data-annotation-color="red"] {
+    background-color: rgba(254, 202, 202, 0.4);
+    border-bottom: 2px solid rgba(239, 68, 68, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Purple */
+  [data-annotation-color="purple"] {
+    background-color: rgba(233, 213, 255, 0.4);
+    border-bottom: 2px solid rgba(168, 85, 247, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Orange */
+  [data-annotation-color="orange"] {
+    background-color: rgba(254, 215, 170, 0.4);
+    border-bottom: 2px solid rgba(249, 115, 22, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Pink */
+  [data-annotation-color="pink"] {
+    background-color: rgba(252, 231, 243, 0.4);
+    border-bottom: 2px solid rgba(236, 72, 153, 0.5);
+    transition: all 0.15s ease;
+  }
+
+  /* Dark mode variants */
+  .dark [data-annotation-color="yellow"] {
+    background-color: rgba(254, 240, 138, 0.2);
+    border-bottom-color: rgba(234, 179, 8, 0.3);
+  }
+
+  .dark [data-annotation-color="green"] {
+    background-color: rgba(187, 247, 208, 0.2);
+    border-bottom-color: rgba(34, 197, 94, 0.3);
+  }
+
+  .dark [data-annotation-color="blue"] {
+    background-color: rgba(191, 219, 254, 0.2);
+    border-bottom-color: rgba(59, 130, 246, 0.3);
+  }
+
+  .dark [data-annotation-color="red"] {
+    background-color: rgba(254, 202, 202, 0.2);
+    border-bottom-color: rgba(239, 68, 68, 0.3);
+  }
+
+  .dark [data-annotation-color="purple"] {
+    background-color: rgba(233, 213, 255, 0.2);
+    border-bottom-color: rgba(168, 85, 247, 0.3);
+  }
+
+  .dark [data-annotation-color="orange"] {
+    background-color: rgba(254, 215, 170, 0.2);
+    border-bottom-color: rgba(249, 115, 22, 0.3);
+  }
+
+  .dark [data-annotation-color="pink"] {
+    background-color: rgba(252, 231, 243, 0.2);
+    border-bottom-color: rgba(236, 72, 153, 0.3);
+  }
+
+  /* Hover effects */
+  [data-annotation-id] {
+    cursor: pointer;
+  }
+
+  [data-annotation-id]:hover {
+    filter: brightness(0.95);
+  }
+
+  .dark [data-annotation-id]:hover {
+    filter: brightness(1.15);
+  }
+
+  /* Resize handle indicators */
+  [data-annotation-start] {
+    position: relative;
+  }
+
+  [data-annotation-start]::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: currentColor;
+    opacity: 0.3;
+    transition: all 0.2s ease;
+  }
+
+  [data-annotation-start]:hover::before {
+    width: 4px;
+    opacity: 0.6;
+    cursor: ew-resize;
+  }
+
+  [data-annotation-end] {
+    position: relative;
+  }
+
+  [data-annotation-end]::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: currentColor;
+    opacity: 0.3;
+    transition: all 0.2s ease;
+  }
+
+  [data-annotation-end]:hover::after {
+    width: 4px;
+    opacity: 0.6;
+    cursor: ew-resize;
+  }
+}
+
 @layer utilities {
   .scrollbar-hide {
     /* Hide scrollbar for Chrome, Safari and Opera */

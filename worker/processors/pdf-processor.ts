@@ -11,48 +11,13 @@ import { extractLargePDF, DEFAULT_BATCH_CONFIG } from '../lib/pdf-batch-utils.js
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from '../lib/model-config.js'
+import { generatePdfExtractionPrompt } from '../lib/prompts/pdf-extraction.js'
+import { cleanPageArtifacts } from '../lib/text-cleanup.js'
 
 // Thresholds for batched processing
 const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
 const LARGE_PDF_SIZE_MB_THRESHOLD = 10 // Or files larger than 10MB
 
-/**
- * Extraction prompt for PDF processing.
- * Instructs Gemini to extract only markdown text for local chunking.
- */
-const EXTRACTION_PROMPT = `
-You are a PDF extraction assistant. Your task is to extract ALL text from this PDF document and convert it to clean markdown format.
-
-IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text.
-Do not summarize or skip any content. Return the COMPLETE document text.
-
-LINE BREAK HANDLING:
-- Merge lines WITHIN paragraphs into continuous text
-- Only preserve line breaks for semantic boundaries:
-  - Paragraph breaks (use \n\n for new paragraphs)
-  - Headings
-  - List items
-  - Code blocks
-  - Block quotes
-
-DO NOT preserve PDF formatting line wraps (lines that end because of page width).
-
-Example of WRONG (preserves PDF line wrapping):
-"This is a sentence that wraps\nat 80 characters because of the\nPDF page width."
-
-Example of CORRECT (continuous paragraph):
-"This is a sentence that wraps at 80 characters because of the PDF page width."
-
-Format the output as clean markdown with:
-- Proper heading hierarchy (# ## ###)
-- Organized lists and paragraphs  
-- Clear section breaks with \n\n between paragraphs
-- Continuous text flow within paragraphs
-
-Return only the markdown text, no JSON wrapper needed.
-`
-
-// No schema needed - expecting plain markdown text response
 
 /**
  * PDF processor for extracting content using Gemini Files API.
@@ -155,6 +120,12 @@ export class PDFProcessor extends SourceProcessor {
     // ALWAYS use AI metadata extraction (no conditional logic)
     console.log(`[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document`)
 
+    // Extract document type from job input_data
+    const documentType = this.job.metadata?.input_data?.document_type || null
+    if (documentType) {
+      console.log(`[PDFProcessor] Using type-specific chunking for: ${documentType}`)
+    }
+
     await this.updateProgress(45, 'metadata', 'ai-extraction', 'Processing with AI metadata extraction...')
 
     const aiChunks = await batchChunkAndExtractMetadata(
@@ -175,7 +146,8 @@ export class PDFProcessor extends SourceProcessor {
           progress.phase,
           `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
         )
-      }
+      },
+      documentType // Pass document type for type-specific chunking
     )
 
     // Convert AI chunks to ProcessedChunk format with proper metadata mapping
@@ -283,7 +255,7 @@ export class PDFProcessor extends SourceProcessor {
         contents: [{
           parts: [
             { fileData: { fileUri: uploadedFile.uri || uploadedFile.name, mimeType: 'application/pdf' } },
-            { text: EXTRACTION_PROMPT }
+            { text: generatePdfExtractionPrompt() }
           ]
         }],
         config: generationConfig
@@ -312,7 +284,7 @@ export class PDFProcessor extends SourceProcessor {
     if (!result || !result.text) {
       throw new Error('AI returned empty response. Please try again.')
     }
-    
+
     // Clean up the markdown text (remove any code block wrappers)
     let markdown = result.text.trim()
     if (markdown.startsWith('```markdown')) {
@@ -320,10 +292,13 @@ export class PDFProcessor extends SourceProcessor {
     } else if (markdown.startsWith('```')) {
       markdown = markdown.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
     }
-    
+
     if (!markdown || markdown.length < 50) {
       throw new Error('AI returned insufficient content. Please try again.')
     }
+
+    // Apply post-processing cleanup to remove page artifacts Gemini might have missed
+    markdown = cleanPageArtifacts(markdown)
     
     // Use local chunking algorithm (same as MarkdownAsIsProcessor)
     const chunks = simpleMarkdownChunking(markdown)
@@ -440,9 +415,16 @@ export class PDFProcessor extends SourceProcessor {
       )
     }
 
-    // Note: Stitching will be handled in T-006
-    // For now, batches are concatenated with separators
-    const markdown = result.markdown
+   // Deduplicate footnotes after stitching
+    let markdown = result.markdown
+    
+    const footnotesBefore = (markdown.match(/\[\^\d+\]:/g) || []).length
+    if (footnotesBefore > 0) {
+      console.log(`[PDFProcessor] 📝 Deduplicating footnotes (found ${footnotesBefore} definitions)...`)
+      markdown = this.deduplicateFootnotes(markdown)
+      const footnotesAfter = (markdown.match(/\[\^\d+\]:/g) || []).length
+      console.log(`[PDFProcessor] 📝 Deduplicated ${footnotesBefore} → ${footnotesAfter} footnotes`)
+    }
 
     const markdownKB = Math.round(markdown.length / 1024)
     await this.updateProgress(
@@ -454,6 +436,12 @@ export class PDFProcessor extends SourceProcessor {
 
     // Stage 3: Create chunks with AI metadata extraction
     await this.updateProgress(45, 'chunking', 'processing', 'Processing with AI metadata extraction...')
+
+    // Extract document type from job input_data
+    const documentType = this.job.metadata?.input_data?.document_type || null
+    if (documentType) {
+      console.log(`[PDFProcessor] Using type-specific chunking for: ${documentType} (batched processing)`)
+    }
 
     console.log(
       `[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document ` +
@@ -478,7 +466,8 @@ export class PDFProcessor extends SourceProcessor {
           progress.phase,
           `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
         )
-      }
+      },
+      documentType // Pass document type for type-specific chunking
     )
 
     await this.updateProgress(
@@ -529,5 +518,51 @@ export class PDFProcessor extends SourceProcessor {
       wordCount,
       outline
     }
+  }
+  
+  /**
+   * Removes duplicate footnote definitions from stitched batches.
+   * Keeps the longer version if duplicates found (more complete from overlap).
+   * Moves all footnotes to end of document for consistency.
+   */
+  private deduplicateFootnotes(markdown: string): string {
+    // Find all footnote definitions
+    // Pattern stops at: next footnote, heading, horizontal rule, or end of string
+    const footnotePattern = /\[\^(\d+)\]:\s*(.+?)(?=\n\[\^|\n\n#{1,6}\s|\n\n---|\n\n\*\*\*|$)/gs
+    const footnotes = new Map<string, string>()
+    
+    let match
+    while ((match = footnotePattern.exec(markdown)) !== null) {
+      const [, num, content] = match
+      const existing = footnotes.get(num)
+      
+      // Keep longer version (likely more complete from batch overlap)
+      if (!existing || content.length > existing.length) {
+        footnotes.set(num, content.trim())
+      }
+    }
+    
+    if (footnotes.size === 0) {
+      return markdown // No footnotes to process
+    }
+    
+    // Remove all footnote definitions from body
+    let cleaned = markdown.replace(footnotePattern, '')
+    
+    // Remove excessive whitespace that may result from removal
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n')
+    
+    // Append deduplicated footnotes at end
+    cleaned += '\n\n---\n\n## Notes\n\n'
+    
+    // Sort footnotes numerically
+    const sortedNotes = Array.from(footnotes.entries())
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+    
+    sortedNotes.forEach(([num, content]) => {
+      cleaned += `[^${num}]: ${content}\n\n`
+    })
+    
+    return cleaned.trim()
   }
 }

@@ -304,10 +304,12 @@ export function ProcessingDock() {
   
   const getJobTitle = (job: Job): string => {
     if (job.job_type === 'process_document') {
-      return `Processing Document ${job.input_data.document_id?.slice(0, 8)}...`
+      const docId = job.input_data?.document_id?.slice(0, 8) || 'Unknown'
+      return `Processing Document ${docId}...`
     }
     if (job.job_type === 'detect-connections') {
-      return `Detecting Connections ${job.input_data.document_id?.slice(0, 8)}...`
+      const docId = job.input_data?.document_id?.slice(0, 8) || 'Unknown'
+      return `Detecting Connections ${docId}...`
     }
     return job.job_type
   }

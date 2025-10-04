@@ -9,32 +9,66 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe } from 'lucide-react'
+import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2 } from 'lucide-react'
+import { DocumentPreview } from '@/components/upload/DocumentPreview'
+import type { DetectedMetadata } from '@/types/metadata'
 
-type SourceType = 'pdf' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
+type SourceType = 'pdf' | 'epub' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
 type TabType = 'file' | 'url' | 'paste'
+type UploadPhase = 'idle' | 'detecting' | 'preview' | 'uploading'
+
+/**
+ * Determine which metadata extraction API to use for a file.
+ * Returns null for types without preview (web_url, paste).
+ */
+function getMetadataEndpoint(file: File): string | null {
+  // PDF - already working
+  if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+    return '/api/extract-metadata'
+  }
+
+  // EPUB - new
+  if (file.type === 'application/epub+zip' || file.name.endsWith('.epub')) {
+    return '/api/extract-epub-metadata'
+  }
+
+  // Markdown - new
+  if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
+    return '/api/extract-text-metadata'
+  }
+
+  // Text - new
+  if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+    return '/api/extract-text-metadata'
+  }
+
+  // No preview for other types (web_url, paste)
+  return null
+}
 
 /**
  * Multi-method upload interface with tabs for file upload, URL fetching, and content pasting.
- * Supports PDFs, Markdown, text, YouTube videos, web articles, and pasted content.
+ * Supports PDFs, EPUBs, Markdown, text, YouTube videos, web articles, and pasted content.
  * @returns Upload zone component with tabbed interface.
  */
 export function UploadZone() {
   const [activeTab, setActiveTab] = useState<TabType>('file')
-  
+
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [markdownProcessing, setMarkdownProcessing] = useState<'asis' | 'clean'>('asis')
-  
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
+  const [detectedMetadata, setDetectedMetadata] = useState<DetectedMetadata | null>(null)
+
   // URL fetch state
   const [urlInput, setUrlInput] = useState('')
-  const [urlType, setUrlType] = useState<'youtube' | 'web' | null>(null)
-  
+  const [urlType, setUrlType] = useState<'youtube' | 'web_url' | null>(null)
+
   // Paste content state
   const [pastedContent, setPastedContent] = useState('')
   const [pasteSourceUrl, setPasteSourceUrl] = useState('')
-  
+
   // Shared state
   const [costEstimate, setCostEstimate] = useState<{
     tokens: number
@@ -65,14 +99,64 @@ export function UploadZone() {
 
   /**
    * Handles file selection and generates cost estimate.
+   * For supported file types, triggers metadata detection.
    * @param file - Selected file.
    */
   const handleFileSelect = useCallback(async (file: File) => {
     setSelectedFile(file)
     setError(null)
-    
+
     const estimate = await estimateProcessingCost(file.size)
     setCostEstimate(estimate)
+
+    // Check if this file type supports metadata preview
+    const endpoint = getMetadataEndpoint(file)
+
+    if (!endpoint) {
+      // No preview, proceed directly to upload (web_url, paste patterns)
+      console.log('No metadata preview for this file type, skipping detection')
+      return
+    }
+
+    // Extract metadata for preview
+    setUploadPhase('detecting')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      console.log(`🔍 Extracting metadata using ${endpoint}...`)
+      const startTime = Date.now()
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Metadata extraction failed')
+      }
+
+      const metadata = await response.json()
+      const duration = Date.now() - startTime
+
+      console.log(`✅ Metadata extracted in ${duration}ms:`, metadata.title)
+
+      setDetectedMetadata(metadata)
+      setUploadPhase('preview')
+    } catch (error) {
+      console.error('Metadata detection error:', error)
+
+      // Fallback: Show preview with filename-based metadata
+      setDetectedMetadata({
+        title: file.name.replace(/\.[^/.]+$/, ''), // Remove extension
+        author: 'Unknown',
+        type: 'article',
+        description: 'Metadata extraction failed. Please edit manually.'
+      })
+      setUploadPhase('preview')
+    }
   }, [])
 
   /**
@@ -108,40 +192,147 @@ export function UploadZone() {
    * @returns Source type.
    */
   const getSourceTypeForFile = useCallback((file: File): SourceType => {
+    // Prefer MIME type
+    if (file.type === 'application/epub+zip') {
+      return 'epub'
+    }
+
     if (file.type.includes('pdf')) {
       return 'pdf'
     }
-    
+
+    // Fallback to extension (EPUB files sometimes have incorrect MIME type)
+    const ext = file.name.split('.').pop()?.toLowerCase()
+
+    if (ext === 'epub') {
+      return 'epub'
+    }
+
+    if (ext === 'pdf') {
+      return 'pdf'
+    }
+
     if (file.name.endsWith('.md')) {
       return markdownProcessing === 'asis' ? 'markdown_asis' : 'markdown_clean'
     }
-    
+
     if (file.type.includes('text') || file.name.endsWith('.txt')) {
       return 'txt'
     }
-    
-    return 'pdf'
+
+    throw new Error(`Unsupported file type: ${file.type}`)
   }, [markdownProcessing])
 
   /**
-   * Uploads file with appropriate source type.
+   * Handles metadata preview confirmation.
+   * Uploads cover image and document with metadata.
+   */
+  const handlePreviewConfirm = useCallback(async (
+    editedMetadata: DetectedMetadata,
+    coverImage: File | null
+  ) => {
+    // Handle both file uploads and YouTube URLs
+    const isFileUpload = selectedFile !== null
+    const isYouTubeUrl = urlInput && urlType === 'youtube'
+
+    if (!isFileUpload && !isYouTubeUrl) return
+
+    setUploadPhase('uploading')
+    setIsUploading(true)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+
+      if (isFileUpload && selectedFile) {
+        // File upload (PDF, EPUB, Markdown, Text)
+        formData.append('file', selectedFile)
+        formData.append('source_type', getSourceTypeForFile(selectedFile))
+      } else if (isYouTubeUrl) {
+        // YouTube URL
+        formData.append('source_type', 'youtube')
+        formData.append('source_url', urlInput)
+      }
+
+      // Add detected/edited metadata
+      formData.append('document_type', editedMetadata.type)
+      formData.append('author', editedMetadata.author)
+      formData.append('title', editedMetadata.title)
+      if (editedMetadata.year) {
+        formData.append('publication_year', editedMetadata.year)
+      }
+      if (editedMetadata.publisher) {
+        formData.append('publisher', editedMetadata.publisher)
+      }
+      if (editedMetadata.isbn) {
+        formData.append('isbn', editedMetadata.isbn)
+      }
+
+      // Handle cover images (File upload or base64/URL from metadata)
+      if (coverImage) {
+        // Manual file upload from DocumentPreview
+        formData.append('cover_image', coverImage)
+      } else if (editedMetadata.coverImage) {
+        // base64 (EPUB) or URL (YouTube) from metadata extraction
+        formData.append('cover_image_data', editedMetadata.coverImage)
+      }
+
+      console.log('📤 Uploading document with metadata...')
+      const result = await uploadDocument(formData)
+      console.log('📤 Upload result:', result)
+
+      if (result.success && result.documentId) {
+        console.log('✅ Document uploaded with metadata, job created:', result.jobId)
+        // Reset state
+        setSelectedFile(null)
+        setCostEstimate(null)
+        setDetectedMetadata(null)
+        setUrlInput('')
+        setUrlType(null)
+        setUploadPhase('idle')
+      } else {
+        setError(result.error || 'Upload failed')
+        setUploadPhase('preview') // Return to preview on error
+      }
+    } catch (err) {
+      console.error('❌ Upload error:', err)
+      setError(err instanceof Error ? err.message : 'Upload failed')
+      setUploadPhase('preview')
+    } finally {
+      setIsUploading(false)
+    }
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile])
+
+  /**
+   * Handles metadata preview cancellation.
+   */
+  const handlePreviewCancel = useCallback(() => {
+    setSelectedFile(null)
+    setCostEstimate(null)
+    setDetectedMetadata(null)
+    setUploadPhase('idle')
+    setError(null)
+  }, [])
+
+  /**
+   * Uploads file with appropriate source type (non-PDF files).
    */
   const handleFileUpload = useCallback(async () => {
     if (!selectedFile) return
-    
+
     setIsUploading(true)
     setError(null)
-    
+
     try {
       const formData = new FormData()
       formData.append('file', selectedFile)
       formData.append('source_type', getSourceTypeForFile(selectedFile))
       formData.append('processing_requested', markdownProcessing === 'clean' ? 'true' : 'false')
-      
+
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
       console.log('📤 Upload result:', result)
-      
+
       if (result.success && result.documentId) {
         console.log('✅ Document uploaded and job created:', result.jobId)
         setSelectedFile(null)
@@ -158,23 +349,83 @@ export function UploadZone() {
   }, [selectedFile, getSourceTypeForFile, markdownProcessing])
 
   /**
+   * Handle YouTube URL metadata extraction.
+   */
+  const handleYouTubeUrl = useCallback(async (url: string) => {
+    setError(null)
+    setUploadPhase('detecting')
+
+    try {
+      console.log('🔍 Fetching YouTube metadata...')
+
+      const response = await fetch('/api/extract-youtube-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+
+        if (response.status === 429 && errorData.fallback) {
+          // Quota exceeded - show manual entry
+          console.warn('YouTube API quota exceeded, using fallback')
+          setDetectedMetadata({
+            title: 'YouTube Video',
+            author: 'Unknown Channel',
+            type: 'article',
+            description: 'YouTube API quota exceeded. Please edit manually.'
+          })
+        } else {
+          throw new Error(errorData.error || 'Failed to fetch metadata')
+        }
+      } else {
+        const metadata = await response.json()
+        console.log('✅ YouTube metadata extracted:', metadata.title)
+        setDetectedMetadata(metadata)
+      }
+
+      setUrlInput(url)
+      setUploadPhase('preview')
+    } catch (error) {
+      console.error('YouTube metadata error:', error)
+
+      // Fallback: Show preview with placeholder
+      setDetectedMetadata({
+        title: 'YouTube Video',
+        author: 'Unknown',
+        type: 'article',
+        description: 'Failed to fetch metadata. Please edit manually.'
+      })
+      setUrlInput(url)
+      setUploadPhase('preview')
+    }
+  }, [])
+
+  /**
    * Fetches content from URL.
    */
   const handleUrlFetch = useCallback(async () => {
     if (!urlInput || !urlType) return
-    
+
+    // For YouTube, show metadata preview first
+    if (urlType === 'youtube') {
+      await handleYouTubeUrl(urlInput)
+      return
+    }
+
     setIsUploading(true)
     setError(null)
-    
+
     try {
       const formData = new FormData()
       formData.append('source_type', urlType)
       formData.append('source_url', urlInput)
-      
+
       console.log('🔗 Fetching from URL...')
       const result = await uploadDocument(formData)
       console.log('🔗 Fetch result:', result)
-      
+
       if (result.success && result.documentId) {
         console.log('✅ Content fetched and job created:', result.jobId)
         setUrlInput('')
@@ -188,7 +439,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [urlInput, urlType])
+  }, [urlInput, urlType, handleYouTubeUrl])
 
   /**
    * Submits pasted content.
@@ -245,17 +496,35 @@ export function UploadZone() {
         </TabsList>
 
         <TabsContent value="file">
-          <Card
-            className={`border-2 border-dashed p-8 text-center transition-colors ${
-              isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
-            }`}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setIsDragging(true)
-            }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-          >
+          {/* Show metadata preview for PDFs */}
+          {uploadPhase === 'preview' && detectedMetadata ? (
+            <DocumentPreview
+              metadata={detectedMetadata}
+              onConfirm={handlePreviewConfirm}
+              onCancel={handlePreviewCancel}
+            />
+          ) : uploadPhase === 'detecting' ? (
+            <Card className="p-12 text-center">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
+                <div>
+                  <p className="text-lg font-medium">Analyzing document...</p>
+                  <p className="text-sm text-muted-foreground">Extracting metadata from first 10 pages (~15 seconds)</p>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <Card
+              className={`border-2 border-dashed p-8 text-center transition-colors ${
+                isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setIsDragging(true)
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+            >
             <div className="flex flex-col items-center gap-4">
               <div className="rounded-full bg-muted p-4">
                 {selectedFile ? <FileText className="h-8 w-8" /> : <Upload className="h-8 w-8" />}
@@ -264,12 +533,12 @@ export function UploadZone() {
               {!selectedFile ? (
                 <>
                   <div>
-                    <p className="text-lg font-medium">Drop PDF, Markdown, or text file here</p>
+                    <p className="text-lg font-medium">Drop PDF, EPUB, Markdown, or text file here</p>
                     <p className="text-sm text-muted-foreground">or click to browse</p>
                   </div>
                   <input
                     type="file"
-                    accept=".pdf,.txt,.md"
+                    accept=".pdf,.epub,.txt,.md"
                     onChange={handleFileInputChange}
                     className="hidden"
                     id="file-input"
@@ -329,7 +598,7 @@ export function UploadZone() {
                   <div className="flex gap-2">
                     <Button
                       onClick={handleFileUpload}
-                      disabled={isUploading}
+                      disabled={isUploading || selectedFile?.type.includes('pdf')}
                       className="flex-1"
                     >
                       {isUploading ? 'Processing...' : 'Process Document'}
@@ -345,10 +614,16 @@ export function UploadZone() {
                       Cancel
                     </Button>
                   </div>
+                  {selectedFile?.type.includes('pdf') && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      PDFs are processed after metadata confirmation
+                    </p>
+                  )}
                 </div>
               )}
             </div>
           </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="url">

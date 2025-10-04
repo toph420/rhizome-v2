@@ -13,7 +13,6 @@ import type {
 } from '../types/processor.js'
 import { classifyError, getUserFriendlyError } from '../lib/errors.js'
 import { batchInsertChunks, calculateOptimalBatchSize } from '../lib/batch-operations.js'
-import { extractMetadata } from '../lib/metadata-extractor.js'
 import type { ChunkMetadata, PartialChunkMetadata } from '../types/metadata.js'
 
 /**
@@ -50,7 +49,7 @@ export abstract class SourceProcessor {
   /** Google AI client for content processing */
   protected readonly ai: GoogleGenAI
   /** Supabase client for database operations */
-  protected readonly supabase: SupabaseClient
+  protected supabase: SupabaseClient
   /** Background job being processed */
   protected readonly job: BackgroundJob
   /** Processing configuration options */
@@ -58,7 +57,7 @@ export abstract class SourceProcessor {
 
   /**
    * Creates a new source processor instance.
-   * 
+   *
    * @param ai - Google Generative AI client
    * @param supabase - Supabase client for database operations
    * @param job - Background job record with document metadata
@@ -79,6 +78,26 @@ export abstract class SourceProcessor {
       cleanWithAI: true,
       ...options
     }
+  }
+
+  /**
+   * Refreshes the Supabase client connection.
+   * Call this before long-running storage operations to prevent stale connections.
+   *
+   * Critical for processors with long AI processing phases (e.g., EPUB with 93-minute chunking).
+   * Supabase connections timeout after periods of inactivity.
+   */
+  protected async refreshConnection(): Promise<void> {
+    const { createClient } = await import('@supabase/supabase-js')
+    // Use NEXT_PUBLIC_SUPABASE_URL if SUPABASE_URL is not set (worker loads from parent .env.local)
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+    if (!supabaseUrl) {
+      throw new Error('SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL must be set')
+    }
+    this.supabase = createClient(
+      supabaseUrl,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
   }
 
   /**
@@ -190,84 +209,6 @@ export abstract class SourceProcessor {
 
     // Should never reach here, but satisfy TypeScript
     throw lastError || new Error(`${operationName} failed after ${maxRetries} retries`)
-  }
-
-  /**
-   * Extracts metadata for a chunk using the metadata extraction pipeline.
-   * Can be overridden by specific processors for custom behavior.
-   * 
-   * @param chunk - The chunk to extract metadata for
-   * @param index - The chunk index in the document
-   * @returns Extracted metadata or partial metadata on failure
-   */
-  protected async extractChunkMetadata(
-    chunk: ProcessedChunk,
-    index: number
-  ): Promise<ChunkMetadata | PartialChunkMetadata> {
-    try {
-      // Extract metadata using the pipeline
-      const metadata = await extractMetadata(chunk.content, {
-        skipMethods: !(chunk.content.includes('```') || chunk.content.includes('function') || chunk.content.includes('class'))
-      })
-      
-      return metadata
-    } catch (error) {
-      console.warn(`[${this.constructor.name}] Metadata extraction failed for chunk ${index}:`, error)
-      // Return partial metadata on failure
-      return {
-        quality: {
-          completeness: 0,
-          extractedFields: 0,
-          totalFields: 7,
-          extractedAt: new Date().toISOString(),
-          extractionTime: 0,
-          extractorVersions: {},
-          errors: [{
-            field: 'all',
-            error: error instanceof Error ? error.message : 'Unknown error'
-          }]
-        }
-      }
-    }
-  }
-
-  /**
-   * Enriches chunks with metadata before storage.
-   * Processes chunks in batches for efficiency.
-   * 
-   * @param chunks - Array of chunks to enrich
-   * @returns Array of chunks with metadata
-   */
-  protected async enrichChunksWithMetadata(
-    chunks: ProcessedChunk[]
-  ): Promise<Array<ProcessedChunk & { metadata?: ChunkMetadata | PartialChunkMetadata }>> {
-    console.log(`[${this.constructor.name}] Extracting metadata for ${chunks.length} chunks`)
-    
-    const enrichedChunks = await Promise.all(
-      chunks.map(async (chunk, index) => {
-        // Skip metadata extraction if disabled
-        if (this.options.skipMetadataExtraction) {
-          return chunk
-        }
-        
-        const metadata = await this.extractChunkMetadata(chunk, index)
-        return {
-          ...chunk,
-          metadata
-        }
-      })
-    )
-    
-    // Log metadata extraction success rate
-    const successCount = enrichedChunks.filter(
-      c => c.metadata && c.metadata.quality.completeness > 0.5
-    ).length
-    console.log(
-      `[${this.constructor.name}] Metadata extraction complete: ` +
-      `${successCount}/${chunks.length} chunks with >50% completeness`
-    )
-    
-    return enrichedChunks
   }
 
   /**

@@ -11,7 +11,7 @@ export interface TextSelection {
   range: {
     startOffset: number
     endOffset: number
-    chunkId: string
+    chunkIds: string[]  // Array for multi-chunk selections
   }
   rect: DOMRect
 }
@@ -31,11 +31,12 @@ export interface TextContext {
 export interface AnnotationData {
   text: string
   note?: string
-  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple'
+  tags?: string[]
+  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
   range: {
     startOffset: number
     endOffset: number
-    chunkId: string
+    chunkIds: string[]  // Array for multi-chunk annotations
   }
   textContext: TextContext
 }
@@ -44,7 +45,7 @@ export interface AnnotationData {
  * Position component data (fuzzy matching metadata).
  */
 export interface PositionData {
-  chunkId: string
+  chunkIds: string[]  // Array for multi-chunk annotations
   startOffset: number
   endOffset: number
   confidence: number // 0.0-1.0
@@ -59,7 +60,7 @@ export interface PositionData {
  * Source component data (chunk/document linking).
  */
 export interface SourceData {
-  chunk_id: string
+  chunk_ids: string[]  // Array for multi-chunk annotations (connection graph)
   document_id: string
 }
 
@@ -79,14 +80,37 @@ export interface StoredAnnotation {
 }
 
 /**
+ * Optimistic annotation for immediate UI updates.
+ * Simpler flat structure for client-side state management.
+ */
+export interface OptimisticAnnotation {
+  id: string // Temp ID: `temp-${Date.now()}` or real UUID
+  text: string
+  chunk_ids: string[]
+  document_id: string
+  start_offset: number
+  end_offset: number
+  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
+  note?: string
+  tags?: string[]
+  text_context?: {
+    before: string
+    content: string
+    after: string
+  }
+  created_at: string
+  _deleted?: boolean // Flag for error rollback
+}
+
+/**
  * Chunk data structure from database.
  */
 export interface Chunk {
   id: string
   content: string
   chunk_index: number
-  start_offset?: number
-  end_offset?: number
+  start_offset: number  // Required for multi-chunk detection
+  end_offset: number    // Required for multi-chunk detection
   position_context?: {
     confidence: number
     method: 'exact' | 'fuzzy' | 'approximate'
@@ -98,7 +122,6 @@ export interface Chunk {
 /**
  * Synthesis engine types (3-engine system matching worker output).
  * Reduced from 7 engines to 3 focused engines for better precision.
- *
  * @see docs/APP_VISION.md - 3-Engine System
  */
 export type SynthesisEngine =
@@ -121,7 +144,7 @@ export interface EngineWeights {
  * - max-friction: Prioritizes contradictions (40%)
  * - thematic-focus: Prioritizes cross-domain bridges (60%)
  * - balanced: Equal weights across all engines (33%)
- * - semantic-only: Prioritizes embedding similarity (70%)
+ * - semantic-only: Prioritizes embedding similarity (70%).
  */
 export type WeightPreset = 'max-friction' | 'thematic-focus' | 'balanced' | 'semantic-only'
 

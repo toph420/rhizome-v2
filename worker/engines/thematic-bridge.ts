@@ -102,6 +102,14 @@ export async function runThematicBridge(
 
     if (!candidates?.length) continue;
 
+    // Debug: Check for duplicate candidates from query
+    const candidateIds = candidates.map(c => c.id);
+    const uniqueIds = new Set(candidateIds);
+    if (candidateIds.length !== uniqueIds.size) {
+      console.log(`[ThematicBridge] ⚠️  Query returned ${candidateIds.length - uniqueIds.size} duplicate chunks for source ${chunk.id}`);
+      console.log(`[ThematicBridge] Candidate IDs:`, candidateIds.slice(0, 10)); // Show first 10
+    }
+
     // Batch analyze with AI
     for (let i = 0; i < candidates.length; i += batchSize) {
       const batch = candidates.slice(i, i + batchSize);

@@ -1,6 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createECS } from '@/lib/ecs'
 import { getCurrentUser } from '@/lib/auth'
@@ -13,15 +12,17 @@ import type {
 
 /**
  * Zod schema for annotation creation.
+ * Updated to support multi-chunk annotations with chunkIds array.
  */
 const CreateAnnotationSchema = z.object({
   text: z.string().min(1).max(5000),
-  chunkId: z.string().uuid(),
+  chunkIds: z.array(z.string().uuid()).min(1).max(5), // Array of chunk IDs (max 5)
   documentId: z.string().uuid(),
   startOffset: z.number().int().min(0),
   endOffset: z.number().int().min(0),
-  color: z.enum(['yellow', 'green', 'blue', 'red', 'purple']),
+  color: z.enum(['yellow', 'green', 'blue', 'red', 'purple', 'orange', 'pink']),
   note: z.string().max(10000).optional(),
+  tags: z.array(z.string()).optional(),
   textContext: z.object({
     before: z.string(),
     content: z.string(),
@@ -50,21 +51,25 @@ export async function createAnnotation(
     // Create ECS instance
     const ecs = createECS()
 
+    // Get primary chunk (first in array)
+    const primaryChunkId = validated.chunkIds[0]
+
     // Create entity with 3 components
     const entityId = await ecs.createEntity(user.id, {
       annotation: {
         text: validated.text,
         note: validated.note,
+        tags: validated.tags || [],
         color: validated.color,
         range: {
           startOffset: validated.startOffset,
           endOffset: validated.endOffset,
-          chunkId: validated.chunkId,
+          chunkIds: validated.chunkIds, // Array of chunk IDs
         },
         textContext: validated.textContext,
       },
       position: {
-        chunkId: validated.chunkId,
+        chunkIds: validated.chunkIds, // Array of chunk IDs
         startOffset: validated.startOffset,
         endOffset: validated.endOffset,
         confidence: 1.0, // Exact match on creation
@@ -75,14 +80,13 @@ export async function createAnnotation(
         },
       },
       source: {
-        chunk_id: validated.chunkId,
+        chunk_id: primaryChunkId, // Primary chunk for ECS filtering
+        chunk_ids: validated.chunkIds, // All chunks for connection graph queries
         document_id: validated.documentId,
       },
     })
 
-    // Revalidate document page
-    revalidatePath(`/read/${validated.documentId}`)
-
+    // No revalidation needed - client handles optimistic updates
     return { success: true, id: entityId }
   } catch (error) {
     console.error('Failed to create annotation:', error)
@@ -94,16 +98,17 @@ export async function createAnnotation(
 }
 
 /**
- * Updates annotation component data (note, color).
+ * Updates annotation component data (note, color, tags).
  * @param entityId - Entity ID.
  * @param updates - Partial annotation data.
  * @param updates.note - Optional note text.
  * @param updates.color - Optional color value.
+ * @param updates.tags - Optional tags array.
  * @returns Success or error.
  */
 export async function updateAnnotation(
   entityId: string,
-  updates: { note?: string; color?: string }
+  updates: { note?: string; color?: string; tags?: string[] }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser()
@@ -135,13 +140,7 @@ export async function updateAnnotation(
 
     await ecs.updateComponent(annotationComponent.id, updatedData, user.id)
 
-    // Revalidate document page
-    const sourceComponent = entity.components?.find(
-      (c) => c.component_type === 'source'
-    )
-    if (sourceComponent?.data.document_id) {
-      revalidatePath(`/read/${sourceComponent.data.document_id}`)
-    }
+    // No revalidation needed - client handles optimistic updates
 
     return { success: true }
   } catch (error) {

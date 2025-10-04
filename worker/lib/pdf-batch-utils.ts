@@ -9,6 +9,8 @@ import { GoogleGenAI, type GenAIFile } from '@google/genai'
 import { GeminiFileCache } from './gemini-cache.js'
 import { stitchMarkdownBatches } from './fuzzy-matching.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from './model-config.js'
+import { generateBatchedPdfExtractionPrompt } from './prompts/pdf-extraction.js'
+import { cleanPageArtifacts } from './text-cleanup.js'
 
 /**
  * Configuration for batched PDF extraction.
@@ -72,44 +74,6 @@ export const DEFAULT_BATCH_CONFIG: BatchConfig = {
   maxOutputTokens: MAX_OUTPUT_TOKENS
 }
 
-/**
- * Extraction prompt for batched PDF processing.
- * Instructs Gemini to extract only the specified page range.
- */
-const BATCH_EXTRACTION_PROMPT = (startPage: number, endPage: number) => `
-You are a PDF extraction assistant. Your task is to extract text ONLY from pages ${startPage} to ${endPage} of this PDF document.
-
-IMPORTANT:
-- Extract ONLY pages ${startPage}-${endPage}, no other pages
-- Read ALL content from these pages completely
-- Do not summarize or skip any content from these pages
-- Convert to clean markdown format
-
-LINE BREAK HANDLING:
-- Merge lines WITHIN paragraphs into continuous text
-- Only preserve line breaks for semantic boundaries:
-  - Paragraph breaks (use \n\n for new paragraphs)
-  - Headings
-  - List items
-  - Code blocks
-  - Block quotes
-
-DO NOT preserve PDF formatting line wraps (lines that end because of page width).
-
-Example of WRONG (preserves PDF line wrapping):
-"This is a sentence that wraps\nat 80 characters because of the\nPDF page width."
-
-Example of CORRECT (continuous paragraph):
-"This is a sentence that wraps at 80 characters because of the PDF page width."
-
-Format the output as clean markdown with:
-- Proper heading hierarchy (# ## ###)
-- Organized lists and paragraphs
-- Clear section breaks with \n\n between paragraphs
-- Continuous text flow within paragraphs
-
-Return only the markdown text, no JSON wrapper needed.
-`
 
 /**
  * Count total pages in a PDF using Gemini Files API.
@@ -239,7 +203,7 @@ export async function extractBatch(
       contents: [{
         parts: [
           { fileData: { fileUri, mimeType: 'application/pdf' } },
-          { text: BATCH_EXTRACTION_PROMPT(startPage, endPage) }
+          { text: generateBatchedPdfExtractionPrompt(startPage, endPage) }
         ]
       }],
       config: {
@@ -260,6 +224,9 @@ export async function extractBatch(
     if (!markdown || markdown.length < 20) {
       throw new Error(`Insufficient content extracted (${markdown.length} chars)`)
     }
+
+    // Apply post-processing cleanup to remove page artifacts Gemini might have missed
+    markdown = cleanPageArtifacts(markdown)
 
     const extractionTime = Date.now() - startTime
 

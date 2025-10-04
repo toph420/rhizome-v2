@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { VirtualizedReader } from './VirtualizedReader'
-import { QuickCapturePanel } from './QuickCapturePanel'
 import { KeyboardHelp } from './KeyboardHelp'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { AlertCircle, RefreshCw } from 'lucide-react'
-import { captureSelection } from '@/lib/annotations/text-range'
-import type { Chunk, StoredAnnotation, TextSelection } from '@/types/annotations'
+import type { Chunk, StoredAnnotation } from '@/types/annotations'
 
 interface DocumentViewerProps {
   documentId: string
@@ -22,19 +20,24 @@ interface DocumentViewerProps {
 /**
  * Document viewer component with virtualized rendering.
  * Uses VirtualizedReader for smooth 60fps scrolling on large documents.
- * Handles document loading, text selection, and annotation overlays.
+ * Handles document loading and error states. Annotation functionality
+ * is managed by VirtualizedReader.
+ * @param props - Component props.
+ * @param props.documentId - Document ID for annotation queries.
+ * @param props.markdownUrl - Signed URL to markdown content.
+ * @param props.chunks - Document chunks with offsets.
+ * @param props.onVisibleChunksChange - Callback for visible chunk changes.
+ * @returns React element with document viewer.
  */
 export function DocumentViewer({
   documentId,
   markdownUrl,
   chunks,
-  annotations,
   onVisibleChunksChange,
 }: DocumentViewerProps) {
   const [markdown, setMarkdown] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedText, setSelectedText] = useState<TextSelection | null>(null)
   const [retryCount, setRetryCount] = useState(0)
 
   // Load markdown from signed URL
@@ -74,28 +77,6 @@ export function DocumentViewer({
 
     loadMarkdown()
   }, [markdownUrl, retryCount])
-
-  // Handle text selection
-  function handleMouseUp() {
-    const selection = captureSelection()
-    if (selection) {
-      setSelectedText(selection)
-    } else {
-      setSelectedText(null)
-    }
-  }
-
-  // Handle Escape key to close selection
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setSelectedText(null)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
 
   // Handle retry
   function handleRetry() {
@@ -168,24 +149,13 @@ export function DocumentViewer({
   }
 
   return (
-    <div className="h-full" onMouseUp={handleMouseUp}>
+    <div className="h-full">
       <VirtualizedReader
         markdown={markdown}
         chunks={chunks}
+        documentId={documentId}
         onVisibleChunksChange={onVisibleChunksChange}
       />
-
-      {selectedText && (
-        <QuickCapturePanel
-          selection={selectedText}
-          documentId={documentId}
-          onClose={() => setSelectedText(null)}
-          chunkContent={
-            chunks.find((c) => c.id === selectedText.range.chunkId)?.content ||
-            ''
-          }
-        />
-      )}
 
       <KeyboardHelp />
     </div>
