@@ -119,10 +119,13 @@ export function RightPanel({
               
               <TabsContent value="annotations" className="flex-1 overflow-hidden m-0">
                 <ScrollArea className="h-full">
-                  <AnnotationsList documentId={documentId} />
+                  <AnnotationsList
+                    documentId={documentId}
+                    onAnnotationClick={onHighlightAnnotation}
+                  />
                 </ScrollArea>
               </TabsContent>
-              
+
               <TabsContent value="review" className="flex-1 overflow-hidden m-0">
                 <AnnotationReviewTab
                   documentId={documentId}
