@@ -25,9 +25,10 @@ FUNCTIONS_PID=$!
 # Give functions a moment to start
 sleep 2
 
-# Start background worker
+# Start background worker with logging
 echo "🔄 Starting Background Worker..."
-(cd worker && npm run dev) &
+echo "📝 Worker logs: /tmp/worker.log"
+(cd worker && npm run dev) > /tmp/worker.log 2>&1 &
 WORKER_PID=$!
 
 # Give worker a moment to start

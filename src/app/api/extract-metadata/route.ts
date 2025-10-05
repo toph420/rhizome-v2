@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { GoogleGenAI } from '@google/genai'
+import { jsonrepair } from 'jsonrepair'
 import type { DetectedMetadata } from '@/types/metadata'
 
 export const runtime = 'nodejs'
@@ -107,18 +108,36 @@ ${markdown.slice(0, 5000)}`
 
   let metadata
   try {
-    metadata = JSON.parse(result.text || '{}')
+    // Try to parse JSON, with fallback for common issues
+    const rawText = result.text || '{}'
+
+    // Remove markdown code blocks if present (sometimes AI adds ```json ... ```)
+    const cleanedText = rawText.replace(/^```json\n?/i, '').replace(/\n?```$/i, '').trim()
+
+    metadata = JSON.parse(cleanedText)
   } catch (parseError) {
     console.error('[extract-metadata] JSON parse error:', parseError)
     console.error('[extract-metadata] Raw text:', result.text)
-    throw new Error('Failed to parse AI response as JSON')
+
+    // Attempt to repair malformed JSON using jsonrepair
+    try {
+      const rawText = result.text || '{}'
+      const cleanedText = rawText.replace(/^```json\n?/i, '').replace(/\n?```$/i, '').trim()
+      const repairedJson = jsonrepair(cleanedText)
+
+      metadata = JSON.parse(repairedJson)
+      console.warn('[extract-metadata] Successfully repaired malformed JSON')
+    } catch (repairError) {
+      console.error('[extract-metadata] JSON repair failed:', repairError)
+      throw new Error(`Failed to parse AI response as JSON. AI may have returned incomplete or malformed data. Please try again.`)
+    }
   }
 
   // Handle edge case where AI returns array instead of object
   if (Array.isArray(metadata)) {
     console.log('[extract-metadata] AI returned array, extracting first element')
     if (metadata.length === 0) {
-      throw new Error('AI returned empty array')
+      throw new Error('AI returned empty array - unable to extract metadata. Please try again.')
     }
     metadata = metadata[0]
   }
@@ -133,7 +152,7 @@ ${markdown.slice(0, 5000)}`
       hasType: !!metadata.type,
       metadata
     })
-    throw new Error(`Invalid metadata response from AI - missing required fields. Got: ${JSON.stringify(metadata)}`)
+    throw new Error(`AI returned incomplete metadata (missing ${!metadata.title ? 'title' : !metadata.author ? 'author' : 'type'}). Please try again.`)
   }
 
   return metadata as DetectedMetadata
@@ -171,10 +190,10 @@ export async function POST(req: NextRequest) {
 
     return Response.json(metadata)
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('[extract-metadata] Error:', error)
     return Response.json(
-      { error: error.message || 'Failed to extract metadata' },
+      { error: error instanceof Error ? error.message : 'Failed to extract metadata' },
       { status: 500 }
     )
   }

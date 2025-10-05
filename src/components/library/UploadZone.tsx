@@ -134,8 +134,33 @@ export function UploadZone() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Metadata extraction failed')
+        // Check if response is JSON before trying to parse
+        const contentType = response.headers.get('content-type')
+        let errorMessage = 'Metadata extraction failed'
+
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json()
+            errorMessage = errorData.error || errorMessage
+          } catch (jsonError) {
+            console.error('Failed to parse error response as JSON:', jsonError)
+            // Use default error message if JSON parsing fails
+          }
+        } else {
+          // Non-JSON error (HTML, plain text, etc.)
+          const errorText = await response.text()
+          console.error('Non-JSON error response:', errorText.slice(0, 200))
+          errorMessage = `Server error (${response.status}): ${response.statusText}`
+        }
+
+        throw new Error(errorMessage)
+      }
+
+      // Check if success response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType?.includes('application/json')) {
+        console.error('Expected JSON response, got:', contentType)
+        throw new Error('Invalid response format from server')
       }
 
       const metadata = await response.json()
@@ -365,9 +390,19 @@ export function UploadZone() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
+        // Check if response is JSON before trying to parse
+        const contentType = response.headers.get('content-type')
+        let errorData: any = null
 
-        if (response.status === 429 && errorData.fallback) {
+        if (contentType?.includes('application/json')) {
+          try {
+            errorData = await response.json()
+          } catch (jsonError) {
+            console.error('Failed to parse error response as JSON:', jsonError)
+          }
+        }
+
+        if (response.status === 429 && errorData?.fallback) {
           // Quota exceeded - show manual entry
           console.warn('YouTube API quota exceeded, using fallback')
           setDetectedMetadata({
@@ -377,9 +412,17 @@ export function UploadZone() {
             description: 'YouTube API quota exceeded. Please edit manually.'
           })
         } else {
-          throw new Error(errorData.error || 'Failed to fetch metadata')
+          const errorMessage = errorData?.error || `Server error (${response.status}): ${response.statusText}`
+          throw new Error(errorMessage)
         }
       } else {
+        // Check if success response is JSON
+        const contentType = response.headers.get('content-type')
+        if (!contentType?.includes('application/json')) {
+          console.error('Expected JSON response, got:', contentType)
+          throw new Error('Invalid response format from server')
+        }
+
         const metadata = await response.json()
         console.log('✅ YouTube metadata extracted:', metadata.title)
         setDetectedMetadata(metadata)

@@ -189,6 +189,18 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     }
     console.log(`✅ Markdown saved to storage`)
 
+    // Update markdown_path in database to match actual storage location
+    const { error: pathUpdateError } = await supabase
+      .from('documents')
+      .update({ markdown_path: markdownPath })
+      .eq('id', document_id)
+
+    if (pathUpdateError) {
+      console.warn(`⚠️ Failed to update markdown_path: ${pathUpdateError.message}`)
+    } else {
+      console.log(`✅ Updated markdown_path: ${markdownPath}`)
+    }
+
     // Update stage after markdown saved
     await updateStage(supabase, job.id, 'markdown_saved')
     
