@@ -31,34 +31,52 @@ export function generateSemanticChunkingPrompt(
     : ''
   return `Analyze the DOCUMENT TEXT below and identify semantic chunks.
 
-🚨 CRITICAL REQUIREMENT - EXACT TEXT PRESERVATION 🚨
-You MUST copy text EXACTLY as it appears. Preserve:
-- Every space, tab, and whitespace character
-- Every newline and line break (\\n)
-- Every special character, punctuation mark
-- Every formatting character
-Do NOT normalize, clean, trim, or modify the text in ANY way.
+🚨 CRITICAL REQUIREMENT #1 - ACCURATE OFFSETS 🚨
 
-If the source has "  Two  spaces\\n\\nTwo newlines", return EXACTLY "  Two  spaces\\n\\nTwo newlines"
-NOT "Two spaces\\n\\nTwo newlines" or any modified version.
+The start_offset and end_offset you provide MUST point to where this content appears in the source.
+These offsets are used for viewport tracking - incorrect offsets break the reader experience.
 
-🚨 ABSOLUTE HARD LIMIT - CHUNK SIZE 🚨
+Your primary task:
+1. Identify semantic boundaries (where thoughts begin and end)
+2. Extract the text content (preserve meaning and structure)
+3. Calculate ACCURATE start_offset and end_offset positions
+4. Generate rich metadata (themes, concepts, emotional tone)
+
+Acceptable content variations:
+✅ Minor whitespace normalization (extra spaces, line breaks)
+✅ Citation formatting (*italics* vs plain text)
+✅ Markdown formatting variations
+
+UNACCEPTABLE violations:
+❌ Paraphrasing: "The author argues..." → "According to the text..."
+❌ Summarizing: [500 words] → [50 word summary]
+❌ Hallucinating content not in source
+❌ Wrong offsets (pointing to different part of document)
+
+VERIFICATION:
+The content at markdown.slice(start_offset, end_offset) should be SIMILAR to your chunk.content.
+Offsets must point to the correct location, even if formatting varies slightly.
+
+🚨 CRITICAL REQUIREMENT #2 - CHUNK SIZE LIMIT 🚨
+
 MAXIMUM chunk size: ${maxChunkSize} characters (approximately ${Math.floor(maxChunkSize / 6)} words)
-MINIMUM chunk size: 200 words
+MINIMUM chunk size: 200 words (1000 characters)
 
-DO NOT EVER return a chunk larger than ${maxChunkSize} characters.
-This is NOT a suggestion. This is a TECHNICAL CONSTRAINT.
-Your response will be REJECTED if you violate this limit.
+This is a TECHNICAL CONSTRAINT, not a suggestion.
+If you return ANY chunk > ${maxChunkSize} chars, your batch will be REJECTED and retried.
 
-If a semantic unit would exceed ${maxChunkSize} characters:
-1. STOP immediately
-2. Break it into 2-3 smaller chunks
-3. Each chunk gets its own themes/concepts/emotional analysis
-4. Ensure each sub-chunk is semantically coherent
+After 3 rejections, the batch will be split into smaller sections.
+
+HOW TO HANDLE LONG SEMANTIC UNITS:
+If a complete thought exceeds ${maxChunkSize} chars:
+1. Find a natural breaking point (paragraph, section, argument boundary)
+2. Split into 2-3 smaller chunks
+3. Each chunk still needs full metadata (themes, concepts, emotional)
+4. Better to have 3 coherent 3000-char chunks than 1 oversized 9000-char chunk
 
 Example of WRONG (will be rejected):
 {
-  "content": "...49,000 characters of text..." ❌ TOO LARGE
+  "content": "...49,000 characters of text..." ❌ EXCEEDS LIMIT
 }
 
 Example of CORRECT:
@@ -66,87 +84,81 @@ Example of CORRECT:
   "content": "...3,500 characters of text..." ✅ WITHIN LIMIT
 }
 
-A semantic chunk is a COMPLETE UNIT OF THOUGHT with these constraints:
+🚨 REQUIREMENTS SUMMARY 🚨
+1. Accurate offsets that point to correct locations in source
+2. Semantic content (preserve meaning, minor formatting variations OK)
+3. No hallucinations - content must exist in source document
+4. Every chunk ≤ ${maxChunkSize} characters
+5. Rich metadata extraction (themes, concepts, emotional analysis)
+
+Your response will be validated: offsets checked for accuracy, content checked for similarity.
+
+═══════════════════════════════════════════════════════════════════════════
+
+A semantic chunk is a COMPLETE UNIT OF THOUGHT:
 - TARGET: 500-1200 words (2500-6000 characters)
 - MINIMUM: 200 words (1000 characters)
 - MAXIMUM: ${maxChunkSize} characters (ABSOLUTE HARD LIMIT)
-- NEVER combine multiple distinct ideas into one chunk
 
-Semantic chunking rules:
-- May span multiple paragraphs if they form one coherent idea
-- May split a long paragraph if it covers multiple distinct ideas
-- Should feel like a natural "node" in a knowledge graph
-- If semantic completeness would exceed ${maxChunkSize} chars, split into multiple chunks at natural boundaries
+Chunking boundaries:
+- Scene changes, argument shifts, topic transitions
+- May span multiple paragraphs if they form one idea
+- May split long paragraphs if they cover multiple ideas
+- Stop at ${maxChunkSize} chars even if mid-thought
 
-MARKDOWN STRUCTURE GUIDANCE:
-- Code blocks: Keep with surrounding context (don't isolate)
-- Lists: Keep intact unless they span very different topics
-- Tables: Usually keep as single chunks unless very large
-- Headings: Good natural boundaries, but not always required
-- Prioritize semantic completeness WITHIN the ${maxChunkSize} character limit
+MARKDOWN STRUCTURE:
+- Code blocks: Keep with surrounding context
+- Lists: Keep intact unless spanning different topics
+- Tables: Usually single chunks unless very large
+- Headings: Good boundaries, but not required
 
 ${typeSpecificGuidance}
 
 For each chunk you identify, extract:
 
-1. **content**: EXACT VERBATIM TEXT from DOCUMENT TEXT section below
-   - Copy EXACTLY character-by-character with NO modifications
-   - Preserve ALL whitespace, newlines, and special characters
-   - Do NOT trim, normalize, or clean the text
-   - This must match markdown.slice(start_offset, end_offset) EXACTLY
-2. **start_offset**: Character position where chunk starts (relative to DOCUMENT TEXT below, starting at 0)
-3. **end_offset**: Character position where chunk ends (relative to DOCUMENT TEXT below)
+1. **content**: The EXACT, UNMODIFIED text from the source
+   - Use markdown.slice(start, end) conceptually
+   - Must match source character-for-character
+   - Will be verified by searching in full document
+
+2. **start_offset**: Character position where chunk starts (0-indexed from start of DOCUMENT TEXT below)
+
+3. **end_offset**: Character position where chunk ends
+
 4. **themes**: 2-5 key themes/topics
-   - Examples: ["mortality", "alienation"], ["power dynamics", "surveillance"], ["entropy", "paranoia"]
+   - Examples: ["mortality", "alienation"], ["power dynamics", "surveillance"]
+
 5. **concepts**: 3-5 specific concepts with importance scores
    - Format: [{"text": "concept name", "importance": 0.8}]
-   - Examples:
-     - Fiction: [{"text": "stream of consciousness", "importance": 0.9}, {"text": "unreliable narrator", "importance": 0.7}]
-     - Philosophy: [{"text": "phenomenology", "importance": 0.85}, {"text": "dasein", "importance": 0.9}]
-   - Importance: 0.0-1.0 representing how central each concept is to the chunk
-6. **importance**: 0.0-1.0 score for how significant this chunk is to the overall work
-   - Higher scores for key arguments, turning points, major revelations
-   - Lower scores for transitional passages, descriptive interludes
-7. **summary**: Brief one-sentence summary (max 100 chars)
-   - Example: "Protagonist realizes the futility of his search"
-8. **domain**: Domain classification
-   - Options: narrative, philosophical, academic, poetic, experimental, essayistic, etc.
-9. **emotional**: Emotional metadata for detecting contradictions and tensions
-   - **polarity**: -1.0 (despair, nihilism, darkness) to +1.0 (hope, affirmation, transcendence)
-   - **primaryEmotion**: anxiety, melancholy, joy, dread, wonder, rage, apathy, ecstasy, etc.
-   - **intensity**: 0.0-1.0 (how strongly the emotion pervades the passage)
-   - Examples:
-     - Absurdist fiction: {polarity: -0.3, primaryEmotion: "absurdist humor", intensity: 0.6}
-     - Existential crisis: {polarity: -0.8, primaryEmotion: "dread", intensity: 0.9}
-     - Mystical experience: {polarity: 0.7, primaryEmotion: "awe", intensity: 0.8}
+   - Importance: 0.0-1.0 representing centrality to the chunk
 
-CRITICAL REQUIREMENTS:
-- Identify chunk boundaries based on semantic completeness, not paragraph breaks
-- ENFORCE the ${maxChunkSize} character maximum limit - this is NOT optional
-- Target 500-1200 words per chunk, NEVER exceed ${maxChunkSize} characters
-- Return chunks in sequential order
-- start_offset and end_offset must be accurate character positions
-- content must be ONLY text from DOCUMENT TEXT section below - DO NOT include instructions or examples
-- Emotional polarity is CRITICAL for detecting contradictions
-- IMPORTANT: Properly escape all JSON strings (quotes, newlines, backslashes)
-- IMPORTANT: Ensure all JSON is well-formed and complete
-- IMPORTANT: If a semantic unit would exceed ${maxChunkSize} chars, split it into multiple chunks
+6. **importance**: 0.0-1.0 score for chunk significance
+   - Higher for key arguments, turning points, revelations
+   - Lower for transitions, descriptions
+
+7. **summary**: One-sentence summary (max 100 chars)
+
+8. **domain**: Domain classification (narrative, philosophical, academic, poetic, experimental, essayistic)
+
+9. **emotional**: Emotional metadata for contradiction detection
+   - **polarity**: -1.0 (despair, darkness) to +1.0 (hope, transcendence)
+   - **primaryEmotion**: anxiety, melancholy, joy, dread, wonder, rage, apathy, ecstasy
+   - **intensity**: 0.0-1.0 (how strongly emotion pervades passage)
 
 Return JSON in this exact format:
 {
   "chunks": [
     {
-      "content": "Exact text copied from DOCUMENT TEXT...",
+      "content": "EXACT unmodified text from source...",
       "start_offset": 0,
       "end_offset": 1847,
       "themes": ["theme1", "theme2"],
       "concepts": [
-        {"text": "specific concept", "importance": 0.9},
-        {"text": "another concept", "importance": 0.7}
+        {"text": "concept", "importance": 0.9}
       ],
       "importance": 0.8,
-      "summary": "Brief summary of chunk",
-      "domain": "technical",
+      "summary": "Brief summary",
+      "domain": "academic",
       "emotional": {
         "polarity": 0.3,
         "primaryEmotion": "neutral",
@@ -157,14 +169,21 @@ Return JSON in this exact format:
 }
 
 ═══════════════════════════════════════════════════════════════════════════
-DOCUMENT TEXT (this text starts at character ${batch.startOffset} in the full document):
+DOCUMENT TEXT (starts at character ${batch.startOffset} in the full document):
 ═══════════════════════════════════════════════════════════════════════════
 
 ${batch.content}
 
 ═══════════════════════════════════════════════════════════════════════════
 
-Extract semantic chunks from the DOCUMENT TEXT above. Return ONLY valid JSON.`
+Extract semantic chunks from the DOCUMENT TEXT above.
+
+BEFORE returning your response:
+1. Verify offsets point to correct locations (validate against source positions)
+2. Verify each chunk is ≤ ${maxChunkSize} characters
+3. Verify no hallucinated content (all text must exist in source)
+
+Return ONLY valid JSON. No explanations, no markdown formatting.`
 }
 
 /**

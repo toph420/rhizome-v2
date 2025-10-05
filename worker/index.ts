@@ -129,24 +129,26 @@ async function handleJobError(supabase: any, job: any, error: Error) {
   const isTransient = isTransientError(error)
   const canRetry = job.retry_count < job.max_retries
   const friendlyError = getUserFriendlyError(error)
+  const errorMessage = error instanceof Error ? error.message : String(error)
 
   if (isTransient && canRetry) {
     const delayMs = 5000 * Math.pow(5, job.retry_count)
     const nextRetry = new Date(Date.now() + delayMs)
-    
+
     await supabase
       .from('background_jobs')
       .update({
         status: 'failed',
         retry_count: job.retry_count + 1,
         next_retry_at: nextRetry.toISOString(),
-        last_error: friendlyError
+        last_error: friendlyError,
+        error_message: errorMessage  // Add detailed error message for debugging
       })
       .eq('id', job.id)
-    
+
     console.log(`Job ${job.id} scheduled for retry at ${nextRetry}`)
   } else {
-    await markJobFailed(supabase, job.id, friendlyError)
+    await markJobFailed(supabase, job.id, friendlyError, errorMessage)
   }
 }
 
@@ -165,13 +167,14 @@ function isTransientError(error: Error): boolean {
   )
 }
 
-async function markJobFailed(supabase: any, jobId: string, error: string) {
+async function markJobFailed(supabase: any, jobId: string, error: string, errorMessage?: string) {
   await supabase
     .from('background_jobs')
     .update({
       status: 'failed',
       completed_at: new Date().toISOString(),
-      last_error: error
+      last_error: error,
+      error_message: errorMessage || error  // Use detailed message if available, fallback to friendly error
     })
     .eq('id', jobId)
 }

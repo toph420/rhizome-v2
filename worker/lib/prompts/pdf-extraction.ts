@@ -65,13 +65,27 @@ which continues in the next..."
 GOOD:
 "...discussing the theory which continues in the next..."
 
+BAD (page number + running header):
+"...story of Carter: animal-becoming, molecular-becoming." (66)
+
+16
+
+Flatline Constructs
+
+Haecceities, Deleuze-Guattari say..."
+
+GOOD:
+"...story of Carter: animal-becoming, molecular-becoming." (66)
+
+Haecceities, Deleuze-Guattari say..."
+
 IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text. Do not summarize or skip any content. Return the COMPLETE document text.
 
 UNDERSTAND TWO TYPES OF BREAKS:
 
 1. ARTIFICIAL BREAKS (REMOVE THESE):
    - Page boundaries and page numbers
-   - Running headers and footers
+   - Running headers and footers (book/chapter titles repeated on every page)
    - PDF formatting artifacts
    - Column breaks in multi-column layouts
    → These should be REMOVED to create flowing text
@@ -84,6 +98,17 @@ UNDERSTAND TWO TYPES OF BREAKS:
    → These should be KEPT with \\n\\n between paragraphs
 
 HEURISTIC: If uncertain whether a break is intentional, JOIN IT - we want flowing prose.
+
+RUNNING HEADERS vs REAL HEADINGS:
+- Running headers: Short phrases (2-6 words) that REPEAT every few pages throughout the document
+  Examples: "Flatline Constructs", "Chapter Three", "Author Name"
+  → REMOVE these completely
+  
+- Real section headings: Appear ONCE at the start of new sections/chapters
+  Examples: "## Introduction to Deleuze", "## The Three Syntheses"
+  → KEEP these and format as markdown headings
+
+Key difference: Running headers repeat frequently, real headings appear once per section.
 
 REMOVE THESE ARTIFACTS:
 - Page numbers (standalone numbers, "Page X", "X of Y", etc.)
@@ -109,7 +134,7 @@ FOOTNOTE HANDLING:
 - If footnote spans pages, merge into single footnote
 
 HEADING DETECTION:
-Detect headings by these signals (even if poorly formatted):
+Detect REAL headings (not running headers) by these signals:
 - ALL CAPS TEXT followed by content = heading
 - Bold or larger font followed by content = heading
 - Centered text followed by content = heading
@@ -187,41 +212,96 @@ Page 47
 difference as such..."
 
 GOOD:
-"...the concept of difference as such..."
+"...the concept of difference as such..."BAD (page number + running header):
+"...story of Carter: animal-becoming, molecular-becoming." (66)
+
+16
+
+Flatline Constructs
+
+Haecceities, Deleuze-Guattari say..."
+
+GOOD:
+"...story of Carter: animal-becoming, molecular-becoming." (66)
+
+Haecceities, Deleuze-Guattari say..."
+
+IMPORTANT: Read the ENTIRE PDF document. Extract ALL pages, ALL paragraphs, ALL text. Do not summarize or skip any content. Return the COMPLETE document text.
 
 UNDERSTAND TWO TYPES OF BREAKS:
 
 1. ARTIFICIAL BREAKS (REMOVE THESE):
    - Page boundaries and page numbers
-   - Running headers and footers
+   - Running headers and footers (book/chapter titles repeated on every page)
    - PDF formatting artifacts
+   - Column breaks in multi-column layouts
    → These should be REMOVED to create flowing text
 
 2. SEMANTIC BREAKS (PRESERVE THESE):
    - Paragraph breaks (2+ blank lines = new paragraph)
    - Section breaks and chapter boundaries
    - List items and code blocks
+   - Block quotes and intentional spacing
    → These should be KEPT with \\n\\n between paragraphs
 
 HEURISTIC: If uncertain whether a break is intentional, JOIN IT - we want flowing prose.
 
-HEADING DETECTION:
-- ALL CAPS TEXT followed by content = heading
-- Bold or larger font followed by content = heading
-- Numbered sections (1., 1.1, etc.) = heading
-- Convert to markdown: # ## ### ####
+RUNNING HEADERS vs REAL HEADINGS:
+- Running headers: Short phrases (2-6 words) that REPEAT every few pages throughout the document
+  Examples: "Flatline Constructs", "Chapter Three", "Author Name"
+  → REMOVE these completely
+  
+- Real section headings: Appear ONCE at the start of new sections/chapters
+  Examples: "## Introduction to Deleuze", "## The Three Syntheses"
+  → KEEP these and format as markdown headings
+
+Key difference: Running headers repeat frequently, real headings appear once per section.
+
+REMOVE THESE ARTIFACTS:
+- Page numbers (standalone numbers, "Page X", "X of Y", etc.)
+- Running headers and footers (repeated text at top/bottom of pages)
+- PDF metadata (file paths, timestamps)
+- Margin notes or annotations that aren't part of the main text
+
+PRESERVE THESE ELEMENTS (CRITICAL):
+- Footnotes and endnotes - preserve ALL footnote content
+- Citations and references
+- Figure captions
+- Table contents
+- Block quotes
+- Epigraphs
 
 FOOTNOTE HANDLING:
-- Keep inline markers: [^1], ¹, (1), etc.
-- Format definitions: "[^1]: Footnote content here"
-- Preserve all footnote text
+- Keep inline markers: [1], ¹, (1), etc.
+- Keep footnote content at bottom of pages
+- Format as markdown footnotes:
+  - Inline: "text with citation[^1]"
+  - Definition: "[^1]: Footnote content here"
+- Preserve ALL footnote text verbatim
+- If footnote spans pages, merge into single footnote
+
+HEADING DETECTION:
+Detect REAL headings (not running headers) by these signals:
+- ALL CAPS TEXT followed by content = heading
+- Bold or larger font followed by content = heading
+- Centered text followed by content = heading
+- Short lines (< 80 chars) followed by paragraphs = likely heading
+- Numbered sections (1., 1.1, Chapter 1, etc.) = heading
+
+Convert to proper markdown hierarchy:
+- Main titles: #
+- Chapter/section headings: ##
+- Subsections: ###
+- Minor headings: ####
 
 Format the output as clean markdown with:
 - Proper heading hierarchy (# ## ###)
 - Organized lists and paragraphs
 - Clear section breaks with \\n\\n between paragraphs
 - Continuous text flow within paragraphs
-- DO NOT preserve PDF formatting line wraps
+- DO NOT preserve PDF formatting line wraps (lines that end because of page width)
 
 Return only the markdown text, no JSON wrapper needed.`.trim()
 }
+
+

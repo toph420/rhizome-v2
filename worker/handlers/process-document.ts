@@ -257,14 +257,14 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     // ✅ ASYNC CONNECTION DETECTION: Queued as separate job (doesn't block document completion)
     // This prevents the main processing job from timing out during connection detection
     if (chunksWithEmbeddings.length >= 2) {
-      // Check for existing jobs (any status except failed) to avoid duplicates
-      // Include 'completed' to prevent re-creating after successful detection
+      // Check for existing ACTIVE jobs to avoid duplicates
+      // Only check pending/processing - allow retries if previous job completed/failed
       const { data: existingJobs } = await supabase
         .from('background_jobs')
         .select('id, status')
         .eq('job_type', 'detect-connections')
         .eq('user_id', userId)
-        .in('status', ['pending', 'processing', 'completed'])
+        .in('status', ['pending', 'processing'])
         .contains('input_data', { document_id })
         .limit(1)
 

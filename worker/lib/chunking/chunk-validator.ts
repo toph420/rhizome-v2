@@ -235,46 +235,86 @@ export function validateChunkSizes(
 }
 
 /**
- * Splits an oversized chunk into smaller chunks while preserving metadata.
+ * Splits an oversized chunk into smaller chunks at paragraph boundaries.
+ * Uses placeholder offsets (-1) which the fuzzy matcher will correct.
  *
- * @param chunk - Oversized chunk to split
+ * Handles raw AI response chunks (metadata fields directly on chunk) safely.
+ *
+ * @param chunk - Oversized chunk to split (raw AI response format)
  * @param maxSize - Target size for split chunks (default: 8000 to stay well under 10K limit)
- * @returns Array of smaller chunks with preserved metadata
+ * @returns Array of smaller chunks with preserved metadata and placeholder offsets
  */
 export function splitOversizedChunk(
-  chunk: ChunkWithOffsets,
+  chunk: any, // Raw AI response - not yet wrapped in ChunkWithOffsets structure
   maxSize: number = 8000
 ): ChunkWithOffsets[] {
   const chunks: ChunkWithOffsets[] = []
-  const content = chunk.content
-  let position = 0
+  const paragraphs = chunk.content.split(/\n\n+/)
 
-  while (position < content.length) {
-    const end = Math.min(position + maxSize, content.length)
-    const splitContent = content.substring(position, end).trim()
+  let currentContent = ''
+  let chunkNumber = 0
 
-    // Calculate proportional offsets
-    const offsetRange = chunk.end_offset - chunk.start_offset
-    const proportionalStart = chunk.start_offset + Math.floor((position / content.length) * offsetRange)
-    const proportionalEnd = chunk.start_offset + Math.floor((end / content.length) * offsetRange)
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i]
 
-    chunks.push({
-      content: splitContent,
-      start_offset: proportionalStart,
-      end_offset: proportionalEnd,
-      metadata: {
-        ...chunk.metadata,
-        // Add note that this was split
-        summary: chunk.metadata.summary
-          ? `${chunk.metadata.summary} (split ${chunks.length + 1})`
-          : `Split chunk ${chunks.length + 1}`
-      }
-    })
+    // Would adding this paragraph exceed the limit?
+    if (currentContent.length > 0 && currentContent.length + para.length + 2 > maxSize) {
+      // Save current chunk with PLACEHOLDER offsets
+      // Fuzzy matcher will find the real position in the source markdown
+      chunks.push({
+        content: currentContent.trim(),
+        start_offset: -1, // Placeholder - fuzzy matcher will correct
+        end_offset: -1,   // Placeholder - fuzzy matcher will correct
+        metadata: {
+          // Safe access - AI may omit optional fields
+          themes: chunk.themes || [],
+          concepts: chunk.concepts || [],
+          importance: chunk.importance ?? 0.5,
+          summary: chunk.summary
+            ? `${chunk.summary} (part ${chunkNumber + 1})`
+            : `Split chunk part ${chunkNumber + 1}`,
+          domain: chunk.domain || 'general',
+          emotional: chunk.emotional || {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          }
+        }
+      })
 
-    position = end
+      chunkNumber++
+      currentContent = para + '\n\n'
+    } else {
+      currentContent += para + '\n\n'
+    }
   }
 
-  console.log(`[Chunk Validator] Split oversized chunk (${content.length} chars) into ${chunks.length} chunks`)
+  // Add final chunk
+  if (currentContent.trim().length > 0) {
+    chunks.push({
+      content: currentContent.trim(),
+      start_offset: -1, // Placeholder - fuzzy matcher will correct
+      end_offset: -1,   // Placeholder - fuzzy matcher will correct
+      metadata: {
+        themes: chunk.themes || [],
+        concepts: chunk.concepts || [],
+        importance: chunk.importance ?? 0.5,
+        summary: chunk.summary
+          ? `${chunk.summary} (part ${chunkNumber + 1})`
+          : `Split chunk part ${chunkNumber + 1}`,
+        domain: chunk.domain || 'general',
+        emotional: chunk.emotional || {
+          polarity: 0,
+          primaryEmotion: 'neutral',
+          intensity: 0
+        }
+      }
+    })
+  }
+
+  console.log(
+    `[Chunk Validator] Split ${chunk.content.length} char chunk into ${chunks.length} parts at paragraph boundaries`
+  )
   return chunks
 }
 
@@ -303,8 +343,8 @@ export function createFallbackChunksForBatch(
       metadata: {
         themes: ['general'],
         concepts: [],
-        importance: 0.5,
-        summary: 'Content analysis unavailable',
+        importance: 0.6, // Set to 0.6 to pass ThematicBridge filter (requires ≥0.6)
+        summary: 'AI extraction failed - fallback chunking used',
         domain: 'general',
         emotional: {
           polarity: 0,

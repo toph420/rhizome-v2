@@ -52,7 +52,7 @@ export async function remapConnections(
 
   // Fetch verified connections where source OR target chunk belongs to this document
   const { data: connections, error } = await supabase
-    .from('chunk_connections')
+    .from('connections')
     .select(`
       id,
       source_chunk_id,
@@ -150,7 +150,7 @@ export async function remapConnections(
 
       // Mark as lost in metadata only (don't update chunk IDs with random matches)
       await supabase
-        .from('chunk_connections')
+        .from('connections')
         .update({
           metadata: { ...conn.metadata, lost_during_reprocessing: true, min_similarity: minSimilarity }
         })
@@ -240,7 +240,7 @@ async function updateConnection(
     : { remapped: true }
 
   const { error } = await supabase
-    .from('chunk_connections')
+    .from('connections')
     .update({
       source_chunk_id: newSourceChunkId,
       target_chunk_id: newTargetChunkId,

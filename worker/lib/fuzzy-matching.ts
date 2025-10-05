@@ -219,46 +219,46 @@ function trigramFuzzyMatch(
 
 /**
  * Generates trigrams (3-character sliding windows) from text.
- * 
+ *
  * @param text - Input text
  * @returns Set of trigrams
- * 
+ *
  * @example
  * generateTrigrams('hello') // Set(['hel', 'ell', 'llo'])
  */
-function generateTrigrams(text: string): Set<string> {
+export function generateTrigrams(text: string): Set<string> {
   const trigrams = new Set<string>()
-  
+
   for (let i = 0; i <= text.length - 3; i++) {
     trigrams.add(text.substring(i, i + 3))
   }
-  
+
   return trigrams
 }
 
 /**
  * Calculates Jaccard similarity between two trigram sets.
  * Jaccard = |intersection| / |union|
- * 
+ *
  * @param set1 - First trigram set
  * @param set2 - Second trigram set
  * @returns Similarity score 0.0-1.0
- * 
+ *
  * @example
  * calculateTrigramSimilarity(
  *   new Set(['abc', 'bcd']),
  *   new Set(['abc', 'cde'])
  * ) // 0.33 (1 intersection / 3 union)
  */
-function calculateTrigramSimilarity(set1: Set<string>, set2: Set<string>): number {
+export function calculateTrigramSimilarity(set1: Set<string>, set2: Set<string>): number {
   if (set1.size === 0 && set2.size === 0) {
     return 1.0
   }
-  
+
   if (set1.size === 0 || set2.size === 0) {
     return 0.0
   }
-  
+
   // Calculate intersection
   const intersectionArray: string[] = []
   set1.forEach(item => {
@@ -266,12 +266,12 @@ function calculateTrigramSimilarity(set1: Set<string>, set2: Set<string>): numbe
       intersectionArray.push(item)
     }
   })
-  
+
   // Calculate union
   const unionSet = new Set<string>()
   set1.forEach(item => unionSet.add(item))
   set2.forEach(item => unionSet.add(item))
-  
+
   return intersectionArray.length / unionSet.size
 }
 

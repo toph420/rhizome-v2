@@ -47,12 +47,13 @@ import { OversizedChunksError, BatchProcessingError } from './chunking/errors'
 /**
  * Default configuration values for batch metadata extraction.
  */
-const DEFAULT_CONFIG: Required<BatchMetadataConfig> = {
+const DEFAULT_CONFIG = {
   maxBatchSize: 100000, // 100K chars per batch (gemini-2.5-flash-lite has 65K output tokens)
   modelName: GEMINI_MODEL,
   apiKey: process.env.GOOGLE_AI_API_KEY || '',
   maxRetries: 3,
-  enableProgress: true
+  enableProgress: true,
+  customBatches: undefined as BatchMetadataConfig['customBatches']
 }
 
 const MAX_CHUNK_SIZE = 10000 // Hard limit for embeddings and reader performance
@@ -359,6 +360,7 @@ async function callGeminiForMetadata(
                 'themes',
                 'concepts',
                 'importance',
+                'summary',
                 'emotional'
               ]
             }
@@ -436,7 +438,7 @@ function parseMetadataResponse(
 
   console.log(`[AI Metadata] Batch ${batch.batchId}: AI identified ${parsed.chunks.length} semantic chunks`)
 
-  // Validate chunks using extracted module
+  // Basic structural validation (size limits, structure)
   const validationResult = validateChunks(parsed.chunks, batch, { maxChunkSize: MAX_CHUNK_SIZE })
 
   // If we have invalid chunks, throw error
@@ -445,21 +447,77 @@ function parseMetadataResponse(
     throw new Error(`Chunk ${firstError.chunkIndex}: ${firstError.reason}`)
   }
 
-  // Handle oversized chunks by splitting them
-  let validated = validationResult.valid
-  if (validationResult.oversized.length > 0) {
-    console.log(`[AI Metadata] Splitting ${validationResult.oversized.length} oversized chunks`)
+  // Handle oversized chunks by auto-splitting (preserves metadata, avoids retries)
+  let chunksToProcess = validationResult.valid
 
-    for (const { chunk } of validationResult.oversized) {
-      const splitChunks = splitOversizedChunk(chunk)
-      validated.push(...splitChunks)
+  if (validationResult.oversized.length > 0) {
+    console.log(`\n⚠️  Auto-splitting ${validationResult.oversized.length} oversized chunks...`)
+    console.log(`   Batch: ${batch.batchId}`)
+
+    const allChunks: ChunkWithOffsets[] = []
+
+    // Process all chunks (valid + oversized)
+    for (const result of [...validationResult.valid, ...validationResult.oversized.map(o => o.chunk)]) {
+      if (result.content.length <= MAX_CHUNK_SIZE) {
+        allChunks.push(result)
+      } else {
+        // Split oversized chunk at paragraph boundaries
+        const subchunks = splitOversizedChunk(result, MAX_CHUNK_SIZE)
+        console.log(`   Split ${result.content.length} char chunk → ${subchunks.length} pieces`)
+        console.log(`     Themes preserved: ${result.metadata?.themes?.join(', ') || 'none'}`)
+        allChunks.push(...subchunks)
+      }
     }
 
-    console.log(`[AI Metadata] After splitting: ${validated.length} total chunks`)
+    console.log(`✅ Split ${validationResult.oversized.length} chunks → ${allChunks.length} total chunks`)
+    chunksToProcess = allChunks
   }
 
-  // Validate and correct offsets before returning (using 4-strategy fuzzy matching)
-  const { chunks: corrected } = correctAIChunkOffsets(fullMarkdown, validated)
+  // All chunks passed structural validation - correct offsets using fuzzy matcher
+  console.log(`[AI Metadata] Correcting chunk offsets using fuzzy matching...`)
+  const { chunks: corrected, stats } = correctAIChunkOffsets(fullMarkdown, chunksToProcess)
+
+  console.log(`[AI Metadata] Offset correction complete:`)
+  console.log(`  ✅ Exact matches: ${stats.exact}/${corrected.length} (${Math.round(stats.exact / corrected.length * 100)}%)`)
+  console.log(`  🔍 Fuzzy matches: ${stats.fuzzy}/${corrected.length} (${Math.round(stats.fuzzy / corrected.length * 100)}%)`)
+  console.log(`  📍 Approximate: ${stats.approximate}/${corrected.length} (${Math.round(stats.approximate / corrected.length * 100)}%)`)
+  console.log(`  ❌ Failed: ${stats.failed}/${corrected.length}`)
+
+  // ✅ POST-CORRECTION VALIDATION: Check if fuzzy matcher successfully corrected offsets
+  const normalize = (s: string) => s.trim().replace(/\s+/g, ' ')
+  const postCorrectionFailures = corrected.filter(chunk => {
+    const actualText = fullMarkdown.slice(chunk.start_offset, chunk.end_offset)
+    const normActual = normalize(actualText)
+    const normChunk = normalize(chunk.content)
+
+    // If lengths are very different, fuzzy matcher failed
+    if (Math.abs(normActual.length - normChunk.length) > normChunk.length * 0.3) {
+      return true
+    }
+
+    // Basic substring check (first 50 chars should match)
+    const preview = normChunk.slice(0, Math.min(50, normChunk.length))
+    return !normActual.includes(preview)
+  })
+
+  // Reject if fuzzy matcher couldn't fix >20% of chunks
+  if (postCorrectionFailures.length > corrected.length * 0.2) {
+    console.error(
+      `[AI Metadata] CRITICAL: Fuzzy matcher failed to correct ${postCorrectionFailures.length}/${corrected.length} chunks (${Math.round(postCorrectionFailures.length / corrected.length * 100)}%)`
+    )
+    throw new Error(
+      `Offset correction failed for ${postCorrectionFailures.length} chunks - fuzzy matcher couldn't locate content`
+    )
+  }
+
+  if (postCorrectionFailures.length > 0) {
+    console.warn(
+      `[AI Metadata] ⚠️  ${postCorrectionFailures.length} chunks still have offset issues after correction`
+    )
+  } else {
+    console.log(`[AI Metadata] ✓ All ${corrected.length} chunks successfully corrected`)
+  }
+
   return corrected
 }
 
