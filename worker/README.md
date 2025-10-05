@@ -252,6 +252,222 @@ GEMINI_MODEL=gemini-2.5-flash-lite
 3. **Cost**: Storage is cheaper than database rows
 4. **Streaming**: Files can be streamed to client
 
+## Annotation Recovery System
+
+### Overview
+
+The annotation recovery system preserves user annotations when documents are edited (via Obsidian or direct edits). Uses 4-tier fuzzy matching to achieve >90% recovery rate in <2 seconds for 20 annotations.
+
+### Handlers
+
+#### recover-annotations.ts
+
+Recovers annotations after document reprocessing using fuzzy matching.
+
+**Exports:**
+- `recoverAnnotations(documentId, newMarkdown, newChunks)` - Main recovery function
+- `updateAnnotationPosition(annotationId, match)` - Update annotation after recovery
+
+**Recovery Strategy:**
+1. Fetch all Position components for document
+2. For each annotation, try fuzzy matching
+3. Classify by confidence:
+   - ≥0.85: Auto-recover (update immediately)
+   - 0.75-0.85: Flag for review
+   - <0.75: Mark as lost (don't delete)
+
+**Performance:** <100ms per annotation with chunk-bounded search
+
+#### remap-connections.ts
+
+Remaps cross-document connections after reprocessing using embedding similarity.
+
+**Exports:**
+- `remapConnections(verifiedConnections, newChunks, documentId)` - Main remapping function
+- `findBestMatch(embedding, chunks)` - Embedding-based chunk matching
+
+**Strategy:**
+1. Only remap verified connections (user_validated: true)
+2. Use pgvector similarity search
+3. Classify by similarity:
+   - Both >0.95: Auto-remap
+   - Both >0.85: Flag for review
+   - Otherwise: Mark as lost
+
+#### reprocess-document.ts
+
+Main orchestrator for document reprocessing with transaction-safe rollback.
+
+**Exports:**
+- `reprocessDocument(documentId)` - Full reprocessing pipeline
+
+**Pipeline:**
+1. Set processing_status: 'reprocessing'
+2. Mark old chunks as is_current: false
+3. Create new chunks with is_current: false
+4. Recover annotations
+5. If recovery succeeds (>80% rate):
+   - Set new chunks is_current: true
+   - Delete old chunks
+   - Run 3-engine detection
+   - Remap connections
+6. If recovery fails:
+   - Restore old chunks
+   - Delete new chunks
+   - Rollback all changes
+
+**Safety:** Zero data loss with rollback capability
+
+#### obsidian-sync.ts
+
+Bidirectional sync with Obsidian vault.
+
+**Exports:**
+- `exportToObsidian(documentId, userId)` - Export markdown to vault
+- `syncFromObsidian(documentId, userId)` - Import edited markdown from vault
+- `getObsidianUri(vaultName, filePath)` - Generate Obsidian URI for protocol handling
+
+**Export Flow:**
+1. Get user's Obsidian settings (vault path, obsidian_path)
+2. Download markdown from storage
+3. Write to vault at configured path
+4. Optionally export annotations.json alongside
+
+**Sync Flow:**
+1. Read edited markdown from vault
+2. Compare with current version
+3. If changed:
+   - Upload to storage
+   - Trigger reprocessDocument()
+   - Return recovery results
+
+**URI Protocol:** Uses `obsidian://advanced-uri?vault=...&filepath=...` for reliable protocol handling
+
+#### readwise-import.ts
+
+Import highlights from Readwise export JSON with fuzzy matching fallback.
+
+**Exports:**
+- `importReadwiseHighlights(documentId, readwiseJson)` - Main import function
+- `acceptFuzzyMatch(documentId, reviewItem)` - Accept match from review queue
+
+**Import Strategy:**
+1. Try exact text match first
+2. If exact fails, use chunk-bounded fuzzy matching
+3. Classify by confidence:
+   - Exact match: Import immediately
+   - Fuzzy >0.8: Add to review queue
+   - Fuzzy <0.8: Mark as failed
+
+**Color Mapping:** Maps Readwise colors (yellow/blue/red/green/orange) to our color system
+
+**Cost:** Zero AI calls (uses local fuzzy matching)
+
+### Jobs (Cron)
+
+#### export-annotations.ts
+
+Periodic export of all annotations to portable JSON format.
+
+**Schedule:** Every hour (`0 * * * *`)
+
+**Exports:**
+- `runAnnotationExport()` - Export all document annotations
+- `startAnnotationExportCron()` - Start cron job
+
+**Process:**
+1. Fetch all documents with markdown_path
+2. For each document:
+   - Get Position components
+   - Transform to portable format
+   - Upload as `.annotations.json` to storage
+
+**Portable Format:**
+```typescript
+{
+  text: string
+  note?: string
+  color?: string
+  type?: string
+  position: { start: number, end: number }
+  pageLabel?: string
+  created_at: string
+  recovery?: { method: string, confidence: number }
+}
+```
+
+**Purpose:**
+- Backup annotations separately from database
+- Enable Obsidian integration
+- Support future import/export workflows
+
+### Extended Fuzzy Matching
+
+The `lib/fuzzy-matching.ts` file has been extended with annotation recovery functions (added ~250 lines after existing 718 lines).
+
+**New Functions:**
+- `findAnnotationMatch()` - Main 4-tier entry point
+- `findWithLevenshteinContext()` - Context-guided matching
+- `findNearChunkLevenshtein()` - Chunk-bounded search (50-75x faster)
+- `findLevenshteinInSegment()` - Internal sliding window matcher
+- `findFuzzyContext()` - Trigram-based context fallback
+
+**4-Tier Strategy:**
+1. **Exact Match**: `markdown.indexOf(text)` (100% confidence)
+2. **Context-Guided**: Levenshtein with ±100 char context (95% confidence)
+3. **Chunk-Bounded**: Search ±2 chunks (~12.5K chars vs 750K) (85-95% confidence)
+4. **Trigram Fallback**: Existing fuzzy-matching system (70-85% confidence)
+
+**Performance:**
+- Chunk-bounded: ~5ms per annotation
+- Full-text: ~300ms per annotation
+- **Speedup: 60x**
+
+### Integration with Worker
+
+The annotation export cron is started in `index.ts`:
+
+```typescript
+import { startAnnotationExportCron } from './jobs/export-annotations.js'
+
+async function main() {
+  console.log('🚀 Background worker started')
+
+  // Start annotation export cron job (runs hourly)
+  startAnnotationExportCron()
+  console.log('✅ Annotation export cron started (runs hourly)')
+
+  // ... rest of worker loop
+}
+```
+
+### Testing Recovery Handlers
+
+**Manual Testing:**
+```bash
+# Test annotation recovery
+npx tsx worker/handlers/recover-annotations.ts <document_id>
+
+# Test Obsidian sync
+npx tsx worker/handlers/obsidian-sync.ts <document_id>
+
+# Test Readwise import
+npx tsx worker/handlers/readwise-import.ts <document_id> <readwise.json>
+
+# Run annotation export manually
+npx tsx worker/jobs/export-annotations.ts
+```
+
+**Integration Tests:**
+```bash
+cd worker && npm run test:integration
+```
+
+**Performance Benchmarks:**
+```bash
+cd worker && npm run benchmark:annotation-recovery
+```
+
 ## Future Enhancements
 
 - [ ] Parallel chunk processing for large documents
