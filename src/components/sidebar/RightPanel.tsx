@@ -19,6 +19,7 @@ interface RightPanelProps {
   visibleChunkIds?: string[]
   reviewResults?: RecoveryResults | null
   onHighlightAnnotation?: (annotationId: string) => void
+  onNavigateToChunk?: (chunkId: string) => void
 }
 
 /**
@@ -37,7 +38,8 @@ export function RightPanel({
   documentId,
   visibleChunkIds = [],
   reviewResults = null,
-  onHighlightAnnotation
+  onHighlightAnnotation,
+  onNavigateToChunk
 }: RightPanelProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<'connections' | 'annotations' | 'review' | 'weights'>('connections')
@@ -107,7 +109,11 @@ export function RightPanel({
                   <ConnectionFilters />
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide">
-                  <ConnectionsList documentId={documentId} visibleChunkIds={visibleChunkIds} />
+                  <ConnectionsList
+                    documentId={documentId}
+                    visibleChunkIds={visibleChunkIds}
+                    onNavigateToChunk={onNavigateToChunk}
+                  />
                 </div>
               </TabsContent>
               

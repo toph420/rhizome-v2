@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
 import { getDocumentJob } from '@/app/actions/documents'
-import { getAnnotations } from '@/app/actions/annotations'
+import { getAnnotations, getAnnotationsNeedingReview } from '@/app/actions/annotations'
 import { ReaderLayout } from '@/components/reader/ReaderLayout'
 
 interface ReaderPageProps {
@@ -167,7 +167,21 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     // Query annotations for this document
     const annotationsResult = await getAnnotations(id)
     const annotations = annotationsResult.success ? annotationsResult.data : []
-    
+
+    // Fetch review results for annotation recovery with error handling
+    let reviewResults = null
+    try {
+      const results = await getAnnotationsNeedingReview(id)
+      // Check if any recovered annotations exist (success, needsReview, or lost)
+      if (results.success.length > 0 || results.needsReview.length > 0 || results.lost.length > 0) {
+        reviewResults = results
+      }
+    } catch (error) {
+      console.error('[ReaderPage] Failed to fetch review results:', error)
+      // Continue showing reader page without review tab
+      reviewResults = null
+    }
+
     return (
       <>
         {!doc.embeddings_available && job && (
@@ -191,6 +205,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           markdownUrl={signedUrl}
           chunks={chunks}
           annotations={annotations}
+          reviewResults={reviewResults}
         />
       </>
     )

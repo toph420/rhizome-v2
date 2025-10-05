@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { toast } from 'sonner'
-import { ExternalLink, Check, X, Star } from 'lucide-react'
+import { ExternalLink, Check, X, Star, Loader2 } from 'lucide-react'
 import type { SynthesisEngine } from '@/types/annotations'
+import { updateConnectionFeedback } from '@/app/actions/connections'
 
 /**
- * Real connection interface from database (chunk_connections table).
+ * Real connection interface from database (connections table).
  */
 interface Connection {
   id: string
@@ -20,6 +21,8 @@ interface Connection {
   strength: number
   auto_detected: boolean
   discovered_at: string
+  user_validated?: boolean | null
+  user_starred?: boolean | null
   metadata: {
     explanation?: string
     target_document_title?: string
@@ -28,25 +31,12 @@ interface Connection {
   }
 }
 
-/**
- * Connection validation feedback (captured via hotkeys).
- * Stored in localStorage for MVP (migrate to database in Phase 3).
- */
-interface ConnectionFeedback {
-  connection_id: string
-  feedback_type: 'validate' | 'reject' | 'star'
-  context: {
-    time_of_day: string // ISO timestamp
-    document_id: string
-    mode: string // 'reading' | 'study' | 'research'
-  }
-}
-
 interface ConnectionCardProps {
   connection: Connection & { weightedStrength?: number }
   documentId: string
   isActive: boolean
   onClick: () => void
+  onNavigateToChunk?: (chunkId: string) => void
 }
 
 /**
@@ -59,77 +49,89 @@ interface ConnectionCardProps {
  * - Press 'r': Reject connection (red border, X icon)
  * - Press 's': Star connection (yellow border, filled star)
  *
- * Feedback stored to localStorage for learning system analysis.
+ * Feedback persisted to database via server action with optimistic updates.
  *
  * @param props - Component props.
- * @param props.connection - Mock connection data with optional weighted strength.
+ * @param props.connection - Connection data with optional weighted strength.
  * @param props.documentId - Current document ID for navigation context.
  * @param props.isActive - Whether this card is currently active for keyboard input.
  * @param props.onClick - Handler to make this card active.
  * @returns Connection card component.
  */
-export function ConnectionCard({ connection, documentId, isActive, onClick }: ConnectionCardProps) {
+export function ConnectionCard({ connection, documentId, isActive, onClick, onNavigateToChunk }: ConnectionCardProps) {
   const strength = connection.weightedStrength || connection.strength
-  const [feedbackType, setFeedbackType] = useState<'validate' | 'reject' | 'star' | null>(null)
+
+  // Initialize feedback type from database state
+  const getInitialFeedbackType = (): 'validate' | 'reject' | 'star' | null => {
+    if (connection.user_starred) return 'star'
+    if (connection.user_validated === true) return 'validate'
+    if (connection.user_validated === false) return 'reject'
+    return null
+  }
+
+  const [feedbackType, setFeedbackType] = useState<'validate' | 'reject' | 'star' | null>(getInitialFeedbackType())
+  const [isSubmitting, setIsSubmitting] = useState(false)
   
   /**
-   * Captures feedback to localStorage for learning system.
+   * Captures feedback to database via server action with optimistic updates.
    * @param type - Type of feedback.
    * @returns Void.
    */
-  const captureFeedback = useCallback((type: 'validate' | 'reject' | 'star') => {
-    const feedback: ConnectionFeedback = {
-      connection_id: connection.id,
-      feedback_type: type,
-      context: {
-        time_of_day: new Date().toISOString(),
-        document_id: documentId,
-        mode: 'reading' // Could be inferred from user activity in future
+  const captureFeedback = useCallback(async (type: 'validate' | 'reject' | 'star') => {
+    // Optimistic update - immediate UI feedback
+    setFeedbackType(type)
+    setIsSubmitting(true)
+
+    try {
+      const result = await updateConnectionFeedback(connection.id, type)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save feedback')
       }
+    } catch (error) {
+      console.error('[ConnectionCard] Failed to save feedback:', error)
+      // Revert optimistic update on error
+      setFeedbackType(getInitialFeedbackType())
+      toast.error('Failed to save feedback', {
+        description: error instanceof Error ? error.message : 'Please try again',
+      })
+    } finally {
+      setIsSubmitting(false)
     }
-    
-    // Store to localStorage (MVP approach, migrate to database in Phase 3)
-    const existing = localStorage.getItem('connection_feedback')
-    const feedbackArray = existing ? JSON.parse(existing) : []
-    feedbackArray.push(feedback)
-    localStorage.setItem('connection_feedback', JSON.stringify(feedbackArray))
-  }, [connection.id, documentId])
+  }, [connection.id])
   
   /**
    * Handles validation feedback (v key).
    * @returns Void.
    */
-  const handleValidate = useCallback(() => {
-    captureFeedback('validate')
-    setFeedbackType('validate')
+  const handleValidate = useCallback(async () => {
+    await captureFeedback('validate')
     toast.success('Connection validated', {
-      description: 'Feedback recorded for learning system',
+      description: 'Will be preserved during document reprocessing',
       duration: 2000
     })
   }, [captureFeedback])
-  
+
   /**
    * Handles rejection feedback (r key).
    * @returns Void.
    */
-  const handleReject = useCallback(() => {
-    captureFeedback('reject')
-    setFeedbackType('reject')
+  const handleReject = useCallback(async () => {
+    await captureFeedback('reject')
     toast.error('Connection rejected', {
-      description: 'Feedback recorded',
+      description: 'Marked as invalid',
       duration: 2000
     })
   }, [captureFeedback])
-  
+
   /**
    * Handles star feedback (s key).
    * @returns Void.
    */
-  const handleStar = useCallback(() => {
-    captureFeedback('star')
-    setFeedbackType('star')
+  const handleStar = useCallback(async () => {
+    await captureFeedback('star')
     toast.success('Connection starred', {
-      description: 'Saved to favorites',
+      description: 'Validated and marked as important',
       duration: 2000
     })
   }, [captureFeedback])
@@ -162,12 +164,16 @@ export function ConnectionCard({ connection, documentId, isActive, onClick }: Co
   
   /**
    * Handles navigation to target chunk.
-   * TODO: Implement actual navigation in Phase 2.
+   * Delegates to parent handler which will scroll to chunk if in current document,
+   * or show message if cross-document connection.
    * @returns Void.
    */
   function handleNavigate() {
-    // Navigate to target chunk (implement in Phase 2)
-    console.log('Navigate to:', connection.target_chunk_id)
+    if (onNavigateToChunk) {
+      onNavigateToChunk(connection.target_chunk_id)
+    } else {
+      console.warn('No navigation handler provided')
+    }
   }
   
   // Determine border color based on feedback and active state
@@ -197,11 +203,12 @@ export function ConnectionCard({ connection, documentId, isActive, onClick }: Co
               <span className="text-xs text-muted-foreground">
                 {(strength * 100).toFixed(0)}%
               </span>
-              {/* Validation icons */}
+              {/* Validation icons with loading state */}
               <div className="flex gap-1 ml-auto">
-                {feedbackType === 'validate' && <Check className="w-4 h-4 text-green-500" />}
-                {feedbackType === 'reject' && <X className="w-4 h-4 text-red-500" />}
-                {feedbackType === 'star' && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
+                {isSubmitting && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+                {!isSubmitting && feedbackType === 'validate' && <Check className="w-4 h-4 text-green-500" />}
+                {!isSubmitting && feedbackType === 'reject' && <X className="w-4 h-4 text-red-500" />}
+                {!isSubmitting && feedbackType === 'star' && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
               </div>
             </div>
             <h4 className="text-sm font-medium">{connection.metadata.target_document_title || 'Unknown Document'}</h4>

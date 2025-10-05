@@ -33,7 +33,7 @@ RETURNS TABLE (
   source_chunk_id UUID,
   target_chunk_id UUID,
   strength FLOAT,
-  engine_type TEXT
+  connection_type TEXT
 ) AS $$
 BEGIN
   RETURN QUERY
@@ -42,8 +42,8 @@ BEGIN
     c.source_chunk_id,
     c.target_chunk_id,
     c.strength,
-    c.engine_type
-  FROM chunk_connections c
+    c.connection_type
+  FROM connections c
   WHERE c.source_chunk_id = ANY(chunk_ids)
      OR c.target_chunk_id = ANY(chunk_ids);
 END;

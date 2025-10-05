@@ -10,7 +10,7 @@ import { CollapsibleSection } from './CollapsibleSection'
 import type { SynthesisEngine } from '@/types/annotations'
 
 /**
- * Real connection interface from database (chunk_connections table).
+ * Real connection interface from database (connections table).
  */
 interface Connection {
   id: string
@@ -31,6 +31,7 @@ interface Connection {
 interface ConnectionsListProps {
   documentId: string
   visibleChunkIds: string[]  // NEW: From Phase 2 VirtualizedReader viewport tracking
+  onNavigateToChunk?: (chunkId: string) => void
 }
 
 /**
@@ -45,7 +46,7 @@ interface ConnectionsListProps {
  * **Data Flow**:
  * 1. VirtualizedReader tracks visible chunks → visibleChunkIds
  * 2. useDebounce delays database query until scrolling pauses (300ms)
- * 3. Fetch connections for visible chunks from chunk_connections table
+ * 3. Fetch connections for visible chunks from connections table
  * 4. Filter by enabled engines + strength threshold
  * 5. Apply weight multiplier and sort by weighted strength
  * 6. Group by engine type for collapsible sections
@@ -55,7 +56,7 @@ interface ConnectionsListProps {
  * @param props.visibleChunkIds - Array of chunk IDs currently in viewport
  * @returns Connections list component with grouped sections
  */
-export function ConnectionsList({ documentId, visibleChunkIds }: ConnectionsListProps) {
+export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk }: ConnectionsListProps) {
   const { weights, enabledEngines, strengthThreshold } = useAnnotationStore()
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
@@ -233,6 +234,7 @@ export function ConnectionsList({ documentId, visibleChunkIds }: ConnectionsList
                     documentId={documentId}
                     isActive={activeConnectionId === connection.id}
                     onClick={() => setActiveConnectionId(connection.id)}
+                    onNavigateToChunk={onNavigateToChunk}
                   />
                 </motion.div>
               ))}

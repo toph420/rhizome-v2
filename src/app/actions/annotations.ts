@@ -265,3 +265,198 @@ export async function getAnnotations(
     }
   }
 }
+
+/**
+ * Gets annotations needing review after document reprocessing.
+ *
+ * Uses optimized query strategy: filters by documentId FIRST at database level,
+ * then fetches related components. Includes comprehensive edge case handling.
+ *
+ * @param documentId - Document ID to query.
+ * @returns RecoveryResults categorized by confidence level, or null if no recovered annotations.
+ */
+export async function getAnnotationsNeedingReview(
+  documentId: string
+): Promise<{
+  success: Array<{
+    id: string
+    text: string
+    startOffset: number
+    endOffset: number
+    textContext?: { before: string; after: string }
+    originalChunkIndex?: number
+  }>
+  needsReview: Array<{
+    annotation: {
+      id: string
+      text: string
+      startOffset: number
+      endOffset: number
+      textContext?: { before: string; after: string }
+      originalChunkIndex?: number
+    }
+    suggestedMatch: {
+      text: string
+      startOffset: number
+      endOffset: number
+      confidence: number
+      method: 'exact' | 'context' | 'chunk_bounded' | 'trigram'
+      contextBefore?: string
+      contextAfter?: string
+    }
+  }>
+  lost: Array<{
+    id: string
+    text: string
+    startOffset: number
+    endOffset: number
+    textContext?: { before: string; after: string }
+    originalChunkIndex?: number
+  }>
+}> {
+  try {
+    const supabase = await createClient()
+    const user = await getCurrentUser()
+
+    if (!user) {
+      return { success: [], needsReview: [], lost: [] }
+    }
+
+    // OPTIMIZATION: Filter by documentId FIRST at database level
+    // This prevents fetching recovery data for all documents
+    // Note: Must join through entities table since user_id is there, not on components
+    const { data: sources, error: sourcesError } = await supabase
+      .from('components')
+      .select(`
+        entity_id,
+        entities!inner(user_id)
+      `)
+      .eq('component_type', 'source')
+      .eq('data->>document_id', documentId)
+      .eq('entities.user_id', user.id)
+
+    if (sourcesError) {
+      console.error('[getAnnotationsNeedingReview] Source query failed:', sourcesError)
+      throw sourcesError
+    }
+
+    const entityIds = sources?.map((s: { entity_id: string }) => s.entity_id) || []
+
+    if (entityIds.length === 0) {
+      // No annotations for this document
+      return { success: [], needsReview: [], lost: [] }
+    }
+
+    // Get position components for ONLY those entities
+    const { data: positions, error: positionsError } = await supabase
+      .from('components')
+      .select('id, entity_id, data, recovery_confidence, recovery_method, needs_review, original_chunk_index')
+      .eq('component_type', 'position')
+      .in('entity_id', entityIds)
+      .not('recovery_method', 'is', null)
+
+    if (positionsError) {
+      console.error('[getAnnotationsNeedingReview] Position query failed:', positionsError)
+      throw positionsError
+    }
+
+    // No recovered annotations
+    if (!positions || positions.length === 0) {
+      return { success: [], needsReview: [], lost: [] }
+    }
+
+    // Get annotation components for same entities
+    const { data: annotations, error: annotationsError } = await supabase
+      .from('components')
+      .select('entity_id, data')
+      .eq('component_type', 'annotation')
+      .in('entity_id', entityIds)
+
+    if (annotationsError) {
+      console.error('[getAnnotationsNeedingReview] Annotation query failed:', annotationsError)
+      throw annotationsError
+    }
+
+    // EDGE CASE HANDLING: Use Maps for defensive lookup
+    const positionMap = new Map(
+      positions?.map((p: any) => [p.entity_id, p]) || []
+    )
+    const annotationMap = new Map(
+      annotations?.map((a: any) => [a.entity_id, a]) || []
+    )
+
+    const success: any[] = []
+    const needsReview: any[] = []
+    const lost: any[] = []
+
+    for (const entityId of entityIds) {
+      const position = positionMap.get(entityId)
+      const annotation = annotationMap.get(entityId)
+
+      // EDGE CASE #1: Missing components (annotation without position, or vice versa)
+      if (!position || !annotation) {
+        console.warn(
+          `[getAnnotationsNeedingReview] Missing components for entity ${entityId}:`,
+          { hasPosition: !!position, hasAnnotation: !!annotation }
+        )
+        continue
+      }
+
+      // Skip if no recovery metadata (not a recovered annotation)
+      if (!position.recovery_method) {
+        continue
+      }
+
+      // Map to Annotation interface with null safety
+      const annotationObj = {
+        id: entityId,
+        text: annotation.data?.text || '',
+        startOffset: position.data?.startOffset || 0,
+        endOffset: position.data?.endOffset || 0,
+        textContext: position.data?.textContext
+          ? {
+              before: position.data.textContext.before || '',
+              after: position.data.textContext.after || '',
+            }
+          : undefined,
+        originalChunkIndex: position.original_chunk_index,
+      }
+
+      // EDGE CASE #2: Lost annotations with null confidence
+      if (
+        position.recovery_method === 'lost' ||
+        position.recovery_confidence === 0 ||
+        position.recovery_confidence === null
+      ) {
+        lost.push(annotationObj)
+      } else if (position.recovery_confidence >= 0.85 && !position.needs_review) {
+        // High confidence - auto-recovered
+        success.push(annotationObj)
+      } else if (position.needs_review) {
+        // Medium confidence - needs manual review
+        const suggestedMatch = {
+          text: annotation.data?.text || '',
+          startOffset: position.data?.startOffset || 0,
+          endOffset: position.data?.endOffset || 0,
+          confidence: position.recovery_confidence || 0,
+          method: position.recovery_method as 'exact' | 'context' | 'chunk_bounded' | 'trigram',
+          // EDGE CASE #3: Undefined text context - provide fallbacks
+          contextBefore: position.data?.textContext?.before || '',
+          contextAfter: position.data?.textContext?.after || '',
+        }
+
+        needsReview.push({
+          annotation: annotationObj,
+          suggestedMatch,
+        })
+      }
+    }
+
+    return { success, needsReview, lost }
+  } catch (error) {
+    console.error('[getAnnotationsNeedingReview] Failed:', error)
+    // ERROR BOUNDARY: Return empty results instead of throwing
+    // This prevents the entire reader page from crashing
+    return { success: [], needsReview: [], lost: [] }
+  }
+}

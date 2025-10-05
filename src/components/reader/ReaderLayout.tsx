@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
 import { RightPanel } from '../sidebar/RightPanel'
+import { toast } from 'sonner'
 import type { Chunk, StoredAnnotation } from '@/types/annotations'
 
 interface ReaderLayoutProps {
@@ -11,6 +12,43 @@ interface ReaderLayoutProps {
   markdownUrl: string
   chunks: Chunk[]
   annotations: StoredAnnotation[]
+  reviewResults?: {
+    success: Array<{
+      id: string
+      text: string
+      startOffset: number
+      endOffset: number
+      textContext?: { before: string; after: string }
+      originalChunkIndex?: number
+    }>
+    needsReview: Array<{
+      annotation: {
+        id: string
+        text: string
+        startOffset: number
+        endOffset: number
+        textContext?: { before: string; after: string }
+        originalChunkIndex?: number
+      }
+      suggestedMatch: {
+        text: string
+        startOffset: number
+        endOffset: number
+        confidence: number
+        method: 'exact' | 'context' | 'chunk_bounded' | 'trigram'
+        contextBefore?: string
+        contextAfter?: string
+      }
+    }>
+    lost: Array<{
+      id: string
+      text: string
+      startOffset: number
+      endOffset: number
+      textContext?: { before: string; after: string }
+      originalChunkIndex?: number
+    }>
+  } | null
 }
 
 /**
@@ -32,8 +70,41 @@ export function ReaderLayout({
   markdownUrl,
   chunks,
   annotations,
+  reviewResults = null,
 }: ReaderLayoutProps) {
   const [visibleChunkIds, setVisibleChunkIds] = useState<string[]>([])
+
+  /**
+   * Navigates to a chunk by scrolling it into view.
+   * Finds the chunk element by data-chunk-id attribute and scrolls smoothly.
+   */
+  const handleNavigateToChunk = useCallback((chunkId: string) => {
+    // Find the chunk element by data attribute
+    const chunkElement = document.querySelector(`[data-chunk-id="${chunkId}"]`)
+
+    if (chunkElement) {
+      chunkElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+
+      // Highlight the chunk temporarily
+      chunkElement.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+      setTimeout(() => {
+        chunkElement.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
+      }, 2000)
+
+      toast.success('Navigated to connected chunk', {
+        duration: 2000,
+      })
+    } else {
+      console.warn(`Chunk element not found: ${chunkId}`)
+      toast.info('Cross-document connection', {
+        description: 'This connection points to another document. Cross-document navigation coming soon!',
+        duration: 3000,
+      })
+    }
+  }, [])
 
   return (
     <div className="flex flex-col h-screen">
@@ -51,7 +122,12 @@ export function ReaderLayout({
       </div>
 
       {/* Right panel with connections and annotations */}
-      <RightPanel documentId={documentId} visibleChunkIds={visibleChunkIds} />
+      <RightPanel
+        documentId={documentId}
+        visibleChunkIds={visibleChunkIds}
+        reviewResults={reviewResults}
+        onNavigateToChunk={handleNavigateToChunk}
+      />
     </div>
   )
 }

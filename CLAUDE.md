@@ -774,7 +774,7 @@ Orchestrator is called from `worker/handlers/detect-connections.ts` after docume
 ```typescript
 // Get all connections for a document
 const { data: connections } = await supabase
-  .from('chunk_connections')
+  .from('connections')
   .select(`
     *,
     source_chunk:chunks!source_chunk_id(id, content, summary),
@@ -785,14 +785,14 @@ const { data: connections } = await supabase
 
 // Get by engine type
 const { data: semantic } = await supabase
-  .from('chunk_connections')
+  .from('connections')
   .select('*')
   .eq('connection_type', 'semantic_similarity')
   .gte('strength', 0.7)
 
 // Get cross-document connections only
 const { data: crossDoc } = await supabase
-  .from('chunk_connections')
+  .from('connections')
   .select('*')
   .neq('source_chunk.document_id', 'target_chunk.document_id')
 ```

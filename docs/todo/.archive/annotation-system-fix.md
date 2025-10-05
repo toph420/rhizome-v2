@@ -1697,7 +1697,7 @@ export async function findAnnotationConnectionsDirect(chunkIds: string[]) {
   const supabase = createClient()
 
   const { data, error } = await supabase
-    .from('chunk_connections')
+    .from('connections')
     .select('*')
     .or(
       `source_chunk_id.in.(${chunkIds.join(',')}),` +

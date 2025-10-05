@@ -289,7 +289,10 @@ export function VirtualizedReader({
       <Virtuoso
         data={blocks}
         itemContent={(index, block) => (
-          <div className="max-w-4xl mx-auto px-8">
+          <div
+            className="max-w-4xl mx-auto px-8 transition-all duration-300"
+            data-chunk-id={block.chunkId}
+          >
             <BlockRenderer
               block={block}
               annotations={annotationsForBlocks}
