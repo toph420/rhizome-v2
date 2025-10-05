@@ -3,9 +3,10 @@
  * Test Readwise Export Import
  *
  * Tests importing highlights from Readwise Export API
- * Specifically configured for JR by William Gaddis
+ * Specifically configured for Three Stigmata of Palmer Eldritch
  */
 
+import 'dotenv/config'
 import { ReadwiseExportClient } from '../lib/readwise-export-api.js'
 import { importFromReadwiseExport } from '../handlers/readwise-import.js'
 import { createClient } from '@supabase/supabase-js'
@@ -30,15 +31,15 @@ async function testJRImport() {
   console.log(`  Readwise token: ${readwiseToken.slice(0, 10)}...`)
   console.log()
 
-  // Step 2: Find JR in Readwise Export
-  console.log('Step 1: Finding JR in Readwise Export...')
+  // Step 2: Find Three Stigmata in Readwise Export
+  console.log('Step 1: Finding Three Stigmata of Palmer Eldritch in Readwise Export...')
   const client = new ReadwiseExportClient(readwiseToken)
 
   // Search by author first (more reliable than title matching)
-  let gaddisBooks = await client.searchBooks({ author: 'Gaddis' })
+  let pkdBooks = await client.searchBooks({ author: 'Philip K. Dick' })
 
-  if (gaddisBooks.length === 0) {
-    console.error('✗ No Gaddis books found in Readwise library')
+  if (pkdBooks.length === 0) {
+    console.error('✗ No Philip K. Dick books found in Readwise library')
     const allBooks = await client.exportAll()
     console.log(`\nTotal books in library: ${allBooks.length}`)
     if (allBooks.length > 0) {
@@ -47,41 +48,41 @@ async function testJRImport() {
         console.log(`  - ${b.title} by ${b.author}`)
       })
     }
-    throw new Error('No Gaddis books found in Readwise')
+    throw new Error('No Philip K. Dick books found in Readwise')
   }
 
-  // Find JR specifically (handle both "JR" and "J R")
-  const jrBook = gaddisBooks.find(b =>
-    b.title.toLowerCase().replace(/\s+/g, '').includes('jr')
-  ) || gaddisBooks[0]
+  // Find Three Stigmata specifically
+  const targetBook = pkdBooks.find(b =>
+    b.title.toLowerCase().includes('stigmata') || b.title.toLowerCase().includes('palmer')
+  ) || pkdBooks[0]
 
-  console.log('Found Gaddis books:')
-  gaddisBooks.forEach(b => {
-    const marker = b === jrBook ? '→' : ' '
+  console.log('Found Philip K. Dick books:')
+  pkdBooks.forEach(b => {
+    const marker = b === targetBook ? '→' : ' '
     console.log(`${marker} ${b.title} by ${b.author} (${b.num_highlights} highlights)`)
   })
 
   console.log('✓ Found in Readwise:')
-  console.log(`  ID: ${jrBook.user_book_id}`)
-  console.log(`  Title: ${jrBook.title}`)
-  console.log(`  Author: ${jrBook.author}`)
-  console.log(`  Category: ${jrBook.category}`)
-  console.log(`  Highlights: ${jrBook.num_highlights}`)
+  console.log(`  ID: ${targetBook.user_book_id}`)
+  console.log(`  Title: ${targetBook.title}`)
+  console.log(`  Author: ${targetBook.author}`)
+  console.log(`  Category: ${targetBook.category}`)
+  console.log(`  Highlights: ${targetBook.num_highlights}`)
   console.log()
 
-  // Step 3: Find JR in Rhizome
-  console.log('Step 2: Finding JR in Rhizome...')
+  // Step 3: Find Three Stigmata in Rhizome
+  console.log('Step 2: Finding Three Stigmata in Rhizome...')
   const supabase = createClient(supabaseUrl, supabaseKey)
 
-  const { data: jrRhizome, error } = await supabase
+  const { data: targetRhizome, error } = await supabase
     .from('documents')
     .select('id, title, processing_status, embeddings_available')
-    .or('title.ilike.%J R%,title.ilike.%JR%,title.ilike.%Gaddis%')
+    .or('title.ilike.%stigmata%,title.ilike.%palmer%,title.ilike.%philip k%')
     .limit(1)
     .single()
 
-  if (error || !jrRhizome) {
-    console.error('✗ JR not found in Rhizome')
+  if (error || !targetRhizome) {
+    console.error('✗ Three Stigmata not found in Rhizome')
     console.log('\nSearching for all documents:')
     const { data: allDocs } = await supabase
       .from('documents')
@@ -94,26 +95,26 @@ async function testJRImport() {
         console.log(`  - ${d.title} (${d.processing_status})`)
       })
     }
-    throw new Error('JR not found in Rhizome. Please upload the book first.')
+    throw new Error('Three Stigmata not found in Rhizome. Please upload the book first.')
   }
 
-  if (jrRhizome.processing_status !== 'completed') {
-    throw new Error(`JR is not fully processed. Status: ${jrRhizome.processing_status}`)
+  if (targetRhizome.processing_status !== 'completed') {
+    throw new Error(`Three Stigmata is not fully processed. Status: ${targetRhizome.processing_status}`)
   }
 
   console.log('✓ Found in Rhizome:')
-  console.log(`  ID: ${jrRhizome.id}`)
-  console.log(`  Title: ${jrRhizome.title}`)
-  console.log(`  Status: ${jrRhizome.processing_status}`)
-  console.log(`  Embeddings: ${jrRhizome.embeddings_available ? 'Yes' : 'No'}`)
+  console.log(`  ID: ${targetRhizome.id}`)
+  console.log(`  Title: ${targetRhizome.title}`)
+  console.log(`  Status: ${targetRhizome.processing_status}`)
+  console.log(`  Embeddings: ${targetRhizome.embeddings_available ? 'Yes' : 'No'}`)
   console.log()
 
   // Step 4: Import highlights
   console.log('Step 3: Importing highlights...\n')
 
   const results = await importFromReadwiseExport(
-    jrRhizome.id,
-    jrBook
+    targetRhizome.id,
+    targetBook
   )
 
   // Step 5: Report results

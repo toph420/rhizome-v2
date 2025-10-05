@@ -8,6 +8,45 @@ export const runtime = 'nodejs'
 export const maxDuration = 30 // EPUB parsing is fast
 
 /**
+ * Strip HTML tags from a string and convert to plain text.
+ * Handles common HTML entities and preserves basic formatting.
+ */
+function stripHTML(html: string): string {
+  return html
+    // Remove script and style tags with their content
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    // Replace <br> and </p> with newlines
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    // Remove all other HTML tags
+    .replace(/<[^>]+>/g, '')
+    // Decode common HTML entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    // Clean up excessive whitespace
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
+
+/**
+ * Extract year from publication date string.
+ * Handles ISO dates, partial dates, and year-only formats.
+ */
+function extractYear(dateString: string): string | undefined {
+  if (!dateString) return undefined
+
+  // Try to extract 4-digit year from various formats
+  const yearMatch = dateString.match(/\d{4}/)
+  return yearMatch ? yearMatch[0] : undefined
+}
+
+/**
  * Extract metadata from EPUB files using local OPF parsing.
  * Returns metadata + base64-encoded cover image.
  */
@@ -41,10 +80,10 @@ export async function POST(req: NextRequest) {
       title: metadata.title || 'Untitled',
       author: metadata.author || 'Unknown',
       type: inferTypeFromEPUB(metadata),
-      year: metadata.publicationDate || undefined,
+      year: metadata.publicationDate ? extractYear(metadata.publicationDate) : undefined,
       publisher: metadata.publisher || undefined,
       isbn: metadata.isbn || undefined,
-      description: metadata.description || undefined,
+      description: metadata.description ? stripHTML(metadata.description) : undefined,
       coverImage: coverBase64,
       language: metadata.language || 'en'
     }

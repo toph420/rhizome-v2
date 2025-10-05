@@ -113,8 +113,14 @@ Key difference: Running headers repeat frequently, real headings appear once per
 REMOVE THESE ARTIFACTS:
 - Page numbers (standalone numbers, "Page X", "X of Y", etc.)
 - Running headers and footers (repeated text at top/bottom of pages)
-- PDF metadata (file paths, timestamps)
+- Garbled headers (all caps text with no spaces, like "THETHREESTIGMATAOFPALMERELDRITCH")
+- PDF metadata (file paths, timestamps, CSS styling like "@page {...}")
+- Formatting directives (margin settings, font sizes, pt measurements)
+- CSS/styling information (e.g., "{ margin-bottom: 5.000000pt; }")
 - Margin notes or annotations that aren't part of the main text
+
+CRITICAL: If you see CSS/PDF styling metadata like "@page { margin: 5pt; }" or similar formatting
+directives with "pt" measurements, completely ignore and remove them. Only extract the actual book content.
 
 PRESERVE THESE ELEMENTS (CRITICAL):
 - Footnotes and endnotes - preserve ALL footnote content
@@ -260,8 +266,14 @@ Key difference: Running headers repeat frequently, real headings appear once per
 REMOVE THESE ARTIFACTS:
 - Page numbers (standalone numbers, "Page X", "X of Y", etc.)
 - Running headers and footers (repeated text at top/bottom of pages)
-- PDF metadata (file paths, timestamps)
+- Garbled headers (all caps text with no spaces, like "THETHREESTIGMATAOFPALMERELDRITCH")
+- PDF metadata (file paths, timestamps, CSS styling like "@page {...}")
+- Formatting directives (margin settings, font sizes, pt measurements)
+- CSS/styling information (e.g., "{ margin-bottom: 5.000000pt; }")
 - Margin notes or annotations that aren't part of the main text
+
+CRITICAL: If you see CSS/PDF styling metadata like "@page { margin: 5pt; }" or similar formatting
+directives with "pt" measurements, completely ignore and remove them. Only extract the actual book content.
 
 PRESERVE THESE ELEMENTS (CRITICAL):
 - Footnotes and endnotes - preserve ALL footnote content

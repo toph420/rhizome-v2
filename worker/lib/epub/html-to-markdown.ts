@@ -44,7 +44,7 @@ turndown.addRule('images', {
 
 /**
  * Convert EPUB HTML content to clean markdown.
- * Removes XML declarations, namespaces, and EPUB-specific tags.
+ * Removes XML declarations, namespaces, EPUB-specific tags, and CSS/script elements.
  *
  * @param html - Raw HTML content from EPUB chapter
  * @returns Clean markdown string
@@ -57,6 +57,12 @@ export function htmlToMarkdown(html: string): string {
     .replace(/<epub:[^>]*>/g, '')
     .replace(/<\/epub:[^>]*>/g, '')
     .replace(/<\?[^>]*\?>/g, '') // Remove processing instructions
+
+    // Remove <style> tags completely (prevents CSS from leaking into markdown)
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+
+    // Remove <script> tags (shouldn't be in EPUBs, but be safe)
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
 
   // Convert to markdown
   const markdown = turndown.turndown(cleaned)
