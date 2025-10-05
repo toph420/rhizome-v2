@@ -33,7 +33,7 @@ import { GEMINI_MODEL } from './model-config.js'
 // Extracted modules
 import { createBatches, OVERLAP_SIZE } from './chunking/batch-creator'
 import { generateSemanticChunkingPrompt, type DocumentType } from './chunking/prompts'
-import { validateChunks, validateChunkSizes, createFallbackChunksForBatch } from './chunking/chunk-validator'
+import { validateChunks, validateChunkSizes, createFallbackChunksForBatch, splitOversizedChunk } from './chunking/chunk-validator'
 import { correctAIChunkOffsets } from './chunking/ai-fuzzy-matcher'
 import {
   sleep,
@@ -445,8 +445,18 @@ function parseMetadataResponse(
     throw new Error(`Chunk ${firstError.chunkIndex}: ${firstError.reason}`)
   }
 
-  // Use the valid chunks (already have absolute offsets from validator)
-  const validated = validationResult.valid
+  // Handle oversized chunks by splitting them
+  let validated = validationResult.valid
+  if (validationResult.oversized.length > 0) {
+    console.log(`[AI Metadata] Splitting ${validationResult.oversized.length} oversized chunks`)
+
+    for (const { chunk } of validationResult.oversized) {
+      const splitChunks = splitOversizedChunk(chunk)
+      validated.push(...splitChunks)
+    }
+
+    console.log(`[AI Metadata] After splitting: ${validated.length} total chunks`)
+  }
 
   // Validate and correct offsets before returning (using 4-strategy fuzzy matching)
   const { chunks: corrected } = correctAIChunkOffsets(fullMarkdown, validated)

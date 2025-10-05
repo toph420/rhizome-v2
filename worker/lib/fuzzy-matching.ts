@@ -4,6 +4,9 @@
  * Uses 3-tier matching: exact → trigram fuzzy → approximate positioning.
  */
 
+import { distance } from 'fastest-levenshtein'
+import type { Annotation, AnnotationMatchResult } from '../types/recovery.js'
+
 /**
  * Result from fuzzy matching with confidence and position metadata.
  */
@@ -715,4 +718,334 @@ export function stitchMarkdownBatches(
   }
 
   return result
+}
+
+// ============================================================================
+// ANNOTATION RECOVERY FUNCTIONS
+// Levenshtein-based fuzzy matching for annotation recovery after document edits
+// ============================================================================
+
+/**
+ * Find annotation in edited markdown using 4-tier strategy
+ * Tier 1: Exact match (markdown.indexOf)
+ * Tier 2: Context-guided Levenshtein (if context available)
+ * Tier 3: Chunk-bounded Levenshtein (if chunk index known)
+ * Tier 4: Trigram fallback (existing fuzzyMatchChunkToSource)
+ *
+ * @param annotation - Annotation to recover
+ * @param markdown - New markdown content
+ * @param chunks - New chunks for chunk-bounded search
+ * @returns Fuzzy match result with confidence and position
+ */
+export function findAnnotationMatch(
+  annotation: Annotation,
+  markdown: string,
+  chunks?: Array<{ chunk_index: number; start_offset: number; end_offset: number; content: string }>
+): AnnotationMatchResult | null {
+  // Validation
+  if (!annotation.text || !markdown) {
+    throw new Error('Invalid inputs: annotation.text and markdown are required')
+  }
+
+  // Tier 1: Exact match (fastest)
+  const exactIndex = markdown.indexOf(annotation.text)
+  if (exactIndex !== -1) {
+    const contextBefore = markdown.slice(Math.max(0, exactIndex - 100), exactIndex)
+    const contextAfter = markdown.slice(exactIndex + annotation.text.length, exactIndex + annotation.text.length + 100)
+
+    return {
+      text: annotation.text,
+      startOffset: exactIndex,
+      endOffset: exactIndex + annotation.text.length,
+      confidence: 1.0,
+      method: 'exact',
+      contextBefore,
+      contextAfter
+    }
+  }
+
+  // Tier 2: Context-guided Levenshtein (if context available)
+  if (annotation.textContext?.before || annotation.textContext?.after) {
+    const contextMatch = findWithLevenshteinContext(
+      annotation.text,
+      markdown,
+      annotation.textContext
+    )
+    if (contextMatch && contextMatch.confidence >= 0.75) {
+      return contextMatch
+    }
+  }
+
+  // Tier 3: Chunk-bounded Levenshtein (if chunk index known)
+  if (annotation.originalChunkIndex !== undefined && chunks && chunks.length > 0) {
+    const chunkMatch = findNearChunkLevenshtein(
+      annotation.text,
+      markdown,
+      annotation.originalChunkIndex,
+      chunks
+    )
+    if (chunkMatch && chunkMatch.confidence >= 0.75) {
+      return chunkMatch
+    }
+  }
+
+  // Tier 4: Trigram fallback (use existing fuzzyMatchChunkToSource)
+  // Note: This is a last resort and may be slow for large documents
+  // Use lower threshold (0.65) for annotation recovery to handle heavily edited text
+  const trigramMatch = fuzzyMatchChunkToSource(annotation.text, markdown, 0, 1, {
+    trigramThreshold: 0.65  // Lower than default 0.75 for annotation recovery
+  })
+  // Accept trigram matches ≥0.60 after penalty (real-world typos give ~64%)
+  if (trigramMatch && trigramMatch.confidence >= 0.60) {
+    return {
+      text: markdown.slice(trigramMatch.startOffset, trigramMatch.endOffset),
+      startOffset: trigramMatch.startOffset,
+      endOffset: trigramMatch.endOffset,
+      confidence: trigramMatch.confidence * 0.9, // Penalty for trigram fallback
+      method: 'trigram',
+      contextBefore: trigramMatch.contextBefore,
+      contextAfter: trigramMatch.contextAfter
+    }
+  }
+
+  // No match found
+  return null
+}
+
+/**
+ * Find annotation using context-guided Levenshtein matching
+ * Uses before/after text context to locate approximate region, then finds best match
+ *
+ * @param needle - Text to find
+ * @param markdown - Full markdown content
+ * @param textContext - Before and after context
+ * @returns Match result or null
+ */
+function findWithLevenshteinContext(
+  needle: string,
+  markdown: string,
+  textContext: { before?: string; after?: string }
+): AnnotationMatchResult | null {
+  if (!textContext.before && !textContext.after) {
+    return null
+  }
+
+  let searchRegion: { start: number; end: number } | null = null
+
+  // Try to locate using contextBefore
+  if (textContext.before) {
+    const contextIndex = markdown.indexOf(textContext.before)
+    if (contextIndex !== -1) {
+      const searchStart = contextIndex + textContext.before.length
+      const searchEnd = Math.min(
+        searchStart + needle.length * 1.3, // Allow 30% length variation
+        markdown.length
+      )
+      searchRegion = { start: searchStart, end: searchEnd }
+    } else {
+      // Try fuzzy context matching
+      const fuzzyContextMatch = findFuzzyContext(textContext.before, markdown)
+      if (fuzzyContextMatch) {
+        const searchStart = fuzzyContextMatch.startOffset + textContext.before.length
+        const searchEnd = Math.min(
+          searchStart + needle.length * 1.3,
+          markdown.length
+        )
+        searchRegion = { start: searchStart, end: searchEnd }
+      }
+    }
+  }
+
+  if (!searchRegion && textContext.after) {
+    const afterIndex = markdown.indexOf(textContext.after)
+    if (afterIndex !== -1) {
+      const searchEnd = afterIndex
+      const searchStart = Math.max(0, searchEnd - needle.length * 1.3)
+      searchRegion = { start: searchStart, end: searchEnd }
+    }
+  }
+
+  if (!searchRegion) {
+    return null
+  }
+
+  // Find best match in bounded region
+  const segment = markdown.slice(searchRegion.start, searchRegion.end)
+  const segmentMatch = findLevenshteinInSegment(needle, segment)
+
+  if (!segmentMatch) {
+    return null
+  }
+
+  // Adjust offsets to full markdown
+  const absoluteStart = searchRegion.start + segmentMatch.startOffset
+  const absoluteEnd = searchRegion.start + segmentMatch.endOffset
+
+  const contextBefore = markdown.slice(Math.max(0, absoluteStart - 100), absoluteStart)
+  const contextAfter = markdown.slice(absoluteEnd, Math.min(absoluteEnd + 100, markdown.length))
+
+  return {
+    text: markdown.slice(absoluteStart, absoluteEnd),
+    startOffset: absoluteStart,
+    endOffset: absoluteEnd,
+    confidence: segmentMatch.confidence * 0.95, // Small penalty for context-guided
+    method: 'context',
+    contextBefore,
+    contextAfter
+  }
+}
+
+/**
+ * Find annotation near original chunk using chunk-bounded search
+ * Searches ±2 chunks from originalChunkIndex for 50-75x performance boost
+ *
+ * @param needle - Text to find
+ * @param markdown - Full markdown content
+ * @param originalChunkIndex - Original chunk index
+ * @param chunks - Array of chunks with offsets
+ * @returns Match result or null
+ */
+function findNearChunkLevenshtein(
+  needle: string,
+  markdown: string,
+  originalChunkIndex: number,
+  chunks: Array<{ chunk_index: number; start_offset: number; end_offset: number }>
+): AnnotationMatchResult | null {
+  // Validate chunks array
+  if (!chunks || chunks.length === 0) {
+    return null
+  }
+
+  // Validate originalChunkIndex is reasonable (allow some range for deleted chunks)
+  if (originalChunkIndex < 0 || originalChunkIndex >= chunks.length + 5) {
+    return null  // Index way out of range
+  }
+
+  // Get ±2 chunks from original position
+  const searchChunks = chunks.filter(
+    c => c.chunk_index >= originalChunkIndex - 2 &&
+         c.chunk_index <= originalChunkIndex + 2
+  )
+
+  if (searchChunks.length === 0) {
+    return null
+  }
+
+  // Determine search bounds
+  const searchStart = Math.min(...searchChunks.map(c => c.start_offset))
+  const searchEnd = Math.max(...searchChunks.map(c => c.end_offset))
+
+  // Extract bounded search space (~12,500 chars instead of 750K)
+  const segment = markdown.slice(searchStart, searchEnd)
+  const segmentMatch = findLevenshteinInSegment(needle, segment)
+
+  if (!segmentMatch) {
+    return null
+  }
+
+  // Adjust offsets to full markdown
+  const absoluteStart = searchStart + segmentMatch.startOffset
+  const absoluteEnd = searchStart + segmentMatch.endOffset
+
+  const contextBefore = markdown.slice(Math.max(0, absoluteStart - 100), absoluteStart)
+  const contextAfter = markdown.slice(absoluteEnd, Math.min(absoluteEnd + 100, markdown.length))
+
+  return {
+    text: markdown.slice(absoluteStart, absoluteEnd),
+    startOffset: absoluteStart,
+    endOffset: absoluteEnd,
+    confidence: segmentMatch.confidence,
+    method: 'chunk_bounded',
+    contextBefore,
+    contextAfter
+  }
+}
+
+/**
+ * Find best match in a segment using sliding window Levenshtein
+ * Internal function used by context-guided and chunk-bounded strategies
+ *
+ * @param needle - Text to find
+ * @param segment - Segment to search within
+ * @returns Best match with relative offsets or null
+ */
+function findLevenshteinInSegment(
+  needle: string,
+  segment: string
+): { text: string; startOffset: number; endOffset: number; confidence: number } | null {
+  if (!needle || !segment) {
+    return null
+  }
+
+  const needleLength = needle.length
+  const windowSize = Math.floor(needleLength * 1.2) // Allow 20% length variation
+
+  let bestMatch: { startOffset: number; endOffset: number; similarity: number } | null = null
+
+  // Slide window through segment
+  for (let i = 0; i <= segment.length - Math.floor(needleLength * 0.8); i++) {
+    const end = Math.min(i + windowSize, segment.length)
+    const window = segment.slice(i, end)
+
+    const dist = distance(needle, window)
+    const maxLength = Math.max(needle.length, window.length)
+    const similarity = 1 - (dist / maxLength)
+
+    // Early exit if very high similarity
+    if (similarity > 0.95) {
+      return {
+        text: window,
+        startOffset: i,
+        endOffset: end,
+        confidence: similarity
+      }
+    }
+
+    // Track best match
+    if (!bestMatch || similarity > bestMatch.similarity) {
+      bestMatch = {
+        startOffset: i,
+        endOffset: end,
+        similarity
+      }
+    }
+  }
+
+  // Return best match if confidence is acceptable
+  if (bestMatch && bestMatch.similarity >= 0.75) {
+    return {
+      text: segment.slice(bestMatch.startOffset, bestMatch.endOffset),
+      startOffset: bestMatch.startOffset,
+      endOffset: bestMatch.endOffset,
+      confidence: bestMatch.similarity
+    }
+  }
+
+  return null
+}
+
+/**
+ * Find fuzzy context using trigram similarity
+ * Fallback when exact context matching fails
+ *
+ * @param context - Context string to find
+ * @param markdown - Full markdown to search
+ * @returns Match result or null
+ */
+function findFuzzyContext(
+  context: string,
+  markdown: string
+): { startOffset: number; endOffset: number; confidence: number } | null {
+  // Use existing trigram infrastructure
+  const trigramMatch = fuzzyMatchChunkToSource(context, markdown, 0, 1)
+
+  if (trigramMatch && trigramMatch.confidence >= 0.70) {
+    return {
+      startOffset: trigramMatch.startOffset,
+      endOffset: trigramMatch.endOffset,
+      confidence: trigramMatch.confidence
+    }
+  }
+
+  return null
 }

@@ -235,6 +235,50 @@ export function validateChunkSizes(
 }
 
 /**
+ * Splits an oversized chunk into smaller chunks while preserving metadata.
+ *
+ * @param chunk - Oversized chunk to split
+ * @param maxSize - Target size for split chunks (default: 8000 to stay well under 10K limit)
+ * @returns Array of smaller chunks with preserved metadata
+ */
+export function splitOversizedChunk(
+  chunk: ChunkWithOffsets,
+  maxSize: number = 8000
+): ChunkWithOffsets[] {
+  const chunks: ChunkWithOffsets[] = []
+  const content = chunk.content
+  let position = 0
+
+  while (position < content.length) {
+    const end = Math.min(position + maxSize, content.length)
+    const splitContent = content.substring(position, end).trim()
+
+    // Calculate proportional offsets
+    const offsetRange = chunk.end_offset - chunk.start_offset
+    const proportionalStart = chunk.start_offset + Math.floor((position / content.length) * offsetRange)
+    const proportionalEnd = chunk.start_offset + Math.floor((end / content.length) * offsetRange)
+
+    chunks.push({
+      content: splitContent,
+      start_offset: proportionalStart,
+      end_offset: proportionalEnd,
+      metadata: {
+        ...chunk.metadata,
+        // Add note that this was split
+        summary: chunk.metadata.summary
+          ? `${chunk.metadata.summary} (split ${chunks.length + 1})`
+          : `Split chunk ${chunks.length + 1}`
+      }
+    })
+
+    position = end
+  }
+
+  console.log(`[Chunk Validator] Split oversized chunk (${content.length} chars) into ${chunks.length} chunks`)
+  return chunks
+}
+
+/**
  * Creates fallback chunks when AI completely fails.
  * Splits batch into ~1500 char chunks locally with minimal metadata.
  *

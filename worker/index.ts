@@ -4,7 +4,10 @@ import { fileURLToPath } from 'url'
 import { createClient } from '@supabase/supabase-js'
 import { processDocumentHandler } from './handlers/process-document.js'
 import { detectConnectionsHandler } from './handlers/detect-connections.js'
+import { syncFromObsidian } from './handlers/obsidian-sync.js'
+import { reprocessDocument } from './handlers/reprocess-document.js'
 import { getUserFriendlyError } from './lib/errors.js'
+import { startAnnotationExportCron } from './jobs/export-annotations.js'
 
 // ES modules compatibility: get __dirname equivalent
 const __filename = fileURLToPath(import.meta.url)
@@ -16,6 +19,36 @@ config({ path: resolve(__dirname, '../.env.local') })
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,
   'detect-connections': detectConnectionsHandler,
+  'reprocess-document': async (supabase: any, job: any) => {
+    const { documentId } = job.input_data
+    const results = await reprocessDocument(documentId, supabase)
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: results
+      })
+      .eq('id', job.id)
+  },
+  'obsidian-sync': async (supabase: any, job: any) => {
+    const { documentId, userId } = job.input_data
+    const result = await syncFromObsidian(documentId, userId)
+
+    if (!result.success) {
+      throw new Error(result.error || 'Sync failed')
+    }
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: { changed: result.changed, recovery: result.recovery }
+      })
+      .eq('id', job.id)
+  },
 }
 
 let isShuttingDown = false
@@ -155,17 +188,21 @@ process.on('SIGTERM', () => {
 
 async function main() {
   console.log('🚀 Background worker started')
-  
+
+  // Start annotation export cron job (runs hourly)
+  startAnnotationExportCron()
+  console.log('✅ Annotation export cron started (runs hourly)')
+
   while (!isShuttingDown) {
     try {
       await processNextJob()
     } catch (error) {
       console.error('Worker error:', error)
     }
-    
+
     await new Promise(resolve => setTimeout(resolve, 5000))
   }
-  
+
   console.log('✅ Worker shut down cleanly')
   process.exit(0)
 }

@@ -19,6 +19,7 @@ import { inferDocumentType } from '../lib/epub/type-inference.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/chunking.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
+import { cleanEpubArtifacts } from '../lib/epub/epub-cleaner.js'
 
 export class EPUBProcessor extends SourceProcessor {
   /**
@@ -86,12 +87,15 @@ export class EPUBProcessor extends SourceProcessor {
     // Stage 4: Combine chapters into full document (30%)
     await this.updateProgress(30, 'convert', 'merging', 'Combining chapters')
 
-    const fullMarkdown = chapters
+    const rawMarkdown = chapters
       .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
       .join('\n\n---\n\n')
 
+    // Clean EPUB artifacts BEFORE chunking (TOC links, filename headings, boilerplate)
+    const fullMarkdown = cleanEpubArtifacts(rawMarkdown)
+
     const markdownKB = Math.round(fullMarkdown.length / 1024)
-    console.log(`[EPUBProcessor] Combined ${chapters.length} chapters into ${markdownKB}KB markdown`)
+    console.log(`[EPUBProcessor] Combined ${chapters.length} chapters into ${markdownKB}KB clean markdown`)
 
     // Stage 5: AI chunking with chapter boundaries (30-70%)
     const documentType = inferDocumentType(metadata)
