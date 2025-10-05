@@ -37,21 +37,31 @@ export async function remapConnections(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  // Get all chunk IDs for this document (both old and new)
-  const { data: allChunks } = await supabase
+  // CRITICAL FIX: Explicitly fetch old chunk data
+  // PostgREST joins DON'T retrieve is_current:false chunks, contrary to previous assumption
+
+  // Step 1: Get ALL chunk IDs (both old and new) for this document
+  const { data: allDocChunks } = await supabase
     .from('chunks')
-    .select('id')
+    .select('id, embedding, document_id, is_current')
     .eq('document_id', documentId)
 
-  const chunkIds = allChunks?.map(c => c.id) || []
+  // Create a lookup map for old chunk embeddings
+  // CRITICAL: Parse embeddings from strings to number arrays (Supabase returns vectors as JSON strings)
+  const oldChunkMap = new Map()
+  allDocChunks?.forEach(chunk => {
+    if (!chunk.is_current && chunk.embedding) {
+      const embedding = typeof chunk.embedding === 'string'
+        ? JSON.parse(chunk.embedding)
+        : chunk.embedding
+      oldChunkMap.set(chunk.id, embedding)
+    }
+  })
 
-  if (chunkIds.length === 0) {
-    console.log('[RemapConnections] No chunks found for document')
-    return { success: [], needsReview: [], lost: [] }
-  }
+  console.log(`[RemapConnections] Found ${oldChunkMap.size} old chunks with embeddings`)
 
-  // Fetch verified connections where source OR target chunk belongs to this document
-  const { data: connections, error } = await supabase
+  // Step 2: Fetch verified connections (without relying on joins for old data)
+  const { data: allConnections, error } = await supabase
     .from('connections')
     .select(`
       id,
@@ -60,16 +70,69 @@ export async function remapConnections(
       connection_type,
       strength,
       user_validated,
-      metadata,
-      source_chunk:chunks!source_chunk_id(id, document_id, embedding),
-      target_chunk:chunks!target_chunk_id(id, document_id, embedding)
+      metadata
     `)
     .eq('user_validated', true)
-    .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`)
 
   if (error) {
     throw new Error(`Failed to fetch connections: ${error.message}`)
   }
+
+  // Step 3: Batch fetch current chunks (avoid N+1 query problem)
+  const chunkIdsNeeded = new Set<string>()
+  allConnections?.forEach(conn => {
+    if (!oldChunkMap.has(conn.source_chunk_id)) {
+      chunkIdsNeeded.add(conn.source_chunk_id)
+    }
+    if (!oldChunkMap.has(conn.target_chunk_id)) {
+      chunkIdsNeeded.add(conn.target_chunk_id)
+    }
+  })
+
+  // Single batch query instead of N queries
+  const { data: currentChunks } = await supabase
+    .from('chunks')
+    .select('id, document_id, embedding')
+    .in('id', Array.from(chunkIdsNeeded))
+    .eq('is_current', true)
+
+  // Parse embeddings and create lookup map
+  const currentChunkMap = new Map(
+    currentChunks?.map(c => [
+      c.id,
+      {
+        id: c.id,
+        document_id: c.document_id,
+        embedding: typeof c.embedding === 'string' ? JSON.parse(c.embedding) : c.embedding
+      }
+    ]) || []
+  )
+
+  // Step 4: Enrich connections with chunk data (synchronous - no more queries)
+  const enrichedConnections = (allConnections || []).map(conn => ({
+    ...conn,
+    source_chunk: oldChunkMap.has(conn.source_chunk_id)
+      ? {
+          id: conn.source_chunk_id,
+          document_id: documentId,
+          embedding: oldChunkMap.get(conn.source_chunk_id)
+        }
+      : currentChunkMap.get(conn.source_chunk_id) || null,
+    target_chunk: oldChunkMap.has(conn.target_chunk_id)
+      ? {
+          id: conn.target_chunk_id,
+          document_id: documentId,
+          embedding: oldChunkMap.get(conn.target_chunk_id)
+        }
+      : currentChunkMap.get(conn.target_chunk_id) || null
+  }))
+
+  // Step 5: Filter to connections involving this document
+  const connections = enrichedConnections.filter(
+    conn =>
+      conn.source_chunk?.document_id === documentId ||
+      conn.target_chunk?.document_id === documentId
+  )
 
   if (!connections || connections.length === 0) {
     console.log('[RemapConnections] No verified connections to remap')
@@ -185,7 +248,12 @@ async function findBestMatch(
   for (const chunk of newChunks) {
     if (!chunk.embedding) continue
 
-    const similarity = cosineSimilarity(queryEmbedding, chunk.embedding)
+    // Parse embedding if it's a string (Supabase returns vectors as JSON strings)
+    const chunkEmbedding = typeof chunk.embedding === 'string'
+      ? JSON.parse(chunk.embedding)
+      : chunk.embedding
+
+    const similarity = cosineSimilarity(queryEmbedding, chunkEmbedding)
 
     if (similarity > 0.75 && (!bestMatch || similarity > bestMatch.similarity)) {
       bestMatch = { chunk, similarity }
