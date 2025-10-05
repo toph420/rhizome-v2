@@ -1,14 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import type { RecoveryResults, ReviewItem } from '../../worker/types/recovery'
+import { getPendingImports, acceptImport, rejectImport, type PendingImport } from '@/app/actions/import-review'
 
 interface AnnotationReviewTabProps {
   documentId: string
@@ -33,17 +34,37 @@ export function AnnotationReviewTab({
 }: AnnotationReviewTabProps) {
   const [showLost, setShowLost] = useState(false)
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
+  const [pendingImports, setPendingImports] = useState<PendingImport[]>([])
+  const [loadingImports, setLoadingImports] = useState(true)
 
-  if (!results) {
+  // Fetch pending imports on mount
+  useEffect(() => {
+    async function fetchPendingImports() {
+      setLoadingImports(true)
+      const result = await getPendingImports(documentId)
+      if (result.success) {
+        setPendingImports(result.data)
+      }
+      setLoadingImports(false)
+    }
+
+    fetchPendingImports()
+  }, [documentId])
+
+  // Check if there's anything to review
+  const hasRecovery = results && results.needsReview.length > 0
+  const hasImports = pendingImports.length > 0
+
+  if (!hasRecovery && !hasImports && !loadingImports) {
     return (
       <div className="p-4 text-center text-muted-foreground">
         <p>No annotations need review</p>
-        <p className="text-sm mt-2">All annotations were automatically recovered</p>
+        <p className="text-sm mt-2">All annotations were automatically processed</p>
       </div>
     )
   }
 
-  const { success, needsReview, lost } = results
+  const { success, needsReview, lost } = results || { success: [], needsReview: [], lost: [] }
 
   /**
    * Accept a single fuzzy match suggestion
@@ -182,6 +203,70 @@ export function AnnotationReviewTab({
   }
 
   /**
+   * Accept a pending import
+   */
+  async function handleAcceptImport(pending: PendingImport) {
+    setProcessingIds((prev) => new Set(prev).add(pending.id))
+
+    try {
+      const result = await acceptImport(pending.id)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to accept import')
+      }
+
+      toast.success('Import Accepted', {
+        description: `Confidence: ${(pending.confidence * 100).toFixed(1)}%`
+      })
+
+      // Remove from pending list
+      setPendingImports(prev => prev.filter(p => p.id !== pending.id))
+
+    } catch (error) {
+      toast.error('Accept Failed', {
+        description: error instanceof Error ? error.message : 'Failed to accept import'
+      })
+    } finally {
+      setProcessingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(pending.id)
+        return next
+      })
+    }
+  }
+
+  /**
+   * Reject a pending import
+   */
+  async function handleRejectImport(pending: PendingImport) {
+    setProcessingIds((prev) => new Set(prev).add(pending.id))
+
+    try {
+      const result = await rejectImport(pending.id)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to reject import')
+      }
+
+      toast.success('Import Rejected')
+
+      // Remove from pending list
+      setPendingImports(prev => prev.filter(p => p.id !== pending.id))
+
+    } catch (error) {
+      toast.error('Reject Failed', {
+        description: error instanceof Error ? error.message : 'Failed to reject import'
+      })
+    } finally {
+      setProcessingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(pending.id)
+        return next
+      })
+    }
+  }
+
+  /**
    * Get confidence color based on score
    */
   function getConfidenceColor(confidence: number): 'default' | 'secondary' | 'destructive' {
@@ -205,7 +290,7 @@ export function AnnotationReviewTab({
         <div className="text-center">
           <div className="flex items-center justify-center gap-1 text-yellow-600">
             <AlertCircle className="h-4 w-4" />
-            <span className="font-semibold text-lg">{needsReview.length}</span>
+            <span className="font-semibold text-lg">{needsReview.length + pendingImports.length}</span>
           </div>
           <p className="text-xs text-muted-foreground">Review</p>
         </div>
@@ -286,6 +371,85 @@ export function AnnotationReviewTab({
                       >
                         <XCircle className="h-3 w-3 mr-1" />
                         Discard
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </>
+          )}
+
+          {/* Readwise Import Reviews */}
+          {pendingImports.length > 0 && (
+            <>
+              {needsReview.length > 0 && <Separator className="my-4" />}
+              <div className="flex items-center gap-2 mb-3">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-medium">Readwise Imports</h3>
+                <Badge variant="secondary">{pendingImports.length}</Badge>
+              </div>
+
+              {pendingImports.map((pending) => (
+                <Card
+                  key={pending.id}
+                  className="p-3 hover:bg-accent transition-colors"
+                >
+                  <div className="space-y-2">
+                    {/* Confidence badge */}
+                    <div className="flex items-center justify-between">
+                      <Badge variant={getConfidenceColor(pending.confidence)}>
+                        {(pending.confidence * 100).toFixed(1)}% confidence
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {pending.suggestedMatch.method}
+                      </span>
+                    </div>
+
+                    {/* Original text */}
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Readwise Highlight:</p>
+                      <p className="text-sm line-clamp-2">{pending.highlightData.text}</p>
+                    </div>
+
+                    {/* Suggested match */}
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Matched Position:</p>
+                      <p className="text-sm line-clamp-2 text-green-700 dark:text-green-400">
+                        {pending.suggestedMatch.text}
+                      </p>
+                    </div>
+
+                    {/* Note if exists */}
+                    {pending.highlightData.note && (
+                      <div className="bg-muted/50 p-2 rounded-sm">
+                        <p className="text-xs text-muted-foreground">
+                          <span className="font-medium">Note: </span>
+                          {pending.highlightData.note}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2 pt-2">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="flex-1"
+                        onClick={() => handleAcceptImport(pending)}
+                        disabled={processingIds.has(pending.id)}
+                      >
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Accept
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="flex-1"
+                        onClick={() => handleRejectImport(pending)}
+                        disabled={processingIds.has(pending.id)}
+                      >
+                        <XCircle className="h-3 w-3 mr-1" />
+                        Reject
                       </Button>
                     </div>
                   </div>

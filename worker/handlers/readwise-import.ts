@@ -62,6 +62,50 @@ interface Chunk {
 // ============================================
 
 /**
+ * Save fuzzy match to import_pending table for manual review
+ */
+async function savePendingImport(
+  supabase: SupabaseClient,
+  documentId: string,
+  userId: string,
+  source: 'readwise_reader' | 'readwise_export',
+  highlight: ReadwiseHighlight,
+  suggestedMatch: FuzzyMatchResult
+): Promise<void> {
+  const { error } = await supabase
+    .from('import_pending')
+    .insert({
+      user_id: userId,
+      document_id: documentId,
+      source,
+      highlight_data: {
+        text: highlight.text,
+        note: highlight.note,
+        color: highlight.color,
+        location: highlight.location,
+        highlighted_at: highlight.highlighted_at,
+        book_id: highlight.book_id,
+        title: highlight.title,
+        author: highlight.author
+      },
+      suggested_match: {
+        text: suggestedMatch.text,
+        startOffset: suggestedMatch.startOffset,
+        endOffset: suggestedMatch.endOffset,
+        confidence: suggestedMatch.confidence,
+        method: suggestedMatch.method
+      },
+      confidence: suggestedMatch.confidence,
+      status: 'pending'
+    })
+
+  if (error) {
+    console.error('[savePendingImport] Failed:', error)
+    throw error
+  }
+}
+
+/**
  * Map Readwise color to our color system
  */
 function mapReadwiseColor(
@@ -112,15 +156,23 @@ async function createAnnotationFromMatch(
     throw new Error('No chunk found for annotation position')
   }
 
-  const chunkPosition = match.startOffset - containingChunk.start_offset
+  // Get document owner - CRITICAL for frontend display
+  const { data: doc, error: docError } = await supabase
+    .from('documents')
+    .select('user_id')
+    .eq('id', documentId)
+    .single()
 
-  // Create entity with all 5 components
+  if (docError || !doc?.user_id) {
+    throw new Error(`Document owner not found: ${docError?.message || 'missing user_id'}`)
+  }
+
+  // Create entity with actual document owner (not hardcoded dev user)
   // NOTE: This uses raw Supabase, not the frontend AnnotationOperations class
   // because we're in the worker module (no access to frontend code)
-  const userId = process.env.NEXT_PUBLIC_DEV_USER_ID || '00000000-0000-0000-0000-000000000000'
   const { data: entity, error: entityError } = await supabase
     .from('entities')
-    .insert({ user_id: userId }) // Dev user UUID
+    .insert({ user_id: doc.user_id }) // Use actual document owner
     .select()
     .single()
 
@@ -128,7 +180,6 @@ async function createAnnotationFromMatch(
     throw new Error(`Failed to create entity: ${entityError.message}`)
   }
 
-  const now = new Date().toISOString()
   const color = mapReadwiseColor(highlight.color)
 
   // Create 3 components matching frontend expectations
@@ -302,8 +353,8 @@ export async function importReadwiseHighlights(
           chunks
         )
 
-        if (fuzzyMatch && fuzzyMatch.confidence > 0.8) {
-          // High confidence fuzzy match - add to review queue
+        if (fuzzyMatch && fuzzyMatch.confidence > 0.7) {
+          // Medium-high confidence fuzzy match - add to review queue
           results.needsReview.push({
             highlight,
             suggestedMatch: fuzzyMatch,
@@ -384,22 +435,6 @@ export async function acceptFuzzyMatch(
 // ============================================
 
 /**
- * Estimate chunk index from page number
- * Assumes relatively even distribution of content per page
- *
- * @param pageNumber - Page number from Readwise
- * @param totalChunks - Total number of chunks in document
- * @returns Estimated chunk index
- */
-function estimateChunkFromPage(pageNumber: number, totalChunks: number): number {
-  // Rough estimate: 500 pages → 378 chunks ≈ 0.75 chunks per page
-  // Adjust based on your typical document characteristics
-  const chunksPerPage = 0.75
-  const estimatedChunk = Math.floor(pageNumber * chunksPerPage)
-  return Math.max(0, Math.min(estimatedChunk, totalChunks - 1))
-}
-
-/**
  * Import highlights from Readwise Reader API for a specific document
  *
  * @param rhizomeDocumentId - Target document ID in Rhizome
@@ -440,13 +475,16 @@ export async function importFromReadwiseReader(
     // Fetch Rhizome document markdown and chunks
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('storage_path')
+      .select('storage_path, metadata')
       .eq('id', rhizomeDocumentId)
       .single()
 
     if (docError || !document?.storage_path) {
       throw new Error('Rhizome document not found or markdown not available')
     }
+
+    // Get document metadata for better location estimation
+    const totalPages = document?.metadata?.total_pages || null
 
     const markdownPath = `${document.storage_path}/content.md`
     const { data: blob, error: storageError } = await supabase.storage
@@ -505,10 +543,22 @@ export async function importFromReadwiseReader(
           continue
         }
 
-        // No exact match - try fuzzy matching
-        const estimatedChunkIndex = highlight.location?.type === 'page'
-          ? estimateChunkFromPage(highlight.location.value, chunks.length)
-          : Math.floor((readerDoc.highlights.indexOf(highlight) / readerDoc.highlights.length) * chunks.length)
+        // No exact match - try fuzzy matching with improved location estimation
+        let estimatedChunkIndex: number
+        if (highlight.location?.type === 'page') {
+          // Use actual page count for better estimation
+          estimatedChunkIndex = estimateChunkFromLocation(
+            highlight.location.value,
+            'page',
+            chunks.length,
+            totalPages
+          )
+        } else {
+          // Fallback: estimate from highlight position in list
+          estimatedChunkIndex = Math.floor(
+            (readerDoc.highlights.indexOf(highlight) / readerDoc.highlights.length) * chunks.length
+          )
+        }
 
         const fuzzyMatch = findAnnotationMatch(
           {
@@ -522,7 +572,7 @@ export async function importFromReadwiseReader(
           chunks
         )
 
-        if (fuzzyMatch && fuzzyMatch.confidence > 0.8) {
+        if (fuzzyMatch && fuzzyMatch.confidence > 0.7) {
           // Convert Reader highlight to our ReadwiseHighlight format
           const readwiseHighlight: ReadwiseHighlight = {
             text: highlight.text,
@@ -627,16 +677,23 @@ export async function importFromReadwiseExport(
   }
 
   try {
-    // Fetch Rhizome document markdown and chunks
+    // Fetch Rhizome document markdown, metadata, and owner
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('storage_path')
+      .select('storage_path, metadata, user_id')
       .eq('id', rhizomeDocumentId)
       .single()
 
     if (docError || !document?.storage_path) {
       throw new Error('Rhizome document not found or markdown not available')
     }
+
+    const userId = document.user_id
+    if (!userId) {
+      throw new Error('Document owner not found')
+    }
+
+    const totalPages = document?.metadata?.total_pages || null
 
     const markdownPath = `${document.storage_path}/content.md`
     const { data: blob, error: storageError } = await supabase.storage
@@ -659,15 +716,6 @@ export async function importFromReadwiseExport(
     if (chunksError || !chunks) {
       throw new Error('Failed to fetch chunks')
     }
-
-    // Get document metadata for better location estimation
-    const { data: docMetadata } = await supabase
-      .from('documents')
-      .select('metadata')
-      .eq('id', rhizomeDocumentId)
-      .single()
-
-    const totalPages = docMetadata?.metadata?.total_pages || null
 
     // Filter out image highlights (can't match markdown text)
     const textHighlights = readwiseBook.highlights.filter(h => {
@@ -745,7 +793,7 @@ export async function importFromReadwiseExport(
           chunks
         )
 
-        if (fuzzyMatch && fuzzyMatch.confidence > 0.8) {
+        if (fuzzyMatch && fuzzyMatch.confidence > 0.7) {
           const readwiseHighlight: ReadwiseHighlight = {
             text: highlight.text,
             note: highlight.note || undefined,
@@ -756,6 +804,16 @@ export async function importFromReadwiseExport(
             title: readwiseBook.title,
             author: readwiseBook.author
           }
+
+          // Save to import_pending table for manual review
+          await savePendingImport(
+            supabase,
+            rhizomeDocumentId,
+            userId,
+            'readwise_export',
+            readwiseHighlight,
+            fuzzyMatch
+          )
 
           results.needsReview.push({
             highlight: readwiseHighlight,
