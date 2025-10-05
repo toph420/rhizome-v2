@@ -26,6 +26,21 @@ export interface PositionComponent {
   originalText: string;
   /** Page label if available (e.g., "iv", "42", "A-3") */
   pageLabel?: string;
+
+  // Fuzzy matching fields for annotation recovery (migration 033)
+  /** Surrounding text for context-guided fuzzy matching (±100 chars) */
+  textContext?: {
+    before: string;
+    after: string;
+  };
+  /** Original chunk index for chunk-bounded search (50-75x performance boost) */
+  originalChunkIndex?: number;
+  /** Fuzzy match confidence (0.0-1.0). >0.85=auto-recovered, 0.75-0.85=needs review, <0.75=lost */
+  recoveryConfidence?: number;
+  /** Matching tier used: exact, context, chunk_bounded, or lost */
+  recoveryMethod?: 'exact' | 'context' | 'chunk_bounded' | 'lost';
+  /** True if fuzzy match needs manual review (confidence 0.75-0.85) */
+  needsReview?: boolean;
 }
 
 export interface VisualComponent {
@@ -58,6 +73,10 @@ export interface ChunkRefComponent {
   chunk_id: string;
   /** Position within the chunk */
   chunkPosition: number;
+
+  // Multi-chunk annotation support (migration 030)
+  /** Array of chunk IDs for annotations spanning multiple chunks */
+  chunkIds?: string[];
 }
 
 // ============================================

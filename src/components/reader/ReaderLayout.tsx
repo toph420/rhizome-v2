@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { DocumentViewer } from './DocumentViewer'
+import { DocumentHeader } from './DocumentHeader'
 import { RightPanel } from '../sidebar/RightPanel'
 import type { Chunk, StoredAnnotation } from '@/types/annotations'
 
@@ -36,6 +37,9 @@ export function ReaderLayout({
 
   return (
     <div className="flex flex-col h-screen">
+      {/* Document header with Obsidian sync buttons */}
+      <DocumentHeader documentId={documentId} />
+
       <div className="flex-1 overflow-hidden">
         <DocumentViewer
           documentId={documentId}

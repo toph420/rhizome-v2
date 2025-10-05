@@ -88,12 +88,14 @@ export function VirtualizedReader({
   // Merge server annotations with optimistic ones
   const allAnnotations = useMemo(() => {
     // Start with server annotations converted to simple format
+    // IMPORTANT: Read offsets from position component (has recovered offsets after reprocessing)
+    // annotation.range has ORIGINAL offsets, position has CURRENT/RECOVERED offsets
     const serverAnnotationsSimple = serverAnnotations
-      .filter(ann => ann.components.annotation)
+      .filter(ann => ann.components.position && ann.components.annotation)
       .map(ann => ({
         id: ann.id,
-        startOffset: ann.components.annotation!.range.startOffset,
-        endOffset: ann.components.annotation!.range.endOffset,
+        startOffset: ann.components.position!.startOffset,
+        endOffset: ann.components.position!.endOffset,
         color: ann.components.annotation!.color,
       }))
 
