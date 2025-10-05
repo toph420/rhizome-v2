@@ -14,6 +14,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { findAnnotationMatch } from '../lib/fuzzy-matching.js'
 import type { FuzzyMatchResult } from '../types/recovery.js'
+import { ReadwiseReaderClient, type ReaderHighlight as ReaderAPIHighlight } from '../lib/readwise-reader-api.js'
+import { ReadwiseExportClient, type ReadwiseBook, type ReadwiseHighlight as ExportHighlight } from '../lib/readwise-export-api.js'
 
 // ============================================
 // READWISE TYPES
@@ -115,9 +117,10 @@ async function createAnnotationFromMatch(
   // Create entity with all 5 components
   // NOTE: This uses raw Supabase, not the frontend AnnotationOperations class
   // because we're in the worker module (no access to frontend code)
+  const userId = process.env.NEXT_PUBLIC_DEV_USER_ID || '00000000-0000-0000-0000-000000000000'
   const { data: entity, error: entityError } = await supabase
     .from('entities')
-    .insert({ user_id: 'dev-user-123' }) // Dev user for MVP
+    .insert({ user_id: userId }) // Dev user UUID
     .select()
     .single()
 
@@ -128,55 +131,56 @@ async function createAnnotationFromMatch(
   const now = new Date().toISOString()
   const color = mapReadwiseColor(highlight.color)
 
-  // Create all 5 components
+  // Create 3 components matching frontend expectations
+  // Frontend expects: annotation, position, source (lowercase)
   const components = [
     {
       entity_id: entity.id,
-      component_type: 'Position',
+      component_type: 'annotation',
       data: {
-        documentId,
-        document_id: documentId,
+        text: match.text,
+        note: highlight.note,
+        tags: ['readwise-import'],
+        color,
+        range: {
+          startOffset: match.startOffset,
+          endOffset: match.endOffset,
+          chunkIds: [containingChunk.id]
+        },
+        textContext: {
+          before: '',  // TODO: Extract context if needed
+          content: match.text,
+          after: ''
+        }
+      }
+    },
+    {
+      entity_id: entity.id,
+      component_type: 'position',
+      data: {
+        chunkIds: [containingChunk.id],
         startOffset: match.startOffset,
         endOffset: match.endOffset,
-        originalText: match.text,
-        pageLabel: highlight.location?.toString()
+        confidence: 1.0,
+        method: 'exact',
+        textContext: {
+          before: '',
+          after: ''
+        },
+        originalChunkIndex: containingChunk.chunk_index
       },
       document_id: documentId
     },
     {
       entity_id: entity.id,
-      component_type: 'Visual',
+      component_type: 'source',
       data: {
-        type: 'highlight',
-        color
-      }
-    },
-    {
-      entity_id: entity.id,
-      component_type: 'Content',
-      data: {
-        note: highlight.note || '',
-        tags: ['readwise-import']
-      }
-    },
-    {
-      entity_id: entity.id,
-      component_type: 'Temporal',
-      data: {
-        createdAt: highlight.highlighted_at || now,
-        updatedAt: now,
-        lastViewedAt: now
-      }
-    },
-    {
-      entity_id: entity.id,
-      component_type: 'ChunkRef',
-      data: {
-        chunkId: containingChunk.id,
         chunk_id: containingChunk.id,
-        chunkPosition
+        chunk_ids: [containingChunk.id],
+        document_id: documentId
       },
-      chunk_id: containingChunk.id
+      chunk_id: containingChunk.id,
+      document_id: documentId
     }
   ]
 
@@ -212,7 +216,7 @@ export async function importReadwiseHighlights(
   console.log(`[Readwise Import] Processing ${readwiseJson.length} highlights`)
 
   const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
@@ -287,7 +291,13 @@ export async function importReadwiseHighlights(
         const estimatedChunkIndex = estimateChunkIndex(highlight.location, chunks.length)
 
         const fuzzyMatch = findAnnotationMatch(
-          { text, originalChunkIndex: estimatedChunkIndex },
+          {
+            id: `readwise-temp-${highlight.highlighted_at || Date.now()}`,
+            text,
+            startOffset: 0,  // Placeholder - fuzzy match will find correct position
+            endOffset: text.length,
+            originalChunkIndex: estimatedChunkIndex
+          },
           markdown,
           chunks
         )
@@ -345,7 +355,7 @@ export async function acceptFuzzyMatch(
   reviewItem: ReviewItem
 ): Promise<string> {
   const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
@@ -367,4 +377,509 @@ export async function acceptFuzzyMatch(
     reviewItem.suggestedMatch,
     chunks
   )
+}
+
+// ============================================
+// READWISE READER API INTEGRATION
+// ============================================
+
+/**
+ * Estimate chunk index from page number
+ * Assumes relatively even distribution of content per page
+ *
+ * @param pageNumber - Page number from Readwise
+ * @param totalChunks - Total number of chunks in document
+ * @returns Estimated chunk index
+ */
+function estimateChunkFromPage(pageNumber: number, totalChunks: number): number {
+  // Rough estimate: 500 pages → 378 chunks ≈ 0.75 chunks per page
+  // Adjust based on your typical document characteristics
+  const chunksPerPage = 0.75
+  const estimatedChunk = Math.floor(pageNumber * chunksPerPage)
+  return Math.max(0, Math.min(estimatedChunk, totalChunks - 1))
+}
+
+/**
+ * Import highlights from Readwise Reader API for a specific document
+ *
+ * @param rhizomeDocumentId - Target document ID in Rhizome
+ * @param readwiseDocumentId - Source document ID in Readwise Reader
+ * @param readwiseToken - Readwise API token
+ * @returns Import statistics
+ */
+export async function importFromReadwiseReader(
+  rhizomeDocumentId: string,
+  readwiseDocumentId: string,
+  readwiseToken: string
+): Promise<ImportResults> {
+  console.log(`[Readwise Reader Import] Fetching highlights for Reader doc ${readwiseDocumentId}`)
+
+  const reader = new ReadwiseReaderClient(readwiseToken)
+  const supabase = createClient(
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const results: ImportResults = {
+    imported: 0,
+    needsReview: [],
+    failed: []
+  }
+
+  try {
+    // Fetch document with highlights from Reader API
+    const readerDoc = await reader.getDocument(readwiseDocumentId)
+
+    if (!readerDoc.highlights || readerDoc.highlights.length === 0) {
+      console.log('[Readwise Reader Import] No highlights found')
+      return results
+    }
+
+    console.log(`[Readwise Reader Import] Processing ${readerDoc.highlights.length} highlights`)
+
+    // Fetch Rhizome document markdown and chunks
+    const { data: document, error: docError } = await supabase
+      .from('documents')
+      .select('storage_path')
+      .eq('id', rhizomeDocumentId)
+      .single()
+
+    if (docError || !document?.storage_path) {
+      throw new Error('Rhizome document not found or markdown not available')
+    }
+
+    const markdownPath = `${document.storage_path}/content.md`
+    const { data: blob, error: storageError } = await supabase.storage
+      .from('documents')
+      .download(markdownPath)
+
+    if (storageError) {
+      throw new Error(`Failed to download markdown: ${storageError.message}`)
+    }
+
+    const markdown = await blob.text()
+
+    // Fetch chunks
+    const { data: chunks, error: chunksError } = await supabase
+      .from('chunks')
+      .select('id, chunk_index, start_offset, end_offset, content')
+      .eq('document_id', rhizomeDocumentId)
+      .order('chunk_index', { ascending: true })
+
+    if (chunksError || !chunks) {
+      throw new Error('Failed to fetch chunks')
+    }
+
+    // Process each highlight
+    for (const highlight of readerDoc.highlights) {
+      try {
+        const text = highlight.text.trim()
+
+        // Try exact match first
+        const exactIndex = markdown.indexOf(text)
+
+        if (exactIndex !== -1) {
+          // Convert Reader highlight to our ReadwiseHighlight format
+          const readwiseHighlight: ReadwiseHighlight = {
+            text: highlight.text,
+            note: highlight.note,
+            color: highlight.color,
+            location: highlight.location?.value,
+            highlighted_at: highlight.highlighted_at
+          }
+
+          await createAnnotationFromMatch(
+            supabase,
+            rhizomeDocumentId,
+            readwiseHighlight,
+            {
+              startOffset: exactIndex,
+              endOffset: exactIndex + text.length,
+              text
+            },
+            chunks
+          )
+
+          results.imported++
+          console.log(`[Readwise Reader Import] ✓ Exact match: "${text.slice(0, 50)}..."`)
+          continue
+        }
+
+        // No exact match - try fuzzy matching
+        const estimatedChunkIndex = highlight.location?.type === 'page'
+          ? estimateChunkFromPage(highlight.location.value, chunks.length)
+          : Math.floor((readerDoc.highlights.indexOf(highlight) / readerDoc.highlights.length) * chunks.length)
+
+        const fuzzyMatch = findAnnotationMatch(
+          {
+            id: highlight.id,
+            text,
+            startOffset: 0,
+            endOffset: text.length,
+            originalChunkIndex: estimatedChunkIndex
+          },
+          markdown,
+          chunks
+        )
+
+        if (fuzzyMatch && fuzzyMatch.confidence > 0.8) {
+          // Convert Reader highlight to our ReadwiseHighlight format
+          const readwiseHighlight: ReadwiseHighlight = {
+            text: highlight.text,
+            note: highlight.note,
+            color: highlight.color,
+            location: highlight.location?.value,
+            highlighted_at: highlight.highlighted_at
+          }
+
+          results.needsReview.push({
+            highlight: readwiseHighlight,
+            suggestedMatch: fuzzyMatch,
+            confidence: fuzzyMatch.confidence
+          })
+
+          console.log(
+            `[Readwise Reader Import] ? Fuzzy match (${(fuzzyMatch.confidence * 100).toFixed(0)}%): "${text.slice(0, 50)}..."`
+          )
+        } else {
+          const readwiseHighlight: ReadwiseHighlight = {
+            text: highlight.text,
+            note: highlight.note,
+            color: highlight.color,
+            location: highlight.location?.value,
+            highlighted_at: highlight.highlighted_at
+          }
+
+          results.failed.push({
+            highlight: readwiseHighlight,
+            reason: fuzzyMatch
+              ? `Low confidence (${(fuzzyMatch.confidence * 100).toFixed(0)}%)`
+              : 'No match found'
+          })
+
+          console.log(`[Readwise Reader Import] ✗ Failed: "${text.slice(0, 50)}..."`)
+        }
+      } catch (error) {
+        const readwiseHighlight: ReadwiseHighlight = {
+          text: highlight.text,
+          note: highlight.note,
+          color: highlight.color,
+          location: highlight.location?.value,
+          highlighted_at: highlight.highlighted_at
+        }
+
+        results.failed.push({
+          highlight: readwiseHighlight,
+          reason: error instanceof Error ? error.message : 'Unknown error'
+        })
+
+        console.error(`[Readwise Reader Import] Error processing highlight:`, error)
+      }
+    }
+
+    console.log('[Readwise Reader Import] Complete!')
+    console.log(`  Imported: ${results.imported}`)
+    console.log(`  Needs Review: ${results.needsReview.length}`)
+    console.log(`  Failed: ${results.failed.length}`)
+
+    const total = results.imported + results.needsReview.length + results.failed.length
+    if (total > 0) {
+      const successRate = (results.imported / total * 100).toFixed(1)
+      console.log(`  Success Rate: ${successRate}%`)
+    }
+
+    return results
+  } catch (error) {
+    console.error('[Readwise Reader Import] Import failed:', error)
+    throw error
+  }
+}
+
+// ============================================
+// READWISE EXPORT API INTEGRATION
+// ============================================
+
+/**
+ * Import highlights from Readwise Export API
+ *
+ * Simpler approach: book object from export API already contains all highlights
+ *
+ * @param rhizomeDocumentId - Target document ID in Rhizome
+ * @param readwiseBook - Book object from Readwise export API
+ * @returns Import statistics
+ */
+export async function importFromReadwiseExport(
+  rhizomeDocumentId: string,
+  readwiseBook: ReadwiseBook
+): Promise<ImportResults> {
+  console.log(`[Readwise Export Import] Importing "${readwiseBook.title}" by ${readwiseBook.author}`)
+  console.log(`[Readwise Export Import] Processing ${readwiseBook.highlights.length} highlights`)
+
+  const supabase = createClient(
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const results: ImportResults = {
+    imported: 0,
+    needsReview: [],
+    failed: []
+  }
+
+  try {
+    // Fetch Rhizome document markdown and chunks
+    const { data: document, error: docError } = await supabase
+      .from('documents')
+      .select('storage_path')
+      .eq('id', rhizomeDocumentId)
+      .single()
+
+    if (docError || !document?.storage_path) {
+      throw new Error('Rhizome document not found or markdown not available')
+    }
+
+    const markdownPath = `${document.storage_path}/content.md`
+    const { data: blob, error: storageError } = await supabase.storage
+      .from('documents')
+      .download(markdownPath)
+
+    if (storageError) {
+      throw new Error(`Failed to download markdown: ${storageError.message}`)
+    }
+
+    const markdown = await blob.text()
+
+    // Fetch chunks
+    const { data: chunks, error: chunksError } = await supabase
+      .from('chunks')
+      .select('id, chunk_index, start_offset, end_offset, content')
+      .eq('document_id', rhizomeDocumentId)
+      .order('chunk_index', { ascending: true })
+
+    if (chunksError || !chunks) {
+      throw new Error('Failed to fetch chunks')
+    }
+
+    // Get document metadata for better location estimation
+    const { data: docMetadata } = await supabase
+      .from('documents')
+      .select('metadata')
+      .eq('id', rhizomeDocumentId)
+      .single()
+
+    const totalPages = docMetadata?.metadata?.total_pages || null
+
+    // Filter out image highlights (can't match markdown text)
+    const textHighlights = readwiseBook.highlights.filter(h => {
+      // Skip image URLs
+      if (h.text.startsWith('![](') || h.text.includes('readwise-assets')) {
+        console.log(`[Readwise Export Import] ⊘ Skipping image: "${h.text.slice(0, 50)}..."`)
+        return false
+      }
+      // Skip very short highlights (likely artifacts)
+      if (h.text.trim().length < 10) {
+        console.log(`[Readwise Export Import] ⊘ Skipping short text: "${h.text}"`)
+        return false
+      }
+      return true
+    })
+
+    console.log(`[Readwise Export Import] Filtered ${readwiseBook.highlights.length - textHighlights.length} non-text highlights`)
+    console.log(`[Readwise Export Import] Processing ${textHighlights.length} text highlights\n`)
+
+    // Process each highlight
+    for (const highlight of textHighlights) {
+      try {
+        const text = highlight.text.trim()
+
+        // Try exact match first
+        const exactIndex = markdown.indexOf(text)
+
+        if (exactIndex !== -1) {
+          // Convert export highlight to our ReadwiseHighlight format
+          const readwiseHighlight: ReadwiseHighlight = {
+            text: highlight.text,
+            note: highlight.note || undefined,
+            color: mapExportColor(highlight.color),
+            location: highlight.location,
+            highlighted_at: highlight.highlighted_at,
+            book_id: readwiseBook.user_book_id.toString(),
+            title: readwiseBook.title,
+            author: readwiseBook.author
+          }
+
+          await createAnnotationFromMatch(
+            supabase,
+            rhizomeDocumentId,
+            readwiseHighlight,
+            {
+              startOffset: exactIndex,
+              endOffset: exactIndex + text.length,
+              text
+            },
+            chunks
+          )
+
+          results.imported++
+          console.log(`[Readwise Export Import] ✓ Exact match: "${text.slice(0, 50)}..."`)
+          continue
+        }
+
+        // No exact match - try fuzzy matching
+        const estimatedChunkIndex = estimateChunkFromLocation(
+          highlight.location,
+          highlight.location_type,
+          chunks.length,
+          totalPages
+        )
+
+        const fuzzyMatch = findAnnotationMatch(
+          {
+            id: highlight.id.toString(),
+            text,
+            startOffset: 0,
+            endOffset: text.length,
+            originalChunkIndex: estimatedChunkIndex
+          },
+          markdown,
+          chunks
+        )
+
+        if (fuzzyMatch && fuzzyMatch.confidence > 0.8) {
+          const readwiseHighlight: ReadwiseHighlight = {
+            text: highlight.text,
+            note: highlight.note || undefined,
+            color: mapExportColor(highlight.color),
+            location: highlight.location,
+            highlighted_at: highlight.highlighted_at,
+            book_id: readwiseBook.user_book_id.toString(),
+            title: readwiseBook.title,
+            author: readwiseBook.author
+          }
+
+          results.needsReview.push({
+            highlight: readwiseHighlight,
+            suggestedMatch: fuzzyMatch,
+            confidence: fuzzyMatch.confidence
+          })
+
+          console.log(
+            `[Readwise Export Import] ? Fuzzy match (${(fuzzyMatch.confidence * 100).toFixed(0)}%): "${text.slice(0, 50)}..."`
+          )
+        } else {
+          const readwiseHighlight: ReadwiseHighlight = {
+            text: highlight.text,
+            note: highlight.note || undefined,
+            color: mapExportColor(highlight.color),
+            location: highlight.location,
+            highlighted_at: highlight.highlighted_at,
+            book_id: readwiseBook.user_book_id.toString(),
+            title: readwiseBook.title,
+            author: readwiseBook.author
+          }
+
+          results.failed.push({
+            highlight: readwiseHighlight,
+            reason: fuzzyMatch
+              ? `Low confidence (${(fuzzyMatch.confidence * 100).toFixed(0)}%)`
+              : 'No match found'
+          })
+
+          console.log(`[Readwise Export Import] ✗ Failed: "${text.slice(0, 50)}..."`)
+        }
+      } catch (error) {
+        const readwiseHighlight: ReadwiseHighlight = {
+          text: highlight.text,
+          note: highlight.note || undefined,
+          color: mapExportColor(highlight.color),
+          location: highlight.location,
+          highlighted_at: highlight.highlighted_at,
+          book_id: readwiseBook.user_book_id.toString(),
+          title: readwiseBook.title,
+          author: readwiseBook.author
+        }
+
+        results.failed.push({
+          highlight: readwiseHighlight,
+          reason: error instanceof Error ? error.message : 'Unknown error'
+        })
+
+        console.error(`[Readwise Export Import] Error processing highlight:`, error)
+      }
+    }
+
+    console.log('[Readwise Export Import] Complete!')
+    console.log(`  Imported: ${results.imported}`)
+    console.log(`  Needs Review: ${results.needsReview.length}`)
+    console.log(`  Failed: ${results.failed.length}`)
+
+    const total = results.imported + results.needsReview.length + results.failed.length
+    if (total > 0) {
+      const successRate = (results.imported / total * 100).toFixed(1)
+      console.log(`  Success Rate: ${successRate}%`)
+    }
+
+    return results
+  } catch (error) {
+    console.error('[Readwise Export Import] Import failed:', error)
+    throw error
+  }
+}
+
+/**
+ * Map export API color to our color system
+ */
+function mapExportColor(
+  color: string | null
+): 'yellow' | 'blue' | 'red' | 'green' | 'orange' {
+  if (!color) return 'yellow'
+
+  const colorMap: Record<string, 'yellow' | 'blue' | 'red' | 'green' | 'orange'> = {
+    yellow: 'yellow',
+    blue: 'blue',
+    red: 'red',
+    orange: 'orange',
+    purple: 'blue',  // Map purple to blue
+    green: 'green'
+  }
+
+  return colorMap[color] || 'yellow'
+}
+
+/**
+ * Estimate chunk index from location data
+ * Uses document metadata (total_pages) when available for accurate estimation
+ */
+function estimateChunkFromLocation(
+  location: number,
+  locationType: 'page' | 'location' | 'time' | 'order',
+  totalChunks: number,
+  totalPages: number | null = null
+): number {
+  switch (locationType) {
+    case 'page':
+      // Use actual document page count if available
+      if (totalPages && totalPages > 0) {
+        const chunksPerPage = totalChunks / totalPages
+        const estimatedChunk = Math.floor(location * chunksPerPage)
+        console.log(`[Location Estimate] Page ${location}/${totalPages} → Chunk ${estimatedChunk}/${totalChunks} (${chunksPerPage.toFixed(2)} chunks/page)`)
+        return Math.min(estimatedChunk, totalChunks - 1)
+      }
+      // Fallback: Assume ~0.75 chunks per page (500 pages → 375 chunks)
+      return Math.min(Math.floor(location * 0.75), totalChunks - 1)
+
+    case 'order':
+      // Order is 0-based index - use directly as chunk estimate
+      return Math.min(location, totalChunks - 1)
+
+    case 'location':
+      // Kindle location - normalize to chunk range
+      // Typical book: 5000 locations → 375 chunks ≈ 0.075 chunks per location
+      const estimatedFromLocation = Math.floor(location * 0.075)
+      return Math.min(estimatedFromLocation, totalChunks - 1)
+
+    default:
+      // Fallback: use order as percentage
+      return Math.floor((location / 100) * totalChunks)
+  }
 }
