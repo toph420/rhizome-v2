@@ -37,6 +37,7 @@ export interface ObsidianSettings {
   vaultPath: string
   autoSync: boolean
   syncAnnotations: boolean
+  exportPath: string  // Relative path in vault (e.g., "Rhizome/")
 }
 
 export interface ExportResult {
@@ -105,9 +106,12 @@ export async function exportToObsidian(
     const markdown = await markdownBlob.text()
 
     // 3. Determine vault file path
-    const vaultFilePath = document.obsidian_path
-      ? path.join(obsidianSettings.vaultPath, document.obsidian_path)
-      : path.join(obsidianSettings.vaultPath, `${document.title}.md`)
+    // Always use current exportPath settings (don't rely on stale obsidian_path)
+    const vaultFilePath = path.join(
+      obsidianSettings.vaultPath,
+      obsidianSettings.exportPath || '',
+      `${document.title}.md`
+    )
 
     // Create directory if needed
     await fs.mkdir(path.dirname(vaultFilePath), { recursive: true })
@@ -121,19 +125,19 @@ export async function exportToObsidian(
       await exportAnnotations(documentId, vaultFilePath)
     }
 
-    // 6. Update obsidian_path in database if needed
-    if (!document.obsidian_path) {
-      const relativePath = path.relative(obsidianSettings.vaultPath, vaultFilePath)
-      await supabase
-        .from('documents')
-        .update({ obsidian_path: relativePath })
-        .eq('id', documentId)
-    }
+    // 6. Calculate relative path for database and URI
+    const relativePathToFile = path.relative(obsidianSettings.vaultPath, vaultFilePath)
+
+    // Always update obsidian_path to reflect current location
+    await supabase
+      .from('documents')
+      .update({ obsidian_path: relativePathToFile })
+      .eq('id', documentId)
 
     // 7. Generate Obsidian URI
     const uri = getObsidianUri(
       obsidianSettings.vaultName,
-      document.obsidian_path || path.basename(vaultFilePath)
+      relativePathToFile
     )
 
     console.log(`[Obsidian Export] ✅ Export complete`)
@@ -165,7 +169,8 @@ export async function exportToObsidian(
  */
 export async function syncFromObsidian(
   documentId: string,
-  userId: string
+  userId: string,
+  jobId?: string
 ): Promise<SyncResult> {
   try {
     console.log(`[Obsidian Sync] Starting sync for document ${documentId}`)
@@ -217,6 +222,13 @@ export async function syncFromObsidian(
     // 4. Check if content actually changed
     if (editedMarkdown.trim() === currentMarkdown.trim()) {
       console.log(`[Obsidian Sync] No changes detected`)
+
+      // Ensure document status is correct (in case of previous failed sync)
+      await supabase
+        .from('documents')
+        .update({ processing_status: 'completed' })
+        .eq('id', documentId)
+
       return {
         success: true,
         changed: false
@@ -238,7 +250,7 @@ export async function syncFromObsidian(
     }
 
     // 6. Trigger reprocessing with annotation recovery
-    const recovery = await reprocessDocument(documentId)
+    const recovery = await reprocessDocument(documentId, supabase, jobId)
 
     console.log(`[Obsidian Sync] ✅ Sync complete`)
     console.log(`[Obsidian Sync] Recovery stats:`, {
@@ -291,6 +303,8 @@ export function getObsidianUri(vaultName: string, filepath: string): string {
  */
 async function exportAnnotations(documentId: string, vaultFilePath: string): Promise<void> {
   try {
+    const supabase = getSupabaseClient()
+
     // Fetch Position components (annotations)
     const { data: components, error } = await supabase
       .from('components')

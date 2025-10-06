@@ -2,11 +2,49 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 /**
+ * Poll for job completion
+ * @param supabase - Supabase client
+ * @param jobId - Job ID to poll
+ * @param maxAttempts - Maximum polling attempts (default: 60 = 2 minutes)
+ * @param intervalMs - Polling interval in ms (default: 2000 = 2s)
+ */
+async function pollForJobCompletion(
+  supabase: any,
+  jobId: string,
+  maxAttempts = 60,
+  intervalMs = 2000
+): Promise<any> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { data: job } = await supabase
+      .from('background_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single()
+
+    if (!job) {
+      throw new Error('Job not found')
+    }
+
+    if (job.status === 'completed') {
+      return job.output_data
+    }
+
+    if (job.status === 'failed') {
+      throw new Error(job.last_error || 'Job failed')
+    }
+
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+
+  throw new Error('Job timeout - export took too long')
+}
+
+/**
  * POST /api/obsidian/export
  * Export document to Obsidian vault
  *
- * Note: This is a placeholder for the Obsidian export functionality.
- * The actual implementation will be done when Obsidian integration is fully set up.
+ * Creates background job and waits for worker to complete the export
  */
 export async function POST(request: NextRequest) {
   try {
@@ -24,30 +62,34 @@ export async function POST(request: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    // Get document info
-    const { data: doc } = await supabase
-      .from('documents')
-      .select('title, markdown_path')
-      .eq('id', documentId)
+    const devUserId = process.env.DEV_USER_ID || '00000000-0000-0000-0000-000000000000'
+
+    // Create background job for obsidian export
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .insert({
+        job_type: 'obsidian-export',
+        status: 'pending',
+        user_id: devUserId,
+        input_data: { documentId, userId: devUserId },
+        max_retries: 2
+      })
+      .select()
       .single()
 
-    if (!doc) {
-      return NextResponse.json(
-        { error: 'Document not found' },
-        { status: 404 }
-      )
+    if (jobError) {
+      throw new Error(`Failed to create export job: ${jobError.message}`)
     }
 
-    // Generate Obsidian URI
-    // Format: obsidian://advanced-uri?vault=VaultName&filepath=path/to/file.md
-    const vaultName = 'Tophs Vault' // TODO: Get from user settings
-    const filePath = `rhizome/${doc.title}.md`
-    const uri = `obsidian://advanced-uri?vault=${encodeURIComponent(vaultName)}&filepath=${encodeURIComponent(filePath)}`
+    console.log(`[API] Created obsidian-export job ${job.id}`)
+
+    // Poll for job completion (max 2 minutes)
+    const result = await pollForJobCompletion(supabase, job.id, 60, 2000)
 
     return NextResponse.json({
       success: true,
-      uri,
-      path: filePath
+      uri: result.uri,
+      path: result.path
     })
 
   } catch (error) {
