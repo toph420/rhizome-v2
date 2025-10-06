@@ -49,12 +49,17 @@ const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?
       storing: 'Saving to database'
     }
   },
-  complete: { 
-    icon: CheckCircle2, 
+  complete: {
+    icon: CheckCircle2,
     label: '✅ Complete',
     substages: {
       done: 'All done!'
     }
+  },
+  reprocessing: {
+    icon: RefreshCw,
+    label: '🔄 Reprocessing',
+    substages: {}
   }
 }
 
@@ -310,6 +315,12 @@ export function ProcessingDock() {
     if (job.job_type === 'detect-connections') {
       const docId = job.input_data?.document_id?.slice(0, 8) || 'Unknown'
       return `Detecting Connections ${docId}...`
+    }
+    if (job.job_type === 'obsidian-sync') {
+      return `Syncing from Obsidian`
+    }
+    if (job.job_type === 'obsidian-export') {
+      return `Exporting to Obsidian`
     }
     return job.job_type
   }

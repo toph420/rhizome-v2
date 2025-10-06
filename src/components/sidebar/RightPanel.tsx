@@ -53,15 +53,15 @@ export function RightPanel({
   
   return (
     <motion.div
-      className="fixed right-0 top-0 bottom-0 border-l z-40 bg-background"
+      className="fixed right-0 top-14 bottom-0 border-l z-40 bg-background"
       initial={false}
-      animate={{ 
+      animate={{
         width: collapsed ? 48 : 384 // w-12 : w-96
       }}
-      transition={{ 
-        type: 'spring', 
-        damping: 25, 
-        stiffness: 300 
+      transition={{
+        type: 'spring',
+        damping: 25,
+        stiffness: 300
       }}
     >
       {/* Toggle button */}

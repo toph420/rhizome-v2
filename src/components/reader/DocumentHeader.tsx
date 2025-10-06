@@ -72,14 +72,42 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
   }
 
   /**
-   * Sync edited markdown from Obsidian vault
+   * Poll job status until completion
+   */
+  async function pollJobStatus(jobId: string): Promise<any> {
+    const maxAttempts = 900 // 30 minutes
+    const intervalMs = 2000 // 2 seconds
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await fetch(`/api/obsidian/status/${jobId}`)
+      const data = await response.json()
+
+      if (data.status === 'completed') {
+        return data.result
+      }
+
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Job failed')
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    throw new Error('Sync timeout - processing took too long')
+  }
+
+  /**
+   * Sync edited markdown from Obsidian vault (async version)
    * Triggers reprocessing pipeline with annotation recovery
+   * Uses client-side polling to avoid API timeout issues
    */
   async function handleSync() {
     setIsSyncing(true)
 
     try {
-      const response = await fetch('/api/obsidian/sync', {
+      // Start sync job
+      const response = await fetch('/api/obsidian/sync-async', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentId })
@@ -90,7 +118,15 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
         throw new Error(error.message || 'Sync failed')
       }
 
-      const { changed, recovery } = await response.json()
+      const { jobId } = await response.json()
+
+      toast.info('Sync Started', {
+        description: 'Processing document - this may take several minutes for large files',
+        duration: 3000
+      })
+
+      // Poll for completion
+      const { changed, recovery } = await pollJobStatus(jobId)
 
       if (!changed) {
         toast.info('No Changes', {
