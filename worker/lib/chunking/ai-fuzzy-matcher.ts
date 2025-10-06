@@ -203,7 +203,43 @@ function fuzzySearchMarkdown(
     }
   }
 
-  // Strategy 2: Fuzzy match with normalized whitespace (MEMORY OPTIMIZED)
+  // Strategy 2: Heading-agnostic match (normalize heading levels)
+  // AI often changes # → ## or vice versa, but content is the same
+  const headingNormalized = targetContent
+    .replace(/^#{1,6}\s+/gm, '').trim()  // Remove leading heading markers
+    .replace(/\s+/g, ' ')  // Normalize whitespace
+
+  if (headingNormalized.length > 50) {  // Only for substantial content
+    // Escape regex special characters, then allow flexible whitespace and heading levels
+    const escapedContent = headingNormalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const flexiblePattern = escapedContent.replace(/ /g, '\\s+')
+
+    try {
+      const regex = new RegExp(flexiblePattern)
+      const searchRegion = markdown.slice(startFrom)
+      const match = searchRegion.match(regex)
+
+      if (match && match.index !== undefined) {
+        const originalIndex = startFrom + match.index
+        // Find the actual start (may include heading markers before matched content)
+        const beforeMatch = markdown.slice(Math.max(0, originalIndex - 20), originalIndex)
+        const headingMatch = beforeMatch.match(/#{1,6}\s+$/)
+        const actualStart = headingMatch ? originalIndex - headingMatch[0].length : originalIndex
+
+        return {
+          start: actualStart,
+          end: originalIndex + match[0].length,
+          confidence: 'fuzzy',
+          similarity: 95
+        }
+      }
+    } catch (e) {
+      // Regex pattern too complex - skip this strategy
+      // Fall through to Strategy 3
+    }
+  }
+
+  // Strategy 2b: Fuzzy match with normalized whitespace (MEMORY OPTIMIZED)
   // Don't create full markdown copy - use regex search instead
   const normalizedContent = targetContent.trim().replace(/\s+/g, ' ')
 

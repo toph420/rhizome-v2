@@ -20,7 +20,7 @@ import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 import type { MetadataExtractionProgress } from '../types/chunking.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
 import { cleanEpubArtifacts } from '../lib/epub/epub-cleaner.js'
-import { cleanMarkdownWithAI } from '../lib/markdown-cleanup-ai.js'
+import { cleanEpubChaptersWithAI } from '../lib/markdown-cleanup-ai.js'
 
 export class EPUBProcessor extends SourceProcessor {
   /**
@@ -85,49 +85,65 @@ export class EPUBProcessor extends SourceProcessor {
       console.log(`[EPUBProcessor] Cover image uploaded`)
     }
 
-    // Stage 4: Combine chapters into full document (30%)
-    await this.updateProgress(30, 'convert', 'merging', 'Combining chapters')
+    // Stage 4: Clean chapters with regex BEFORE combining (30%)
+    await this.updateProgress(30, 'cleanup', 'regex', 'Cleaning EPUB artifacts')
 
-    const rawMarkdown = chapters
-      .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
-      .join('\n\n---\n\n')
+    // Step 1: Regex cleanup (per chapter)
+    const regexCleaned = chapters.map(ch => ({
+      title: ch.title,
+      markdown: cleanEpubArtifacts(ch.markdown)
+    }))
 
-    // Clean EPUB artifacts BEFORE chunking (TOC links, filename headings, boilerplate)
-    let fullMarkdown = cleanEpubArtifacts(rawMarkdown)
+    console.log(`[EPUBProcessor] Regex cleaned ${regexCleaned.length} chapters`)
 
-    const markdownKB = Math.round(fullMarkdown.length / 1024)
-    console.log(`[EPUBProcessor] Combined ${chapters.length} chapters into ${markdownKB}KB clean markdown`)
-
-    // Stage 4.5: AI cleanup pass (if enabled)
+    // Stage 4.5: AI cleanup pass (if enabled) - per chapter, no batching
     const { cleanMarkdown: cleanMarkdownEnabled = true } = this.job.input_data as any
+    let fullMarkdown: string
 
     if (cleanMarkdownEnabled) {
-      await this.updateProgress(32, 'cleanup', 'ai-polish', 'AI polishing markdown...')
+      await this.updateProgress(32, 'cleanup', 'ai-polish', 'AI polishing chapters...')
 
       try {
-        fullMarkdown = await cleanMarkdownWithAI(this.ai, fullMarkdown, {
+        // Step 2: AI cleanup (per chapter) + Step 3: Join with ---
+        fullMarkdown = await cleanEpubChaptersWithAI(this.ai, regexCleaned, {
           enableProgress: true,
-          onProgress: async (batch, total) => {
-            if (total > 1) {
-              const progressPercent = 32 + Math.floor((batch / total) * 3) // 32-35%
-              await this.updateProgress(
-                progressPercent,
-                'cleanup',
-                'ai-polish',
-                `AI cleanup: batch ${batch}/${total}`
-              )
-            }
+          onProgress: async (chapter, total) => {
+            const progressPercent = 32 + Math.floor((chapter / total) * 3) // 32-35%
+            await this.updateProgress(
+              progressPercent,
+              'cleanup',
+              'ai-polish',
+              `AI cleanup: chapter ${chapter}/${total}`
+            )
           }
         })
 
         await this.updateProgress(35, 'cleanup', 'complete', 'Markdown cleanup complete')
+
+        const markdownKB = Math.round(fullMarkdown.length / 1024)
+        console.log(
+          `[EPUBProcessor] AI cleaned ${regexCleaned.length} chapters → ${markdownKB}KB markdown ` +
+          `(joined with deterministic --- separators)`
+        )
       } catch (cleanupError: any) {
-        console.warn(`[EPUBProcessor] AI cleanup failed, continuing: ${cleanupError.message}`)
-        // Continue with EPUB-cleaned markdown - non-fatal
+        console.warn(`[EPUBProcessor] AI cleanup failed, using regex-only: ${cleanupError.message}`)
+
+        // Fallback: just combine regex-cleaned chapters
+        fullMarkdown = regexCleaned
+          .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
+          .join('\n\n---\n\n')
       }
     } else {
       console.log('[EPUBProcessor] AI cleanup skipped (cleanMarkdown: false)')
+
+      // No AI cleanup: just combine regex-cleaned chapters
+      fullMarkdown = regexCleaned
+        .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
+        .join('\n\n---\n\n')
     }
+
+    const markdownKB = Math.round(fullMarkdown.length / 1024)
+    console.log(`[EPUBProcessor] Final markdown: ${markdownKB}KB`)
 
     // Stage 5: Check if we should skip AI chunking (review mode)
     const documentType = inferDocumentType(metadata)
@@ -172,38 +188,17 @@ export class EPUBProcessor extends SourceProcessor {
       }
     }
 
-    // Normal mode: AI chunking with chapter boundaries (30-70%)
+    // Normal mode: AI chunking with windowed batching (30-70%)
     await this.updateProgress(
       35,
       'extract',
       'chunking',
-      `AI chunking ${chapters.length} chapters (${documentType})`
+      `AI chunking with semantic analysis (${documentType})`
     )
 
-    // CRITICAL: Build customBatches from CLEANED markdown, not original chapters
-    // Split the cleaned markdown back into chapters using the separator
-    const cleanedChapterSections = fullMarkdown.split(/\n\n---\n\n/)
-
-    console.log(`[EPUBProcessor] Rebuilt ${cleanedChapterSections.length} chapters from cleaned markdown`)
-
-    // Calculate absolute offsets for each chapter using CLEANED content
-    const customBatches = cleanedChapterSections.map((chapterContent, i) => {
-      // Calculate start offset: sum of all previous chapters + separators
-      const precedingChapters = cleanedChapterSections.slice(0, i)
-
-      const startOffset = precedingChapters.reduce((offset, prevChapter) => {
-        const separatorLength = offset === 0 ? 0 : '\n\n---\n\n'.length
-        return offset + prevChapter.length + separatorLength
-      }, 0)
-
-      const endOffset = startOffset + chapterContent.length
-
-      return {
-        content: chapterContent, // DON'T trim - keep offsets aligned with fullMarkdown positions
-        startOffset,
-        endOffset
-      }
-    })
+    // Use windowed batching (same as PDFs) for consistent behavior
+    // The AI will create semantic chunks regardless of chapter boundaries
+    console.log(`[EPUBProcessor] Using windowed batching for ${fullMarkdown.length} chars of markdown`)
 
     const progressCallback = (progress: MetadataExtractionProgress) => {
       const percentage = 35 + Math.floor(((progress.batchesProcessed + 1) / progress.totalBatches) * 35)
@@ -211,7 +206,7 @@ export class EPUBProcessor extends SourceProcessor {
         percentage,
         'extract',
         'metadata',
-        `AI metadata: chapter ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks)`
+        `AI metadata: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks)`
       )
     }
 
@@ -221,8 +216,8 @@ export class EPUBProcessor extends SourceProcessor {
         {
           apiKey: process.env.GOOGLE_AI_API_KEY,
           modelName: GEMINI_MODEL,
-          enableProgress: true,
-          customBatches // Use chapter boundaries instead of arbitrary windows
+          enableProgress: true
+          // No customBatches - use default windowed approach like PDFs
         },
         progressCallback,
         documentType // Use type-specific chunking prompt
@@ -230,7 +225,7 @@ export class EPUBProcessor extends SourceProcessor {
       'AI metadata extraction'
     )
 
-    console.log(`[EPUBProcessor] Created ${chunks.length} semantic chunks from ${chapters.length} chapters`)
+    console.log(`[EPUBProcessor] Created ${chunks.length} semantic chunks using windowed batching`)
 
     // Stage 6: Finalize (75%)
     // Note: Handler will upload markdown to storage (not processor responsibility)

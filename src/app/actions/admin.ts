@@ -245,6 +245,43 @@ export async function forceFailJob(jobId: string) {
 }
 
 /**
+ * Cancel and delete a job immediately.
+ * Marks job as cancelled (worker will check and exit) then deletes it.
+ * Useful for development when testing and need to stop+remove jobs quickly.
+ */
+export async function cancelAndDeleteJob(jobId: string) {
+  const supabase = await createClient()
+
+  try {
+    // First mark as cancelled so worker knows to stop
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'cancelled',
+        last_error: 'Cancelled by user'
+      })
+      .eq('id', jobId)
+
+    // Give worker a moment to see the cancellation
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    // Then delete the job
+    const { error } = await supabase
+      .from('background_jobs')
+      .delete()
+      .eq('id', jobId)
+
+    if (error) throw error
+
+    revalidatePath('/')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Error cancelling and deleting job:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+/**
  * Clear all failed jobs.
  * Useful for development to clean up test failures.
  */

@@ -42,7 +42,7 @@ Replace the current `createBatches()` with this simpler version:
 ```typescript
 function createBatches(markdown: string, maxBatchSize: number): MetadataExtractionBatch[] {
   const batches: MetadataExtractionBatch[] = []
-  const OVERLAP_SIZE = 2000 // 2K character overlap to avoid losing chunks at boundaries
+  const OVERLAP_SIZE = 1000 // 2K character overlap to avoid losing chunks at boundaries
   
   let position = 0
   let batchIndex = 0

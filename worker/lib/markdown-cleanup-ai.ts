@@ -4,28 +4,17 @@
  * Second-pass cleanup using Gemini to polish extracted markdown.
  * Focuses on removing artifacts and fixing formatting without changing content.
  *
- * Handles large documents through batching:
- * - Documents < 50K chars: Single-pass cleanup
- * - Documents >= 50K chars: Batched cleanup with heading boundaries
+ * Strategies:
+ * - EPUBs: Per-chapter cleanup with deterministic joining (NO overlap, NO stitching)
+ * - PDFs: Single-pass (<100K) or heading-split (>100K) with deterministic joining
  *
- * Cost: ~$0.02-0.10 per document depending on size (uses Gemini 2.5 Flash)
+ * Cost: ~$0.02-0.60 per document depending on size and type (uses Gemini 2.5 Flash)
  * Speed: ~10-60 seconds depending on document size
  */
 
 import type { GoogleGenAI } from '@google/genai'
 import { generateMarkdownCleanupPrompt } from './prompts/markdown-cleanup.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from './model-config.js'
-
-/**
- * Threshold for batched processing (characters)
- * 50K chars ≈ 12.5K tokens, well under the 65K output limit
- */
-const BATCH_SIZE_CHARS = 50000
-
-/**
- * Overlap between batches to preserve context at boundaries
- */
-const BATCH_OVERLAP_CHARS = 1000
 
 /**
  * Configuration for markdown cleanup
@@ -60,59 +49,8 @@ export interface MarkdownCleanupConfig {
 }
 
 /**
- * Clean extracted markdown using AI.
- *
- * This function sends the extracted markdown to Gemini for a second pass
- * of cleanup, focusing purely on formatting polish without changing content.
- *
- * Automatically handles batching for large documents (>50K chars):
- * - Small documents: Single AI call
- * - Large documents: Batched with overlap and stitching
- *
- * Use this AFTER initial extraction but BEFORE chunking to ensure the
- * cleanest possible markdown for downstream processing.
- *
- * @param ai - GoogleGenAI client instance
- * @param markdown - Extracted markdown to clean
- * @param config - Optional configuration
- * @returns Cleaned markdown string
- * @throws Error if AI cleanup fails
- *
- * @example
- * ```typescript
- * const cleanedMarkdown = await cleanMarkdownWithAI(
- *   ai,
- *   extractedMarkdown,
- *   {
- *     enableProgress: true,
- *     onProgress: (batch, total) => console.log(`Batch ${batch}/${total}`)
- *   }
- * )
- * ```
- */
-export async function cleanMarkdownWithAI(
-  ai: GoogleGenAI,
-  markdown: string,
-  config: MarkdownCleanupConfig = {}
-): Promise<string> {
-  if (!markdown || markdown.trim().length === 0) {
-    throw new Error('Cannot clean empty markdown')
-  }
-
-  const markdownChars = markdown.length
-
-  // Decide between single-pass and batched processing
-  if (markdownChars <= BATCH_SIZE_CHARS) {
-    // Small document: single-pass cleanup
-    return await cleanMarkdownSinglePass(ai, markdown, config)
-  } else {
-    // Large document: batched cleanup with stitching
-    return await cleanMarkdownBatched(ai, markdown, config)
-  }
-}
-
-/**
- * Clean markdown in a single AI call (for documents < 50K chars).
+ * Clean markdown in a single AI call.
+ * Internal helper used by cleanEpubChaptersWithAI() and cleanPdfMarkdown().
  */
 async function cleanMarkdownSinglePass(
   ai: GoogleGenAI,
@@ -184,14 +122,40 @@ async function cleanMarkdownSinglePass(
 }
 
 /**
- * Clean markdown in batches (for documents > 50K chars).
- * Splits at heading boundaries when possible to avoid breaking sections.
+ * Clean EPUB chapters with AI (per-chapter, no batching).
+ *
+ * Designed specifically for EPUBs which have natural chapter boundaries.
+ * Each chapter is cleaned independently and then joined deterministically.
+ *
+ * Why per-chapter instead of batched:
+ * - Chapters are natural semantic boundaries
+ * - Each chapter < 65K output tokens (no batching needed)
+ * - Deterministic joining with \n\n---\n\n (no stitching complexity)
+ * - No content drift from overlap reconciliation
+ *
+ * @param ai - GoogleGenAI client instance
+ * @param chapters - Array of chapter objects with title and markdown
+ * @param config - Optional configuration
+ * @returns Cleaned markdown with chapters joined by ---
+ * @throws Error if AI cleanup fails
+ *
+ * @example
+ * ```typescript
+ * const cleaned = await cleanEpubChaptersWithAI(ai, chapters, {
+ *   enableProgress: true,
+ *   onProgress: (chapter, total) => console.log(`Chapter ${chapter}/${total}`)
+ * })
+ * ```
  */
-async function cleanMarkdownBatched(
+export async function cleanEpubChaptersWithAI(
   ai: GoogleGenAI,
-  markdown: string,
-  config: MarkdownCleanupConfig
+  chapters: Array<{ title: string; markdown: string }>,
+  config: MarkdownCleanupConfig = {}
 ): Promise<string> {
+  if (!chapters || chapters.length === 0) {
+    throw new Error('Cannot clean empty chapters array')
+  }
+
   const {
     enableProgress = false,
     modelName = GEMINI_MODEL,
@@ -200,48 +164,39 @@ async function cleanMarkdownBatched(
     onProgress
   } = config
 
-  const markdownKB = Math.round(markdown.length / 1024)
-  const estimatedBatches = Math.ceil(markdown.length / BATCH_SIZE_CHARS)
-
   if (enableProgress) {
-    console.log(
-      `[markdown-cleanup-ai] Cleaning ${markdownKB}KB markdown in ~${estimatedBatches} batches`
-    )
+    console.log(`[markdown-cleanup-ai] Cleaning ${chapters.length} chapters individually`)
   }
 
   const startTime = Date.now()
+  const cleanedChapters: string[] = []
 
-  try {
-    // Split markdown into batches at heading boundaries
-    const batches = splitMarkdownIntoBatches(markdown, BATCH_SIZE_CHARS, BATCH_OVERLAP_CHARS)
+  // Clean each chapter independently (no batching, no overlap)
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i]
 
-    if (enableProgress) {
-      console.log(`[markdown-cleanup-ai] Split into ${batches.length} batches`)
+    if (onProgress) {
+      await onProgress(i + 1, chapters.length)
     }
 
-    // Clean each batch
-    const cleanedBatches: string[] = []
+    if (enableProgress) {
+      const chapterKB = Math.round(chapter.markdown.length / 1024)
+      console.log(
+        `[markdown-cleanup-ai] Cleaning chapter ${i + 1}/${chapters.length}: ` +
+        `"${chapter.title}" (${chapterKB}KB)`
+      )
+    }
 
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i]
+    // Prepend chapter title as heading
+    const chapterText = `# ${chapter.title}\n\n${chapter.markdown}`
 
-      if (onProgress) {
-        await onProgress(i + 1, batches.length)
-      }
-
-      if (enableProgress) {
-        console.log(
-          `[markdown-cleanup-ai] Cleaning batch ${i + 1}/${batches.length} ` +
-          `(${Math.round(batch.length / 1024)}KB)`
-        )
-      }
-
+    try {
       const result = await ai.models.generateContent({
         model: modelName,
         contents: [{
           parts: [
             { text: generateMarkdownCleanupPrompt() },
-            { text: `\n\nHere is the markdown to clean:\n\n${batch}` }
+            { text: `\n\nHere is the markdown to clean:\n\n${chapterText}` }
           ]
         }],
         config: {
@@ -251,172 +206,152 @@ async function cleanMarkdownBatched(
       })
 
       if (!result || !result.text) {
-        throw new Error(`Batch ${i + 1} returned empty response`)
+        throw new Error(`Chapter ${i + 1} returned empty response`)
       }
 
       let cleaned = result.text.trim()
 
-      // Remove markdown code block wrappers
+      // Remove markdown code block wrappers if AI added them
       if (cleaned.startsWith('```markdown')) {
         cleaned = cleaned.replace(/^```markdown\s*\n?/, '').replace(/\n?```\s*$/, '')
       } else if (cleaned.startsWith('```')) {
         cleaned = cleaned.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
       }
 
-      cleanedBatches.push(cleaned)
-    }
-
-    // Stitch batches together, removing overlap
-    const stitched = stitchCleanedBatches(cleanedBatches, BATCH_OVERLAP_CHARS)
-
-    const elapsedMs = Date.now() - startTime
-    const stitchedKB = Math.round(stitched.length / 1024)
-
-    // Warn if stitching introduced significant length drift
-    const lengthDiff = Math.abs(stitched.length - markdown.length)
-    const driftPercent = (lengthDiff / markdown.length) * 100
-    if (driftPercent > 5) {
-      console.warn(
-        `[markdown-cleanup-ai] ⚠️  Stitching introduced ${driftPercent.toFixed(1)}% length drift ` +
-        `(${lengthDiff} chars). Chunk offsets may be approximate.`
+      cleanedChapters.push(cleaned)
+    } catch (error: any) {
+      console.error(
+        `[markdown-cleanup-ai] ❌ Chapter ${i + 1} cleanup failed: ${error.message}`
       )
+      throw new Error(`AI cleanup failed on chapter ${i + 1} ("${chapter.title}"): ${error.message}`)
     }
+  }
 
-    if (enableProgress) {
-      console.log(
-        `[markdown-cleanup-ai] ✅ Batched cleanup complete in ${Math.round(elapsedMs / 1000)}s ` +
-        `(${batches.length} batches, ${markdownKB}KB → ${stitchedKB}KB)`
-      )
-    }
+  // Join with deterministic separator (no stitching logic needed)
+  const joined = cleanedChapters.join('\n\n---\n\n')
 
-    return stitched
-  } catch (error: any) {
-    const elapsedMs = Date.now() - startTime
-    console.error(
-      `[markdown-cleanup-ai] ❌ Batched cleanup failed after ${Math.round(elapsedMs / 1000)}s:`,
-      error.message
+  const elapsedMs = Date.now() - startTime
+  const joinedKB = Math.round(joined.length / 1024)
+
+  if (enableProgress) {
+    console.log(
+      `[markdown-cleanup-ai] ✅ Per-chapter cleanup complete in ${Math.round(elapsedMs / 1000)}s ` +
+      `(${chapters.length} chapters, ${joinedKB}KB total)`
     )
-    throw new Error(`AI markdown cleanup (batched) failed: ${error.message}`)
   }
+
+  return joined
 }
 
 /**
- * Split markdown into batches at heading boundaries when possible.
- * Adds overlap between batches to preserve context.
+ * Clean PDF markdown with AI.
  *
- * @param markdown - Full markdown to split
- * @param batchSize - Target batch size in characters
- * @param overlap - Overlap size in characters
- * @returns Array of markdown batch strings
+ * Strategy:
+ * - Small documents (<100K chars): Single-pass cleanup
+ * - Large documents (>100K chars): Split at ## headings, clean each section, join directly
+ *
+ * Why this works:
+ * - ## headings are structural markers that AI won't modify
+ * - Splitting BEFORE headings keeps sections intact
+ * - NO overlap, NO stitching - just clean and join
+ *
+ * @param ai - GoogleGenAI client instance
+ * @param markdown - PDF markdown to clean
+ * @param config - Optional configuration with onProgress callback
+ * @returns Cleaned markdown string
+ * @throws Error if AI cleanup fails
+ *
+ * @example
+ * ```typescript
+ * const cleaned = await cleanPdfMarkdown(ai, pdfMarkdown, {
+ *   onProgress: (section, total) => console.log(`Section ${section}/${total}`)
+ * })
+ * ```
  */
-function splitMarkdownIntoBatches(
+export async function cleanPdfMarkdown(
+  ai: GoogleGenAI,
   markdown: string,
-  batchSize: number,
-  overlap: number
-): string[] {
-  const batches: string[] = []
-  let currentPos = 0
+  config: { onProgress?: (section: number, total: number) => void | Promise<void> } = {}
+): Promise<string> {
+  // Small documents: single-pass cleanup
+  if (markdown.length < 100000) {
+    console.log('[markdown-cleanup-ai] Small PDF (<100K chars), using single-pass cleanup')
 
-  while (currentPos < markdown.length) {
-    const endPos = Math.min(currentPos + batchSize, markdown.length)
+    return await cleanMarkdownSinglePass(ai, markdown, {
+      enableProgress: true,
+      modelName: GEMINI_MODEL,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      temperature: 0.1
+    })
+  }
 
-    // Try to find a heading boundary near the end position
-    const searchStart = Math.max(currentPos, endPos - 500) // Look back up to 500 chars
-    const searchEnd = Math.min(endPos + 500, markdown.length) // Look ahead up to 500 chars
-    const searchRegion = markdown.substring(searchStart, searchEnd)
+  // Large documents: split at ## headings
+  console.log('[markdown-cleanup-ai] Large PDF (>100K chars), splitting at ## headings')
 
-    // Find heading markers (##, ###, etc.) near the boundary
-    const headingMatch = searchRegion.match(/\n(#{1,6}\s+.+)\n/g)
+  const sections = markdown.split(/(?=\n##\s)/)  // Split BEFORE ## headings
+  console.log(`[markdown-cleanup-ai] Split into ${sections.length} sections`)
 
-    let actualEndPos = endPos
+  const cleanedSections: string[] = []
 
-    if (headingMatch && headingMatch.length > 0) {
-      // Find the closest heading to our target end position
-      const lastHeading = headingMatch[headingMatch.length - 1]
-      const headingPos = searchRegion.lastIndexOf(lastHeading)
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i]
 
-      if (headingPos !== -1) {
-        actualEndPos = searchStart + headingPos
+    if (config.onProgress) {
+      await config.onProgress(i + 1, sections.length)
+    }
 
-        // Don't create a batch that's too small
-        if (actualEndPos - currentPos < batchSize * 0.5) {
-          actualEndPos = endPos
+    console.log(
+      `[markdown-cleanup-ai] Cleaning section ${i + 1}/${sections.length} ` +
+      `(${Math.round(section.length / 1024)}KB)`
+    )
+
+    try {
+      const result = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [{
+          parts: [
+            { text: generateMarkdownCleanupPrompt() },
+            { text: `\n\nHere is the markdown to clean:\n\n${section}` }
+          ]
+        }],
+        config: {
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          temperature: 0.1
         }
+      })
+
+      if (!result || !result.text) {
+        throw new Error(`Section ${i + 1} returned empty response`)
       }
-    }
 
-    // Extract batch with overlap for context
-    const batchEnd = Math.min(actualEndPos + overlap, markdown.length)
-    const batch = markdown.substring(currentPos, batchEnd)
-    batches.push(batch)
+      let cleaned = result.text.trim()
 
-    // Move to next batch position (accounting for overlap)
-    currentPos = actualEndPos
-
-    // Break if we've reached the end
-    if (currentPos >= markdown.length) {
-      break
-    }
-  }
-
-  return batches
-}
-
-/**
- * Stitch cleaned batches together, removing overlap regions.
- * Uses fuzzy matching to find and remove duplicate content at boundaries.
- *
- * @param batches - Array of cleaned batch strings
- * @param overlapSize - Expected overlap size in characters
- * @returns Stitched markdown string
- */
-function stitchCleanedBatches(batches: string[], overlapSize: number): string {
-  if (batches.length === 0) {
-    return ''
-  }
-
-  if (batches.length === 1) {
-    return batches[0]
-  }
-
-  let stitched = batches[0]
-
-  for (let i = 1; i < batches.length; i++) {
-    const prevBatch = batches[i - 1]
-    const currentBatch = batches[i]
-
-    // Get the overlap region from the end of previous batch
-    const prevOverlap = prevBatch.substring(Math.max(0, prevBatch.length - overlapSize * 2))
-
-    // Find where the current batch starts relative to the overlap
-    // Look for the first significant paragraph or heading
-    const currentStart = currentBatch.substring(0, overlapSize * 2)
-
-    // Find common text between end of prev and start of current
-    let bestMatchPos = 0
-    let bestMatchLen = 0
-
-    // Try to find a paragraph or heading boundary
-    const paragraphMatches = currentStart.match(/\n\n(.{20,})/g)
-
-    if (paragraphMatches && paragraphMatches.length > 0) {
-      const firstPara = paragraphMatches[0].trim()
-      const matchPos = prevOverlap.indexOf(firstPara)
-
-      if (matchPos !== -1) {
-        // Found the paragraph in the overlap - skip to after it in current batch
-        const skipTo = currentStart.indexOf(firstPara) + firstPara.length
-        stitched += currentBatch.substring(skipTo)
-        continue
+      // Remove markdown code block wrappers if AI added them
+      if (cleaned.startsWith('```markdown')) {
+        cleaned = cleaned.replace(/^```markdown\s*\n?/, '').replace(/\n?```\s*$/, '')
+      } else if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
       }
-    }
 
-    // Fallback: just skip the overlap amount
-    const skipAmount = Math.min(overlapSize, currentBatch.length)
-    stitched += currentBatch.substring(skipAmount)
+      cleanedSections.push(cleaned)
+    } catch (error: any) {
+      console.error(
+        `[markdown-cleanup-ai] ❌ Section ${i + 1} cleanup failed: ${error.message}`
+      )
+      throw new Error(`AI cleanup failed on section ${i + 1}: ${error.message}`)
+    }
   }
 
-  return stitched
+  // Join sections directly - NO STITCHING
+  // We split at headings, so joining with '' is deterministic
+  const joined = cleanedSections.join('')
+
+  console.log(
+    `[markdown-cleanup-ai] ✅ PDF cleanup complete: ` +
+    `${sections.length} sections → ${Math.round(joined.length / 1024)}KB`
+  )
+
+  return joined
 }
 
 /**
@@ -431,7 +366,7 @@ function stitchCleanedBatches(batches: string[], overlapSize: number): string {
  * @example
  * ```typescript
  * if (shouldCleanMarkdown(extracted)) {
- *   cleaned = await cleanMarkdownWithAI(ai, extracted)
+ *   cleaned = await cleanPdfMarkdown(ai, extracted)
  * }
  * ```
  */

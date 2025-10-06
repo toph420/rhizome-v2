@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'fs'
 import { GoogleGenAI } from '@google/genai'
-import { cleanMarkdownWithAI } from './lib/markdown-cleanup-ai.js'
+import { cleanMarkdownWithAI } from './lib/ai-chunking.js'
 
 const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY
 
@@ -36,9 +36,7 @@ async function testCleanup() {
   try {
     const startTime = Date.now()
 
-    const cleaned = await cleanMarkdownWithAI(ai, testMarkdown, {
-      enableProgress: true
-    })
+    const cleaned = await cleanMarkdownWithAI(ai, testMarkdown)
 
     const duration = Math.round((Date.now() - startTime) / 1000)
 

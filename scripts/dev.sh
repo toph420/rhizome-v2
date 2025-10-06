@@ -5,6 +5,9 @@ set -e
 echo "🚀 Starting Rhizome V2 Development Environment"
 echo ""
 
+# Cleanup zombie workers and stuck jobs
+./scripts/cleanup-workers.sh
+
 # Check and kill anything on port 3000
 if lsof -ti:3000 > /dev/null 2>&1; then
   echo "⚠️  Port 3000 is occupied. Killing process..."

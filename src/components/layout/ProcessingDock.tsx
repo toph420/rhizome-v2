@@ -7,7 +7,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, AlertTriangle, Trash2, type LucideIcon } from 'lucide-react'
-import { forceFailJob, forceFailAllProcessing, clearFailedJobs } from '@/app/actions/admin'
+import { forceFailJob, forceFailAllProcessing, clearFailedJobs, cancelAndDeleteJob } from '@/app/actions/admin'
 
 const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?: Record<string, string> }> = {
   download: { 
@@ -323,6 +323,28 @@ export function ProcessingDock() {
       console.log('Force failed job:', jobId)
     }
   }
+
+  async function handleCancelAndDelete(jobId: string) {
+    // Mark as deleting for UI feedback
+    setDeletingIds(prev => new Set(prev).add(jobId))
+
+    const result = await cancelAndDeleteJob(jobId)
+
+    if (result.success) {
+      // Job will be removed by realtime subscription
+      console.log('Cancelled and deleted job:', jobId)
+
+      // Update local state immediately for better UX
+      setJobs(prev => prev.filter(j => j.id !== jobId))
+    }
+
+    // Clear deleting state
+    setDeletingIds(prev => {
+      const next = new Set(prev)
+      next.delete(jobId)
+      return next
+    })
+  }
   
   const getJobTitle = (job: Job): string => {
     if (job.job_type === 'process_document') {
@@ -464,14 +486,29 @@ export function ProcessingDock() {
                   
                   <div className="flex-shrink-0 flex gap-2">
                     {job.status === 'processing' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleForceFailJob(job.id)}
-                      >
-                        <AlertTriangle className="h-4 w-4 mr-1" />
-                        Force Fail
-                      </Button>
+                      <>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleCancelAndDelete(job.id)}
+                          disabled={deletingIds.has(job.id)}
+                        >
+                          {deletingIds.has(job.id) ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <X className="h-4 w-4 mr-1" />
+                          )}
+                          Cancel & Delete
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleForceFailJob(job.id)}
+                        >
+                          <AlertTriangle className="h-4 w-4 mr-1" />
+                          Force Fail
+                        </Button>
+                      </>
                     )}
                     {job.status === 'failed' && (
                       <Button
@@ -483,18 +520,20 @@ export function ProcessingDock() {
                         Retry
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeJob(job.id)}
-                      disabled={deletingIds.has(job.id)}
-                    >
-                      {deletingIds.has(job.id) ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <X className="h-4 w-4" />
-                      )}
-                    </Button>
+                    {(job.status === 'completed' || job.status === 'failed') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeJob(job.id)}
+                        disabled={deletingIds.has(job.id)}
+                      >
+                        {deletingIds.has(job.id) ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <X className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>

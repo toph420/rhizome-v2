@@ -8,6 +8,7 @@
     "dev:worker": "cd worker && npm run dev",
     "worker": "cd worker && npm start",
     "build:worker": "cd worker && npm run build",
+    "cleanup": "./scripts/cleanup-workers.sh",
     "stop": "./scripts/stop.sh",
     "status": "./scripts/status.sh",
     "build": "next build",

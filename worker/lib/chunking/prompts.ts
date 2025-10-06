@@ -65,14 +65,16 @@ MINIMUM chunk size: 200 words (1000 characters)
 This is a TECHNICAL CONSTRAINT, not a suggestion.
 If you return ANY chunk > ${maxChunkSize} chars, your batch will be REJECTED and retried.
 
-After 3 rejections, the batch will be split into smaller sections.
+IF YOU VIOLATE THIS LIMIT:
+- Your batch will be REJECTED
+- You will be called again with a stricter prompt
+- After 3 rejections, this batch will be split into smaller sections
+- Example of FAILURE: A 46,000 character chunk will cause IMMEDIATE REJECTION
 
-HOW TO HANDLE LONG SEMANTIC UNITS:
-If a complete thought exceeds ${maxChunkSize} chars:
-1. Find a natural breaking point (paragraph, section, argument boundary)
-2. Split into 2-3 smaller chunks
-3. Each chunk still needs full metadata (themes, concepts, emotional)
-4. Better to have 3 coherent 3000-char chunks than 1 oversized 9000-char chunk
+ACCEPTABLE: Chunk with 9,500 characters
+UNACCEPTABLE: Chunk with 10,001 characters (will be REJECTED)
+
+Break long sections into 2-3 chunks rather than violating the limit.
 
 Example of WRONG (will be rejected):
 {
@@ -99,6 +101,16 @@ A semantic chunk is a COMPLETE UNIT OF THOUGHT:
 - TARGET: 500-1200 words (2500-6000 characters)
 - MINIMUM: 200 words (1000 characters)
 - MAXIMUM: ${maxChunkSize} characters (ABSOLUTE HARD LIMIT)
+
+🚨 SKIP NON-CONTENT SECTIONS 🚨
+DO NOT create chunks from:
+- Table of contents / chapter listings
+- Cover pages / title pages
+- Copyright / publisher information
+- Navigation elements / links
+- Dedications / acknowledgments
+
+These are metadata, not semantic content. Start chunking at the first substantial content section.
 
 Chunking boundaries:
 - Scene changes, argument shifts, topic transitions

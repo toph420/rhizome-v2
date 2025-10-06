@@ -13,7 +13,7 @@ import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from '../lib/model-config.js'
 import { generatePdfExtractionPrompt } from '../lib/prompts/pdf-extraction.js'
 import { cleanPageArtifacts } from '../lib/text-cleanup.js'
-import { cleanMarkdownWithAI } from '../lib/markdown-cleanup-ai.js'
+import { cleanPdfMarkdown } from '../lib/markdown-cleanup-ai.js'
 
 // Thresholds for batched processing
 const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
@@ -335,16 +335,15 @@ export class PDFProcessor extends SourceProcessor {
       await this.updateProgress(35, 'cleanup', 'ai-polish', 'AI polishing markdown...')
 
       try {
-        markdown = await cleanMarkdownWithAI(this.ai, markdown, {
-          enableProgress: true,
-          onProgress: async (batch, total) => {
+        markdown = await cleanPdfMarkdown(this.ai, markdown, {
+          onProgress: async (section, total) => {
             if (total > 1) {
-              const progressPercent = 35 + Math.floor((batch / total) * 5) // 35-40%
+              const progressPercent = 35 + Math.floor((section / total) * 5) // 35-40%
               await this.updateProgress(
                 progressPercent,
                 'cleanup',
                 'ai-polish',
-                `AI cleanup: batch ${batch}/${total}`
+                `AI cleanup: section ${section}/${total}`
               )
             }
           }
@@ -500,16 +499,15 @@ export class PDFProcessor extends SourceProcessor {
       await this.updateProgress(42, 'cleanup', 'ai-polish', 'AI polishing markdown...')
 
       try {
-        markdown = await cleanMarkdownWithAI(this.ai, markdown, {
-          enableProgress: true,
-          onProgress: async (batch, total) => {
+        markdown = await cleanPdfMarkdown(this.ai, markdown, {
+          onProgress: async (section, total) => {
             if (total > 1) {
-              const progressPercent = 42 + Math.floor((batch / total) * 3) // 42-45%
+              const progressPercent = 42 + Math.floor((section / total) * 3) // 42-45%
               await this.updateProgress(
                 progressPercent,
                 'cleanup',
                 'ai-polish',
-                `AI cleanup: batch ${batch}/${total}`
+                `AI cleanup: section ${section}/${total}`
               )
             }
           }
