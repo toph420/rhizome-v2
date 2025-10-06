@@ -14,7 +14,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { findAnnotationMatch } from '../lib/fuzzy-matching.js'
 import type { FuzzyMatchResult } from '../types/recovery.js'
-import { ReadwiseReaderClient, type ReaderHighlight as ReaderAPIHighlight } from '../lib/readwise-reader-api.js'
 import { ReadwiseExportClient, type ReadwiseBook, type ReadwiseHighlight as ExportHighlight } from '../lib/readwise-export-api.js'
 
 // ============================================

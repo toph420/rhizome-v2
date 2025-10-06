@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { ExternalLink, RefreshCw, Loader2 } from 'lucide-react'
+import { ExternalLink, RefreshCw, Loader2, BookMarked } from 'lucide-react'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -24,6 +24,7 @@ interface DocumentHeaderProps {
 export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
   const [isExporting, setIsExporting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
 
   /**
    * Export document to Obsidian vault and open in editor
@@ -124,6 +125,50 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
     }
   }
 
+  /**
+   * Import highlights from Readwise
+   * Searches Readwise library for matching book and imports highlights
+   */
+  async function handleImportFromReadwise() {
+    setIsImporting(true)
+
+    try {
+      const response = await fetch('/api/readwise/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId })
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Import failed')
+      }
+
+      const { imported, needsReview, failed, bookTitle, bookAuthor } = result
+
+      // Show success toast with stats
+      const total = imported + needsReview + failed
+      const stats = `${imported} imported | ${needsReview} need review | ${failed} failed`
+
+      toast.success('Readwise Import Complete', {
+        description: `${bookTitle} by ${bookAuthor}\n${stats}`,
+        duration: 5000
+      })
+
+      // Reload page to show imported annotations
+      window.location.reload()
+
+    } catch (error) {
+      console.error('[DocumentHeader] Readwise import failed:', error)
+      toast.error('Import Failed', {
+        description: error instanceof Error ? error.message : 'Failed to import from Readwise'
+      })
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   return (
     <header className="flex items-center justify-between px-6 py-4 border-b bg-background">
       <div className="flex-1">
@@ -132,8 +177,23 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
 
       <div className="flex items-center gap-2">
         <Button
+          onClick={handleImportFromReadwise}
+          disabled={isExporting || isSyncing || isImporting}
+          variant="outline"
+          size="sm"
+          className="gap-2"
+        >
+          {isImporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <BookMarked className="h-4 w-4" />
+          )}
+          Import from Readwise
+        </Button>
+
+        <Button
           onClick={handleEditInObsidian}
-          disabled={isExporting || isSyncing}
+          disabled={isExporting || isSyncing || isImporting}
           variant="outline"
           size="sm"
           className="gap-2"
@@ -148,7 +208,7 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
 
         <Button
           onClick={handleSync}
-          disabled={isExporting || isSyncing}
+          disabled={isExporting || isSyncing || isImporting}
           variant="default"
           size="sm"
           className="gap-2"

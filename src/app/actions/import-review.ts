@@ -48,19 +48,38 @@ export async function getPendingImports(
 ): Promise<{ success: boolean; data: PendingImport[]; error?: string }> {
   try {
     const user = await getCurrentUser()
+    console.log('[getPendingImports] User:', user?.id)
+
     if (!user) {
+      console.log('[getPendingImports] No user - not authenticated')
       return { success: false, data: [], error: 'Not authenticated' }
     }
 
     const supabase = await createClient()
 
+    // Verify user owns the document first
+    const { data: doc, error: docError } = await supabase
+      .from('documents')
+      .select('user_id')
+      .eq('id', documentId)
+      .single()
+
+    console.log('[getPendingImports] Document owner:', doc?.user_id, 'Error:', docError)
+
+    if (docError || !doc || doc.user_id !== user.id) {
+      console.log('[getPendingImports] Ownership check failed')
+      return { success: false, data: [], error: 'Document not found or access denied' }
+    }
+
+    // Get all pending imports for this document (regardless of who saved them)
     const { data, error } = await supabase
       .from('import_pending')
       .select('*')
-      .eq('user_id', user.id)
       .eq('document_id', documentId)
       .eq('status', 'pending')
-      .order('confidence', { ascending: false }) // Show highest confidence first
+      .order('confidence', { ascending: false })
+
+    console.log('[getPendingImports] Query result:', data?.length || 0, 'rows, Error:', error)
 
     if (error) {
       console.error('[getPendingImports] Query failed:', error)

@@ -235,11 +235,12 @@
     position: absolute;
     left: -2px;
     top: 0;
-    bottom: 0;
+    /* bottom: 0; */
     width: 2px;
     background: currentColor;
     opacity: 0.3;
     transition: all 0.2s ease;
+    height:20px
   }
 
   [data-annotation-start]:hover::before {
@@ -256,9 +257,10 @@
     content: '';
     position: absolute;
     right: -2px;
-    top: 0;
+    /* top: 0; */
     bottom: 0;
     width: 2px;
+    height: 20px;
     background: currentColor;
     opacity: 0.3;
     transition: all 0.2s ease;
