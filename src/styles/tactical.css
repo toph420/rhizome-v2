@@ -1,0 +1,337 @@
+/**
+ * Tactical/Command Center Styles
+ *
+ * Dark cyber-military aesthetic with red accents and terminal-style typography
+ */
+
+@layer experimental {
+  /* =====================================================
+     TACTICAL COLOR SCHEME
+     ===================================================== */
+
+  .tactical-theme {
+    --tactical-bg: #0a0a0a;
+    --tactical-panel: #111111;
+    --tactical-border: #333333;
+    --tactical-text: #e0e0e0;
+    --tactical-text-dim: #888888;
+    --tactical-accent-red: #ff3333;
+    --tactical-accent-green: #00ff88;
+    --tactical-accent-blue: #00aaff;
+    --tactical-grid: #1a1a1a;
+  }
+
+  /* =====================================================
+     TACTICAL PANEL (with corner brackets)
+     ===================================================== */
+
+  .tactical-panel {
+    position: relative;
+    background: var(--tactical-panel);
+    border: 1px solid var(--tactical-border);
+    padding: 1.5rem;
+    color: var(--tactical-text);
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  }
+
+  /* Corner brackets */
+  .tactical-panel::before,
+  .tactical-panel::after,
+  .tactical-panel .tactical-corner-tl,
+  .tactical-panel .tactical-corner-tr,
+  .tactical-panel .tactical-corner-bl,
+  .tactical-panel .tactical-corner-br {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--tactical-border);
+  }
+
+  /* Top-left corner */
+  .tactical-panel::before {
+    top: -1px;
+    left: -1px;
+    border-right: none;
+    border-bottom: none;
+  }
+
+  /* Top-right corner */
+  .tactical-panel::after {
+    top: -1px;
+    right: -1px;
+    border-left: none;
+    border-bottom: none;
+  }
+
+  /* Bottom corners (need wrapper divs) */
+  .tactical-corners::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: -1px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--tactical-border);
+    border-right: none;
+    border-top: none;
+  }
+
+  .tactical-corners::before {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--tactical-border);
+    border-left: none;
+    border-top: none;
+  }
+
+  /* =====================================================
+     TACTICAL TYPOGRAPHY
+     ===================================================== */
+
+  .tactical-text {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+    color: var(--tactical-text);
+    letter-spacing: 0.02em;
+  }
+
+  .tactical-text-dim {
+    color: var(--tactical-text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+
+  .tactical-text-red {
+    color: var(--tactical-accent-red);
+    font-weight: 600;
+  }
+
+  .tactical-text-green {
+    color: var(--tactical-accent-green);
+    font-weight: 600;
+  }
+
+  .tactical-code {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+    font-size: 0.875rem;
+    letter-spacing: 0.05em;
+  }
+
+  /* =====================================================
+     GRID OVERLAY PATTERNS
+     ===================================================== */
+
+  .tactical-grid {
+    background-image:
+      linear-gradient(to right, var(--tactical-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--tactical-grid) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .tactical-grid-lg {
+    background-image:
+      linear-gradient(to right, var(--tactical-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--tactical-grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* =====================================================
+     SCANNING LINE ANIMATION
+     ===================================================== */
+
+  .tactical-scan {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tactical-scan::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      var(--tactical-accent-red),
+      transparent
+    );
+    animation: tactical-scan 3s ease-in-out infinite;
+  }
+
+  @keyframes tactical-scan {
+    0% {
+      left: -100%;
+    }
+    50% {
+      left: 100%;
+    }
+    100% {
+      left: 100%;
+    }
+  }
+
+  /* =====================================================
+     RISK INDICATORS
+     ===================================================== */
+
+  .tactical-risk-high {
+    color: var(--tactical-accent-red);
+    border-color: var(--tactical-accent-red);
+    background: rgba(255, 51, 51, 0.1);
+  }
+
+  .tactical-risk-medium {
+    color: #ff9933;
+    border-color: #ff9933;
+    background: rgba(255, 153, 51, 0.1);
+  }
+
+  .tactical-risk-low {
+    color: var(--tactical-accent-green);
+    border-color: var(--tactical-accent-green);
+    background: rgba(0, 255, 136, 0.1);
+  }
+
+  /* =====================================================
+     GLITCH EFFECT
+     ===================================================== */
+
+  .tactical-glitch {
+    position: relative;
+  }
+
+  .tactical-glitch:hover::before {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 2px;
+    color: var(--tactical-accent-red);
+    opacity: 0.8;
+    animation: glitch-1 0.3s infinite;
+  }
+
+  .tactical-glitch:hover::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: -2px;
+    color: var(--tactical-accent-blue);
+    opacity: 0.8;
+    animation: glitch-2 0.3s infinite;
+  }
+
+  @keyframes glitch-1 {
+    0%, 100% { clip-path: inset(40% 0 61% 0); }
+    20% { clip-path: inset(92% 0 1% 0); }
+    40% { clip-path: inset(43% 0 1% 0); }
+    60% { clip-path: inset(25% 0 58% 0); }
+    80% { clip-path: inset(54% 0 7% 0); }
+  }
+
+  @keyframes glitch-2 {
+    0%, 100% { clip-path: inset(65% 0 20% 0); }
+    20% { clip-path: inset(12% 0 78% 0); }
+    40% { clip-path: inset(80% 0 15% 0); }
+    60% { clip-path: inset(37% 0 51% 0); }
+    80% { clip-path: inset(91% 0 6% 0); }
+  }
+
+  /* =====================================================
+     DATA BLOCKS
+     ===================================================== */
+
+  .tactical-data-block {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-family: 'SF Mono', monospace;
+  }
+
+  .tactical-data-label {
+    color: var(--tactical-text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+
+  .tactical-data-value {
+    color: var(--tactical-text);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  /* =====================================================
+     MISSION STATUS
+     ===================================================== */
+
+  .tactical-status-active {
+    position: relative;
+    color: var(--tactical-accent-green);
+  }
+
+  .tactical-status-active::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--tactical-accent-green);
+    border-radius: 50%;
+    margin-right: 0.5rem;
+    animation: pulse-green 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-green {
+    0%, 100% {
+      opacity: 1;
+      box-shadow: 0 0 4px var(--tactical-accent-green);
+    }
+    50% {
+      opacity: 0.5;
+      box-shadow: 0 0 12px var(--tactical-accent-green);
+    }
+  }
+
+  /* =====================================================
+     WIREFRAME MAPS
+     ===================================================== */
+
+  .tactical-map {
+    position: relative;
+    background: var(--tactical-panel);
+    border: 1px solid var(--tactical-border);
+  }
+
+  .tactical-map-overlay {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      circle at center,
+      transparent 40%,
+      rgba(0, 0, 0, 0.8) 100%
+    );
+    pointer-events: none;
+  }
+
+  /* =====================================================
+     UTILITIES
+     ===================================================== */
+
+  .tactical-divider {
+    height: 1px;
+    background: var(--tactical-border);
+    margin: 1rem 0;
+  }
+
+  .tactical-glow-red {
+    box-shadow: 0 0 10px rgba(255, 51, 51, 0.3);
+  }
+
+  .tactical-glow-green {
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+  }
+}

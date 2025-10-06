@@ -8,7 +8,8 @@ import {
   Library,
   Settings,
   BookOpen,
-  Brain
+  Brain,
+  Palette
 } from 'lucide-react'
 import {
   Sheet,
@@ -33,6 +34,11 @@ const navigation = [
     href: '/study',
     icon: Brain,
     disabled: true, // Coming soon
+  },
+  {
+    name: 'Design Guide',
+    href: '/design',
+    icon: Palette,
   },
   {
     name: 'Settings',
