@@ -203,21 +203,31 @@ function fuzzySearchMarkdown(
     }
   }
 
-  // Strategy 2: Fuzzy match with normalized whitespace
+  // Strategy 2: Fuzzy match with normalized whitespace (MEMORY OPTIMIZED)
+  // Don't create full markdown copy - use regex search instead
   const normalizedContent = targetContent.trim().replace(/\s+/g, ' ')
-  const normalizedMarkdown = markdown.replace(/\s+/g, ' ')
 
-  const fuzzyIndex = normalizedMarkdown.indexOf(normalizedContent, startFrom)
-  if (fuzzyIndex !== -1) {
-    // Map back to original markdown position
-    const originalIndex = mapNormalizedToOriginal(markdown, normalizedMarkdown, fuzzyIndex)
+  // Escape regex special characters, then allow flexible whitespace
+  const escapedContent = normalizedContent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const flexiblePattern = escapedContent.replace(/ /g, '\\s+')
 
-    return {
-      start: originalIndex,
-      end: originalIndex + targetContent.length,
-      confidence: 'fuzzy',
-      similarity: 95
+  try {
+    const regex = new RegExp(flexiblePattern)
+    const searchRegion = markdown.slice(startFrom)
+    const match = searchRegion.match(regex)
+
+    if (match && match.index !== undefined) {
+      const originalIndex = startFrom + match.index
+      return {
+        start: originalIndex,
+        end: originalIndex + match[0].length,  // Use actual matched length
+        confidence: 'fuzzy',
+        similarity: 95
+      }
     }
+  } catch (e) {
+    // Regex pattern too complex - skip this strategy
+    // Fall through to Strategy 3
   }
 
   // Strategy 3: First 100/last 100 chars (for heavily modified chunks)
@@ -248,16 +258,26 @@ function fuzzySearchMarkdown(
     }
   }
 
-  // Strategy 4: Sliding window with character-level similarity (last resort)
+  // Strategy 4: Sliding window with character-level similarity (last resort, MEMORY OPTIMIZED)
   // When content is heavily rewritten, find the best matching region
   const windowSize = targetContent.length
   const maxDistance = targetContent.length * 2 // Allow up to 2x length variation
+  const MAX_ITERATIONS = 100 // Hard cap to prevent memory explosion
+  const step = Math.max(Math.floor(windowSize / 2), 1000) // Bigger steps = fewer allocations (was windowSize/4)
 
   let bestMatch: AIFuzzyMatch | null = null
   let bestSimilarity = 0.7 // Minimum 70% similarity threshold
+  let iterations = 0
 
   // Start from hint and search forward with sliding window
-  for (let i = startFrom; i < markdown.length - windowSize && i < startFrom + maxDistance; i += Math.floor(windowSize / 4)) {
+  for (
+    let i = startFrom;
+    i < markdown.length - windowSize &&
+    i < startFrom + maxDistance &&
+    iterations < MAX_ITERATIONS; // Safety cap
+    i += step
+  ) {
+    iterations++
     const window = markdown.slice(i, i + windowSize)
     const similarity = calculateStringSimilarity(targetContent, window)
 
@@ -268,6 +288,11 @@ function fuzzySearchMarkdown(
         end: i + windowSize,
         confidence: 'approximate',
         similarity: Math.round(similarity * 100)
+      }
+
+      // Early exit if we found a good match (don't keep searching for "perfect")
+      if (similarity >= 0.85) {
+        break
       }
     }
   }
@@ -324,29 +349,4 @@ function levenshteinDistance(str1: string, str2: string): number {
   return matrix[str2.length][str1.length]
 }
 
-/**
- * Maps normalized index back to original markdown position.
- * Accounts for collapsed whitespace during normalization.
- */
-function mapNormalizedToOriginal(
-  original: string,
-  normalized: string,
-  normalizedIndex: number
-): number {
-  let originalIndex = 0
-  let normalizedCount = 0
-
-  while (normalizedCount < normalizedIndex && originalIndex < original.length) {
-    if (/\s/.test(original[originalIndex])) {
-      originalIndex++
-      if (/\s/.test(normalized[normalizedCount])) {
-        normalizedCount++
-      }
-    } else {
-      originalIndex++
-      normalizedCount++
-    }
-  }
-
-  return originalIndex
-}
+// mapNormalizedToOriginal function removed - no longer needed with regex-based fuzzy matching

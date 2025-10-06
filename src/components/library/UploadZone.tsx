@@ -79,6 +79,7 @@ export function UploadZone() {
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reviewBeforeChunking, setReviewBeforeChunking] = useState(false)
+  const [cleanMarkdown, setCleanMarkdown] = useState(true) // Default to true - cleanup enabled
 
   // Debug: Log state changes
   useEffect(() => {
@@ -300,10 +301,14 @@ export function UploadZone() {
         formData.append('isbn', editedMetadata.isbn)
       }
 
-      // Add review before chunking flag
+      // Add processing flags
       console.log('[UploadZone] DEBUG reviewBeforeChunking state:', reviewBeforeChunking)
       formData.append('reviewBeforeChunking', reviewBeforeChunking.toString())
       console.log('[UploadZone] DEBUG formData value:', formData.get('reviewBeforeChunking'))
+
+      console.log('[UploadZone] DEBUG cleanMarkdown state:', cleanMarkdown)
+      formData.append('cleanMarkdown', cleanMarkdown.toString())
+      console.log('[UploadZone] DEBUG cleanMarkdown formData value:', formData.get('cleanMarkdown'))
 
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
@@ -338,7 +343,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewBeforeChunking])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewBeforeChunking, cleanMarkdown])
 
   /**
    * Handles metadata preview cancellation.
@@ -562,6 +567,8 @@ export function UploadZone() {
               onCancel={handlePreviewCancel}
               reviewBeforeChunking={reviewBeforeChunking}
               onReviewBeforeChunkingChange={setReviewBeforeChunking}
+              cleanMarkdown={cleanMarkdown}
+              onCleanMarkdownChange={setCleanMarkdown}
             />
           ) : uploadPhase === 'detecting' ? (
             <Card className="p-12 text-center">

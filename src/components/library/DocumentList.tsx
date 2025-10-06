@@ -129,15 +129,39 @@ export function DocumentList() {
   }
 
   async function handleDelete(documentId: string, title: string) {
-    if (!confirm(`Delete "${title}"? This will remove the document and all associated data.`)) {
+    if (!confirm(
+      `⚠️ Delete "${title}"?\n\n` +
+      `This will PERMANENTLY remove:\n` +
+      `• Document and all chunks\n` +
+      `• All annotations and highlights\n` +
+      `• All flashcards\n` +
+      `• All connections\n` +
+      `• All storage files\n\n` +
+      `This action cannot be undone!`
+    )) {
       return
     }
 
     setDeleting(documentId)
+    toast.info('Deleting document...', {
+      description: 'Removing all data and files'
+    })
+
     const result = await deleteDocument(documentId)
 
-    if (!result.success) {
-      alert(`Failed to delete: ${result.error}`)
+    if (result.success) {
+      toast.success('Document deleted', {
+        description: `"${title}" and all associated data removed`
+      })
+      // Refresh the list
+      if (userId) {
+        const supabase = createClient()
+        loadDocuments(supabase, userId)
+      }
+    } else {
+      toast.error('Delete failed', {
+        description: result.error || 'Unknown error'
+      })
     }
 
     setDeleting(null)
@@ -336,9 +360,14 @@ export function DocumentList() {
                     size="sm"
                     onClick={() => handleDelete(doc.id, doc.title)}
                     disabled={deleting === doc.id}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     data-testid="delete-button"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    {deleting === doc.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
                   </Button>
                 </div>
               </div>

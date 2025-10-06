@@ -473,6 +473,18 @@ function parseMetadataResponse(
     chunksToProcess = allChunks
   }
 
+  // Convert batch-relative offsets to document-absolute offsets
+  // AI returns offsets relative to batch.content (0 to batch.content.length)
+  // But fuzzy matcher searches fullMarkdown, so we need absolute positions
+  if (batch.startOffset > 0) {
+    console.log(`[AI Metadata] Converting batch-relative offsets to document-absolute (batch starts at ${batch.startOffset})`)
+    chunksToProcess = chunksToProcess.map(chunk => ({
+      ...chunk,
+      start_offset: chunk.start_offset + batch.startOffset,
+      end_offset: chunk.end_offset + batch.startOffset
+    }))
+  }
+
   // All chunks passed structural validation - correct offsets using fuzzy matcher
   console.log(`[AI Metadata] Correcting chunk offsets using fuzzy matching...`)
   const { chunks: corrected, stats } = correctAIChunkOffsets(fullMarkdown, chunksToProcess)

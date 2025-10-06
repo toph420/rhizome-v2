@@ -22,6 +22,8 @@ interface DocumentPreviewProps {
   onCancel: () => void
   reviewBeforeChunking?: boolean
   onReviewBeforeChunkingChange?: (checked: boolean) => void
+  cleanMarkdown?: boolean
+  onCleanMarkdownChange?: (checked: boolean) => void
 }
 
 const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
@@ -38,7 +40,9 @@ export function DocumentPreview({
   onConfirm,
   onCancel,
   reviewBeforeChunking = false,
-  onReviewBeforeChunkingChange
+  onReviewBeforeChunkingChange,
+  cleanMarkdown = true,
+  onCleanMarkdownChange
 }: DocumentPreviewProps) {
   const [edited, setEdited] = useState(metadata)
   const [coverImage, setCoverImage] = useState<File | null>(null)
@@ -193,6 +197,23 @@ export function DocumentPreview({
 
       {/* Actions */}
       <div className="mt-6 pt-4 border-t space-y-4">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="clean-markdown-preview"
+            checked={cleanMarkdown}
+            onCheckedChange={(checked) => {
+              console.log('[DocumentPreview] Clean markdown checkbox changed:', checked)
+              onCleanMarkdownChange?.(checked as boolean)
+            }}
+          />
+          <label
+            htmlFor="clean-markdown-preview"
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+          >
+            <Sparkles className="h-3 w-3" />
+            AI cleanup markdown (recommended)
+          </label>
+        </div>
         <div className="flex items-center gap-2">
           <Checkbox
             id="review-before-chunking-preview"

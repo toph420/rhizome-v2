@@ -13,6 +13,7 @@ import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL, MAX_OUTPUT_TOKENS } from '../lib/model-config.js'
 import { generatePdfExtractionPrompt } from '../lib/prompts/pdf-extraction.js'
 import { cleanPageArtifacts } from '../lib/text-cleanup.js'
+import { cleanMarkdownWithAI } from '../lib/markdown-cleanup-ai.js'
 
 // Thresholds for batched processing
 const LARGE_PDF_PAGE_THRESHOLD = 200 // Use batching for PDFs with >200 pages
@@ -326,7 +327,38 @@ export class PDFProcessor extends SourceProcessor {
 
     // Apply post-processing cleanup to remove page artifacts Gemini might have missed
     markdown = cleanPageArtifacts(markdown)
-    
+
+    // STEP 3.5: AI cleanup pass (if enabled)
+    const { cleanMarkdown: cleanMarkdownEnabled = true } = this.job.input_data as any
+
+    if (cleanMarkdownEnabled) {
+      await this.updateProgress(35, 'cleanup', 'ai-polish', 'AI polishing markdown...')
+
+      try {
+        markdown = await cleanMarkdownWithAI(this.ai, markdown, {
+          enableProgress: true,
+          onProgress: async (batch, total) => {
+            if (total > 1) {
+              const progressPercent = 35 + Math.floor((batch / total) * 5) // 35-40%
+              await this.updateProgress(
+                progressPercent,
+                'cleanup',
+                'ai-polish',
+                `AI cleanup: batch ${batch}/${total}`
+              )
+            }
+          }
+        })
+
+        await this.updateProgress(40, 'cleanup', 'complete', 'Markdown cleanup complete')
+      } catch (cleanupError: any) {
+        console.warn(`[PDFProcessor] AI cleanup failed, continuing with local cleanup: ${cleanupError.message}`)
+        // Continue with markdown from local cleanup - non-fatal
+      }
+    } else {
+      console.log('[PDFProcessor] AI cleanup skipped (cleanMarkdown: false)')
+    }
+
     // Use local chunking algorithm (same as MarkdownAsIsProcessor)
     const chunks = simpleMarkdownChunking(markdown)
     
@@ -444,7 +476,7 @@ export class PDFProcessor extends SourceProcessor {
 
    // Deduplicate footnotes after stitching
     let markdown = result.markdown
-    
+
     const footnotesBefore = (markdown.match(/\[\^\d+\]:/g) || []).length
     if (footnotesBefore > 0) {
       console.log(`[PDFProcessor] 📝 Deduplicating footnotes (found ${footnotesBefore} definitions)...`)
@@ -460,6 +492,37 @@ export class PDFProcessor extends SourceProcessor {
       'complete',
       `Extracted ${result.totalPages} pages in ${result.batches.length} batches (${markdownKB} KB)`
     )
+
+    // STEP 2.5: AI cleanup pass (if enabled) for batched processing
+    const { cleanMarkdown: cleanMarkdownEnabled = true } = this.job.input_data as any
+
+    if (cleanMarkdownEnabled) {
+      await this.updateProgress(42, 'cleanup', 'ai-polish', 'AI polishing markdown...')
+
+      try {
+        markdown = await cleanMarkdownWithAI(this.ai, markdown, {
+          enableProgress: true,
+          onProgress: async (batch, total) => {
+            if (total > 1) {
+              const progressPercent = 42 + Math.floor((batch / total) * 3) // 42-45%
+              await this.updateProgress(
+                progressPercent,
+                'cleanup',
+                'ai-polish',
+                `AI cleanup: batch ${batch}/${total}`
+              )
+            }
+          }
+        })
+
+        await this.updateProgress(45, 'cleanup', 'complete', 'Markdown cleanup complete')
+      } catch (cleanupError: any) {
+        console.warn(`[PDFProcessor] AI cleanup failed, continuing: ${cleanupError.message}`)
+        // Continue with stitched markdown - non-fatal
+      }
+    } else {
+      console.log('[PDFProcessor] AI cleanup skipped (cleanMarkdown: false)')
+    }
 
     // Stage 3: Create chunks with AI metadata extraction
     await this.updateProgress(45, 'chunking', 'processing', 'Processing with AI metadata extraction...')

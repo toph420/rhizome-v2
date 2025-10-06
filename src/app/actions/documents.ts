@@ -64,9 +64,12 @@ export async function uploadDocument(formData: FormData): Promise<{
     const reviewBeforeChunkingRaw = formData.get('reviewBeforeChunking')
     const reviewBeforeChunking = reviewBeforeChunkingRaw === 'true'
 
-    console.log('[uploadDocument] reviewBeforeChunking DEBUG:', {
-      raw: reviewBeforeChunkingRaw,
-      parsed: reviewBeforeChunking
+    const cleanMarkdownRaw = formData.get('cleanMarkdown')
+    const cleanMarkdown = cleanMarkdownRaw !== 'false' // Default to true
+
+    console.log('[uploadDocument] Processing flags DEBUG:', {
+      reviewBeforeChunking: { raw: reviewBeforeChunkingRaw, parsed: reviewBeforeChunking },
+      cleanMarkdown: { raw: cleanMarkdownRaw, parsed: cleanMarkdown }
     })
 
     // Extract document metadata (from preview)
@@ -261,7 +264,8 @@ export async function uploadDocument(formData: FormData): Promise<{
           pasted_content: pastedContent,
           // Include document metadata for worker
           document_type: documentType,
-          reviewBeforeChunking: reviewBeforeChunking
+          reviewBeforeChunking: reviewBeforeChunking,
+          cleanMarkdown: cleanMarkdown
         }
       })
       .select()

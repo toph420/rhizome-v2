@@ -126,12 +126,21 @@ export function cleanEpubArtifacts(markdown: string): string {
 
   // 9. Format real chapter headings (short all-caps or "Chapter N" on own line)
   // Pattern: **THREE** or **CHAPTER ONE** or **Chapter 1**
+  // SKIP if immediately after a # heading (already formatted by epub-parser)
   cleaned = cleaned.replace(
     /\n\n(\*\*)?([A-Z]+(?:\s+[A-Z]+){0,3}|Chapter\s+\d+)(\*\*)?\n\n/gi,
-    (match, _bold1, text, _bold2) => {
+    (match, _bold1, text, _bold2, offset) => {
       const words = text.trim().split(/\s+/)
 
-      // Chapter numbers or short all-caps headings
+      // Skip if this appears right after a # heading (within 100 chars)
+      // This prevents duplicate headings when epub-parser already added "# Title"
+      const beforeMatch = cleaned.substring(Math.max(0, offset - 100), offset)
+      if (beforeMatch.match(/#\s+[^\n]+\n\n$/)) {
+        console.log(`[epub-cleaner] Skipping duplicate heading: ${text} (already formatted)`)
+        return match.replace(/\*\*/g, '') // Just remove bold markers, keep text
+      }
+
+      // Chapter numbers or short all-caps headings (for internal sections)
       if (
         text.match(/^Chapter\s+\d+$/i) ||
         (words.length <= 4 && words.every((w: string) => w === w.toUpperCase()) && text.length < 30)
@@ -160,11 +169,24 @@ export function cleanEpubArtifacts(markdown: string): string {
     }
   }
 
-  // 11. Remove table of contents sections (multiple consecutive TOC links)
+  // 11. Remove ALL navigation links (TOC, cover, title page, etc.)
+  // Pattern: [Any text](any_file.html#anchor) - catches all EPUB navigation
   cleaned = cleaned.replace(
-    /(?:\[(?:chapter|prologue|epilogue|part)[^\]]*\]\([^\)]+\)\s*\n){3,}/gi,
+    /\[([^\]]+)\]\([^)]*\.x?html[^)]*\)/gi,
+    (match, linkText) => {
+      removedBytes += match.length
+      console.log(`[epub-cleaner] Removed navigation link: [${linkText}]`)
+      return ''
+    }
+  )
+
+  // 11b. Remove table of contents headers/sections
+  // Pattern: "Contents" or "Table of Contents" as standalone heading
+  cleaned = cleaned.replace(
+    /^#{0,3}\s*(?:Contents|Table of Contents)\s*$/gim,
     (match) => {
       removedBytes += match.length
+      console.log(`[epub-cleaner] Removed TOC heading: ${match}`)
       return ''
     }
   )
@@ -189,13 +211,33 @@ export function cleanEpubArtifacts(markdown: string): string {
     }
   )
 
-  // 14. Remove localhost/file:// URLs (keep text, strip link)
+  // 14. Remove "Unknown" headings (garbled/missing chapter titles)
+  // Pattern: # Unknown, ## Unknown, or standalone "Unknown"
+  cleaned = cleaned.replace(
+    /^#{0,6}\s*Unknown\s*$/gim,
+    (match) => {
+      removedBytes += match.length
+      console.log(`[epub-cleaner] Removed Unknown heading: ${match}`)
+      return ''
+    }
+  )
+
+  // Also remove standalone "Unknown" lines between chapters
+  cleaned = cleaned.replace(
+    /^\s*Unknown\s*$/gm,
+    (match) => {
+      removedBytes += match.length
+      return ''
+    }
+  )
+
+  // 15. Remove localhost/file:// URLs (keep text, strip link)
   cleaned = cleaned.replace(
     /\[([^\]]+)\]\((https?:\/\/localhost|file:\/\/)[^\)]+\)/g,
     '$1'
   )
 
-  // 15. Remove "Publisher's Note" sections
+  // 16. Remove "Publisher's Note" sections
   cleaned = cleaned.replace(
     /^#{1,3}\s*Publisher'?s? Note\s*\n[\s\S]*?(?=\n#{1,3}|\n\n[A-Z]|$)/gim,
     (match) => {
@@ -204,10 +246,11 @@ export function cleanEpubArtifacts(markdown: string): string {
     }
   )
 
-  // 16. Clean excessive whitespace
+  // 17. Clean excessive whitespace
   cleaned = cleaned
     .replace(/\n{4,}/g, '\n\n\n')  // Max 2 blank lines
-    .replace(/^---\s*\n/gm, '')    // Remove orphaned horizontal rules
+    // Only remove orphaned horizontal rules NOT followed by blank line (preserve chapter separators like \n\n---\n\n)
+    .replace(/^---\s*\n(?!\n)/gm, '')
     .trim()
 
   // Log what was removed
