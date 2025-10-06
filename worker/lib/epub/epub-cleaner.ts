@@ -169,21 +169,23 @@ export function cleanEpubArtifacts(markdown: string): string {
     }
   )
 
-  // 12. Remove EPUB filename headings
+  // 12. Remove ALL EPUB filename artifacts (comprehensive pattern)
+  // Matches: filename.html, **filename.html**, # filename.html
   cleaned = cleaned.replace(
-    /^#{1,6}\s+[\w\d]+[-_][\w\d]+[-_.]+[\w\d.]+\.x?html?\s*$/gim,
+    /(?:^|\n)(?:#{1,6}\s+)?(?:\*\*)?[\w\d]+[-_]+[\w\d]+[-_.]*[\w\d.]*\.x?html?(?:\*\*)?(?:\n|$)/gim,
     (match) => {
       removedBytes += match.length
-      return ''
+      console.log(`[epub-cleaner] Removed filename artifact: ${match.trim()}`)
+      return '\n'
     }
   )
 
-  // 13. Remove standalone filename lines
+  // 13. Format standalone chapter numbers (1-2 digits) as headings
   cleaned = cleaned.replace(
-    /^[\w\d]+[-_][\w\d]+[-_.]+[\w\d.]+\.x?html?\s*$/gim,
-    (match) => {
-      removedBytes += match.length
-      return ''
+    /\n\n(\d{1,2})\n\n/g,
+    (match, num) => {
+      console.log(`[epub-cleaner] Formatted chapter number as heading: ${num}`)
+      return `\n\n## ${num}\n\n`
     }
   )
 

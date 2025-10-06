@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url'
 import { createClient } from '@supabase/supabase-js'
 import { processDocumentHandler } from './handlers/process-document.js'
 import { detectConnectionsHandler } from './handlers/detect-connections.js'
-import { syncFromObsidian } from './handlers/obsidian-sync.js'
+import { syncFromObsidian, exportToObsidian } from './handlers/obsidian-sync.js'
 import { reprocessDocument } from './handlers/reprocess-document.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
@@ -21,20 +21,38 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
   'detect-connections': detectConnectionsHandler,
   'reprocess-document': async (supabase: any, job: any) => {
     const { documentId } = job.input_data
-    const results = await reprocessDocument(documentId, supabase)
+    const results = await reprocessDocument(documentId, supabase, job.id)  // Pass jobId for progress tracking
 
     await supabase
       .from('background_jobs')
       .update({
         status: 'completed',
         completed_at: new Date().toISOString(),
-        output_data: results
+        output_data: results,
+        progress: { percent: 100, stage: 'complete', details: 'Reprocessing complete' }  // Ensure final progress is 100%
+      })
+      .eq('id', job.id)
+  },
+  'obsidian-export': async (supabase: any, job: any) => {
+    const { documentId, userId } = job.input_data
+    const result = await exportToObsidian(documentId, userId)
+
+    if (!result.success) {
+      throw new Error(result.error || 'Export failed')
+    }
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: { uri: result.uri, path: result.path }
       })
       .eq('id', job.id)
   },
   'obsidian-sync': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
-    const result = await syncFromObsidian(documentId, userId)
+    const result = await syncFromObsidian(documentId, userId, job.id)  // Pass jobId for progress tracking
 
     if (!result.success) {
       throw new Error(result.error || 'Sync failed')
