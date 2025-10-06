@@ -117,7 +117,34 @@ export class PDFProcessor extends SourceProcessor {
     const markdownKB = Math.round(markdown.length / 1024)
     await this.updateProgress(40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB)`)
 
-    // ALWAYS use AI metadata extraction (no conditional logic)
+    // Check if we should skip AI chunking (review mode - AI chunking deferred to continue-processing)
+    const { reviewBeforeChunking = false } = this.job.input_data as any
+
+    console.log('[PDFProcessor] Debug - job.input_data:', JSON.stringify(this.job.input_data, null, 2))
+    console.log('[PDFProcessor] Debug - reviewBeforeChunking flag:', reviewBeforeChunking)
+
+    if (reviewBeforeChunking) {
+      console.log('[PDFProcessor] Review mode: Using simple chunking (AI chunking deferred to continue-processing)')
+
+      // Use cheap heading-based chunking (FREE - no AI cost)
+      const simpleChunks = simpleMarkdownChunking(markdown)
+
+      console.log(`[PDFProcessor] Created ${simpleChunks.length} simple chunks (placeholder mode)`)
+      await this.updateProgress(85, 'metadata', 'complete', `Created ${simpleChunks.length} placeholder chunks`)
+
+      // Calculate metadata for simple mode
+      const wordCount = markdown.split(/\s+/).filter(word => word.length > 0).length
+
+      // Return simple chunks as placeholders (will be replaced in continue-processing)
+      return {
+        markdown,
+        chunks: simpleChunks,
+        wordCount,
+        outline: [] // No outline in review mode (deferred to continue-processing)
+      }
+    }
+
+    // Normal mode: Use AI metadata extraction
     console.log(`[PDFProcessor] Using AI metadata extraction for ${markdown.length} character document`)
 
     // Extract document type from job input_data

@@ -60,6 +60,23 @@ const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?
     icon: RefreshCw,
     label: '🔄 Reprocessing',
     substages: {}
+  },
+  awaiting_manual_review: {
+    icon: RefreshCw,
+    label: '⏸️ Awaiting Review',
+    substages: {
+      waiting: 'Exported to Obsidian - edit when ready',
+      ready: 'Click "Continue Processing" to resume'
+    }
+  },
+  continue_processing: {
+    icon: Sparkles,
+    label: '▶️ Resuming',
+    substages: {
+      chunking: 'Creating semantic chunks',
+      embedding: 'Generating embeddings',
+      connections: 'Detecting connections'
+    }
   }
 }
 

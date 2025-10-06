@@ -6,6 +6,7 @@ import { processDocumentHandler } from './handlers/process-document.js'
 import { detectConnectionsHandler } from './handlers/detect-connections.js'
 import { syncFromObsidian, exportToObsidian } from './handlers/obsidian-sync.js'
 import { reprocessDocument } from './handlers/reprocess-document.js'
+import { continueProcessing } from './handlers/continue-processing.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
 
@@ -64,6 +65,20 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
         status: 'completed',
         completed_at: new Date().toISOString(),
         output_data: { changed: result.changed, recovery: result.recovery }
+      })
+      .eq('id', job.id)
+  },
+  'continue-processing': async (supabase: any, job: any) => {
+    const { documentId, userId } = job.input_data
+    const result = await continueProcessing(documentId, userId, job.id)  // Pass jobId for progress tracking
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: { chunksCreated: result.chunksCreated },
+        progress: { percent: 100, stage: 'complete', details: 'Chunking complete' }
       })
       .eq('id', job.id)
   },

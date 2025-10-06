@@ -97,10 +97,48 @@ export class EPUBProcessor extends SourceProcessor {
     const markdownKB = Math.round(fullMarkdown.length / 1024)
     console.log(`[EPUBProcessor] Combined ${chapters.length} chapters into ${markdownKB}KB clean markdown`)
 
-    // Stage 5: AI chunking with chapter boundaries (30-70%)
+    // Stage 5: Check if we should skip AI chunking (review mode)
     const documentType = inferDocumentType(metadata)
     console.log(`[EPUBProcessor] Inferred document type: ${documentType}`)
 
+    const { reviewBeforeChunking = false } = this.job.input_data as any
+
+    console.log('[EPUBProcessor] Debug - job.input_data:', JSON.stringify(this.job.input_data, null, 2))
+    console.log('[EPUBProcessor] Debug - reviewBeforeChunking flag:', reviewBeforeChunking)
+
+    if (reviewBeforeChunking) {
+      console.log('[EPUBProcessor] Review mode: Using simple chunking (AI chunking deferred to continue-processing)')
+
+      // Use cheap heading-based chunking (FREE - no AI cost)
+      const { simpleMarkdownChunking } = await import('../lib/markdown-chunking.js')
+      const simpleChunks = simpleMarkdownChunking(fullMarkdown)
+
+      console.log(`[EPUBProcessor] Created ${simpleChunks.length} simple chunks (placeholder mode)`)
+      await this.updateProgress(75, 'finalize', 'complete', `Created ${simpleChunks.length} placeholder chunks`)
+
+      // Calculate metadata for simple mode
+      const wordCount = fullMarkdown.split(/\s+/).filter(word => word.length > 0).length
+
+      // Return simple chunks as placeholders (will be replaced in continue-processing)
+      return {
+        markdown: fullMarkdown,
+        chunks: simpleChunks,
+        metadata: {
+          title: metadata.title,
+          author: metadata.author,
+          document_type: documentType,
+          isbn: metadata.isbn,
+          publisher: metadata.publisher,
+          publication_date: metadata.publicationDate,
+          language: metadata.language,
+          description: metadata.description
+        },
+        wordCount,
+        outline: [] // No outline in review mode (deferred to continue-processing)
+      }
+    }
+
+    // Normal mode: AI chunking with chapter boundaries (30-70%)
     await this.updateProgress(
       35,
       'extract',

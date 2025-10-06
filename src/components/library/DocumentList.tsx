@@ -6,9 +6,11 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Eye, Loader2, Trash2 } from 'lucide-react'
+import { FileText, Eye, Loader2, Trash2, Pause, Play, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { deleteDocument } from '@/app/actions/admin'
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
 
 interface Document {
   id: string
@@ -29,6 +31,8 @@ export function DocumentList() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [processing, setProcessing] = useState<string | null>(null)
+  const router = useRouter()
 
   useEffect(() => {
     const supabase = createClient()
@@ -139,6 +143,97 @@ export function DocumentList() {
     setDeleting(null)
   }
 
+  async function openInObsidian(documentId: string) {
+    try {
+      const response = await fetch('/api/obsidian/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId })
+      })
+
+      if (!response.ok) {
+        throw new Error('Export failed')
+      }
+
+      const { uri } = await response.json()
+
+      // Open in Obsidian via protocol handler
+      const iframe = document.createElement('iframe')
+      iframe.style.display = 'none'
+      iframe.src = uri
+      document.body.appendChild(iframe)
+      setTimeout(() => iframe.remove(), 1000)
+
+      toast.success('Opened in Obsidian')
+    } catch (error) {
+      toast.error('Failed to open in Obsidian')
+    }
+  }
+
+  async function continueProcessing(documentId: string) {
+    setProcessing(documentId)
+
+    try {
+      // Start job
+      const response = await fetch('/api/obsidian/continue-processing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.message || 'Failed to start processing')
+      }
+
+      const { jobId } = await response.json()
+
+      toast.info('Processing Started', {
+        description: 'Chunking document - this may take a few minutes'
+      })
+
+      // Poll for completion
+      await pollJobStatus(jobId)
+
+      toast.success('Processing Complete', {
+        description: 'Document is ready to read'
+      })
+
+      // Refresh document list
+      router.refresh()
+
+    } catch (error) {
+      toast.error('Processing Failed', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      })
+    } finally {
+      setProcessing(null)
+    }
+  }
+
+  async function pollJobStatus(jobId: string): Promise<any> {
+    const maxAttempts = 900 // 30 minutes
+    const intervalMs = 2000 // 2 seconds
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await fetch(`/api/obsidian/status/${jobId}`)
+      const data = await response.json()
+
+      if (data.status === 'completed') {
+        return data.result
+      }
+
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Job failed')
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    throw new Error('Processing timeout - took too long')
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8" data-testid="library-loading">
@@ -163,7 +258,8 @@ export function DocumentList() {
         const isCompleted = doc.processing_status === 'completed'
         const isProcessing = doc.processing_status === 'processing'
         const isFailed = doc.processing_status === 'failed'
-        
+        const isAwaitingReview = doc.processing_status === 'awaiting_manual_review'
+
         return (
           <Card key={doc.id} data-testid="document-card">
             <CardHeader>
@@ -172,11 +268,13 @@ export function DocumentList() {
                   <CardTitle className="truncate" data-testid="document-title">{doc.title}</CardTitle>
                   <CardDescription className="flex items-center gap-2 mt-1">
                     <Badge variant={
-                      isCompleted ? 'default' : 
-                      isProcessing ? 'secondary' : 
-                      isFailed ? 'destructive' : 
+                      isCompleted ? 'default' :
+                      isProcessing ? 'secondary' :
+                      isFailed ? 'destructive' :
+                      isAwaitingReview ? 'secondary' :
                       'outline'
                     } data-testid="status-badge">
+                      {isAwaitingReview && <Pause className="h-3 w-3 mr-1" />}
                       {doc.processing_status}
                     </Badge>
                     {doc.processing_stage && (
@@ -206,6 +304,32 @@ export function DocumentList() {
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Processing
                     </Button>
+                  )}
+                  {isAwaitingReview && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openInObsidian(doc.id)}
+                        data-testid="review-obsidian-button"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Review in Obsidian
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => continueProcessing(doc.id)}
+                        disabled={processing === doc.id}
+                        data-testid="continue-processing-button"
+                      >
+                        {processing === doc.id ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Play className="h-4 w-4 mr-2" />
+                        )}
+                        Continue Processing
+                      </Button>
+                    </>
                   )}
                   <Button
                     variant="ghost"

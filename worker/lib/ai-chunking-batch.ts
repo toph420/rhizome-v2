@@ -48,7 +48,7 @@ import { OversizedChunksError, BatchProcessingError } from './chunking/errors'
  * Default configuration values for batch metadata extraction.
  */
 const DEFAULT_CONFIG = {
-  maxBatchSize: 100000, // 100K chars per batch (gemini-2.5-flash-lite has 65K output tokens)
+  maxBatchSize: 50000, // 50K chars per batch (reduced from 100K for better reliability)
   modelName: GEMINI_MODEL,
   apiKey: process.env.GOOGLE_AI_API_KEY || '',
   maxRetries: 3,

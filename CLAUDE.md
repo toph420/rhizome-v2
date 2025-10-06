@@ -31,6 +31,7 @@ This is a personal tool optimized for aggressive connection detection and knowle
 - **YouTube Enhancement**: Transcript cleaning, fuzzy positioning for annotations
 - **EPUB Support**: Full EPUB book processing with metadata extraction
 
+
 ### The 3-Engine System
 
 Dropped from 7 engines to 3. Each does something distinct:
@@ -871,6 +872,9 @@ Rhizome includes a Readwise highlight import system with a review workflow:
 - When creating migrations, use format: `NNN_descriptive_name.sql` where NNN is zero-padded number
 - EPUB files are supported as a source type alongside PDF - handle both when implementing document features
 - Readwise import uses a review workflow via `import_pending` table before creating documents 
-
+- shadcn/ui Pattern: Always use npx shadcn@latest add <component> to install UI components rather than creating them manually. This ensures:
+  - Correct Radix UI primitives
+  - Consistent styling with the design system
+  - Proper TypeScript types
 
 Remember: This is an AI-first personal tool. Prioritize connection discovery and knowledge synthesis over traditional features.

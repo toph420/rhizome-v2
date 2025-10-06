@@ -11,14 +11,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, X } from 'lucide-react'
+import { Upload, X, Sparkles } from 'lucide-react'
 import Image from 'next/image'
 import type { DetectedMetadata, DocumentType } from '@/types/metadata'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface DocumentPreviewProps {
   metadata: DetectedMetadata
   onConfirm: (edited: DetectedMetadata, coverImage: File | null) => void
   onCancel: () => void
+  reviewBeforeChunking?: boolean
+  onReviewBeforeChunkingChange?: (checked: boolean) => void
 }
 
 const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
@@ -33,7 +36,9 @@ const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
 export function DocumentPreview({
   metadata,
   onConfirm,
-  onCancel
+  onCancel,
+  reviewBeforeChunking = false,
+  onReviewBeforeChunkingChange
 }: DocumentPreviewProps) {
   const [edited, setEdited] = useState(metadata)
   const [coverImage, setCoverImage] = useState<File | null>(null)
@@ -187,13 +192,32 @@ export function DocumentPreview({
       </div>
 
       {/* Actions */}
-      <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-        <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button onClick={() => onConfirm(edited, coverImage)}>
-          Process Document
-        </Button>
+      <div className="mt-6 pt-4 border-t space-y-4">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="review-before-chunking-preview"
+            checked={reviewBeforeChunking}
+            onCheckedChange={(checked) => {
+              console.log('[DocumentPreview] Checkbox changed:', checked)
+              onReviewBeforeChunkingChange?.(checked as boolean)
+            }}
+          />
+          <label
+            htmlFor="review-before-chunking-preview"
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+          >
+            <Sparkles className="h-3 w-3" />
+            Review markdown before chunking
+          </label>
+        </div>
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={() => onConfirm(edited, coverImage)}>
+            Process Document
+          </Button>
+        </div>
       </div>
     </div>
   )

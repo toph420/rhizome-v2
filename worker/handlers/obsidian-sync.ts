@@ -180,7 +180,7 @@ export async function syncFromObsidian(
     // 1. Get document and Obsidian settings
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('markdown_path, obsidian_path')
+      .select('markdown_path, obsidian_path, processing_status')
       .eq('id', documentId)
       .single()
 
@@ -235,7 +235,7 @@ export async function syncFromObsidian(
       }
     }
 
-    console.log(`[Obsidian Sync] Changes detected, starting reprocessing`)
+    console.log(`[Obsidian Sync] Changes detected`)
 
     // 5. Upload edited markdown to storage
     const { error: uploadError } = await supabase.storage
@@ -249,7 +249,19 @@ export async function syncFromObsidian(
       throw new Error(`Failed to upload edited markdown: ${uploadError.message}`)
     }
 
-    // 6. Trigger reprocessing with annotation recovery
+    // NEW: Check if document is in pre-chunking review state
+    if (document.processing_status === 'awaiting_manual_review') {
+      console.log('[Obsidian Sync] Pre-chunking review mode - simple sync (no annotation recovery needed)')
+
+      return {
+        success: true,
+        changed: true,
+        recovery: null // No recovery needed - annotations don't exist yet!
+      }
+    }
+
+    // 6. Full reprocessing with annotation recovery (post-chunking edits)
+    console.log('[Obsidian Sync] Post-chunking edit detected - triggering full reprocessing')
     const recovery = await reprocessDocument(documentId, supabase, jobId)
 
     console.log(`[Obsidian Sync] ✅ Sync complete`)

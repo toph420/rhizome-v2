@@ -184,7 +184,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
 
     return (
       <>
-        {!doc.embeddings_available && job && (
+        {!doc.embeddings_available && job && (job.status === 'processing' || job.status === 'pending') && (
           <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 fixed top-0 left-0 right-0 z-50">
             <div className="flex items-center gap-3">
               <Loader2 className="h-4 w-4 animate-spin text-blue-600" />

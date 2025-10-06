@@ -10,11 +10,12 @@ A visual guide to how documents flow through the Rhizome system, from upload to 
 1. [Complete Pipeline Overview](#complete-pipeline-overview)
 2. [Stage 1: Document Ingestion](#stage-1-document-ingestion)
 3. [Stage 2: Content Extraction](#stage-2-content-extraction)
-4. [Stage 3: Semantic Chunking](#stage-3-semantic-chunking)
-5. [Stage 4: Embedding Generation](#stage-4-embedding-generation)
-6. [Stage 5: Connection Detection](#stage-5-connection-detection)
-7. [Reader Experience](#reader-experience)
-8. [Error Handling & Fallbacks](#error-handling--fallbacks)
+4. [Stage 2.5: Obsidian Integration](#stage-25-obsidian-integration)
+5. [Stage 3: Semantic Chunking](#stage-3-semantic-chunking)
+6. [Stage 4: Embedding Generation](#stage-4-embedding-generation)
+7. [Stage 5: Connection Detection](#stage-5-connection-detection)
+8. [Reader Experience](#reader-experience)
+9. [Error Handling & Fallbacks](#error-handling--fallbacks)
 
 ---
 
@@ -36,7 +37,14 @@ flowchart TD
     MD --> Extract
     Text --> Extract
 
-    Extract --> Chunk[Semantic Chunking<br/>AI-Powered]
+    Extract --> Review{Review Before<br/>Chunking?}
+
+    Review -->|No| Chunk[Semantic Chunking<br/>AI-Powered]
+    Review -->|Yes| Export[Export to Obsidian<br/>Simple Placeholder Chunks]
+
+    Export --> Edit[User Edits in Obsidian<br/>Fix Formatting]
+    Edit --> Continue[Continue Processing<br/>Sync + AI Chunking]
+    Continue --> Chunk
 
     Chunk --> Size{Chunk Size<br/>Valid?}
     Size -->|> 10K chars| Split[Auto-Split<br/>at Paragraphs]
@@ -168,6 +176,125 @@ sequenceDiagram
 
     Proc->>Store: Save markdown
     Store-->>Proc: Storage URL
+```
+
+---
+
+## Stage 2.5: Obsidian Integration
+
+### Pre-Chunking Review Workflow
+
+```mermaid
+flowchart TD
+    Start[Upload Document] --> Check{Review Before<br/>Chunking?}
+
+    Check -->|No ✗| Direct[Direct to AI Chunking<br/>Cost: ~$0.20]
+    Check -->|Yes ✓| Extract[PDF/EPUB Extraction<br/>Generate Clean Markdown]
+
+    Extract --> Simple[Simple Heading-Based Chunking<br/>FREE - No AI Cost]
+    Simple --> Export[Export to Obsidian Vault<br/>Open in Obsidian via URI]
+
+    Export --> Status[Document Status:<br/>awaiting_manual_review]
+
+    Status --> UserEdit[User Edits Markdown<br/>Fix formatting, headers, tables]
+
+    UserEdit --> Continue[Click "Continue Processing"]
+    Continue --> Sync[Sync Edited Markdown<br/>from Obsidian]
+
+    Sync --> AIChunk[AI Chunking on<br/>EDITED Markdown<br/>Cost: ~$0.20]
+
+    Direct --> Embeddings[Embeddings + Connections]
+    AIChunk --> Embeddings
+
+    style Check fill:#fff4e6
+    style Simple fill:#c8e6c9
+    style AIChunk fill:#fff4e6
+    style UserEdit fill:#e3f2fd
+
+    Note1[Cost Savings:<br/>❌ Old: AI chunk → discard → AI chunk = $0.40<br/>✅ New: Simple chunk → AI chunk edited = $0.20]
+    style Note1 fill:#c8e6c9
+```
+
+### Post-Completion Obsidian Sync
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Doc as Document Reader
+    participant Obs as Obsidian
+    participant Worker as Worker Process
+    participant DB as Database
+
+    User->>Doc: Click "Sync from Obsidian"
+    Doc->>Worker: Trigger obsidian-sync job
+
+    Worker->>Obs: Read edited markdown from vault
+    Worker->>Worker: Compare with stored version
+
+    alt No Changes
+        Worker->>DB: Update status (no reprocessing)
+        Worker->>User: "No changes detected"
+    else Changes Detected
+        Worker->>DB: Upload edited markdown to storage
+        Worker->>Worker: Mark old chunks is_current=false
+        Worker->>Worker: Create new chunks (AI)
+        Worker->>Worker: Recover annotations (fuzzy matching)
+        Worker->>Worker: Remap connections to new chunks
+        Worker->>DB: Commit changes, delete old chunks
+        Worker->>User: Recovery stats (success/review/lost)
+    end
+
+    Note over Worker,DB: Annotation Recovery:<br/>90-100% for minor edits<br/>70-90% for moderate edits<br/>50-70% for major rewrites
+```
+
+### Obsidian Export Flow
+
+```mermaid
+flowchart LR
+    Doc[Document] --> Export{Export Type}
+
+    Export -->|Markdown Only| MD[Write .md to vault]
+    Export -->|With Annotations| Both[Write .md + .annotations.json]
+
+    MD --> URI1[Generate obsidian:// URI<br/>vault + filepath]
+    Both --> URI2[Generate obsidian:// URI<br/>vault + filepath]
+
+    URI1 --> Open1[Open in Obsidian<br/>via iframe protocol]
+    URI2 --> Open2[Open in Obsidian<br/>via iframe protocol]
+
+    Open1 --> Save1[Update obsidian_path in DB]
+    Open2 --> Save2[Update obsidian_path in DB]
+
+    style MD fill:#e3f2fd
+    style Both fill:#fff4e6
+    style Open2 fill:#c8e6c9
+```
+
+### Why Use Obsidian Integration?
+
+```mermaid
+mindmap
+  root((Obsidian<br/>Integration))
+    Pre-Chunking Review
+      Fix extraction errors early
+      Clean markdown before AI
+      No annotation recovery needed
+      Save $0.20 per document
+    Post-Completion Sync
+      Edit content after reading
+      Annotation recovery 70-100%
+      Connection remapping automatic
+      Bidirectional sync
+    Export Features
+      Markdown export
+      Optional annotations .json
+      Direct vault integration
+      Advanced URI protocol
+    Cost Benefits
+      Avoid double AI chunking
+      Fix issues before embeddings
+      Higher quality chunks
+      Better connection detection
 ```
 
 ---
@@ -653,6 +780,7 @@ gantt
 
 ### Cost Breakdown (500-page book)
 
+**Normal Processing:**
 ```mermaid
 pie title Cost Distribution (~$0.54 total)
     "PDF Extraction ($0.12)" : 22
@@ -660,6 +788,22 @@ pie title Cost Distribution (~$0.54 total)
     "Embeddings ($0.02)" : 4
     "Thematic Bridge ($0.20)" : 37
 ```
+
+**With Pre-Chunking Review:**
+```mermaid
+pie title Cost Distribution (~$0.54 total - Same Cost!)
+    "PDF Extraction ($0.12)" : 22
+    "Semantic Chunking ($0.20)" : 37
+    "Embeddings ($0.02)" : 4
+    "Thematic Bridge ($0.20)" : 37
+```
+
+**Cost Comparison:**
+| Mode | Extraction | Chunking | Total | Notes |
+|------|-----------|----------|-------|-------|
+| **Normal** | $0.12 | $0.20 | $0.54 | Direct AI chunking |
+| **Pre-Review** | $0.12 | $0.20 | $0.54 | Simple chunks (free) → AI chunking edited markdown |
+| **Old Bug** | $0.12 | $0.40 | $0.74 | AI chunking twice (fixed!) |
 
 ---
 
@@ -706,6 +850,12 @@ mindmap
 - [Code Examples](./CODE_EXAMPLES.md)
 
 ---
+
+**Completed Features**:
+- [x] Obsidian Integration (export, sync, advanced URI)
+- [x] Pre-Chunking Review Workflow (save $0.20 per document)
+- [x] Post-Completion Sync with Annotation Recovery
+- [x] Double-Chunking Cost Bug Fix
 
 **Next Steps**:
 - [ ] Continue Reader UI (markdown renderer, virtual scrolling)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { uploadDocument, estimateProcessingCost } from '@/app/actions/documents'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2 } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2, Sparkles } from 'lucide-react'
 import { DocumentPreview } from '@/components/upload/DocumentPreview'
 import type { DetectedMetadata } from '@/types/metadata'
 
@@ -77,6 +78,12 @@ export function UploadZone() {
   } | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reviewBeforeChunking, setReviewBeforeChunking] = useState(false)
+
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log('[UploadZone] reviewBeforeChunking state changed to:', reviewBeforeChunking)
+  }, [reviewBeforeChunking])
 
   /**
    * Detects URL type (YouTube vs web article).
@@ -293,6 +300,11 @@ export function UploadZone() {
         formData.append('isbn', editedMetadata.isbn)
       }
 
+      // Add review before chunking flag
+      console.log('[UploadZone] DEBUG reviewBeforeChunking state:', reviewBeforeChunking)
+      formData.append('reviewBeforeChunking', reviewBeforeChunking.toString())
+      console.log('[UploadZone] DEBUG formData value:', formData.get('reviewBeforeChunking'))
+
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
         // Manual file upload from DocumentPreview
@@ -326,7 +338,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewBeforeChunking])
 
   /**
    * Handles metadata preview cancellation.
@@ -353,6 +365,9 @@ export function UploadZone() {
       formData.append('file', selectedFile)
       formData.append('source_type', getSourceTypeForFile(selectedFile))
       formData.append('processing_requested', markdownProcessing === 'clean' ? 'true' : 'false')
+      console.log('[handleFileUpload] DEBUG reviewBeforeChunking state:', reviewBeforeChunking)
+      formData.append('reviewBeforeChunking', reviewBeforeChunking.toString())
+      console.log('[handleFileUpload] DEBUG formData value:', formData.get('reviewBeforeChunking'))
 
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
@@ -545,6 +560,8 @@ export function UploadZone() {
               metadata={detectedMetadata}
               onConfirm={handlePreviewConfirm}
               onCancel={handlePreviewCancel}
+              reviewBeforeChunking={reviewBeforeChunking}
+              onReviewBeforeChunkingChange={setReviewBeforeChunking}
             />
           ) : uploadPhase === 'detecting' ? (
             <Card className="p-12 text-center">
@@ -638,24 +655,43 @@ export function UploadZone() {
                     </div>
                   )}
                   
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleFileUpload}
-                      disabled={isUploading || selectedFile?.type.includes('pdf')}
-                      className="flex-1"
-                    >
-                      {isUploading ? 'Processing...' : 'Process Document'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setSelectedFile(null)
-                        setCostEstimate(null)
-                      }}
-                      disabled={isUploading}
-                    >
-                      Cancel
-                    </Button>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="review-before-chunking"
+                        checked={reviewBeforeChunking}
+                        onCheckedChange={(checked) => {
+                          console.log('[UploadZone main] Checkbox changed:', checked)
+                          setReviewBeforeChunking(checked as boolean)
+                        }}
+                      />
+                      <label
+                        htmlFor="review-before-chunking"
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        Review markdown before chunking
+                      </label>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleFileUpload}
+                        disabled={isUploading || selectedFile?.type.includes('pdf')}
+                        className="flex-1"
+                      >
+                        {isUploading ? 'Processing...' : 'Process Document'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedFile(null)
+                          setCostEstimate(null)
+                        }}
+                        disabled={isUploading}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
                   {selectedFile?.type.includes('pdf') && (
                     <p className="text-xs text-muted-foreground text-center">

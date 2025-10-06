@@ -1,6 +1,6 @@
 # Rhizome V2 Processing Pipeline
 
-**Last Updated:** 2025-10-05
+**Last Updated:** 2025-10-06
 
 A comprehensive guide to how documents flow through the Rhizome system, from upload to connection detection.
 
@@ -9,11 +9,14 @@ A comprehensive guide to how documents flow through the Rhizome system, from upl
 ## Table of Contents
 1. [Pipeline Overview](#pipeline-overview)
 2. [Stage 1: Document Ingestion](#stage-1-document-ingestion)
-3. [Stage 2: Content Extraction](#stage-2-content-extraction)
-4. [Stage 3: Semantic Chunking](#stage-3-semantic-chunking)
-5. [Stage 4: Embedding Generation](#stage-4-embedding-generation)
-6. [Stage 5: Connection Detection](#stage-5-connection-detection)
-7. [Error Handling & Fallbacks](#error-handling--fallbacks)
+3. [Stage 2: Optional Markdown Review](#stage-2-optional-markdown-review-pre-chunking)
+4. [Stage 3: Content Extraction](#stage-3-content-extraction)
+5. [Stage 4: Semantic Chunking](#stage-4-semantic-chunking)
+6. [Stage 5: Embedding Generation](#stage-5-embedding-generation)
+7. [Stage 6: Connection Detection](#stage-6-connection-detection)
+8. [Stage 7: Reader Experience](#stage-7-reader-experience)
+9. [Stage 8: Obsidian Sync](#stage-8-obsidian-sync-post-processing)
+10. [Error Handling & Fallbacks](#error-handling--fallbacks)
 
 ---
 
@@ -37,7 +40,26 @@ A comprehensive guide to how documents flow through the Rhizome system, from upl
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    STAGE 2: SEMANTIC CHUNKING                        │
+│                STAGE 2: OPTIONAL MARKDOWN REVIEW                     │
+│                  (Pre-Chunking Quality Control)                      │
+│                                                                       │
+│  IF reviewBeforeChunking enabled:                                   │
+│  ┌──────────────────────────────────────────────────────────┐      │
+│  │ 1. Create Simple Chunks (FREE - heading-based)           │      │
+│  │ 2. Export to Obsidian for editing                        │      │
+│  │ 3. User fixes formatting, structure, headers             │      │
+│  │ 4. Sync edited markdown back                             │      │
+│  │ 5. Continue to AI chunking (next stage)                  │      │
+│  │                                                           │      │
+│  │ Cost Savings: $0.20 (no double AI chunking)              │      │
+│  └──────────────────────────────────────────────────────────┘      │
+│                                                                       │
+│  ELSE: Skip to Stage 3 (AI chunking)                                │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    STAGE 3: SEMANTIC CHUNKING                        │
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────────┐      │
 │  │ AI-Powered Chunking (Primary Path)                        │      │
@@ -68,7 +90,7 @@ A comprehensive guide to how documents flow through the Rhizome system, from upl
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                   STAGE 3: EMBEDDING GENERATION                      │
+│                   STAGE 4: EMBEDDING GENERATION                      │
 │  • Model: text-embedding-004 (768 dimensions)                       │
 │  • Batch processing: 100 chunks at a time                           │
 │  • Stored in PostgreSQL with pgvector                               │
@@ -76,7 +98,7 @@ A comprehensive guide to how documents flow through the Rhizome system, from upl
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  STAGE 4: CONNECTION DETECTION                       │
+│                  STAGE 5: CONNECTION DETECTION                       │
 │                      (3-Engine System)                               │
 │                                                                       │
 │  ┌────────────────────────────────────────────────────────┐        │
@@ -120,6 +142,21 @@ A comprehensive guide to how documents flow through the Rhizome system, from upl
 │  • Viewport tracking: chunk offsets determine visible chunks        │
 │  • Right panel shows connections for visible chunks                 │
 │  • Click connection → jump to related passage                       │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    OPTIONAL: POST-PROCESSING SYNC                    │
+│                  (Edit After Completion)                             │
+│                                                                       │
+│  User can edit markdown in Obsidian AFTER reading:                  │
+│  1. Click "Sync from Obsidian" in document header                   │
+│  2. Worker detects changes, uploads edited markdown                 │
+│  3. Reprocess: New chunks created from edited content               │
+│  4. Annotation Recovery: Fuzzy match annotations to new chunks      │
+│  5. Connection Remapping: Update connections to new chunk IDs       │
+│                                                                       │
+│  Cost: ~$0.20 (reprocessing) + recovery complexity                  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -146,7 +183,77 @@ A comprehensive guide to how documents flow through the Rhizome system, from upl
 
 ---
 
-## Stage 2: Content Extraction
+## Stage 2: Optional Markdown Review (Pre-Chunking)
+
+### Review Workflow (When `reviewBeforeChunking` Enabled)
+
+```
+Upload with "Review before chunking" ✅
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│  Processor Creates Simple Chunks        │
+│  • Heading-based splitting (FREE)       │
+│  • No AI metadata extraction            │
+│  • Placeholder chunks for structure     │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  Export to Obsidian                     │
+│  • Write markdown to vault              │
+│  • Open via obsidian://advanced-uri     │
+│  • Document status: awaiting_manual_review
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  User Edits Markdown                    │
+│  • Fix extraction errors                │
+│  • Adjust formatting                    │
+│  • Correct headers, tables, lists       │
+│  • Save when done                       │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  Click "Continue Processing"            │
+│  • Sync edited markdown from Obsidian   │
+│  • Upload to storage                    │
+│  • Trigger AI chunking (Stage 3)        │
+│  • Replace simple chunks with AI chunks │
+└─────────────────────────────────────────┘
+```
+
+**Why This Matters:**
+- **Cost Savings**: $0.20 per document (avoids double AI chunking)
+- **Quality**: AI chunks clean, edited markdown (better results)
+- **Flexibility**: Fix extraction issues before expensive processing
+
+**Implementation Details:**
+```typescript
+// In PDF/EPUB processors
+if (reviewBeforeChunking) {
+  // Use FREE heading-based chunking
+  const simpleChunks = simpleMarkdownChunking(markdown)
+
+  // Export to Obsidian for editing
+  await exportToObsidian(documentId, userId)
+
+  // Pause processing (status: awaiting_manual_review)
+  return {
+    status: 'awaiting_manual_review',
+    message: 'Review markdown in Obsidian, then click Continue Processing'
+  }
+}
+
+// Normal flow: proceed with AI chunking
+const aiChunks = await batchChunkAndExtractMetadata(markdown, ...)
+```
+
+---
+
+## Stage 3: Content Extraction
 
 ### Extraction Flow
 
@@ -179,7 +286,7 @@ Input Document
 
 ---
 
-## Stage 3: Semantic Chunking
+## Stage 4: Semantic Chunking
 
 ### AI-Powered Chunking Pipeline
 
@@ -318,7 +425,7 @@ Input Document
 
 ---
 
-## Stage 4: Embedding Generation
+## Stage 5: Embedding Generation
 
 ### Embedding Pipeline
 
@@ -347,7 +454,7 @@ Chunks from Stage 3
 
 ---
 
-## Stage 5: Connection Detection
+## Stage 6: Connection Detection
 
 ### 3-Engine Architecture
 
@@ -541,7 +648,7 @@ CREATE INDEX idx_connections_strength ON connections(strength DESC);
 
 ---
 
-## Stage 6: Reader Experience
+## Stage 7: Reader Experience
 
 ### Viewport Tracking
 
@@ -588,6 +695,111 @@ JavaScript calculates scroll position
 - User at position 5000 sees chunks that **actually** overlap position 5000
 - Wrong offsets = wrong connections displayed
 - Fuzzy matcher ensures viewport tracking works correctly
+
+---
+
+## Stage 8: Obsidian Sync (Post-Processing)
+
+### Sync Workflow (Edit After Completion)
+
+```
+Document Complete & Readable
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│  Export to Obsidian                     │
+│  • Click "Export to Obsidian" button    │
+│  • Write markdown to vault              │
+│  • Export .annotations.json (optional)  │
+│  • Open in Obsidian for editing         │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  User Edits Content                     │
+│  • Fix typos, rephrase sections         │
+│  • Add notes, reorganize                │
+│  • Save when done                       │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  Click "Sync from Obsidian"             │
+│  • Detect changes (compare hash)        │
+│  • Upload edited markdown               │
+│  • Trigger reprocessing pipeline        │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
+│  Reprocessing Pipeline                  │
+│                                          │
+│  1. Mark old chunks is_current=false    │
+│     (batch_id for rollback safety)      │
+│                                          │
+│  2. Create new chunks from edited MD    │
+│     • AI chunking on edited content     │
+│     • Generate embeddings               │
+│     • Extract new metadata              │
+│                                          │
+│  3. Annotation Recovery (Fuzzy Match)   │
+│     • Find annotations for old chunks   │
+│     • Match to new chunks (85%+ similar)│
+│     • Create recovery jobs for review   │
+│                                          │
+│  4. Connection Remapping                │
+│     • Update connections to new IDs     │
+│     • Preserve connection metadata      │
+│                                          │
+│  5. Commit Changes                      │
+│     • Delete old chunks                 │
+│     • Set new chunks is_current=true    │
+│     • Update document status            │
+└─────────────────────────────────────────┘
+```
+
+### Recovery Success Rates
+
+**Minor Edits** (typos, formatting):
+- Success: 90-100% annotations recovered
+- Needs Review: 0-10%
+- Lost: 0%
+
+**Moderate Edits** (rephrasing, moving):
+- Success: 70-90% annotations recovered
+- Needs Review: 10-20%
+- Lost: 0-10%
+
+**Major Edits** (deletions, rewrites):
+- Success: 50-70% annotations recovered
+- Needs Review: 20-30%
+- Lost: 10-30%
+
+### Obsidian Integration
+
+**Export Settings:**
+```typescript
+{
+  vaultName: string          // "My Vault"
+  vaultPath: string          // "/Users/.../My Vault"
+  exportPath: string         // "Rhizome" (subfolder)
+  syncAnnotations: boolean   // Export .annotations.json
+  autoSync: boolean          // Auto-sync on changes
+  reviewBeforeChunking: boolean  // Enable pre-chunking review
+}
+```
+
+**URI Protocol:**
+```
+obsidian://advanced-uri?
+  vault=My%20Vault&
+  filepath=Rhizome/Document.md&
+  mode=source
+```
+
+**Files Exported:**
+- `{title}.md` - Markdown content
+- `{title}.annotations.json` - Annotation positions (optional)
 
 ---
 
@@ -654,20 +866,24 @@ Thematic Bridge Budget Exceeded:
 **Stage**|**Time**|**Bottleneck**
 ---|---|---
 Extraction|2-5 min|Gemini Files API
+**Review (optional)**|**User time**|**Manual editing**
 Chunking|15-25 min|AI semantic analysis (10 batches)
 Embeddings|1-2 min|Batch embedding generation
 Connections|5-10 min|Thematic bridge AI calls
 **Total**|**23-42 min**|**AI processing**
+**With Review**|**23-42 min + user time**|**Manual + AI**
 
 ### Cost Budget (500-page book)
 
 **Component**|**Cost**|**Notes**
 ---|---|---
 PDF Extraction|$0.12|6 batches × $0.02
+**Review Mode**|**$0 saved**|**Skip AI chunking initially**
 Semantic Chunking|$0.20|10 batches × $0.02
 Embeddings|$0.02|382 chunks × $0.00005
 Thematic Bridge|$0.20|200 AI calls × $0.001
 **Total**|**~$0.54**|**Well under $1 budget**
+**With Post-Sync**|**+$0.20**|**Reprocessing edited markdown**
 
 ### Optimization Strategies
 
@@ -708,6 +924,12 @@ Thematic Bridge|$0.20|200 AI calls × $0.001
    - Accurate offsets enable scroll-based chunk detection
    - Right panel shows connections for visible content
    - One-click navigation to related passages
+
+6. **Obsidian Integration**
+   - Pre-chunking review: Fix extraction errors before AI processing (saves $0.20)
+   - Post-processing sync: Edit completed documents with annotation recovery
+   - Bidirectional workflow: Export → Edit → Sync back
+   - Advanced URI protocol for cross-app integration
 
 ---
 

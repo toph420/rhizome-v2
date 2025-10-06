@@ -61,6 +61,13 @@ export async function uploadDocument(formData: FormData): Promise<{
     const sourceUrl = formData.get('source_url') as string | null
     const processingRequested = formData.get('processing_requested') === 'true'
     const pastedContent = formData.get('pasted_content') as string | null
+    const reviewBeforeChunkingRaw = formData.get('reviewBeforeChunking')
+    const reviewBeforeChunking = reviewBeforeChunkingRaw === 'true'
+
+    console.log('[uploadDocument] reviewBeforeChunking DEBUG:', {
+      raw: reviewBeforeChunkingRaw,
+      parsed: reviewBeforeChunking
+    })
 
     // Extract document metadata (from preview)
     const documentType = formData.get('document_type') as string | null
@@ -253,7 +260,8 @@ export async function uploadDocument(formData: FormData): Promise<{
           processing_requested: processingRequested,
           pasted_content: pastedContent,
           // Include document metadata for worker
-          document_type: documentType
+          document_type: documentType,
+          reviewBeforeChunking: reviewBeforeChunking
         }
       })
       .select()
