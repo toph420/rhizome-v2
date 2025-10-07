@@ -56,10 +56,13 @@ export function parseMarkdownToBlocks(
     const chunkId = chunk?.id || 'no-chunk'
     const chunkPosition = chunk?.chunk_index ?? -1
 
-    // Parse token to HTML
+    // Parse token to HTML with smart typography
     let html = ''
     try {
-      html = marked.parse(raw, { async: false }) as string
+      html = marked.parse(raw, {
+        async: false,
+        smartypants: true  // Convert straight quotes to curly quotes
+      }) as string
     } catch (err) {
       console.error('Failed to parse token:', err)
       html = `<p>${raw}</p>`
