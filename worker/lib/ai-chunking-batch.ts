@@ -48,7 +48,7 @@ import { OversizedChunksError, BatchProcessingError } from './chunking/errors'
  * Default configuration values for batch metadata extraction.
  */
 const DEFAULT_CONFIG = {
-  maxBatchSize: 25000, // 50K chars per batch (reduced from 100K for better reliability)
+  maxBatchSize: 20000, // 20K chars per batch (optimized to reduce oversized chunks)
   modelName: GEMINI_MODEL,
   apiKey: process.env.GOOGLE_AI_API_KEY || '',
   maxRetries: 3,
@@ -477,13 +477,21 @@ function parseMetadataResponse(
   // Convert batch-relative offsets to document-absolute offsets
   // AI returns offsets relative to batch.content (0 to batch.content.length)
   // But fuzzy matcher searches fullMarkdown, so we need absolute positions
+  // SKIP placeholder offsets (-1) from auto-splitting
   if (batch.startOffset > 0) {
     console.log(`[AI Metadata] Converting batch-relative offsets to document-absolute (batch starts at ${batch.startOffset})`)
-    chunksToProcess = chunksToProcess.map(chunk => ({
-      ...chunk,
-      start_offset: chunk.start_offset + batch.startOffset,
-      end_offset: chunk.end_offset + batch.startOffset
-    }))
+    chunksToProcess = chunksToProcess.map(chunk => {
+      // Don't convert placeholder offsets (from auto-splitting)
+      if (chunk.start_offset === -1 && chunk.end_offset === -1) {
+        return chunk  // Keep as -1, fuzzy matcher will find position
+      }
+
+      return {
+        ...chunk,
+        start_offset: chunk.start_offset + batch.startOffset,
+        end_offset: chunk.end_offset + batch.startOffset
+      }
+    })
   }
 
   // All chunks passed structural validation - correct offsets using fuzzy matcher
@@ -504,10 +512,17 @@ function parseMetadataResponse(
       chunk.start_offset < chunk.end_offset
 
     if (!valid) {
-      console.warn(
-        `[AI Metadata] Discarding chunk with invalid offsets: ` +
-        `${chunk.start_offset}-${chunk.end_offset} (doc length: ${fullMarkdown.length})`
-      )
+      if (chunk.start_offset === -1 || chunk.end_offset === -1) {
+        console.warn(
+          `[AI Metadata] Discarding chunk: Fuzzy matcher could not locate content ` +
+          `(${chunk.content.length} chars, preview: "${chunk.content.slice(0, 60)}...")`
+        )
+      } else {
+        console.warn(
+          `[AI Metadata] Discarding chunk with out-of-bounds offsets: ` +
+          `${chunk.start_offset}-${chunk.end_offset} (doc length: ${fullMarkdown.length})`
+        )
+      }
     }
 
     return valid
@@ -515,7 +530,7 @@ function parseMetadataResponse(
 
   const invalidCount = corrected.length - validChunks.length
   if (invalidCount > 0) {
-    console.warn(`[AI Metadata] Discarded ${invalidCount} chunks with out-of-bounds offsets`)
+    console.warn(`[AI Metadata] Discarded ${invalidCount} chunks with invalid offsets`)
   }
 
   // ✅ POST-CORRECTION VALIDATION: Check if fuzzy matcher successfully corrected offsets

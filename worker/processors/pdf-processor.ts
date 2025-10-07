@@ -113,10 +113,43 @@ export class PDFProcessor extends SourceProcessor {
     const result = await this.extractContent({ uri: fileUri, name: fileUri })
     
     // Stage 5: Parse and validate response
-    const { markdown, chunks } = await this.parseExtractionResult(result)
-    
-    const markdownKB = Math.round(markdown.length / 1024)
+    let { markdown, chunks } = await this.parseExtractionResult(result)
+
+    let markdownKB = Math.round(markdown.length / 1024)
     await this.updateProgress(40, 'extract', 'complete', `Extracted ${chunks.length} chunks (${markdownKB} KB)`)
+
+    // Stage 5.5: AI cleanup pass (remove artifacts before chunking)
+    const { cleanMarkdown: cleanMarkdownEnabled = true } = this.job.input_data as any
+
+    if (cleanMarkdownEnabled) {
+      await this.updateProgress(42, 'cleanup', 'ai-polish', 'AI polishing markdown...')
+      console.log('[PDFProcessor] Running AI cleanup pass to remove artifacts')
+
+      try {
+        const { cleanPdfMarkdown } = await import('../lib/markdown-cleanup-ai.js')
+
+        markdown = await cleanPdfMarkdown(this.ai, markdown, {
+          onProgress: async (section, total) => {
+            const progressPercent = 42 + Math.floor((section / total) * 3) // 42-45%
+            await this.updateProgress(
+              progressPercent,
+              'cleanup',
+              'ai-polish',
+              `AI cleanup: section ${section}/${total}`
+            )
+          }
+        })
+
+        markdownKB = Math.round(markdown.length / 1024)
+        await this.updateProgress(45, 'cleanup', 'complete', `Cleaned markdown (${markdownKB}KB)`)
+        console.log(`[PDFProcessor] AI cleanup complete: ${markdownKB}KB cleaned markdown`)
+      } catch (cleanupError: any) {
+        console.warn(`[PDFProcessor] AI cleanup failed, using raw extraction: ${cleanupError.message}`)
+        // Continue with uncleaned markdown (non-fatal error)
+      }
+    } else {
+      console.log('[PDFProcessor] AI cleanup skipped (cleanMarkdown: false)')
+    }
 
     // Check if we should skip AI chunking (review mode - AI chunking deferred to continue-processing)
     const { reviewBeforeChunking = false } = this.job.input_data as any
@@ -154,7 +187,7 @@ export class PDFProcessor extends SourceProcessor {
       console.log(`[PDFProcessor] Using type-specific chunking for: ${documentType}`)
     }
 
-    await this.updateProgress(45, 'metadata', 'ai-extraction', 'Processing with AI metadata extraction...')
+    await this.updateProgress(47, 'metadata', 'ai-extraction', 'Processing with AI metadata extraction...')
 
     const aiChunks = await batchChunkAndExtractMetadata(
       markdown,
@@ -164,9 +197,9 @@ export class PDFProcessor extends SourceProcessor {
         enableProgress: true
       },
       async (progress: MetadataExtractionProgress) => {
-        // Map AI extraction progress to overall progress (45-85%)
+        // Map AI extraction progress to overall progress (47-85%)
         const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
-        const overallPercent = 45 + Math.floor(aiProgressPercent * 40)
+        const overallPercent = 47 + Math.floor(aiProgressPercent * 38)
 
         await this.updateProgress(
           overallPercent,
@@ -544,9 +577,9 @@ export class PDFProcessor extends SourceProcessor {
         enableProgress: true
       },
       async (progress: MetadataExtractionProgress) => {
-        // Map AI extraction progress to overall progress (45-85%)
+        // Map AI extraction progress to overall progress (47-85%)
         const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
-        const overallPercent = 45 + Math.floor(aiProgressPercent * 40)
+        const overallPercent = 47 + Math.floor(aiProgressPercent * 38)
 
         await this.updateProgress(
           overallPercent,

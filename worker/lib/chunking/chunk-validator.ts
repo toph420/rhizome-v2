@@ -236,54 +236,106 @@ export function validateChunkSizes(
 
 /**
  * Splits an oversized chunk into smaller chunks at paragraph boundaries.
- * Uses placeholder offsets - fuzzy matcher will find actual positions.
+ * Preserves exact bytes from source and calculates real offsets (no fuzzy matching needed).
  *
- * KEY INSIGHT: We extract from source for better semantic content, but use
- * placeholder offsets because paragraph splitting modifies whitespace.
- * You can't calculate offsets for modified content!
+ * KEY FIX: Instead of split() + modify + placeholder, we find boundaries + extract exact bytes + calculate real offsets.
+ * This ensures split chunks can be found by exact match (100% reliability).
  *
  * @param chunk - Oversized chunk with AI metadata (must have start_offset and end_offset)
  * @param sourceMarkdown - Original markdown to extract from
  * @param maxSize - Target size for split chunks (default: 8000 to stay well under 10K limit)
- * @returns Array of smaller chunks with inherited metadata and placeholder offsets
+ * @returns Array of smaller chunks with exact content and calculated offsets
  */
 export function splitOversizedChunk(
   chunk: any, // Raw AI response with start_offset and end_offset
   sourceMarkdown: string,
   maxSize: number = 8000
 ): ChunkWithOffsets[] {
-  // Extract source content using AI's offsets for better semantic quality
-  const sourceContent = sourceMarkdown.slice(chunk.start_offset, chunk.end_offset)
+  // Extract source content using AI's offsets
+  const chunkStart = chunk.start_offset
+  const chunkEnd = chunk.end_offset
+  const sourceContent = sourceMarkdown.slice(chunkStart, chunkEnd)
 
-  // Validate extraction succeeded
+  // Validate extraction
   if (!sourceContent || sourceContent.length === 0) {
     console.error(
       `[Chunk Validator] Failed to extract source content at offsets ` +
-      `${chunk.start_offset}-${chunk.end_offset} (doc length: ${sourceMarkdown.length})`
+      `${chunkStart}-${chunkEnd} (doc length: ${sourceMarkdown.length})`
     )
     // Fallback to AI's content
     return splitOversizedChunkFallback(chunk, maxSize)
   }
 
-  // Split source content at paragraph boundaries (modifies whitespace!)
-  const paragraphs = sourceContent.split(/\n\n+/)
+  console.log(
+    `[Chunk Validator] Splitting ${sourceContent.length} char chunk ` +
+    `(offsets ${chunkStart}-${chunkEnd})`
+  )
 
+  // Find paragraph boundaries WITHOUT modifying content
+  const boundaries: number[] = [0]
+  const paragraphRegex = /\n\n+/g
+  let match
+
+  while ((match = paragraphRegex.exec(sourceContent)) !== null) {
+    // Boundary is AFTER the \n\n sequence
+    boundaries.push(match.index + match[0].length)
+  }
+  boundaries.push(sourceContent.length)
+
+  console.log(`[Chunk Validator] Found ${boundaries.length - 1} paragraph boundaries`)
+
+  // If no paragraph breaks, try sentence boundaries
+  if (boundaries.length === 2 && sourceContent.length > maxSize) {
+    console.warn(`[Chunk Validator] No paragraphs found, trying sentence boundaries`)
+    boundaries.length = 0
+    boundaries.push(0)
+
+    const sentenceRegex = /\.\s+/g
+    while ((match = sentenceRegex.exec(sourceContent)) !== null) {
+      boundaries.push(match.index + match[0].length)
+    }
+    boundaries.push(sourceContent.length)
+  }
+
+  // If still no breaks, use word boundaries
+  if (boundaries.length === 2 && sourceContent.length > maxSize) {
+    console.warn(`[Chunk Validator] No sentence breaks found, using fixed-size word boundaries`)
+    const wordSplit = splitAtWordBoundaries(sourceContent, maxSize)
+    let position = 0
+    boundaries.length = 0
+    boundaries.push(0)
+    for (const piece of wordSplit) {
+      position += piece.length
+      if (position < sourceContent.length) {
+        boundaries.push(position)
+      }
+    }
+    boundaries.push(sourceContent.length)
+  }
+
+  // Group boundaries into chunks ≤ maxSize
   const splitChunks: ChunkWithOffsets[] = []
-  let currentContent = ''
+  let currentStart = 0
   let chunkNumber = 0
 
-  for (const para of paragraphs) {
-    const paraWithBreak = para + '\n\n'
+  for (let i = 1; i < boundaries.length; i++) {
+    const nextBoundary = boundaries[i]
+    const potentialSize = nextBoundary - currentStart
 
-    // Would adding this paragraph exceed the limit?
-    if (currentContent.length > 0 && currentContent.length + paraWithBreak.length > maxSize) {
-      // Use placeholder offsets - fuzzy matcher will find actual position
+    // If adding next section would exceed limit, create chunk now
+    if (currentStart > 0 && potentialSize > maxSize) {
+      const prevBoundary = boundaries[i - 1]
+
+      // Extract EXACT bytes from source (no modification!)
+      const content = sourceContent.slice(currentStart, prevBoundary)
+      const absoluteStart = chunkStart + currentStart
+      const absoluteEnd = chunkStart + prevBoundary
+
       splitChunks.push({
-        content: currentContent.trim(),
-        start_offset: -1, // Placeholder - fuzzy matcher will correct
-        end_offset: -1,   // Placeholder - fuzzy matcher will correct
+        content,
+        start_offset: absoluteStart,
+        end_offset: absoluteEnd,
         metadata: {
-          // Inherit ALL metadata from parent chunk
           themes: chunk.themes || chunk.metadata?.themes || [],
           concepts: chunk.concepts || chunk.metadata?.concepts || [],
           importance: chunk.importance ?? chunk.metadata?.importance ?? 0.5,
@@ -299,19 +351,26 @@ export function splitOversizedChunk(
         }
       })
 
+      console.log(
+        `[Chunk Validator]   Part ${chunkNumber + 1}: ` +
+        `${content.length} chars at ${absoluteStart}-${absoluteEnd}`
+      )
+
       chunkNumber++
-      currentContent = paraWithBreak
-    } else {
-      currentContent += paraWithBreak
+      currentStart = prevBoundary
     }
   }
 
   // Add final chunk
-  if (currentContent.trim().length > 0) {
+  if (currentStart < sourceContent.length) {
+    const content = sourceContent.slice(currentStart)
+    const absoluteStart = chunkStart + currentStart
+    const absoluteEnd = chunkEnd
+
     splitChunks.push({
-      content: currentContent.trim(),
-      start_offset: -1, // Placeholder - fuzzy matcher will correct
-      end_offset: -1,   // Placeholder - fuzzy matcher will correct
+      content,
+      start_offset: absoluteStart,
+      end_offset: absoluteEnd,
       metadata: {
         themes: chunk.themes || chunk.metadata?.themes || [],
         concepts: chunk.concepts || chunk.metadata?.concepts || [],
@@ -327,11 +386,16 @@ export function splitOversizedChunk(
         }
       }
     })
+
+    console.log(
+      `[Chunk Validator]   Part ${chunkNumber + 1}: ` +
+      `${content.length} chars at ${absoluteStart}-${absoluteEnd}`
+    )
   }
 
   console.log(
-    `[Chunk Validator] Split ${sourceContent.length} char chunk → ${splitChunks.length} pieces ` +
-    `(extracted from source offsets ${chunk.start_offset}-${chunk.end_offset}, using placeholder offsets for fuzzy matching)`
+    `[Chunk Validator] ✅ Split into ${splitChunks.length} chunks ` +
+    `(preserved exact source bytes, no fuzzy matching needed)`
   )
 
   return splitChunks
@@ -450,4 +514,41 @@ export function createFallbackChunksForBatch(
 
   console.log(`[Chunk Validator] Created ${chunks.length} fallback chunks for failed batch`)
   return chunks
+}
+
+/**
+ * Split content at word boundaries when no natural breaks exist.
+ * Used as last resort for dense prose without paragraphs or sentences.
+ *
+ * @param content - Content to split
+ * @param maxSize - Target size per piece
+ * @returns Array of content pieces split at word boundaries
+ */
+function splitAtWordBoundaries(content: string, maxSize: number): string[] {
+  const pieces: string[] = []
+  let position = 0
+
+  while (position < content.length) {
+    const end = Math.min(position + maxSize, content.length)
+    let slice = content.substring(position, end)
+
+    // If not at the end, try to break at a word boundary
+    if (end < content.length) {
+      const lastSpace = slice.lastIndexOf(' ')
+      if (lastSpace > maxSize * 0.8) {
+        // Found a good word boundary (in last 20% of chunk)
+        slice = slice.substring(0, lastSpace + 1)
+        position += lastSpace + 1
+      } else {
+        // No good word boundary, just hard split
+        position = end
+      }
+    } else {
+      position = end
+    }
+
+    pieces.push(slice)
+  }
+
+  return pieces
 }

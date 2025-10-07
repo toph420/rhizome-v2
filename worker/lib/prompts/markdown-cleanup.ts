@@ -23,18 +23,24 @@ export function generateMarkdownCleanupPrompt(): string {
   return `You are a markdown formatting expert. Your task is to clean up this extracted markdown document by fixing ONLY formatting issues. DO NOT change any words or content.
 
 CRITICAL RULES (VIOLATING THESE WILL BREAK THE SYSTEM):
-1. PRESERVE ALL WORDS - Do not add, remove, or change ANY text content
-2. PRESERVE ALL HEADINGS - Keep exact heading text and structure, unless they are clearly duplicates
+1. PRESERVE ALL REAL WORDS - Do not add, remove, or change ANY actual text content
+2. PRESERVE REAL HEADINGS - Keep actual chapter/section headings, DELETE filename headings
 3. PRESERVE ALL FOOTNOTES - Keep all footnote markers and definitions
 4. PRESERVE HORIZONTAL RULES (---) - These mark chapter/section boundaries, NEVER remove them
-5. ONLY FIX FORMATTING - Remove artifacts, fix spacing, improve structure
+5. BE AGGRESSIVE WITH ARTIFACTS - Remove anything that looks like metadata/filenames/navigation
 6. DO NOT REWORD SENTENCES - Even minor rewording breaks content matching
 7. DO NOT PARAPHRASE - Keep every sentence exactly as written
 
-If you're unsure whether something is an artifact or real content, KEEP IT.
-Only remove things that are OBVIOUSLY metadata/navigation/artifacts.
+FILENAME ARTIFACTS TO AGGRESSIVELY REMOVE (both as headings and plain text):
+- "eBook1234.html", "eBook1234-5.html", "split_001.html"
+- "chapter01.xhtml", "part_003.html"
+- "V4135EPUB-9", "filename-0012"
+- ANY pattern matching: word/numbers + dash/underscore + numbers + .html/.xhtml
 
-YOUR ONLY JOB: Remove formatting artifacts and fix spacing issues left from PDF/EPUB extraction.
+WHEN IN DOUBT: If it looks like a filename or technical artifact, DELETE IT.
+Only preserve things that are clearly human-written prose, headings, or literary content.
+
+YOUR ONLY JOB: Aggressively remove ALL formatting artifacts and technical junk left from extraction.
 
 USE YOUR BEST JUDGEMENT AND BEAUTIFY THE MARKDOWN WHILE FOLLOWING THE RULES ABOVE.
 

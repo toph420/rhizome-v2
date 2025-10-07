@@ -8,8 +8,14 @@ export type DocumentType = 'fiction' | 'technical_manual' | 'academic_paper'
 
 /**
  * Infer document type from EPUB metadata.
- * Uses simple heuristics based on publisher and subjects.
+ * Uses priority-based heuristics to prevent misclassification.
  * Can be overridden in the preview UI.
+ *
+ * Priority order:
+ * 1. Fiction (check first to prevent "science fiction" → academic)
+ * 2. Technical manuals
+ * 3. Academic papers
+ * 4. Default to fiction
  *
  * @param metadata - EPUB metadata from OPF file
  * @returns Inferred document type
@@ -18,8 +24,24 @@ export function inferDocumentType(metadata: EPUBMetadata): DocumentType {
   const subjects = metadata.subjects?.join(' ').toLowerCase() || ''
   const publisher = metadata.publisher?.toLowerCase() || ''
   const title = metadata.title?.toLowerCase() || ''
+  const author = metadata.author?.toLowerCase() || ''
 
-  // Technical books - programming, technology, computing
+  // PRIORITY 1: Fiction detection (highest priority to prevent false positives)
+  // Check for explicit fiction indicators
+  if (
+    subjects.match(/fiction|novel|science fiction|fantasy|mystery|thriller|romance|adventure/i) ||
+    title.match(/\b(dream|darkness|sheep|dune|foundation|dragons|chronicles)\b/i) ||
+    author.match(/le guin|ursula|dick|philip k\.|asimov|bradbury|butler|octavia|heinlein|clarke|herbert/i) ||
+    publisher.includes('tor') ||
+    publisher.includes('orbit') ||
+    publisher.includes('daw') ||
+    publisher.includes('ballantine') ||
+    publisher.includes('del rey')
+  ) {
+    return 'fiction'
+  }
+
+  // PRIORITY 2: Technical books - programming, technology, computing
   if (
     publisher.includes("o'reilly") ||
     publisher.includes('oreilly') ||
@@ -40,17 +62,14 @@ export function inferDocumentType(metadata: EPUBMetadata): DocumentType {
     return 'technical_manual'
   }
 
-  // Academic papers and textbooks
+  // PRIORITY 3: Academic papers and textbooks
+  // Only match after ruling out fiction (prevents "science fiction" → academic)
   if (
     subjects.includes('textbook') ||
     subjects.includes('academic') ||
     subjects.includes('education') ||
     subjects.includes('research') ||
-    subjects.includes('science') ||
-    subjects.includes('mathematics') ||
-    subjects.includes('physics') ||
-    subjects.includes('chemistry') ||
-    subjects.includes('biology') ||
+    subjects.match(/\b(science|mathematics|physics|chemistry|biology)\b/i) || // Use word boundaries
     publisher.includes('university press') ||
     publisher.includes('oxford') ||
     publisher.includes('cambridge') ||
@@ -61,6 +80,6 @@ export function inferDocumentType(metadata: EPUBMetadata): DocumentType {
     return 'academic_paper'
   }
 
-  // Default to fiction for novels, literature, etc.
+  // Default to fiction for novels, literature, unknown types
   return 'fiction'
 }

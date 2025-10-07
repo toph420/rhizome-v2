@@ -57,6 +57,36 @@ VERIFICATION:
 The content at markdown.slice(start_offset, end_offset) should be SIMILAR to your chunk.content.
 Offsets must point to the correct location, even if formatting varies slightly.
 
+VALIDATION EXAMPLE - BATCH-RELATIVE OFFSETS:
+Given DOCUMENT TEXT (batch content): "The sky was blue.\n\nThe grass was green."
+Batch starts at position 50000 in full document (you can IGNORE this number)
+
+✅ CORRECT (batch-relative):
+{
+  "content": "The sky was blue.",
+  "start_offset": 0,       // ← 0 = start of THIS batch
+  "end_offset": 17         // ← 17 chars into THIS batch
+}
+// Verify: DOCUMENT_TEXT.slice(0, 17) = "The sky was blue." ✓
+// System will add 50000 automatically → final: 50000-50017
+
+❌ WRONG (used document-absolute instead of batch-relative):
+{
+  "content": "The sky was blue.",
+  "start_offset": 50000,   // ✗ You added batch start position!
+  "end_offset": 50017      // ✗ System will add 50000 again → wrong by 50000!
+}
+
+❌ WRONG (offset points to wrong location):
+{
+  "content": "The sky was blue.",
+  "start_offset": 19,  // Points to "The grass was green" ✗
+  "end_offset": 36
+}
+
+Before returning offsets, mentally verify:
+DOCUMENT_TEXT.slice(your_start, your_end) ≈ your_content (lengths within ±5%)
+
 🚨 CRITICAL REQUIREMENT #2 - CHUNK SIZE LIMIT 🚨
 
 MAXIMUM chunk size: ${maxChunkSize} characters (approximately ${Math.floor(maxChunkSize / 6)} words)
@@ -133,9 +163,18 @@ For each chunk you identify, extract:
    - Must match source character-for-character
    - Will be verified by searching in full document
 
-2. **start_offset**: Character position where chunk starts (0-indexed from start of DOCUMENT TEXT below)
+2. **boundary_before**: Last 50 characters BEFORE this chunk starts
+   - Extract the 50 characters that immediately precede your chunk
+   - This helps us locate where your chunk begins in the document
+   - If chunk starts at beginning of document, use empty string: ""
 
-3. **end_offset**: Character position where chunk ends
+3. **boundary_after**: First 50 characters AFTER this chunk ends
+   - Extract the 50 characters that immediately follow your chunk
+   - This helps us locate where your chunk ends in the document
+   - If chunk ends at end of document, use empty string: ""
+
+NOTE: We will calculate start_offset and end_offset automatically by finding these boundaries.
+You don't need to do any arithmetic!
 
 4. **themes**: 2-5 key themes/topics
    - Examples: ["mortality", "alienation"], ["power dynamics", "surveillance"]
@@ -162,8 +201,8 @@ Return JSON in this exact format:
   "chunks": [
     {
       "content": "EXACT unmodified text from source...",
-      "start_offset": 0,
-      "end_offset": 1847,
+      "start_offset": 0,        // ← BATCH-RELATIVE (0 = start of DOCUMENT TEXT)
+      "end_offset": 1847,       // ← BATCH-RELATIVE (1847 chars into THIS batch)
       "themes": ["theme1", "theme2"],
       "concepts": [
         {"text": "concept", "importance": 0.9}
@@ -179,6 +218,11 @@ Return JSON in this exact format:
     }
   ]
 }
+
+OFFSET REMINDER:
+- First chunk in batch → start_offset: 0 (NOT ${batch.startOffset})
+- Offsets measured from beginning of DOCUMENT TEXT below
+- We automatically convert to document-absolute offsets
 
 ═══════════════════════════════════════════════════════════════════════════
 DOCUMENT TEXT (starts at character ${batch.startOffset} in the full document):
