@@ -47,7 +47,14 @@ export function DocumentViewer({
       setError(null)
 
       try {
-        const response = await fetch(markdownUrl)
+        // Add cache-busting headers to prevent stale content
+        const response = await fetch(markdownUrl, {
+          cache: 'no-store', // Force fresh fetch from server
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+        })
         if (!response.ok) {
           if (response.status === 404) {
             throw new Error('Document not found. It may have been deleted.')

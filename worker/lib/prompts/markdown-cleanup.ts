@@ -24,7 +24,7 @@ export function generateMarkdownCleanupPrompt(): string {
 
 CRITICAL RULES (VIOLATING THESE WILL BREAK THE SYSTEM):
 1. PRESERVE ALL WORDS - Do not add, remove, or change ANY text content
-2. PRESERVE ALL HEADINGS - Keep exact heading text and structure
+2. PRESERVE ALL HEADINGS - Keep exact heading text and structure, unless they are clearly duplicates
 3. PRESERVE ALL FOOTNOTES - Keep all footnote markers and definitions
 4. PRESERVE HORIZONTAL RULES (---) - These mark chapter/section boundaries, NEVER remove them
 5. ONLY FIX FORMATTING - Remove artifacts, fix spacing, improve structure
@@ -35,6 +35,8 @@ If you're unsure whether something is an artifact or real content, KEEP IT.
 Only remove things that are OBVIOUSLY metadata/navigation/artifacts.
 
 YOUR ONLY JOB: Remove formatting artifacts and fix spacing issues left from PDF/EPUB extraction.
+
+USE YOUR BEST JUDGEMENT AND BEAUTIFY THE MARKDOWN WHILE FOLLOWING THE RULES ABOVE.
 
 ARTIFACTS TO REMOVE:
 - Leftover page numbers that interrupt text flow

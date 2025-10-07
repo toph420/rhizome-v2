@@ -33,7 +33,7 @@ import { GEMINI_MODEL } from './model-config.js'
 // Extracted modules
 import { createBatches, OVERLAP_SIZE } from './chunking/batch-creator'
 import { generateSemanticChunkingPrompt, type DocumentType } from './chunking/prompts'
-import { validateChunks, validateChunkSizes, createFallbackChunksForBatch } from './chunking/chunk-validator'
+import { validateChunks, validateChunkSizes, createFallbackChunksForBatch, splitOversizedChunk } from './chunking/chunk-validator'
 import { correctAIChunkOffsets } from './chunking/ai-fuzzy-matcher'
 import {
   sleep,
@@ -447,22 +447,32 @@ function parseMetadataResponse(
     throw new Error(`Chunk ${firstError.chunkIndex}: ${firstError.reason}`)
   }
 
-  // REMOVED: Auto-splitting logic
-  // If we have oversized chunks at this point, it means the retry logic failed
-  // This should NEVER happen because validateChunkSizes() in the retry loop
-  // should have caught this and either retried or split the batch
+  // Handle oversized chunks by auto-splitting (preserves metadata)
+  let chunksToProcess: ChunkWithOffsets[]
+
   if (validationResult.oversized.length > 0) {
-    // Format oversized chunks for error
-    const oversizedChunks = validationResult.oversized.map(o => ({
-      content: o.chunk.content.substring(0, 100) + '...',  // First 100 chars
-      size: o.size
-    }))
+    console.log(`\n⚠️  Auto-splitting ${validationResult.oversized.length} oversized chunks...`)
+    console.log(`   Batch: ${batch.batchId}`)
 
-    throw new OversizedChunksError(oversizedChunks, MAX_CHUNK_SIZE)
+    const allChunks: ChunkWithOffsets[] = []
+
+    // Keep valid chunks as-is
+    allChunks.push(...validationResult.valid)
+
+    // Split oversized chunks using SOURCE markdown
+    for (const { chunk, size } of validationResult.oversized) {
+      const subchunks = splitOversizedChunk(chunk, fullMarkdown, MAX_CHUNK_SIZE)
+      console.log(`   Split ${size} char chunk → ${subchunks.length} pieces`)
+      console.log(`     Themes preserved: ${chunk.themes?.join(', ') || chunk.metadata?.themes?.join(', ') || 'none'}`)
+      allChunks.push(...subchunks)
+    }
+
+    console.log(`✅ Split ${validationResult.oversized.length} chunks → ${allChunks.length} total chunks`)
+    chunksToProcess = allChunks
+  } else {
+    // All chunks are valid size - proceed as normal
+    chunksToProcess = validationResult.valid
   }
-
-  // All chunks are valid size - proceed with offset correction
-  let chunksToProcess = validationResult.valid
 
   // Convert batch-relative offsets to document-absolute offsets
   // AI returns offsets relative to batch.content (0 to batch.content.length)

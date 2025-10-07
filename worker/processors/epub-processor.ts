@@ -129,16 +129,36 @@ export class EPUBProcessor extends SourceProcessor {
         console.warn(`[EPUBProcessor] AI cleanup failed, using regex-only: ${cleanupError.message}`)
 
         // Fallback: just combine regex-cleaned chapters
+        // Check if markdown already has a heading to prevent duplicates
+        // Skip prepending if title looks like a filename (e.g., "V4135EPUB-9" or "chapter01")
         fullMarkdown = regexCleaned
-          .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
+          .map(ch => {
+            const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
+            const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+
+            if (startsWithHeading || isFilename) {
+              return ch.markdown
+            }
+            return `# ${ch.title}\n\n${ch.markdown}`
+          })
           .join('\n\n---\n\n')
       }
     } else {
       console.log('[EPUBProcessor] AI cleanup skipped (cleanMarkdown: false)')
 
       // No AI cleanup: just combine regex-cleaned chapters
+      // Check if markdown already has a heading to prevent duplicates
+      // Skip prepending if title looks like a filename (e.g., "V4135EPUB-9" or "chapter01")
       fullMarkdown = regexCleaned
-        .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
+        .map(ch => {
+          const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
+          const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+
+          if (startsWithHeading || isFilename) {
+            return ch.markdown
+          }
+          return `# ${ch.title}\n\n${ch.markdown}`
+        })
         .join('\n\n---\n\n')
     }
 

@@ -236,45 +236,62 @@ export function validateChunkSizes(
 
 /**
  * Splits an oversized chunk into smaller chunks at paragraph boundaries.
- * Uses placeholder offsets (-1) which the fuzzy matcher will correct.
+ * Uses placeholder offsets - fuzzy matcher will find actual positions.
  *
- * Handles raw AI response chunks (metadata fields directly on chunk) safely.
+ * KEY INSIGHT: We extract from source for better semantic content, but use
+ * placeholder offsets because paragraph splitting modifies whitespace.
+ * You can't calculate offsets for modified content!
  *
- * @param chunk - Oversized chunk to split (raw AI response format)
+ * @param chunk - Oversized chunk with AI metadata (must have start_offset and end_offset)
+ * @param sourceMarkdown - Original markdown to extract from
  * @param maxSize - Target size for split chunks (default: 8000 to stay well under 10K limit)
- * @returns Array of smaller chunks with preserved metadata and placeholder offsets
+ * @returns Array of smaller chunks with inherited metadata and placeholder offsets
  */
 export function splitOversizedChunk(
-  chunk: any, // Raw AI response - not yet wrapped in ChunkWithOffsets structure
+  chunk: any, // Raw AI response with start_offset and end_offset
+  sourceMarkdown: string,
   maxSize: number = 8000
 ): ChunkWithOffsets[] {
-  const chunks: ChunkWithOffsets[] = []
-  const paragraphs = chunk.content.split(/\n\n+/)
+  // Extract source content using AI's offsets for better semantic quality
+  const sourceContent = sourceMarkdown.slice(chunk.start_offset, chunk.end_offset)
 
+  // Validate extraction succeeded
+  if (!sourceContent || sourceContent.length === 0) {
+    console.error(
+      `[Chunk Validator] Failed to extract source content at offsets ` +
+      `${chunk.start_offset}-${chunk.end_offset} (doc length: ${sourceMarkdown.length})`
+    )
+    // Fallback to AI's content
+    return splitOversizedChunkFallback(chunk, maxSize)
+  }
+
+  // Split source content at paragraph boundaries (modifies whitespace!)
+  const paragraphs = sourceContent.split(/\n\n+/)
+
+  const splitChunks: ChunkWithOffsets[] = []
   let currentContent = ''
   let chunkNumber = 0
 
-  for (let i = 0; i < paragraphs.length; i++) {
-    const para = paragraphs[i]
+  for (const para of paragraphs) {
+    const paraWithBreak = para + '\n\n'
 
     // Would adding this paragraph exceed the limit?
-    if (currentContent.length > 0 && currentContent.length + para.length + 2 > maxSize) {
-      // Save current chunk with PLACEHOLDER offsets
-      // Fuzzy matcher will find the real position in the source markdown
-      chunks.push({
+    if (currentContent.length > 0 && currentContent.length + paraWithBreak.length > maxSize) {
+      // Use placeholder offsets - fuzzy matcher will find actual position
+      splitChunks.push({
         content: currentContent.trim(),
         start_offset: -1, // Placeholder - fuzzy matcher will correct
         end_offset: -1,   // Placeholder - fuzzy matcher will correct
         metadata: {
-          // Safe access - AI may omit optional fields
-          themes: chunk.themes || [],
-          concepts: chunk.concepts || [],
-          importance: chunk.importance ?? 0.5,
-          summary: chunk.summary
-            ? `${chunk.summary} (part ${chunkNumber + 1})`
+          // Inherit ALL metadata from parent chunk
+          themes: chunk.themes || chunk.metadata?.themes || [],
+          concepts: chunk.concepts || chunk.metadata?.concepts || [],
+          importance: chunk.importance ?? chunk.metadata?.importance ?? 0.5,
+          summary: chunk.summary || chunk.metadata?.summary
+            ? `${chunk.summary || chunk.metadata?.summary} (part ${chunkNumber + 1})`
             : `Split chunk part ${chunkNumber + 1}`,
-          domain: chunk.domain || 'general',
-          emotional: chunk.emotional || {
+          domain: chunk.domain || chunk.metadata?.domain || 'general',
+          emotional: chunk.emotional || chunk.metadata?.emotional || {
             polarity: 0,
             primaryEmotion: 'neutral',
             intensity: 0
@@ -283,27 +300,27 @@ export function splitOversizedChunk(
       })
 
       chunkNumber++
-      currentContent = para + '\n\n'
+      currentContent = paraWithBreak
     } else {
-      currentContent += para + '\n\n'
+      currentContent += paraWithBreak
     }
   }
 
   // Add final chunk
   if (currentContent.trim().length > 0) {
-    chunks.push({
+    splitChunks.push({
       content: currentContent.trim(),
       start_offset: -1, // Placeholder - fuzzy matcher will correct
       end_offset: -1,   // Placeholder - fuzzy matcher will correct
       metadata: {
-        themes: chunk.themes || [],
-        concepts: chunk.concepts || [],
-        importance: chunk.importance ?? 0.5,
-        summary: chunk.summary
-          ? `${chunk.summary} (part ${chunkNumber + 1})`
+        themes: chunk.themes || chunk.metadata?.themes || [],
+        concepts: chunk.concepts || chunk.metadata?.concepts || [],
+        importance: chunk.importance ?? chunk.metadata?.importance ?? 0.5,
+        summary: chunk.summary || chunk.metadata?.summary
+          ? `${chunk.summary || chunk.metadata?.summary} (part ${chunkNumber + 1})`
           : `Split chunk part ${chunkNumber + 1}`,
-        domain: chunk.domain || 'general',
-        emotional: chunk.emotional || {
+        domain: chunk.domain || chunk.metadata?.domain || 'general',
+        emotional: chunk.emotional || chunk.metadata?.emotional || {
           polarity: 0,
           primaryEmotion: 'neutral',
           intensity: 0
@@ -313,9 +330,83 @@ export function splitOversizedChunk(
   }
 
   console.log(
-    `[Chunk Validator] Split ${chunk.content.length} char chunk into ${chunks.length} parts at paragraph boundaries`
+    `[Chunk Validator] Split ${sourceContent.length} char chunk → ${splitChunks.length} pieces ` +
+    `(extracted from source offsets ${chunk.start_offset}-${chunk.end_offset}, using placeholder offsets for fuzzy matching)`
   )
-  return chunks
+
+  return splitChunks
+}
+
+/**
+ * Fallback splitting when source extraction fails.
+ * Uses AI's content directly with placeholder offsets.
+ */
+function splitOversizedChunkFallback(
+  chunk: any,
+  maxSize: number
+): ChunkWithOffsets[] {
+  console.warn('[Chunk Validator] Using fallback splitting with AI content')
+
+  const paragraphs = chunk.content.split(/\n\n+/)
+  const splitChunks: ChunkWithOffsets[] = []
+  let currentContent = ''
+  let chunkNumber = 0
+
+  for (const para of paragraphs) {
+    const paraWithBreak = para + '\n\n'
+
+    if (currentContent.length > 0 && currentContent.length + paraWithBreak.length > maxSize) {
+      splitChunks.push({
+        content: currentContent.trim(),
+        start_offset: -1,
+        end_offset: -1,
+        metadata: {
+          themes: chunk.themes || chunk.metadata?.themes || [],
+          concepts: chunk.concepts || chunk.metadata?.concepts || [],
+          importance: chunk.importance ?? chunk.metadata?.importance ?? 0.5,
+          summary: chunk.summary || chunk.metadata?.summary
+            ? `${chunk.summary || chunk.metadata?.summary} (part ${chunkNumber + 1})`
+            : `Split chunk part ${chunkNumber + 1}`,
+          domain: chunk.domain || chunk.metadata?.domain || 'general',
+          emotional: chunk.emotional || chunk.metadata?.emotional || {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          }
+        }
+      })
+      chunkNumber++
+      currentContent = paraWithBreak
+    } else {
+      currentContent += paraWithBreak
+    }
+  }
+
+  if (currentContent.trim().length > 0) {
+    splitChunks.push({
+      content: currentContent.trim(),
+      start_offset: -1,
+      end_offset: -1,
+      metadata: {
+        themes: chunk.themes || chunk.metadata?.themes || [],
+        concepts: chunk.concepts || chunk.metadata?.concepts || [],
+        importance: chunk.importance ?? chunk.metadata?.importance ?? 0.5,
+        summary: chunk.summary || chunk.metadata?.summary
+          ? `${chunk.summary || chunk.metadata?.summary} (part ${chunkNumber + 1})`
+          : `Split chunk part ${chunkNumber + 1}`,
+        domain: chunk.domain || chunk.metadata?.domain || 'general',
+        emotional: chunk.emotional || chunk.metadata?.emotional || {
+          polarity: 0,
+          primaryEmotion: 'neutral',
+          intensity: 0
+        }
+      }
+    })
+  }
+
+  console.log(`[Chunk Validator] Fallback split: ${chunk.content.length} chars → ${splitChunks.length} pieces`)
+
+  return splitChunks
 }
 
 /**

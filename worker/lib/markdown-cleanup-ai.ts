@@ -179,6 +179,19 @@ export async function cleanEpubChaptersWithAI(
       await onProgress(i + 1, chapters.length)
     }
 
+    // Skip AI cleanup for tiny/empty chapters (< 500 chars = front matter, cover, TOC)
+    if (chapter.markdown.length < 500) {
+      if (enableProgress) {
+        console.log(
+          `[markdown-cleanup-ai] Skipping chapter ${i + 1}/${chapters.length}: ` +
+          `"${chapter.title}" (${chapter.markdown.length} chars - too small for AI cleanup)`
+        )
+      }
+      // Keep the chapter content as-is (epub-cleaner already handled it)
+      cleanedChapters.push(chapter.markdown)
+      continue
+    }
+
     if (enableProgress) {
       const chapterKB = Math.round(chapter.markdown.length / 1024)
       console.log(
@@ -187,8 +200,13 @@ export async function cleanEpubChaptersWithAI(
       )
     }
 
-    // Prepend chapter title as heading
-    const chapterText = `# ${chapter.title}\n\n${chapter.markdown}`
+    // Prepend chapter title as heading (if not already present and not a filename)
+    const startsWithHeading = /^#+\s/.test(chapter.markdown.trim())
+    const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(chapter.title)
+
+    const chapterText = (startsWithHeading || isFilename)
+      ? chapter.markdown
+      : `# ${chapter.title}\n\n${chapter.markdown}`
 
     try {
       const result = await ai.models.generateContent({
