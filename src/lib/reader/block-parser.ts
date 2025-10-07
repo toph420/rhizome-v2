@@ -52,10 +52,9 @@ export function parseMarkdownToBlocks(
     // Find chunk for this offset using binary search
     const chunk = findChunkForOffset(sortedChunks, offset)
 
-    if (!chunk) {
-      offset = endOffset
-      continue
-    }
+    // Always render content, even without chunk coverage (chunks are metadata overlays)
+    const chunkId = chunk?.id || 'no-chunk'
+    const chunkPosition = chunk?.chunk_index ?? -1
 
     // Parse token to HTML
     let html = ''
@@ -89,8 +88,8 @@ export function parseMarkdownToBlocks(
       html,
       startOffset: offset,
       endOffset,
-      chunkId: chunk.id,
-      chunkPosition: chunk.chunk_index,
+      chunkId,
+      chunkPosition,
     })
 
     offset = endOffset

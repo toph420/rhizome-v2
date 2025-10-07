@@ -496,9 +496,31 @@ function parseMetadataResponse(
   console.log(`  📍 Approximate: ${stats.approximate}/${corrected.length} (${Math.round(stats.approximate / corrected.length * 100)}%)`)
   console.log(`  ❌ Failed: ${stats.failed}/${corrected.length}`)
 
+  // Validate bounds to prevent markdown.slice() errors
+  const validChunks = corrected.filter(chunk => {
+    const valid =
+      chunk.start_offset >= 0 &&
+      chunk.end_offset <= fullMarkdown.length &&
+      chunk.start_offset < chunk.end_offset
+
+    if (!valid) {
+      console.warn(
+        `[AI Metadata] Discarding chunk with invalid offsets: ` +
+        `${chunk.start_offset}-${chunk.end_offset} (doc length: ${fullMarkdown.length})`
+      )
+    }
+
+    return valid
+  })
+
+  const invalidCount = corrected.length - validChunks.length
+  if (invalidCount > 0) {
+    console.warn(`[AI Metadata] Discarded ${invalidCount} chunks with out-of-bounds offsets`)
+  }
+
   // ✅ POST-CORRECTION VALIDATION: Check if fuzzy matcher successfully corrected offsets
   const normalize = (s: string) => s.trim().replace(/\s+/g, ' ')
-  const postCorrectionFailures = corrected.filter(chunk => {
+  const postCorrectionFailures = validChunks.filter(chunk => {
     const actualText = fullMarkdown.slice(chunk.start_offset, chunk.end_offset)
     const normActual = normalize(actualText)
     const normChunk = normalize(chunk.content)
@@ -513,25 +535,18 @@ function parseMetadataResponse(
     return !normActual.includes(preview)
   })
 
-  // Reject if fuzzy matcher couldn't fix >20% of chunks
-  if (postCorrectionFailures.length > corrected.length * 0.2) {
-    console.error(
-      `[AI Metadata] CRITICAL: Fuzzy matcher failed to correct ${postCorrectionFailures.length}/${corrected.length} chunks (${Math.round(postCorrectionFailures.length / corrected.length * 100)}%)`
-    )
-    throw new Error(
-      `Offset correction failed for ${postCorrectionFailures.length} chunks - fuzzy matcher couldn't locate content`
-    )
-  }
-
+  // Accept approximate offsets - chunks are metadata overlays, not display requirements
   if (postCorrectionFailures.length > 0) {
     console.warn(
-      `[AI Metadata] ⚠️  ${postCorrectionFailures.length} chunks still have offset issues after correction`
+      `[AI Metadata] ${postCorrectionFailures.length}/${validChunks.length} chunks ` +
+      `have approximate offsets (${Math.round(postCorrectionFailures.length / validChunks.length * 100)}%). ` +
+      `Chunks are metadata overlays - continuing.`
     )
   } else {
-    console.log(`[AI Metadata] ✓ All ${corrected.length} chunks successfully corrected`)
+    console.log(`[AI Metadata] ✓ All ${validChunks.length} chunks successfully corrected`)
   }
 
-  return corrected
+  return validChunks
 }
 
 /**

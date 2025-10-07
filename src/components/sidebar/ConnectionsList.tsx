@@ -72,8 +72,11 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
     async function fetchConnections() {
       console.log('[ConnectionsList] Fetching connections for chunks:', debouncedChunkIds)
 
-      if (debouncedChunkIds.length === 0) {
-        console.log('[ConnectionsList] No visible chunks, clearing connections')
+      // Filter out 'no-chunk' placeholders (gap regions without chunk coverage)
+      const validChunkIds = debouncedChunkIds.filter(id => id !== 'no-chunk')
+
+      if (validChunkIds.length === 0) {
+        console.log('[ConnectionsList] No valid chunks (gap region or empty), clearing connections')
         setConnections([])
         return
       }
@@ -85,7 +88,7 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
         const { data, error } = await supabase
           .from('connections')
           .select('*')
-          .in('source_chunk_id', debouncedChunkIds)
+          .in('source_chunk_id', validChunkIds)
           .order('strength', { ascending: false })
           .limit(100)
 
@@ -186,11 +189,13 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
 
   // Empty state when no connections match filters
   if (filteredConnections.length === 0) {
+    const validChunkIds = visibleChunkIds.filter(id => id !== 'no-chunk')
+
     return (
       <div className="p-8 text-center">
         <p className="text-sm text-muted-foreground">
-          {visibleChunkIds.length === 0
-            ? 'No chunks visible in viewport'
+          {validChunkIds.length === 0
+            ? 'No semantic metadata available for this section'
             : connections.length === 0
             ? 'No connections found for visible chunks'
             : 'No connections match current filters'}

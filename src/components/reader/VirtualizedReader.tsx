@@ -320,6 +320,7 @@ export function VirtualizedReader({
           existingAnnotation={editingAnnotation}
           mode={editingAnnotation ? 'edit' : 'create'}
           chunks={chunks}
+          markdown={markdown}
         />
       )}
 
