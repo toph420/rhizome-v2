@@ -845,6 +845,81 @@ const { data: crossDoc } = await supabase
 - **Worker Module**: `worker/README.md` - Document processing system
 - **Gemini Processing**: `docs/GEMINI_PROCESSING.md` - AI processing patterns
 
+
+## Zustand Checklist
+
+### ✅ Use Zustand for:
+- [ ] State shared across multiple components
+- [ ] State that persists across unmounts
+- [ ] State updated from multiple locations
+- [ ] Complex state requiring coordinated updates
+- [ ] Personal preferences (engine weights, UI settings)
+
+### ❌ Don't use Zustand for:
+- [ ] Component-local UI state (hover, focus)
+- [ ] Form inputs and validation
+- [ ] Temporary loading indicators
+- [ ] Animation states
+- [ ] Props that don't need to be shared
+
+### 🎯 Best Practices:
+- [ ] Subscribe to minimal state slices
+- [ ] Normalize complex state (weights sum to 1.0)
+- [ ] Define actions for all state mutations
+- [ ] Use persist middleware for user preferences
+- [ ] Batch related state updates
+- [ ] Test store actions independently
+- [ ] Reset state when appropriate
+
+---
+
+## Zustand Quick Reference
+
+### Import Statements
+```typescript
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+```
+
+### Basic Store Template
+```typescript
+interface MyState {
+  value: number
+  setValue: (value: number) => void
+}
+
+export const useMyStore = create<MyState>((set, get) => ({
+  value: 0,
+  setValue: (value) => set({ value })
+}))
+```
+
+### Usage in Components
+```typescript
+// Subscribe to specific value
+const value = useMyStore(state => state.value)
+
+// Get action
+const setValue = useMyStore(state => state.setValue)
+
+// Get state outside React
+const currentValue = useMyStore.getState().value
+```
+
+### Persistence
+```typescript
+export const useMyStore = create<MyState>()(
+  persist(
+    (set, get) => ({ /* store definition */ }),
+    {
+      name: 'my-storage',
+      partialize: (state) => ({ value: state.value })
+    }
+  )
+)
+```
+
+
 ## Readwise Integration
 
 Rhizome includes a Readwise highlight import system with a review workflow:
