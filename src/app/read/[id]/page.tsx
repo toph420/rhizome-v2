@@ -182,6 +182,12 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
       reviewResults = null
     }
 
+    // Query connection count for header stats
+    const { count: connectionCount } = await supabase
+      .from('chunk_connections')
+      .select('*', { count: 'exact', head: true })
+      .or(`source_chunk_id.in.(${chunks.map(c => c.id).join(',')}),target_chunk_id.in.(${chunks.map(c => c.id).join(',')})`)
+
     return (
       <>
         {!doc.embeddings_available && job && (job.status === 'processing' || job.status === 'pending') && (
@@ -205,6 +211,9 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           markdownUrl={signedUrl}
           chunks={chunks}
           annotations={annotations}
+          documentTitle={doc.title}
+          wordCount={doc.word_count}
+          connectionCount={connectionCount || 0}
           reviewResults={reviewResults}
         />
       </>

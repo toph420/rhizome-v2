@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useAnnotationStore } from '@/stores/annotation-store'
+import { useConnectionStore } from '@/stores/connection-store'
 import { useDebounce } from '@/hooks/useDebounce'
 import { createClient } from '@/lib/supabase/client'
 import { ConnectionCard } from './ConnectionCard'
@@ -32,6 +32,13 @@ interface ConnectionsListProps {
   documentId: string
   visibleChunkIds: string[]  // NEW: From Phase 2 VirtualizedReader viewport tracking
   onNavigateToChunk?: (chunkId: string) => void
+  onConnectionsChange?: (connections: Array<{
+    id: string
+    source_chunk_id: string
+    target_chunk_id: string
+    strength: number
+  }>) => void
+  onActiveConnectionCountChange?: (count: number) => void
 }
 
 /**
@@ -56,8 +63,17 @@ interface ConnectionsListProps {
  * @param props.visibleChunkIds - Array of chunk IDs currently in viewport
  * @returns Connections list component with grouped sections
  */
-export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk }: ConnectionsListProps) {
-  const { weights, enabledEngines, strengthThreshold } = useAnnotationStore()
+export function ConnectionsList({
+  documentId,
+  visibleChunkIds,
+  onNavigateToChunk,
+  onConnectionsChange,
+  onActiveConnectionCountChange
+}: ConnectionsListProps) {
+  const weights = useConnectionStore(state => state.weights)
+  const enabledEngines = useConnectionStore(state => state.enabledEngines)
+  const strengthThreshold = useConnectionStore(state => state.strengthThreshold)
+
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(false)
@@ -152,6 +168,25 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
 
     return result
   }, [connections, weights, enabledEngines, strengthThreshold])  // Minimize re-computation
+
+  // Notify parent when connections change (for heatmap)
+  useEffect(() => {
+    if (onConnectionsChange) {
+      // Map to simpler format for heatmap
+      const simplifiedConnections = connections.map(c => ({
+        id: c.id,
+        source_chunk_id: c.source_chunk_id,
+        target_chunk_id: c.target_chunk_id,
+        strength: c.strength
+      }))
+      onConnectionsChange(simplifiedConnections)
+    }
+
+    // Notify parent of active connection count
+    if (onActiveConnectionCountChange) {
+      onActiveConnectionCountChange(filteredConnections.length)
+    }
+  }, [connections, filteredConnections, onConnectionsChange, onActiveConnectionCountChange])
 
   // Group connections by engine type for sectioned display
   const groupedConnections = useMemo(() => {

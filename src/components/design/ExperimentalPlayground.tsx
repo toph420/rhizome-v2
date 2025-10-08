@@ -29,7 +29,8 @@ import {
 } from './BrutalistComponents'
 import { Badge } from '@/components/ui/badge'
 import { motion } from 'framer-motion'
-import { Palette, Sparkles, Wand2, Terminal, Square } from 'lucide-react'
+import { Palette, Sparkles, Wand2, Terminal, Square, Navigation } from 'lucide-react'
+import { EdgeNavigationDemo } from './EdgeNavigationDemo'
 
 export function ExperimentalPlayground() {
   const [cardVariant, setCardVariant] = useState<'earth' | 'mars' | 'neutral'>('earth')
@@ -86,6 +87,46 @@ export function ExperimentalPlayground() {
             </Badge>
             <Badge variant="outline">Framer Motion</Badge>
             <Badge variant="outline">CSS Textures</Badge>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edge Navigation Demo */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Navigation className="h-5 w-5 text-primary" />
+            <CardTitle>Edge-Based Navigation (Retro/Brutalist)</CardTitle>
+          </div>
+          <CardDescription>
+            Inspired by Front Line design - clickable edge panels with retro aesthetic, pixel decorations, and bold typography.
+            Click the black edge panels to open document outline (left) or reader sidebar (right).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2 mb-6">
+            <Badge variant="secondary">Edge Panels</Badge>
+            <Badge variant="secondary">Vertical Text</Badge>
+            <Badge variant="outline">Retro Aesthetic</Badge>
+            <Badge variant="outline">Brutalist Borders</Badge>
+            <Badge variant="outline">Pixel Decorations</Badge>
+            <Badge variant="outline">Spring Animations</Badge>
+          </div>
+
+          <EdgeNavigationDemo />
+
+          <div className="mt-6 p-4 bg-muted rounded-lg">
+            <h4 className="font-semibold mb-2 text-sm">Design Features</h4>
+            <ul className="space-y-1 text-sm text-muted-foreground">
+              <li>• <strong>Edge Triggers:</strong> Clickable vertical panels with rotated text</li>
+              <li>• <strong>Spring Animations:</strong> Smooth panel expansion with Framer Motion</li>
+              <li>• <strong>Retro Decorations:</strong> Scattered pixels, corner squares, checkered footer</li>
+              <li>• <strong>Brutalist Elements:</strong> Thick borders (4-8px), offset shadows, bold colors</li>
+              <li>• <strong>Icon Tabs:</strong> 6-column grid (Connections, Annotations, Sparks, Cards, Review, Tune)</li>
+              <li>• <strong>Bottom Control Panel:</strong> View modes, chat, spark, progress indicator</li>
+              <li>• <strong>Chat Button:</strong> Bottom left corner (red button)</li>
+              <li>• <strong>Spark Button:</strong> Bottom right corner (yellow button)</li>
+            </ul>
           </div>
         </CardContent>
       </Card>

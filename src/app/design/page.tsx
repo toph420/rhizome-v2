@@ -4,6 +4,10 @@ import { ColorPalette } from '@/components/design/ColorPalette'
 import { ComponentShowcase } from '@/components/design/ComponentShowcase'
 import { ExperimentalPlayground } from '@/components/design/ExperimentalPlayground'
 
+/**
+ * Design guide page showcasing typography, colors, components, and experimental styles.
+ * @returns Design guide page component.
+ */
 export default function DesignGuidePage() {
   return (
     <div className="container mx-auto py-8 px-4 max-w-7xl">
@@ -50,7 +54,7 @@ export default function DesignGuidePage() {
           <div className="rounded-lg border p-6">
             <h2 className="text-2xl font-semibold mb-4">Spacing System</h2>
             <p className="text-muted-foreground mb-6">
-              Tailwind's default spacing scale based on rem units
+              Tailwind&apos;s default spacing scale based on rem units
             </p>
 
             <div className="space-y-4">

@@ -302,14 +302,14 @@ export function ProcessingDock() {
   }
 
   async function handleForceFailAll() {
-    if (!confirm('Force fail all processing jobs? They will retry immediately.')) return
+    if (!confirm('Stop and DELETE all processing jobs? This cannot be undone.')) return
 
     setIsForceFailingAll(true)
     const result = await forceFailAllProcessing()
 
     if (result.success) {
-      // Jobs will be updated by realtime subscription
-      console.log('Force failed all processing jobs')
+      // Jobs will be removed by realtime subscription
+      console.log('Stopped and deleted all processing jobs')
     }
 
     setIsForceFailingAll(false)
