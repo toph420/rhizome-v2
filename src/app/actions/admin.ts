@@ -433,3 +433,44 @@ export async function forceFailAllProcessing() {
     return { success: false, error: error.message }
   }
 }
+
+/**
+ * Clear ALL jobs regardless of status.
+ * Nuclear option for development - removes everything.
+ *
+ * @returns Promise with success status.
+ */
+export async function clearAllJobs() {
+  const supabase = await createClient()
+
+  try {
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (userError || !user) {
+      // In dev mode, use dev user ID
+      const devUserId = process.env.NEXT_PUBLIC_DEV_USER_ID
+      if (!devUserId) throw new Error('Not authenticated')
+
+      const { error } = await supabase
+        .from('background_jobs')
+        .delete()
+        .eq('user_id', devUserId)
+
+      if (error) throw error
+    } else {
+      const { error } = await supabase
+        .from('background_jobs')
+        .delete()
+        .eq('user_id', user.id)
+
+      if (error) throw error
+    }
+
+    revalidatePath('/')
+    return { success: true }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error clearing all jobs:', error)
+    return { success: false, error: errorMessage }
+  }
+}

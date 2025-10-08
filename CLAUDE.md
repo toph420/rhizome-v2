@@ -409,7 +409,7 @@ npm run dev:next             # Next.js on port 3000
 2. **Never store markdown in DB** - Use Supabase Storage
 3. **Never parse PDFs directly** - Use Gemini Files API
 4. **Never create service classes** - Use ECS for entities
-5. **Never mix storage patterns** - Files OR database, not both
+5. **Storage for source of truth + portability, Database for queryable cache + derived data**
 6. **Never skip error handling** - Especially for AI operations
 7. **Never test without mocks in CI** - Use `validate:metadata` not `validate:metadata:real`
 8. **Never commit node_modules** - Check .gitignore in both root and worker/
