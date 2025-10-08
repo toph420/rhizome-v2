@@ -98,9 +98,26 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       processor = ProcessorRouter.createProcessor(sourceType, ai, supabase, job)
 
       // ✅ START HEARTBEAT: Update job timestamp every 5 minutes during long processing
+      // Also checks for job cancellation
+      let jobCancelled = false
       const heartbeatInterval = setInterval(async () => {
         console.log('[Heartbeat] Updating job timestamp to prevent stale detection...')
         try {
+          // Check if job has been cancelled
+          const { data: currentJob } = await supabase
+            .from('background_jobs')
+            .select('status')
+            .eq('id', job.id)
+            .single()
+
+          if (currentJob?.status === 'cancelled') {
+            console.log('[Heartbeat] ⚠️  Job has been cancelled - stopping processing')
+            jobCancelled = true
+            clearInterval(heartbeatInterval)
+            return
+          }
+
+          // Update timestamp if still processing
           await supabase
             .from('background_jobs')
             .update({
@@ -116,6 +133,11 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         // Process document with AI
         console.log(`🚀 Starting processing with ${processor.constructor.name}`)
         result = await processor.process()
+
+        // Check if job was cancelled during processing
+        if (jobCancelled) {
+          throw new Error('Job was cancelled during processing')
+        }
       } finally {
         // ✅ ALWAYS CLEANUP: Stop heartbeat when processing completes or fails
         clearInterval(heartbeatInterval)

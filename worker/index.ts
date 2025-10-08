@@ -153,6 +153,18 @@ async function processNextJob() {
   try {
     await handler(supabase, job)
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+
+    // Check if job was cancelled
+    if (errorMessage.includes('cancelled')) {
+      console.log(`Job ${job.id} was cancelled - deleting job`)
+      await supabase
+        .from('background_jobs')
+        .delete()
+        .eq('id', job.id)
+      return
+    }
+
     console.error(`Job ${job.id} failed:`, error)
     await handleJobError(supabase, job, error as Error)
   }

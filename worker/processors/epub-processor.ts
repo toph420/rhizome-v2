@@ -1,26 +1,31 @@
 /**
- * Simplified EPUB Processor
+ * EPUB Processor with Two-Pass AI Cleanup
  *
  * Linear processing flow:
  * 1. Parse EPUB (local, free)
  * 2. Local regex cleanup per chapter
- * 3. AI cleanup with batching
- * 4. Boundary-based chunking
- * 5. Return results
+ * 3. AI cleanup per chapter (zero-stitching)
+ * 4. Review checkpoint (optional pause)
+ * 5. AI semantic chunking
+ * 6. Return results
  *
- * Removed complexity:
- * - Review mode (reviewBeforeChunking)
- * - Type-specific chunking strategies
- * - Custom batching for chapters
+ * AI Cleanup Strategy (Optional):
+ * - Per-chapter cleanup (natural semantic boundaries)
+ * - Deterministic joining with \n\n---\n\n
+ * - No overlap, no stitching, no content drift
+ * - Controlled by cleanMarkdown flag (default: true)
  *
- * Cost: ~$0.50 per 500-page book
- * Time: <20 minutes processing
+ * Cost:
+ * - With AI cleanup: ~$1.10 per 500-page book ($0.60 cleanup + $0.50 chunking)
+ * - Without AI cleanup: ~$0.50 per 500-page book (chunking only)
+ * Time: <25 minutes with cleanup, <15 minutes without
  */
 
 import { SourceProcessor } from './base.js'
 import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { parseEPUB } from '../lib/epub/epub-parser.js'
 import { cleanEpubArtifacts } from '../lib/epub/epub-cleaner.js'
+import { cleanEpubChaptersWithAI } from '../lib/markdown-cleanup-ai.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 
 export class EPUBProcessor extends SourceProcessor {
@@ -96,24 +101,106 @@ export class EPUBProcessor extends SourceProcessor {
 
     console.log(`[EPUBProcessor] Regex cleaned ${cleanedChapters.length} chapters`)
 
-    // Combine chapters with headings
-    let combinedMarkdown = cleanedChapters
-      .map(ch => {
-        const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
-        const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+    await this.updateProgress(35, 'cleanup_local', 'complete', 'Local cleanup done')
 
-        if (startsWithHeading || isFilename) {
-          return ch.markdown
+    // Stage 5: AI cleanup per chapter (35-50%) - CONDITIONAL on cleanMarkdown flag
+    const cleanMarkdownEnabled = this.job.input_data?.cleanMarkdown !== false // Default true
+
+    let combinedMarkdown: string
+
+    if (cleanMarkdownEnabled) {
+      await this.updateProgress(40, 'cleanup_ai', 'processing', 'AI cleaning chapters')
+      console.log('[EPUBProcessor] Starting AI cleanup (per-chapter, no stitching)')
+
+      try {
+        combinedMarkdown = await cleanEpubChaptersWithAI(
+        this.ai,
+        cleanedChapters,
+        {
+          enableProgress: true,
+          onProgress: async (chapterNum, totalChapters) => {
+            const percent = 40 + Math.floor((chapterNum / totalChapters) * 10) // 40-50%
+            await this.updateProgress(
+              percent,
+              'cleanup_ai',
+              'processing',
+              `AI cleaning chapter ${chapterNum}/${totalChapters}`
+            )
+          }
         }
-        return `# ${ch.title}\n\n${ch.markdown}`
-      })
-      .join('\n\n---\n\n')
+      )
 
-    await this.updateProgress(40, 'cleanup_local', 'complete', 'Local cleanup done')
+        console.log(`[EPUBProcessor] AI cleanup complete`)
+        await this.updateProgress(50, 'cleanup_ai', 'complete', 'AI cleanup done')
+      } catch (error: any) {
+        console.error(`[EPUBProcessor] AI cleanup failed: ${error.message}`)
+        console.warn('[EPUBProcessor] Falling back to regex-cleaned markdown')
 
-    // Stage 5: AI semantic chunking with metadata extraction (40-90%)
-    // This replaces both AI cleanup AND boundary chunking with a single integrated step
-    await this.updateProgress(45, 'chunking', 'processing', 'Creating semantic chunks')
+        // Fallback: Use regex-cleaned chapters without AI cleanup
+        combinedMarkdown = cleanedChapters
+          .map(ch => {
+            const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
+            const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+
+            if (startsWithHeading || isFilename) {
+              return ch.markdown
+            }
+            return `# ${ch.title}\n\n${ch.markdown}`
+          })
+          .join('\n\n---\n\n')
+
+        await this.updateProgress(50, 'cleanup_ai', 'fallback', 'Using regex cleanup only')
+      }
+    } else {
+      // AI cleanup disabled by user - use regex-only
+      console.log('[EPUBProcessor] AI cleanup disabled - using regex cleanup only')
+
+      combinedMarkdown = cleanedChapters
+        .map(ch => {
+          const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
+          const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+
+          if (startsWithHeading || isFilename) {
+            return ch.markdown
+          }
+          return `# ${ch.title}\n\n${ch.markdown}`
+        })
+        .join('\n\n---\n\n')
+
+      await this.updateProgress(50, 'cleanup_ai', 'skipped', 'AI cleanup disabled by user')
+    }
+
+    // Stage 6: Check for review mode BEFORE expensive AI chunking
+    const reviewBeforeChunking = this.job.input_data?.reviewBeforeChunking
+
+    if (reviewBeforeChunking) {
+      console.log('[EPUBProcessor] Review mode enabled - skipping AI chunking')
+      console.log('[EPUBProcessor] Markdown will be chunked after Obsidian review')
+      console.log('[EPUBProcessor] Saved ~$0.50 by skipping pre-review chunking (already AI cleaned)')
+
+      await this.updateProgress(90, 'finalize', 'awaiting_review', 'Ready for manual review')
+
+      return {
+        markdown: combinedMarkdown,
+        chunks: [], // No chunks - will be created after review
+        metadata: {
+          title: metadata.title,
+          author: metadata.author,
+          extra: {
+            isbn: metadata.isbn,
+            publisher: metadata.publisher,
+            publication_date: metadata.publicationDate,
+            language: metadata.language,
+            description: metadata.description,
+            cover_image_url: coverImage ? `${storagePath}/cover.jpg` : undefined
+          }
+        },
+        wordCount: combinedMarkdown.split(/\s+/).length
+      }
+    }
+
+    // Stage 7: AI semantic chunking with metadata extraction (50-90%)
+    await this.updateProgress(55, 'chunking', 'processing', 'Creating semantic chunks')
 
     const markdownKB = Math.round(combinedMarkdown.length / 1024)
     console.log(`[EPUBProcessor] Starting AI chunking on ${markdownKB}KB markdown`)
@@ -128,9 +215,9 @@ export class EPUBProcessor extends SourceProcessor {
             enableProgress: true
           },
           async (progress) => {
-            // Map progress phases to percentages: 45-90%
-            const basePercent = 45
-            const rangePercent = 45
+            // Map progress phases to percentages: 55-90%
+            const basePercent = 55
+            const rangePercent = 35
 
             let phaseProgress = 0
             if (progress.phase === 'batching') phaseProgress = 0

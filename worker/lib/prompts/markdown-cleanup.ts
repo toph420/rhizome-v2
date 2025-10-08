@@ -19,7 +19,7 @@
  *
  * @returns Formatted cleanup prompt
  */
-export function generateMarkdownCleanupPrompt(): string {
+export function generateMarkdownCleanupPromptOld(): string {
   return `You are a markdown formatting expert. Your task is to clean up this extracted markdown document by fixing ONLY formatting issues. DO NOT change any words or content.
 
 CRITICAL RULES (VIOLATING THESE WILL BREAK THE SYSTEM):
@@ -27,9 +27,11 @@ CRITICAL RULES (VIOLATING THESE WILL BREAK THE SYSTEM):
 2. PRESERVE REAL HEADINGS - Keep actual chapter/section headings, DELETE filename headings
 3. PRESERVE ALL FOOTNOTES - Keep all footnote markers and definitions
 4. PRESERVE HORIZONTAL RULES (---) - These mark chapter/section boundaries, NEVER remove them
-5. BE AGGRESSIVE WITH ARTIFACTS - Remove anything that looks like metadata/filenames/navigation
-6. DO NOT REWORD SENTENCES - Even minor rewording breaks content matching
-7. DO NOT PARAPHRASE - Keep every sentence exactly as written
+5. PRESERVE SMART TYPOGRAPHY - Keep curly quotes (""), em dashes (—), en dashes (–), ellipses (…), and all typographic characters
+6. BE AGGRESSIVE WITH ARTIFACTS - Remove anything that looks like metadata/filenames/navigation
+7. DO NOT REWORD SENTENCES - Even minor rewording breaks content matching
+8. DO NOT PARAPHRASE - Keep every sentence exactly as written
+9. DO NOT CONVERT TYPOGRAPHY - Never change curly quotes to straight quotes, em dashes to hyphens, or any other typographic downgrades
 
 FILENAME ARTIFACTS TO AGGRESSIVELY REMOVE (both as headings and plain text):
 - "eBook1234.html", "eBook1234-5.html", "split_001.html"
@@ -173,6 +175,14 @@ GOOD OUTPUT:
 "## ONE
 
 The story begins..."
+
+IMPORTANT: Return ONLY the cleaned markdown. No explanations, no wrapper text, just the cleaned content.`.trim()
+}
+
+
+
+export function generateMarkdownCleanupPrompt(): string {
+  return `you're a markdown beautifier, clean this document up, dont remove any of the important content, but get rid of anomalies and make it look pretty. Make sure the weird line breaks are cleaned up.
 
 IMPORTANT: Return ONLY the cleaned markdown. No explanations, no wrapper text, just the cleaned content.`.trim()
 }

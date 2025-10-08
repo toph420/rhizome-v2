@@ -1,27 +1,31 @@
 /**
- * Simplified PDF Processor
+ * PDF Processor with Two-Pass AI Cleanup
  *
  * Linear processing flow:
- * 1. Extract PDF with batching (uses existing extractLargePDF)
+ * 1. Extract PDF with batching (uses extractLargePDF)
  * 2. Local regex cleanup (cleanPageArtifacts)
- * 3. AI cleanup with batching
- * 4. Boundary-based chunking
- * 5. Return results
+ * 3. AI cleanup (heading-split for large docs)
+ * 4. Review checkpoint (optional pause)
+ * 5. AI semantic chunking
+ * 6. Return results
  *
- * Removed complexity:
- * - Review mode (reviewBeforeChunking)
- * - Type-specific chunking strategies
- * - Complex progress tracking with intervals
- * - Gemini file upload flow (uses extractLargePDF directly)
+ * AI Cleanup Strategy (Optional):
+ * - Small PDFs (<100K): Single-pass cleanup
+ * - Large PDFs (>100K): Split at ## headings, clean sections
+ * - Deterministic joining (no overlap, no stitching)
+ * - Controlled by cleanMarkdown flag (default: true)
  *
- * Cost: ~$0.55 per 500-page book
- * Time: <20 minutes processing
+ * Cost:
+ * - With AI cleanup: ~$1.15 per 500-page book ($0.60 cleanup + $0.55 chunking)
+ * - Without AI cleanup: ~$0.55 per 500-page book (chunking only)
+ * Time: <25 minutes with cleanup, <20 minutes without
  */
 
 import { SourceProcessor } from './base.js'
 import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { extractLargePDF } from '../lib/pdf-batch-utils.js'
 import { cleanPageArtifacts } from '../lib/text-cleanup.js'
+import { cleanPdfMarkdown } from '../lib/markdown-cleanup-ai.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 
 export class PDFProcessor extends SourceProcessor {
@@ -91,9 +95,66 @@ export class PDFProcessor extends SourceProcessor {
 
     await this.updateProgress(45, 'cleanup_local', 'complete', 'Local cleanup done')
 
-    // Stage 4: AI semantic chunking with metadata extraction (45-90%)
-    // This replaces both AI cleanup AND boundary chunking with a single integrated step
-    await this.updateProgress(50, 'chunking', 'processing', 'Creating semantic chunks')
+    // Stage 4: AI cleanup (45-60%) - CONDITIONAL on cleanMarkdown flag
+    const cleanMarkdownEnabled = this.job.input_data?.cleanMarkdown !== false // Default true
+
+    if (cleanMarkdownEnabled) {
+      await this.updateProgress(48, 'cleanup_ai', 'processing', 'AI cleaning markdown')
+      console.log('[PDFProcessor] Starting AI cleanup (heading-split for large docs)')
+
+      try {
+        markdown = await cleanPdfMarkdown(
+        this.ai,
+        markdown,
+        {
+          onProgress: async (sectionNum, totalSections) => {
+            const percent = 48 + Math.floor((sectionNum / totalSections) * 12) // 48-60%
+            await this.updateProgress(
+              percent,
+              'cleanup_ai',
+              'processing',
+              `AI cleaning section ${sectionNum}/${totalSections}`
+            )
+          }
+        }
+      )
+
+        console.log(`[PDFProcessor] AI cleanup complete`)
+        await this.updateProgress(60, 'cleanup_ai', 'complete', 'AI cleanup done')
+      } catch (error: any) {
+        console.error(`[PDFProcessor] AI cleanup failed: ${error.message}`)
+        console.warn('[PDFProcessor] Falling back to regex-cleaned markdown')
+        // markdown already has regex cleanup, just continue
+        await this.updateProgress(60, 'cleanup_ai', 'fallback', 'Using regex cleanup only')
+      }
+    } else {
+      // AI cleanup disabled by user - use regex-only
+      console.log('[PDFProcessor] AI cleanup disabled - using regex cleanup only')
+      await this.updateProgress(60, 'cleanup_ai', 'skipped', 'AI cleanup disabled by user')
+    }
+
+    // Stage 5: Check for review mode BEFORE expensive AI chunking
+    const reviewBeforeChunking = this.job.input_data?.reviewBeforeChunking
+
+    if (reviewBeforeChunking) {
+      console.log('[PDFProcessor] Review mode enabled - skipping AI chunking')
+      console.log('[PDFProcessor] Markdown will be chunked after Obsidian review')
+      console.log('[PDFProcessor] Saved ~$0.50 by skipping pre-review chunking (already AI cleaned)')
+
+      await this.updateProgress(90, 'finalize', 'awaiting_review', 'Ready for manual review')
+
+      return {
+        markdown,
+        chunks: [], // No chunks - will be created after review
+        metadata: {
+          sourceUrl: this.job.metadata?.source_url
+        },
+        wordCount: markdown.split(/\s+/).length
+      }
+    }
+
+    // Stage 6: AI semantic chunking with metadata extraction (60-90%)
+    await this.updateProgress(65, 'chunking', 'processing', 'Creating semantic chunks')
 
     const cleanedKB = Math.round(markdown.length / 1024)
     console.log(`[PDFProcessor] Starting AI chunking on ${cleanedKB}KB markdown`)
@@ -108,9 +169,9 @@ export class PDFProcessor extends SourceProcessor {
             enableProgress: true
           },
           async (progress) => {
-            // Map progress phases to percentages: 50-90%
-            const basePercent = 50
-            const rangePercent = 40
+            // Map progress phases to percentages: 65-90%
+            const basePercent = 65
+            const rangePercent = 25
 
             let phaseProgress = 0
             if (progress.phase === 'batching') phaseProgress = 0
