@@ -21,12 +21,22 @@ interface ChunkMetadataIconProps {
  * @returns Hover card with chunk metadata
  */
 export function ChunkMetadataIcon({ chunk, chunkIndex }: ChunkMetadataIconProps) {
-  // Extract metadata (will be populated once worker adds metadata extraction)
+  // Helper function to determine polarity category
+  const getPolarity = (polarity?: number): 'positive' | 'negative' | 'neutral' | null => {
+    if (polarity === undefined || polarity === null) return null
+    if (polarity > 0.2) return 'positive'
+    if (polarity < -0.2) return 'negative'
+    return 'neutral'
+  }
+
+  // Extract metadata from chunk (now populated from database)
   const metadata = {
-    themes: chunk.position_context?.context_before ? ['processing...'] : [],
-    importanceScore: 0.75, // Placeholder - will come from chunk metadata
-    concepts: [], // Placeholder - will come from chunk metadata
-    emotionalPolarity: null as 'positive' | 'negative' | 'neutral' | null // Placeholder
+    themes: chunk.themes || [],
+    importanceScore: chunk.importance_score || 0,
+    concepts: chunk.conceptual_metadata?.concepts?.slice(0, 5).map(c => c.text) || [],
+    emotionalPolarity: getPolarity(chunk.emotional_metadata?.polarity),
+    domain: chunk.domain_metadata?.primaryDomain,
+    summary: chunk.summary
   }
 
   return (
@@ -85,6 +95,24 @@ export function ChunkMetadataIcon({ chunk, chunkIndex }: ChunkMetadataIconProps)
             </div>
           )}
 
+          {/* Summary (when available) */}
+          {metadata.summary && (
+            <div>
+              <p className="text-xs font-medium mb-1.5">Summary</p>
+              <p className="text-xs text-muted-foreground">{metadata.summary}</p>
+            </div>
+          )}
+
+          {/* Domain (when available) */}
+          {metadata.domain && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Domain:</span>
+              <Badge variant="outline" className="text-xs">
+                {metadata.domain}
+              </Badge>
+            </div>
+          )}
+
           {/* Emotional Polarity (when available) */}
           {metadata.emotionalPolarity && (
             <div className="flex items-center gap-2 text-xs">
@@ -105,7 +133,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex }: ChunkMetadataIconProps)
           )}
 
           {/* Placeholder message when no metadata */}
-          {metadata.themes.length === 0 && metadata.concepts.length === 0 && (
+          {metadata.themes.length === 0 && metadata.concepts.length === 0 && !metadata.summary && (
             <p className="text-xs text-muted-foreground">
               Metadata extraction in progress...
             </p>

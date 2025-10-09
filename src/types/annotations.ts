@@ -111,6 +111,36 @@ export interface Chunk {
   chunk_index: number
   start_offset: number  // Required for multi-chunk detection
   end_offset: number    // Required for multi-chunk detection
+
+  // AI-extracted metadata (from migration 019)
+  themes?: string[]
+  summary?: string
+  importance_score?: number
+  emotional_metadata?: {
+    polarity: number
+    primaryEmotion: string
+    intensity: number
+  }
+  conceptual_metadata?: {
+    concepts: Array<{
+      text: string
+      importance: number
+      frequency?: number
+      category?: string
+    }>
+    relationships?: Array<{
+      from: string
+      to: string
+      type: string
+      strength: number
+    }>
+  }
+  domain_metadata?: {
+    primaryDomain: string
+    confidence?: number
+    technicalDepth?: number
+  }
+
   position_context?: {
     confidence: number
     method: 'exact' | 'fuzzy' | 'approximate'

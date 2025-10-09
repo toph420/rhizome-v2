@@ -135,10 +135,22 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     const signedUrl = data.signedUrl
     const job = await getDocumentJob(id)
     
-    // Query chunks ordered by index
+    // Query chunks ordered by index with metadata
     const { data: chunks, error: chunksError } = await supabase
       .from('chunks')
-      .select('id, content, chunk_index, start_offset, end_offset')
+      .select(`
+        id,
+        content,
+        chunk_index,
+        start_offset,
+        end_offset,
+        themes,
+        summary,
+        importance_score,
+        emotional_metadata,
+        conceptual_metadata,
+        domain_metadata
+      `)
       .eq('document_id', id)
       .order('chunk_index', { ascending: true })
     
