@@ -66,10 +66,13 @@ export interface BatchedExtractionResult {
 
 /**
  * Default batch configuration for large PDFs.
+ * Optimized for maximum reliability: 25 pages/batch with 3-page overlap.
+ * Small batches = shorter API calls = lower timeout/network error risk.
+ * Cost impact: ~$0.02 per 500-page book (negligible).
  */
 export const DEFAULT_BATCH_CONFIG: BatchConfig = {
-  pagesPerBatch: 100,
-  overlapPages: 10,
+  pagesPerBatch: 25,
+  overlapPages: 3,
   model: GEMINI_MODEL,
   maxOutputTokens: MAX_OUTPUT_TOKENS
 }
@@ -171,7 +174,24 @@ export function calculateBatchRanges(
 }
 
 /**
- * Extract a single batch of pages from a PDF.
+ * Helper to check if error is transient (should retry).
+ * Uses same logic as worker/lib/errors.ts for consistency.
+ */
+function isTransientError(error: Error): boolean {
+  const message = error.message.toLowerCase()
+  return message.includes('fetch failed') ||
+         message.includes('network') ||
+         message.includes('timeout') ||
+         message.includes('econnrefused') ||
+         message.includes('econnreset') ||
+         message.includes('500') ||
+         message.includes('503') ||
+         message.includes('unavailable') ||
+         message.includes('429')
+}
+
+/**
+ * Extract a single batch of pages from a PDF with retry logic.
  *
  * @param ai - Google AI client
  * @param fileUri - URI of uploaded PDF file
@@ -190,76 +210,107 @@ export async function extractBatch(
   config: Partial<BatchConfig> = {}
 ): Promise<ExtractionBatch> {
   const { model, maxOutputTokens } = { ...DEFAULT_BATCH_CONFIG, ...config }
+  const maxRetries = 3
   const startTime = Date.now()
 
-  try {
-    console.log(
-      `[PDFBatch] Extracting batch ${batchNumber}: ` +
-      `pages ${startPage}-${endPage}`
-    )
+  // Retry loop with exponential backoff
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const attemptLog = attempt > 0 ? ` (attempt ${attempt + 1}/${maxRetries + 1})` : ''
+      console.log(
+        `[PDFBatch] Extracting batch ${batchNumber}: ` +
+        `pages ${startPage}-${endPage}${attemptLog}`
+      )
 
-    const result = await ai.models.generateContent({
-      model,
-      contents: [{
-        parts: [
-          { fileData: { fileUri, mimeType: 'application/pdf' } },
-          { text: generateBatchedPdfExtractionPrompt(startPage, endPage) }
-        ]
-      }],
-      config: {
-        maxOutputTokens,
-        temperature: 0.1
+      const result = await ai.models.generateContent({
+        model,
+        contents: [{
+          parts: [
+            { fileData: { fileUri, mimeType: 'application/pdf' } },
+            { text: generateBatchedPdfExtractionPrompt(startPage, endPage) }
+          ]
+        }],
+        config: {
+          maxOutputTokens,
+          temperature: 0.1
+        }
+      })
+
+      let markdown = result.text?.trim() || ''
+
+      // Clean up markdown (remove code block wrappers if present)
+      if (markdown.startsWith('```markdown')) {
+        markdown = markdown.replace(/^```markdown\s*\n?/, '').replace(/\n?```\s*$/, '')
+      } else if (markdown.startsWith('```')) {
+        markdown = markdown.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
       }
-    })
 
-    let markdown = result.text?.trim() || ''
+      if (!markdown || markdown.length < 20) {
+        throw new Error(`Insufficient content extracted (${markdown.length} chars)`)
+      }
 
-    // Clean up markdown (remove code block wrappers if present)
-    if (markdown.startsWith('```markdown')) {
-      markdown = markdown.replace(/^```markdown\s*\n?/, '').replace(/\n?```\s*$/, '')
-    } else if (markdown.startsWith('```')) {
-      markdown = markdown.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
+      // Apply post-processing cleanup to remove page artifacts Gemini might have missed
+      markdown = cleanPageArtifacts(markdown)
+
+      const extractionTime = Date.now() - startTime
+
+      console.log(
+        `[PDFBatch] Batch ${batchNumber} complete: ` +
+        `${markdown.length} chars in ${(extractionTime / 1000).toFixed(1)}s`
+      )
+
+      return {
+        batchNumber,
+        startPage,
+        endPage,
+        markdown,
+        success: true,
+        extractionTime
+      }
+    } catch (error: any) {
+      // Check if we should retry
+      if (isTransientError(error) && attempt < maxRetries) {
+        const delay = Math.min(2000 * Math.pow(2, attempt), 16000) // 2s, 4s, 8s, max 16s
+        console.warn(
+          `[PDFBatch] Batch ${batchNumber} failed with transient error: ${error.message}`
+        )
+        console.log(
+          `[PDFBatch] Retrying batch ${batchNumber} in ${delay}ms ` +
+          `(attempt ${attempt + 2}/${maxRetries + 1})...`
+        )
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+
+      // Permanent error or max retries reached
+      const extractionTime = Date.now() - startTime
+      console.error(
+        `[PDFBatch] Batch ${batchNumber} failed after ${(extractionTime / 1000).toFixed(1)}s:`,
+        error.message
+      )
+
+      return {
+        batchNumber,
+        startPage,
+        endPage,
+        markdown: '',
+        success: false,
+        error,
+        extractionTime
+      }
     }
+  }
 
-    if (!markdown || markdown.length < 20) {
-      throw new Error(`Insufficient content extracted (${markdown.length} chars)`)
-    }
-
-    // Apply post-processing cleanup to remove page artifacts Gemini might have missed
-    markdown = cleanPageArtifacts(markdown)
-
-    const extractionTime = Date.now() - startTime
-
-    console.log(
-      `[PDFBatch] Batch ${batchNumber} complete: ` +
-      `${markdown.length} chars in ${(extractionTime / 1000).toFixed(1)}s`
-    )
-
-    return {
-      batchNumber,
-      startPage,
-      endPage,
-      markdown,
-      success: true,
-      extractionTime
-    }
-  } catch (error: any) {
-    const extractionTime = Date.now() - startTime
-
-    console.error(
-      `[PDFBatch] Batch ${batchNumber} failed after ${(extractionTime / 1000).toFixed(1)}s:`,
-      error.message
-    )
-
-    return {
-      batchNumber,
-      startPage,
-      endPage,
-      markdown: '',
-      success: false,
-      error,
-      extractionTime
-    }
+  // Should never reach here, but satisfy TypeScript
+  const extractionTime = Date.now() - startTime
+  return {
+    batchNumber,
+    startPage,
+    endPage,
+    markdown: '',
+    success: false,
+    error: new Error('Max retries exceeded'),
+    extractionTime
   }
 }
 
