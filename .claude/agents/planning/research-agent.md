@@ -6,7 +6,6 @@ description: >
   documentation, industry best practices, and implementation patterns from
   external sources.
 tools: WebSearch, WebFetch
-model: opus
 ---
 
 # Purpose
@@ -38,12 +37,6 @@ When invoked, you must focus exclusively on external research:
    - Research API specifications and integration patterns
    - Study configuration options and advanced features
    - Find official examples and recommended practices
-   
-If Archon RAG is available and relevant:
-- Use `mcp__archon__rag_get_available_sources()` to see available documentation
-- Search for relevant patterns: `mcp__archon__rag_search_knowledge_base(query="...")`
-- Find code examples: `mcp__archon__rag_search_code_examples(query="...")`
-- Focus on implementation patterns, best practices, and similar features
 
 4. **Implementation Examples Research**
    - Use WebSearch to find real-world implementation examples
