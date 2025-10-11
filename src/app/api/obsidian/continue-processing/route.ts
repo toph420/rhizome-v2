@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js'
  */
 export async function POST(request: NextRequest) {
   try {
-    const { documentId } = await request.json()
+    const { documentId, skipAiCleanup = false } = await request.json()
 
     if (!documentId) {
       return NextResponse.json(
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
         job_type: 'continue-processing',
         status: 'pending',
         user_id: devUserId,
-        input_data: { documentId, userId: devUserId },
+        input_data: { documentId, userId: devUserId, skipAiCleanup },
         max_retries: 3
       })
       .select()

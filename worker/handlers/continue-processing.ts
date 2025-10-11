@@ -36,16 +36,20 @@ export interface ContinueProcessingResult {
 
 /**
  * Continue processing a document from awaiting_manual_review state
- * Runs chunking → embeddings → collision detection
+ * Handles two review stages:
+ * 1. docling_extraction: Can run AI cleanup or skip to chunking
+ * 2. ai_cleanup: Just run chunking (AI cleanup already done)
  *
  * @param documentId - Document to continue processing
  * @param userId - User ID
  * @param jobId - Optional job ID for progress tracking
+ * @param skipAiCleanup - Skip AI cleanup (only for docling_extraction stage)
  */
 export async function continueProcessing(
   documentId: string,
   userId: string,
-  jobId?: string
+  jobId?: string,
+  skipAiCleanup: boolean = false
 ): Promise<ContinueProcessingResult> {
   const supabase = getSupabaseClient()
 
@@ -73,7 +77,7 @@ export async function continueProcessing(
     // 1. Get document
     const { data: document } = await supabase
       .from('documents')
-      .select('id, markdown_path, processing_status, obsidian_path')
+      .select('id, markdown_path, processing_status, obsidian_path, review_stage')
       .eq('id', documentId)
       .single()
 
@@ -84,6 +88,9 @@ export async function continueProcessing(
     if (document.processing_status !== 'awaiting_manual_review') {
       throw new Error(`Invalid status: ${document.processing_status}. Expected: awaiting_manual_review`)
     }
+
+    const reviewStage = document.review_stage as 'docling_extraction' | 'ai_cleanup' | null
+    console.log(`[ContinueProcessing] Review stage: ${reviewStage}, skipAiCleanup: ${skipAiCleanup}`)
 
     // 2. Sync latest version from Obsidian (if it was edited)
     // This is a simple sync - no annotation recovery needed
@@ -110,18 +117,58 @@ export async function continueProcessing(
       throw new Error('Failed to download markdown from storage')
     }
 
-    const markdown = await blob.text()
+    let markdown = await blob.text()
     console.log(`[ContinueProcessing] Markdown loaded (${Math.round(markdown.length / 1024)}KB)`)
     await updateProgress(15, 'Markdown loaded')
 
-    // 4. Set processing status
+    // 4. Handle AI cleanup if needed (only for docling_extraction stage)
+    if (reviewStage === 'docling_extraction' && !skipAiCleanup) {
+      console.log('[ContinueProcessing] Running AI cleanup on Docling extraction...')
+      await updateProgress(20, 'AI cleaning markdown...')
+
+      const { cleanPdfMarkdown } = await import('../lib/markdown-cleanup-ai.js')
+      const { GoogleGenAI } = await import('@google/genai')
+      const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! })
+
+      markdown = await cleanPdfMarkdown(ai, markdown, {
+        onProgress: async (section, total) => {
+          const percent = 20 + Math.floor((section / total) * 30) // 20-50%
+          await updateProgress(percent, `AI cleaning section ${section}/${total}`)
+        }
+      })
+
+      console.log(`[ContinueProcessing] ✓ AI cleanup complete (${Math.round(markdown.length / 1024)}KB)`)
+
+      // Save cleaned markdown back to storage
+      await updateProgress(51, 'Saving cleaned markdown...')
+      const markdownBlob = new Blob([markdown], { type: 'text/plain' })
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .update(document.markdown_path, markdownBlob, {
+          contentType: 'text/plain',
+          upsert: true
+        })
+
+      if (uploadError) {
+        console.warn(`[ContinueProcessing] ⚠️ Failed to save cleaned markdown: ${uploadError.message}`)
+      } else {
+        console.log('[ContinueProcessing] ✓ Cleaned markdown saved to storage')
+      }
+
+      await updateProgress(55, 'AI cleanup complete')
+    }
+
+    // 5. Set processing status and clear review_stage
     await supabase
       .from('documents')
-      .update({ processing_status: 'processing' })
+      .update({
+        processing_status: 'processing',
+        review_stage: null // Clear review stage now that we're continuing
+      })
       .eq('id', documentId)
 
-    // 5. Run AI chunking
-    await updateProgress(20, 'Starting AI chunking...')
+    // 6. Run AI chunking
+    await updateProgress(60, 'Starting AI chunking...')
     const { batchChunkAndExtractMetadata } = await import('../lib/ai-chunking-batch.js')
 
     const aiChunks = await batchChunkAndExtractMetadata(
@@ -134,16 +181,16 @@ export async function continueProcessing(
     )
 
     console.log(`[ContinueProcessing] Created ${aiChunks.length} chunks`)
-    await updateProgress(60, `Created ${aiChunks.length} semantic chunks`)
+    await updateProgress(80, `Created ${aiChunks.length} semantic chunks`)
 
-    // 6. Generate embeddings
-    await updateProgress(65, 'Generating embeddings...')
+    // 7. Generate embeddings
+    await updateProgress(85, 'Generating embeddings...')
     const { generateEmbeddings } = await import('../lib/embeddings.js')
     const embeddings = await generateEmbeddings(aiChunks.map(c => c.content))
     console.log(`[ContinueProcessing] Generated ${embeddings.length} embeddings`)
-    await updateProgress(70, 'Embeddings generated')
+    await updateProgress(88, 'Embeddings generated')
 
-    // 7. Map chunks to database schema
+    // 8. Map chunks to database schema
     const chunksToInsert = aiChunks.map((chunk, index) => ({
       document_id: documentId,
       chunk_index: index,
@@ -174,7 +221,7 @@ export async function continueProcessing(
       is_current: true
     }))
 
-    // 8. Insert chunks into database
+    // 9. Insert chunks into database
     console.log(`[ContinueProcessing] Saving ${chunksToInsert.length} chunks to database`)
     const { error: insertError } = await supabase
       .from('chunks')
@@ -185,10 +232,10 @@ export async function continueProcessing(
     }
 
     console.log(`[ContinueProcessing] ✓ Saved ${chunksToInsert.length} chunks`)
-    await updateProgress(75, 'Chunks saved to database')
+    await updateProgress(90, 'Chunks saved to database')
 
-    // 9. Queue collision detection job
-    await updateProgress(80, 'Queueing collision detection...')
+    // 10. Queue collision detection job
+    await updateProgress(92, 'Queueing collision detection...')
 
     // Check for existing active jobs to avoid duplicates
     const { data: existingJobs } = await supabase
@@ -225,9 +272,9 @@ export async function continueProcessing(
       }
     }
 
-    await updateProgress(90, 'Collision detection queued')
+    await updateProgress(95, 'Collision detection queued')
 
-    // 10. Mark document as completed
+    // 11. Mark document as completed
     await supabase
       .from('documents')
       .update({

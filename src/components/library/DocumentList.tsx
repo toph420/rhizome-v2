@@ -17,6 +17,7 @@ interface Document {
   title: string
   processing_status: string
   processing_stage?: string
+  review_stage?: 'docling_extraction' | 'ai_cleanup' | null
   created_at: string
   markdown_available: boolean
   embeddings_available: boolean
@@ -89,7 +90,7 @@ export function DocumentList() {
         console.log('[DocumentList] Polling for processing updates...')
         const { data } = await supabase
           .from('documents')
-          .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
+          .select('id, title, processing_status, processing_stage, review_stage, created_at, markdown_available, embeddings_available')
           .eq('user_id', userId)
           .eq('processing_status', 'processing')
 
@@ -118,7 +119,7 @@ export function DocumentList() {
     setLoading(true)
     const { data } = await supabase
       .from('documents')
-      .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
+      .select('id, title, processing_status, processing_stage, review_stage, created_at, markdown_available, embeddings_available')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
@@ -194,7 +195,7 @@ export function DocumentList() {
     }
   }
 
-  async function continueProcessing(documentId: string) {
+  async function continueProcessing(documentId: string, skipAiCleanup: boolean = false) {
     setProcessing(documentId)
 
     try {
@@ -202,7 +203,7 @@ export function DocumentList() {
       const response = await fetch('/api/obsidian/continue-processing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId })
+        body: JSON.stringify({ documentId, skipAiCleanup })
       })
 
       if (!response.ok) {
@@ -213,7 +214,9 @@ export function DocumentList() {
       const { jobId } = await response.json()
 
       toast.info('Processing Started', {
-        description: 'Chunking document - this may take a few minutes'
+        description: skipAiCleanup
+          ? 'Chunking document (skipping AI cleanup) - this may take a few minutes'
+          : 'Chunking document - this may take a few minutes'
       })
 
       // Poll for completion
@@ -340,19 +343,53 @@ export function DocumentList() {
                         <ExternalLink className="h-4 w-4 mr-2" />
                         Review in Obsidian
                       </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => continueProcessing(doc.id)}
-                        disabled={processing === doc.id}
-                        data-testid="continue-processing-button"
-                      >
-                        {processing === doc.id ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Play className="h-4 w-4 mr-2" />
-                        )}
-                        Continue Processing
-                      </Button>
+                      {doc.review_stage === 'docling_extraction' ? (
+                        // After Docling extraction: Offer two options
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => continueProcessing(doc.id, true)}
+                            disabled={processing === doc.id}
+                            data-testid="skip-ai-cleanup-button"
+                          >
+                            {processing === doc.id ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Skip AI Cleanup
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => continueProcessing(doc.id, false)}
+                            disabled={processing === doc.id}
+                            data-testid="continue-with-ai-button"
+                          >
+                            {processing === doc.id ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Continue with AI Cleanup
+                          </Button>
+                        </>
+                      ) : (
+                        // After AI cleanup: Just continue to chunking
+                        <Button
+                          size="sm"
+                          onClick={() => continueProcessing(doc.id, false)}
+                          disabled={processing === doc.id}
+                          data-testid="continue-processing-button"
+                        >
+                          {processing === doc.id ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4 mr-2" />
+                          )}
+                          Continue Processing
+                        </Button>
+                      )}
                     </>
                   )}
                   <Button

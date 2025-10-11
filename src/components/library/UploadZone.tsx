@@ -80,6 +80,8 @@ export function UploadZone() {
   const [error, setError] = useState<string | null>(null)
   const [reviewBeforeChunking, setReviewBeforeChunking] = useState(false)
   const [cleanMarkdown, setCleanMarkdown] = useState(true) // Default to true - cleanup enabled
+  const [reviewDoclingExtraction, setReviewDoclingExtraction] = useState(false)
+  const [extractImages, setExtractImages] = useState(false)
 
   // Debug: Log state changes
   useEffect(() => {
@@ -310,6 +312,14 @@ export function UploadZone() {
       formData.append('cleanMarkdown', cleanMarkdown.toString())
       console.log('[UploadZone] DEBUG cleanMarkdown formData value:', formData.get('cleanMarkdown'))
 
+      console.log('[UploadZone] DEBUG reviewDoclingExtraction state:', reviewDoclingExtraction)
+      formData.append('reviewDoclingExtraction', reviewDoclingExtraction.toString())
+      console.log('[UploadZone] DEBUG reviewDoclingExtraction formData value:', formData.get('reviewDoclingExtraction'))
+
+      console.log('[UploadZone] DEBUG extractImages state:', extractImages)
+      formData.append('extractImages', extractImages.toString())
+      console.log('[UploadZone] DEBUG extractImages formData value:', formData.get('extractImages'))
+
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
         // Manual file upload from DocumentPreview
@@ -343,7 +353,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewBeforeChunking, cleanMarkdown])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewBeforeChunking, cleanMarkdown, reviewDoclingExtraction, extractImages])
 
   /**
    * Handles metadata preview cancellation.
@@ -569,6 +579,10 @@ export function UploadZone() {
               onReviewBeforeChunkingChange={setReviewBeforeChunking}
               cleanMarkdown={cleanMarkdown}
               onCleanMarkdownChange={setCleanMarkdown}
+              reviewDoclingExtraction={reviewDoclingExtraction}
+              onReviewDoclingExtractionChange={setReviewDoclingExtraction}
+              extractImages={extractImages}
+              onExtractImagesChange={setExtractImages}
             />
           ) : uploadPhase === 'detecting' ? (
             <Card className="p-12 text-center">

@@ -235,13 +235,24 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     await updateStage(supabase, job.id, 'markdown_saved')
 
     // NEW: Check if manual review is requested - if so, pause BEFORE saving chunks
-    const { reviewBeforeChunking = false } = job.input_data as any
+    const { reviewBeforeChunking = false, reviewDoclingExtraction = false } = job.input_data as any
 
-    if (reviewBeforeChunking) {
-      console.log('[ProcessDocument] Review mode - pausing before saving chunks')
+    // Check if we're pausing after Docling extraction (before AI cleanup)
+    // This happens when processor returns empty chunks and reviewDoclingExtraction = true
+    const isDoclingReview = reviewDoclingExtraction && result.chunks.length === 0
 
-      // Discard the chunks the processor created - we'll re-chunk after review
-      console.log(`[ProcessDocument] Discarding ${result.chunks.length} pre-review chunks`)
+    if (reviewBeforeChunking || isDoclingReview) {
+      const reviewStage = isDoclingReview ? 'docling_extraction' : 'ai_cleanup'
+      const reviewMessage = isDoclingReview
+        ? 'Review Docling extraction in Obsidian, then choose: Continue with AI cleanup, or Skip AI cleanup'
+        : 'Review markdown in Obsidian, then click "Continue Processing"'
+
+      console.log(`[ProcessDocument] Review mode (${reviewStage}) - pausing before ${isDoclingReview ? 'AI cleanup' : 'chunking'}`)
+
+      if (!isDoclingReview) {
+        // Discard the chunks the processor created - we'll re-chunk after review
+        console.log(`[ProcessDocument] Discarding ${result.chunks.length} pre-review chunks`)
+      }
 
       // Export to Obsidian for review
       const { exportToObsidian } = await import('./obsidian-sync.js')
@@ -253,38 +264,43 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         console.warn(`[ProcessDocument] ⚠️ Export failed: ${exportResult.error}`)
       }
 
-      // Pause pipeline
+      // Pause pipeline with review stage
       await supabase
         .from('documents')
-        .update({ processing_status: 'awaiting_manual_review' })
+        .update({
+          processing_status: 'awaiting_manual_review',
+          review_stage: reviewStage
+        })
         .eq('id', document_id)
 
       await supabase
         .from('background_jobs')
         .update({
           progress: {
-            percent: 50,
+            percent: isDoclingReview ? 40 : 50,
             stage: 'awaiting_manual_review',
-            details: 'Exported to Obsidian - awaiting manual review'
+            details: `Exported to Obsidian - ${reviewMessage}`
           },
           status: 'completed',
           output_data: {
             success: true,
             status: 'awaiting_manual_review',
-            message: 'Review markdown in Obsidian, then click "Continue Processing"',
+            review_stage: reviewStage,
+            message: reviewMessage,
             exportPath: exportResult.path,
             exportUri: exportResult.uri,
-            discardedChunks: result.chunks.length
+            discardedChunks: isDoclingReview ? 0 : result.chunks.length
           },
           completed_at: new Date().toISOString()
         })
         .eq('id', job.id)
 
-      console.log('[ProcessDocument] ⏸️ Paused - chunks will be created after review')
+      console.log(`[ProcessDocument] ⏸️ Paused at ${reviewStage} stage`)
       return {
         success: true,
         status: 'awaiting_manual_review',
-        message: 'Review markdown in Obsidian, then click "Continue Processing"'
+        review_stage: reviewStage,
+        message: reviewMessage
       }
     }
 

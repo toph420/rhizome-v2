@@ -306,8 +306,55 @@ export async function cleanPdfMarkdown(
   // Large documents: split at ## headings
   console.log('[markdown-cleanup-ai] Large PDF (>100K chars), splitting at ## headings')
 
-  const sections = markdown.split(/(?=\n##\s)/)  // Split BEFORE ## headings
-  console.log(`[markdown-cleanup-ai] Split into ${sections.length} sections`)
+  const allSections = markdown.split(/(?=\n##\s)/)  // Split BEFORE ## headings
+  console.log(`[markdown-cleanup-ai] Raw split: ${allSections.length} sections`)
+
+  // Filter out spurious headings (single letters, Roman numerals, etc.)
+  const sections: string[] = []
+  let currentMerged = ''
+
+  for (let i = 0; i < allSections.length; i++) {
+    const section = allSections[i]
+
+    // Extract heading text if present
+    const headingMatch = section.match(/^##\s+(.+?)$/m)
+
+    if (!headingMatch) {
+      // No heading, merge with current
+      currentMerged += section
+      continue
+    }
+
+    const headingText = headingMatch[1].trim()
+
+    // Check if this is a false positive heading
+    const singleLetterOrRoman = /^[IVXLCDM]$|^\d+$/i.test(headingText)
+    const tooShort = headingText.length < 3
+    const commonIndexTerms = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|A|B|C|D|E|INDEX|NOTES|PAGE|PART|SECTION|CHAPTER)$/i.test(headingText)
+
+    if (singleLetterOrRoman || (tooShort && !headingText.match(/\s/)) || commonIndexTerms) {
+      // False positive - merge with current section
+      console.log(`[markdown-cleanup-ai] Filtering spurious heading: "${headingText}"`)
+      currentMerged += section
+      continue
+    }
+
+    // Valid heading - save current merged section if any
+    if (currentMerged) {
+      sections.push(currentMerged)
+      currentMerged = ''
+    }
+
+    // Start new section
+    currentMerged = section
+  }
+
+  // Don't forget last merged section
+  if (currentMerged) {
+    sections.push(currentMerged)
+  }
+
+  console.log(`[markdown-cleanup-ai] After filtering: ${sections.length} sections (removed ${allSections.length - sections.length} spurious headings)`)
 
   const cleanedSections: string[] = []
 

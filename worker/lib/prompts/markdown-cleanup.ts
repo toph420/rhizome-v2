@@ -182,7 +182,9 @@ IMPORTANT: Return ONLY the cleaned markdown. No explanations, no wrapper text, j
 
 
 export function generateMarkdownCleanupPrompt(): string {
-  return `you're a markdown beautifier, clean this document up, dont remove any of the important content, but get rid of anomalies and make it look pretty. Make sure the weird line breaks are cleaned up.
+  return `you're a markdown beautifier, clean this document up, dont remove any of the important content, but get rid of anomalies and make it look pretty. Make sure the weird line breaks are cleaned up. If you see any weird artifacts that look like they came from a pdf or ebook conversion, remove them. Make sure to keep all the headings, footnotes, and important formatting. If there are too many line breaks in a row, reduce them to just two. If there are any page numbers or headers/footers, remove them. If there are any weird characters or symbols that don't belong, remove them. If there are any lists that are not formatted correctly, fix them. If there are any horizontal rules (---), make sure they are preserved. If there are any blockquotes, make sure they are preserved. If there are any code blocks, make sure they are preserved. If there are any links, make sure they are preserved. If there are any images, make sure they are preserved. If there are any tables, make sure they are preserved. If there are any footnotes, make sure they are preserved. If there are any citations, make sure they are preserved. If there are any references, make sure they are preserved. If there are any special characters (like curly quotes, em dashes, etc.), make sure they are preserved.
+
+  Review the document for clearly out of place entities, words that may have gotten garbled in the pdf extraction, fix them if you're confident, just be sure to maintain the original meaning and intent of the text. If you're not sure, leave it as is.
 
 IMPORTANT: Return ONLY the cleaned markdown. No explanations, no wrapper text, just the cleaned content.`.trim()
 }
