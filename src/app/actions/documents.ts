@@ -61,6 +61,24 @@ export async function uploadDocument(formData: FormData): Promise<{
     const sourceUrl = formData.get('source_url') as string | null
     const processingRequested = formData.get('processing_requested') === 'true'
     const pastedContent = formData.get('pasted_content') as string | null
+    const reviewBeforeChunkingRaw = formData.get('reviewBeforeChunking')
+    const reviewBeforeChunking = reviewBeforeChunkingRaw === 'true'
+
+    const cleanMarkdownRaw = formData.get('cleanMarkdown')
+    const cleanMarkdown = cleanMarkdownRaw !== 'false' // Default to true
+
+    const reviewDoclingExtractionRaw = formData.get('reviewDoclingExtraction')
+    const reviewDoclingExtraction = reviewDoclingExtractionRaw === 'true'
+
+    const extractImagesRaw = formData.get('extractImages')
+    const extractImages = extractImagesRaw === 'true'
+
+    console.log('[uploadDocument] Processing flags DEBUG:', {
+      reviewBeforeChunking: { raw: reviewBeforeChunkingRaw, parsed: reviewBeforeChunking },
+      cleanMarkdown: { raw: cleanMarkdownRaw, parsed: cleanMarkdown },
+      reviewDoclingExtraction: { raw: reviewDoclingExtractionRaw, parsed: reviewDoclingExtraction },
+      extractImages: { raw: extractImagesRaw, parsed: extractImages }
+    })
 
     // Extract document metadata (from preview)
     const documentType = formData.get('document_type') as string | null
@@ -253,7 +271,11 @@ export async function uploadDocument(formData: FormData): Promise<{
           processing_requested: processingRequested,
           pasted_content: pastedContent,
           // Include document metadata for worker
-          document_type: documentType
+          document_type: documentType,
+          reviewBeforeChunking: reviewBeforeChunking,
+          cleanMarkdown: cleanMarkdown,
+          reviewDoclingExtraction: reviewDoclingExtraction,
+          extractImages: extractImages
         }
       })
       .select()

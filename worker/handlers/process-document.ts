@@ -86,13 +86,38 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       // ✅ STEP 2: NO CACHE, RUN AI PROCESSING
       console.log(`🤖 No cache found, running AI processing`)
 
+      // ✅ CHECK: Should we pause for manual review BEFORE chunking?
+      const { reviewBeforeChunking = false } = job.input_data as any
+
+      if (reviewBeforeChunking) {
+        console.log('[ProcessDocument] Review before chunking enabled - will pause after extraction')
+        // Continue with processor, but we'll pause before chunking later
+      }
+
       // Create processor using router
       processor = ProcessorRouter.createProcessor(sourceType, ai, supabase, job)
 
       // ✅ START HEARTBEAT: Update job timestamp every 5 minutes during long processing
+      // Also checks for job cancellation
+      let jobCancelled = false
       const heartbeatInterval = setInterval(async () => {
         console.log('[Heartbeat] Updating job timestamp to prevent stale detection...')
         try {
+          // Check if job has been cancelled
+          const { data: currentJob } = await supabase
+            .from('background_jobs')
+            .select('status')
+            .eq('id', job.id)
+            .single()
+
+          if (currentJob?.status === 'cancelled') {
+            console.log('[Heartbeat] ⚠️  Job has been cancelled - stopping processing')
+            jobCancelled = true
+            clearInterval(heartbeatInterval)
+            return
+          }
+
+          // Update timestamp if still processing
           await supabase
             .from('background_jobs')
             .update({
@@ -108,6 +133,11 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
         // Process document with AI
         console.log(`🚀 Starting processing with ${processor.constructor.name}`)
         result = await processor.process()
+
+        // Check if job was cancelled during processing
+        if (jobCancelled) {
+          throw new Error('Job was cancelled during processing')
+        }
       } finally {
         // ✅ ALWAYS CLEANUP: Stop heartbeat when processing completes or fails
         clearInterval(heartbeatInterval)
@@ -203,7 +233,77 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
 
     // Update stage after markdown saved
     await updateStage(supabase, job.id, 'markdown_saved')
-    
+
+    // NEW: Check if manual review is requested - if so, pause BEFORE saving chunks
+    const { reviewBeforeChunking = false, reviewDoclingExtraction = false } = job.input_data as any
+
+    // Check if we're pausing after Docling extraction (before AI cleanup)
+    // This happens when processor returns empty chunks and reviewDoclingExtraction = true
+    const isDoclingReview = reviewDoclingExtraction && result.chunks.length === 0
+
+    if (reviewBeforeChunking || isDoclingReview) {
+      const reviewStage = isDoclingReview ? 'docling_extraction' : 'ai_cleanup'
+      const reviewMessage = isDoclingReview
+        ? 'Review Docling extraction in Obsidian, then choose: Continue with AI cleanup, or Skip AI cleanup'
+        : 'Review markdown in Obsidian, then click "Continue Processing"'
+
+      console.log(`[ProcessDocument] Review mode (${reviewStage}) - pausing before ${isDoclingReview ? 'AI cleanup' : 'chunking'}`)
+
+      if (!isDoclingReview) {
+        // Discard the chunks the processor created - we'll re-chunk after review
+        console.log(`[ProcessDocument] Discarding ${result.chunks.length} pre-review chunks`)
+      }
+
+      // Export to Obsidian for review
+      const { exportToObsidian } = await import('./obsidian-sync.js')
+      const exportResult = await exportToObsidian(document_id, userId)
+
+      if (exportResult.success) {
+        console.log(`[ProcessDocument] ✓ Exported to Obsidian: ${exportResult.path}`)
+      } else {
+        console.warn(`[ProcessDocument] ⚠️ Export failed: ${exportResult.error}`)
+      }
+
+      // Pause pipeline with review stage
+      await supabase
+        .from('documents')
+        .update({
+          processing_status: 'awaiting_manual_review',
+          review_stage: reviewStage
+        })
+        .eq('id', document_id)
+
+      await supabase
+        .from('background_jobs')
+        .update({
+          progress: {
+            percent: isDoclingReview ? 40 : 50,
+            stage: 'awaiting_manual_review',
+            details: `Exported to Obsidian - ${reviewMessage}`
+          },
+          status: 'completed',
+          output_data: {
+            success: true,
+            status: 'awaiting_manual_review',
+            review_stage: reviewStage,
+            message: reviewMessage,
+            exportPath: exportResult.path,
+            exportUri: exportResult.uri,
+            discardedChunks: isDoclingReview ? 0 : result.chunks.length
+          },
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', job.id)
+
+      console.log(`[ProcessDocument] ⏸️ Paused at ${reviewStage} stage`)
+      return {
+        success: true,
+        status: 'awaiting_manual_review',
+        review_stage: reviewStage,
+        message: reviewMessage
+      }
+    }
+
     // Generate embeddings for chunks
     console.log(`🔢 Generating embeddings for ${result.chunks.length} chunks`)
     const chunkTexts = result.chunks.map(chunk => chunk.content).filter(text => text && text.trim().length > 0)

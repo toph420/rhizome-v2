@@ -17,7 +17,7 @@ import type {
  */
 const CreateAnnotationSchema = z.object({
   text: z.string().min(1).max(5000),
-  chunkIds: z.array(z.string().uuid()).min(1).max(5), // Array of chunk IDs (max 5)
+  chunkIds: z.array(z.string().uuid()).min(0).max(5).default([]), // Array of chunk IDs (min 0 allows gap regions)
   documentId: z.string().uuid(),
   startOffset: z.number().int().min(0),
   endOffset: z.number().int().min(0),
@@ -53,21 +53,25 @@ export async function createAnnotation(
     const ecs = createECS()
     const supabase = await createClient()
 
-    // Get primary chunk (first in array)
-    const primaryChunkId = validated.chunkIds[0]
+    // Get primary chunk (first in array, or null for gap regions)
+    const primaryChunkId = validated.chunkIds.length > 0 ? validated.chunkIds[0] : null
 
     // ENHANCEMENT: Find chunk index for chunk-bounded recovery
     // This enables 50-75x performance boost during annotation recovery
-    const { data: chunks } = await supabase
-      .from('chunks')
-      .select('id, chunk_index, start_offset, end_offset')
-      .eq('document_id', validated.documentId)
-      .eq('is_current', true)
-      .order('chunk_index')
+    // Skip if no chunks (gap region annotation)
+    let chunkIndex = -1
+    if (primaryChunkId) {
+      const { data: chunks } = await supabase
+        .from('chunks')
+        .select('id, chunk_index, start_offset, end_offset')
+        .eq('document_id', validated.documentId)
+        .eq('is_current', true)
+        .order('chunk_index')
 
-    const chunkIndex = chunks?.findIndex(
-      c => c.id === primaryChunkId
-    ) ?? -1
+      chunkIndex = chunks?.findIndex(
+        c => c.id === primaryChunkId
+      ) ?? -1
+    }
 
     // Create entity with 3 components
     const entityId = await ecs.createEntity(user.id, {
@@ -96,7 +100,7 @@ export async function createAnnotation(
         originalChunkIndex: chunkIndex >= 0 ? chunkIndex : undefined, // For chunk-bounded recovery
       },
       source: {
-        chunk_id: primaryChunkId, // Primary chunk for ECS filtering
+        chunk_id: primaryChunkId || null, // Primary chunk for ECS filtering (null for gap regions)
         chunk_ids: validated.chunkIds, // All chunks for connection graph queries
         document_id: validated.documentId,
       },

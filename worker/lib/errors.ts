@@ -15,7 +15,7 @@ export function classifyError(error: Error): ErrorType {
   const message = error.message
   
   // Transient errors - retry possible
-  if (message.startsWith('YOUTUBE_RATE_LIMIT') || 
+  if (message.startsWith('YOUTUBE_RATE_LIMIT') ||
       message.startsWith('WEB_TIMEOUT') ||
       message.startsWith('WEB_NETWORK_ERROR') ||
       message.includes('rate limit') ||
@@ -23,8 +23,12 @@ export function classifyError(error: Error): ErrorType {
       message.includes('timeout') ||
       message.includes('timed out') ||
       message.includes('network') ||
+      message.includes('fetch failed') ||  // Network errors from Gemini API
+      message.includes('ECONNREFUSED') ||
       message.includes('econnrefused') ||
+      message.includes('ECONNRESET') ||
       message.includes('econnreset') ||
+      message.includes('500') ||  // Internal server error (Gemini recommends retry)
       message.includes('503') ||
       message.includes('unavailable')) {
     return 'transient'

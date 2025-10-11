@@ -6,15 +6,18 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { FileText, Eye, Loader2, Trash2 } from 'lucide-react'
+import { FileText, Eye, Loader2, Trash2, Pause, Play, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { deleteDocument } from '@/app/actions/admin'
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
 
 interface Document {
   id: string
   title: string
   processing_status: string
   processing_stage?: string
+  review_stage?: 'docling_extraction' | 'ai_cleanup' | null
   created_at: string
   markdown_available: boolean
   embeddings_available: boolean
@@ -29,6 +32,8 @@ export function DocumentList() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [processing, setProcessing] = useState<string | null>(null)
+  const router = useRouter()
 
   useEffect(() => {
     const supabase = createClient()
@@ -85,7 +90,7 @@ export function DocumentList() {
         console.log('[DocumentList] Polling for processing updates...')
         const { data } = await supabase
           .from('documents')
-          .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
+          .select('id, title, processing_status, processing_stage, review_stage, created_at, markdown_available, embeddings_available')
           .eq('user_id', userId)
           .eq('processing_status', 'processing')
 
@@ -114,7 +119,7 @@ export function DocumentList() {
     setLoading(true)
     const { data } = await supabase
       .from('documents')
-      .select('id, title, processing_status, processing_stage, created_at, markdown_available, embeddings_available')
+      .select('id, title, processing_status, processing_stage, review_stage, created_at, markdown_available, embeddings_available')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
@@ -125,18 +130,135 @@ export function DocumentList() {
   }
 
   async function handleDelete(documentId: string, title: string) {
-    if (!confirm(`Delete "${title}"? This will remove the document and all associated data.`)) {
+    if (!confirm(
+      `⚠️ Delete "${title}"?\n\n` +
+      `This will PERMANENTLY remove:\n` +
+      `• Document and all chunks\n` +
+      `• All annotations and highlights\n` +
+      `• All flashcards\n` +
+      `• All connections\n` +
+      `• All storage files\n\n` +
+      `This action cannot be undone!`
+    )) {
       return
     }
 
     setDeleting(documentId)
+    toast.info('Deleting document...', {
+      description: 'Removing all data and files'
+    })
+
     const result = await deleteDocument(documentId)
 
-    if (!result.success) {
-      alert(`Failed to delete: ${result.error}`)
+    if (result.success) {
+      toast.success('Document deleted', {
+        description: `"${title}" and all associated data removed`
+      })
+      // Refresh the list
+      if (userId) {
+        const supabase = createClient()
+        loadDocuments(supabase, userId)
+      }
+    } else {
+      toast.error('Delete failed', {
+        description: result.error || 'Unknown error'
+      })
     }
 
     setDeleting(null)
+  }
+
+  async function openInObsidian(documentId: string) {
+    try {
+      const response = await fetch('/api/obsidian/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId })
+      })
+
+      if (!response.ok) {
+        throw new Error('Export failed')
+      }
+
+      const { uri } = await response.json()
+
+      // Open in Obsidian via protocol handler
+      const iframe = document.createElement('iframe')
+      iframe.style.display = 'none'
+      iframe.src = uri
+      document.body.appendChild(iframe)
+      setTimeout(() => iframe.remove(), 1000)
+
+      toast.success('Opened in Obsidian')
+    } catch (error) {
+      toast.error('Failed to open in Obsidian')
+    }
+  }
+
+  async function continueProcessing(documentId: string, skipAiCleanup: boolean = false) {
+    setProcessing(documentId)
+
+    try {
+      // Start job
+      const response = await fetch('/api/obsidian/continue-processing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId, skipAiCleanup })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.message || 'Failed to start processing')
+      }
+
+      const { jobId } = await response.json()
+
+      toast.info('Processing Started', {
+        description: skipAiCleanup
+          ? 'Chunking document (skipping AI cleanup) - this may take a few minutes'
+          : 'Chunking document - this may take a few minutes'
+      })
+
+      // Poll for completion
+      await pollJobStatus(jobId)
+
+      toast.success('Processing Complete', {
+        description: 'Document is ready to read'
+      })
+
+      // Refresh document list
+      router.refresh()
+
+    } catch (error) {
+      toast.error('Processing Failed', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      })
+    } finally {
+      setProcessing(null)
+    }
+  }
+
+  async function pollJobStatus(jobId: string): Promise<any> {
+    const maxAttempts = 900 // 30 minutes
+    const intervalMs = 2000 // 2 seconds
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await fetch(`/api/obsidian/status/${jobId}`)
+      const data = await response.json()
+
+      if (data.status === 'completed') {
+        return data.result
+      }
+
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Job failed')
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    throw new Error('Processing timeout - took too long')
   }
 
   if (loading) {
@@ -163,7 +285,8 @@ export function DocumentList() {
         const isCompleted = doc.processing_status === 'completed'
         const isProcessing = doc.processing_status === 'processing'
         const isFailed = doc.processing_status === 'failed'
-        
+        const isAwaitingReview = doc.processing_status === 'awaiting_manual_review'
+
         return (
           <Card key={doc.id} data-testid="document-card">
             <CardHeader>
@@ -172,11 +295,13 @@ export function DocumentList() {
                   <CardTitle className="truncate" data-testid="document-title">{doc.title}</CardTitle>
                   <CardDescription className="flex items-center gap-2 mt-1">
                     <Badge variant={
-                      isCompleted ? 'default' : 
-                      isProcessing ? 'secondary' : 
-                      isFailed ? 'destructive' : 
+                      isCompleted ? 'default' :
+                      isProcessing ? 'secondary' :
+                      isFailed ? 'destructive' :
+                      isAwaitingReview ? 'secondary' :
                       'outline'
                     } data-testid="status-badge">
+                      {isAwaitingReview && <Pause className="h-3 w-3 mr-1" />}
                       {doc.processing_status}
                     </Badge>
                     {doc.processing_stage && (
@@ -207,14 +332,79 @@ export function DocumentList() {
                       Processing
                     </Button>
                   )}
+                  {isAwaitingReview && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openInObsidian(doc.id)}
+                        data-testid="review-obsidian-button"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Review in Obsidian
+                      </Button>
+                      {doc.review_stage === 'docling_extraction' ? (
+                        // After Docling extraction: Offer two options
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => continueProcessing(doc.id, true)}
+                            disabled={processing === doc.id}
+                            data-testid="skip-ai-cleanup-button"
+                          >
+                            {processing === doc.id ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Skip AI Cleanup
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => continueProcessing(doc.id, false)}
+                            disabled={processing === doc.id}
+                            data-testid="continue-with-ai-button"
+                          >
+                            {processing === doc.id ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Continue with AI Cleanup
+                          </Button>
+                        </>
+                      ) : (
+                        // After AI cleanup: Just continue to chunking
+                        <Button
+                          size="sm"
+                          onClick={() => continueProcessing(doc.id, false)}
+                          disabled={processing === doc.id}
+                          data-testid="continue-processing-button"
+                        >
+                          {processing === doc.id ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4 mr-2" />
+                          )}
+                          Continue Processing
+                        </Button>
+                      )}
+                    </>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => handleDelete(doc.id, doc.title)}
                     disabled={deleting === doc.id}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     data-testid="delete-button"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    {deleting === doc.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
                   </Button>
                 </div>
               </div>

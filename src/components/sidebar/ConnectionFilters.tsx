@@ -3,16 +3,16 @@
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
-import { useAnnotationStore } from '@/stores/annotation-store'
-import type { EngineWeights } from '@/types/annotations'
+import { useConnectionStore } from '@/stores/connection-store'
+import type { SynthesisEngine } from '@/types/annotations'
 
-const ENGINE_LABELS: Record<keyof EngineWeights, string> = {
+const ENGINE_LABELS: Record<SynthesisEngine, string> = {
   semantic_similarity: 'Semantic Similarity',
   thematic_bridge: 'Thematic Bridges',
   contradiction_detection: 'Contradictions'
 }
 
-const ENGINE_COLORS: Record<keyof EngineWeights, string> = {
+const ENGINE_COLORS: Record<SynthesisEngine, string> = {
   semantic_similarity: 'bg-blue-500',
   thematic_bridge: 'bg-purple-500',
   contradiction_detection: 'bg-red-500'
@@ -24,13 +24,11 @@ const ENGINE_COLORS: Record<keyof EngineWeights, string> = {
  * @returns React element with filter controls.
  */
 export function ConnectionFilters() {
-  const {
-    weights,
-    enabledEngines,
-    toggleEngine,
-    strengthThreshold,
-    setStrengthThreshold
-  } = useAnnotationStore()
+  const weights = useConnectionStore(state => state.weights)
+  const enabledEngines = useConnectionStore(state => state.enabledEngines)
+  const toggleEngine = useConnectionStore(state => state.toggleEngine)
+  const strengthThreshold = useConnectionStore(state => state.strengthThreshold)
+  const setStrengthThreshold = useConnectionStore(state => state.setStrengthThreshold)
   
   return (
     <div className="space-y-4 p-4">
@@ -40,7 +38,7 @@ export function ConnectionFilters() {
       <div className="space-y-2">
         <Label>Active Engines</Label>
         <div className="flex flex-wrap gap-2">
-          {(Object.keys(weights) as (keyof EngineWeights)[]).map(engine => {
+          {(Object.keys(weights) as SynthesisEngine[]).map(engine => {
             const isEnabled = enabledEngines.has(engine)
             return (
               <Badge

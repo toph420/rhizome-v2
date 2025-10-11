@@ -18,6 +18,7 @@ interface QuickCapturePanelProps {
   documentId: string
   onClose: () => void
   chunks: Chunk[]
+  markdown: string
   onAnnotationCreated?: (annotation: OptimisticAnnotation) => void
   onAnnotationUpdated?: (annotation: StoredAnnotation) => void
   existingAnnotation?: StoredAnnotation | null
@@ -51,6 +52,7 @@ export function QuickCapturePanel({
   documentId,
   onClose,
   chunks,
+  markdown,
   onAnnotationCreated,
   onAnnotationUpdated,
   existingAnnotation,
@@ -150,31 +152,11 @@ export function QuickCapturePanel({
           }
         } else {
           // CREATE MODE: New annotation
-          // Extract context from primary chunk
-          const primaryChunkId = selection.range.chunkIds[0]
-          const primaryChunk = chunks.find((c) => c.id === primaryChunkId)
-
-          if (!primaryChunk) {
-            toast.error('Failed to find annotation chunk')
-            setSaving(false)
-            return
-          }
-
-          // Convert to chunk-relative offsets for context extraction
-          const chunkStartOffset = primaryChunk.start_offset ?? 0
-          const chunkRelativeStart = Math.max(
-            0,
-            selection.range.startOffset - chunkStartOffset
-          )
-          const chunkRelativeEnd = Math.min(
-            primaryChunk.content.length,
-            selection.range.endOffset - chunkStartOffset
-          )
-
+          // Extract context from markdown (works for both chunked and gap regions)
           const textContext = extractContext(
-            primaryChunk.content,
-            chunkRelativeStart,
-            chunkRelativeEnd
+            markdown,
+            selection.range.startOffset,
+            selection.range.endOffset
           )
 
           // Create optimistic annotation for immediate UI update

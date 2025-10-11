@@ -128,13 +128,22 @@ export async function runThematicBridge(
   ]
 }
 
+CRITICAL INSTRUCTION: In your explanation, reference chunks by their summary as if they are titles.
+Instead of "This chunk discusses..." or "The source chunk explores...", use natural references like:
+- "In 'Foucault's disciplinary power analysis', the author explores..."
+- "The concept of surveillance in 'Panopticon as social control' connects to..."
+
 SOURCE CHUNK (${sourceDomain}):
-${chunk.summary || chunk.content.substring(0, 500)}
+Title/Summary: ${chunk.summary || 'Untitled chunk'}
+Content preview: ${chunk.content.substring(0, 200)}
 
 CANDIDATES:
-${batch.map((c, idx) => `[${idx}] (${c.domain_metadata?.primaryDomain}): ${c.summary || c.content.substring(0, 300)}`).join('\n\n')}
+${batch.map((c, idx) => `[${idx}] (${c.domain_metadata?.primaryDomain})
+Title/Summary: ${c.summary || 'Untitled chunk'}
+Content preview: ${c.content.substring(0, 200)}`).join('\n\n')}
 
-Only include bridges with strength > ${minStrength}. Be selective.`;
+Only include bridges with strength > ${minStrength}. Be selective.
+Remember: Reference chunks by their summary/title in explanations.`;
 
       try {
         const result = await genAI.models.generateContent({

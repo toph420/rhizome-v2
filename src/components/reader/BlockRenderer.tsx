@@ -3,7 +3,9 @@
 import { memo } from 'react'
 import DOMPurify from 'dompurify'
 import { injectAnnotations } from '@/lib/annotations/inject'
+import { ChunkMetadataIcon } from './ChunkMetadataIcon'
 import type { Block } from '@/lib/reader/block-parser'
+import type { Chunk } from '@/types/annotations'
 
 interface BlockRendererProps {
   block: Block
@@ -13,6 +15,7 @@ interface BlockRendererProps {
     endOffset: number
     color: string
   }>
+  chunk?: Chunk
   onAnnotationClick?: (annotationId: string, element: HTMLElement) => void
 }
 
@@ -37,6 +40,7 @@ const ALLOWED_ATTR = [
 export const BlockRenderer = memo(function BlockRenderer({
   block,
   annotations,
+  chunk,
   onAnnotationClick
 }: BlockRendererProps) {
   // Find annotations that overlap this block
@@ -81,15 +85,25 @@ export const BlockRenderer = memo(function BlockRenderer({
     }
   }
 
+  // Only show metadata icon for first paragraph block of each chunk (avoid duplication)
+  const showMetadataIcon = block.type === 'paragraph' && chunk && block.chunkPosition >= 0
+
   return (
     <div
       data-block-id={block.id}
       data-chunk-id={block.chunkId}
       data-start-offset={block.startOffset}
       data-end-offset={block.endOffset}
-      className={`${proseClass} py-2 min-h-[1rem]`}
+      className={`${proseClass} py-2 min-h-[1rem] relative group`}
       onClick={handleClick}
-      dangerouslySetInnerHTML={{ __html: cleanHtml }}
-    />
+    >
+      {/* Chunk metadata icon in left margin - only show on first block of chunk */}
+      {showMetadataIcon && block.chunkPosition === 0 && (
+        <ChunkMetadataIcon chunk={chunk} chunkIndex={chunk.chunk_index} />
+      )}
+
+      {/* Rendered content with injected annotations */}
+      <div dangerouslySetInnerHTML={{ __html: cleanHtml }} />
+    </div>
   )
 })

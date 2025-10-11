@@ -1,102 +1,211 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { getAnnotations } from '@/app/actions/annotations'
-import type { StoredAnnotation } from '@/types/annotations'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { useAnnotationStore } from '@/stores/annotation-store'
+import { useReaderStore } from '@/stores/reader-store'
+import { updateAnnotation } from '@/app/actions/annotations'
 import { formatDistanceToNow } from 'date-fns'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Pencil, Save, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+
+// Constant empty array to prevent infinite loops from new references
+const EMPTY_ANNOTATIONS: any[] = []
 
 interface AnnotationsListProps {
   documentId: string
-  onAnnotationClick?: (annotationId: string) => void
+  onAnnotationClick?: (annotationId: string, startOffset: number) => void
 }
 
 /**
- * Displays all annotations for the current document.
- * Shows annotation text, note, color, and creation timestamp.
- * Fetches data from getAnnotations Server Action.
+ * Displays all annotations for the current document, sorted by document order.
+ * Uses Zustand store for state management - no prop drilling!
  *
- * @param props - Component props.
- * @param props.documentId - Document identifier for annotation filtering.
- * @param props.onAnnotationClick - Optional callback when annotation is clicked.
- * @returns React element with annotations list.
+ * FEATURES:
+ * 1. Auto-updates when new annotations are created (via Zustand store)
+ * 2. Sorts by document order (startOffset)
+ * 3. Highlights annotations in viewport
+ * 4. Calls parent callback for scroll-into-view (handles virtual scroll)
+ * 5. Inline edit form expansion
+ * 6. Matches ConnectionCard styling with animations
  */
-export function AnnotationsList({ documentId, onAnnotationClick }: AnnotationsListProps) {
-  const [annotations, setAnnotations] = useState<StoredAnnotation[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+export function AnnotationsList({
+  documentId,
+  onAnnotationClick
+}: AnnotationsListProps) {
+  // Get annotations from Zustand store - document-keyed
+  // Use constant empty array reference to prevent infinite loop
+  const annotations = useAnnotationStore(
+    state => state.annotations[documentId ?? ''] ?? EMPTY_ANNOTATIONS
+  )
+  const updateStoreAnnotation = useAnnotationStore(state => state.updateAnnotation)
 
-  useEffect(() => {
-    async function fetchAnnotations() {
-      try {
-        setLoading(true)
-        setError(null)
+  // Get viewport offsets from ReaderStore for precise visibility detection
+  const viewportOffsets = useReaderStore(state => state.viewportOffsets)
 
-        const result = await getAnnotations(documentId)
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const annotationRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
-        if (!result.success) {
-          setError(result.error || 'Failed to load annotations')
-          return
+  // Editing state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editNote, setEditNote] = useState('')
+  const [editColor, setEditColor] = useState<string>('yellow')
+  const [saving, setSaving] = useState(false)
+
+  // Sort annotations by document order (startOffset)
+  const sortedAnnotations = useMemo(() => {
+    return [...annotations].sort((a, b) => {
+      const aOffset = a.components.position?.startOffset || a.components.annotation?.range.startOffset || 0
+      const bOffset = b.components.position?.startOffset || b.components.annotation?.range.startOffset || 0
+      return aOffset - bOffset
+    })
+  }, [annotations])
+
+  // Find which annotations are in current viewport using precise offset-based detection
+  const visibleAnnotationIds = useMemo(() => {
+    if (!viewportOffsets || (viewportOffsets.start === 0 && viewportOffsets.end === 0)) {
+      return new Set<string>()
+    }
+
+    const visible = new Set<string>()
+
+    sortedAnnotations.forEach(annotation => {
+      // Get annotation's precise offsets (prefer recovered position, fallback to original range)
+      const startOffset = annotation.components.position?.startOffset
+        ?? annotation.components.annotation?.range.startOffset
+        ?? 0
+      const endOffset = annotation.components.position?.endOffset
+        ?? annotation.components.annotation?.range.endOffset
+        ?? 0
+
+      // Check if annotation overlaps with viewport (same logic as ReaderStore for chunks)
+      const isVisible =
+        startOffset <= viewportOffsets.end &&
+        endOffset >= viewportOffsets.start
+
+      if (isVisible) {
+        visible.add(annotation.id)
+      }
+    })
+
+    console.log('[AnnotationsList] Offset-based visibility:', {
+      viewport: `${viewportOffsets.start}-${viewportOffsets.end}`,
+      totalAnnotations: sortedAnnotations.length,
+      visibleAnnotations: visible.size,
+      sampleAnnotations: sortedAnnotations.slice(0, 3).map(a => {
+        const start = a.components.position?.startOffset ?? a.components.annotation?.range.startOffset ?? 0
+        const end = a.components.position?.endOffset ?? a.components.annotation?.range.endOffset ?? 0
+        const isVis = start <= viewportOffsets.end && end >= viewportOffsets.start
+        return {
+          id: a.id.slice(0, 8),
+          offsets: `${start}-${end}`,
+          visible: isVis
         }
+      })
+    })
 
-        setAnnotations(result.data)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unknown error')
-      } finally {
-        setLoading(false)
+    return visible
+  }, [sortedAnnotations, viewportOffsets])
+
+  // Scroll annotation card into view when annotation becomes visible in document
+  useEffect(() => {
+    const firstVisibleId = sortedAnnotations.find(a => visibleAnnotationIds.has(a.id))?.id
+
+    if (firstVisibleId) {
+      const element = annotationRefs.current.get(firstVisibleId)
+      if (element && scrollAreaRef.current) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       }
     }
+  }, [visibleAnnotationIds, sortedAnnotations])
 
-    fetchAnnotations()
-  }, [documentId])
+  // Handle annotation card click - call parent callback for scroll coordination
+  function handleAnnotationCardClick(annotation: typeof sortedAnnotations[0]) {
+    const startOffset = annotation.components.position?.startOffset
+      || annotation.components.annotation?.range.startOffset
 
-  /**
-   * Get color badge styling based on annotation color
-   */
-  function getColorBadge(color: string) {
-    const colorMap: Record<string, { bg: string; text: string; label: string }> = {
-      yellow: { bg: 'bg-yellow-200', text: 'text-yellow-900', label: 'Yellow' },
-      green: { bg: 'bg-green-200', text: 'text-green-900', label: 'Green' },
-      blue: { bg: 'bg-blue-200', text: 'text-blue-900', label: 'Blue' },
-      red: { bg: 'bg-red-200', text: 'text-red-900', label: 'Red' },
-      purple: { bg: 'bg-purple-200', text: 'text-purple-900', label: 'Purple' },
-      orange: { bg: 'bg-orange-200', text: 'text-orange-900', label: 'Orange' },
-      pink: { bg: 'bg-pink-200', text: 'text-pink-900', label: 'Pink' }
+    if (startOffset === undefined) return
+
+    // Call parent callback to handle scroll (works with virtual scroll)
+    if (onAnnotationClick) {
+      onAnnotationClick(annotation.id, startOffset)
     }
-
-    const colorData = colorMap[color] || colorMap.yellow
-    return (
-      <Badge className={`${colorData.bg} ${colorData.text} border-0`}>
-        {colorData.label}
-      </Badge>
-    )
   }
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="p-4 flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+  // Enter edit mode for annotation
+  function handleEditClick(annotation: typeof sortedAnnotations[0], e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditingId(annotation.id)
+    setEditNote(annotation.components.annotation?.note || '')
+    setEditColor(annotation.components.annotation?.color || 'yellow')
   }
 
-  // Error state
-  if (error) {
-    return (
-      <div className="p-4">
-        <Card className="p-4 border-destructive">
-          <p className="text-sm text-destructive">Error loading annotations</p>
-          <p className="text-xs text-muted-foreground mt-1">{error}</p>
-        </Card>
-      </div>
-    )
+  // Save annotation edits
+  async function handleSave(annotationId: string) {
+    setSaving(true)
+    try {
+      const result = await updateAnnotation(annotationId, {
+        note: editNote,
+        color: editColor,
+      })
+
+      if (result.success) {
+        // Update Zustand store
+        const existingAnnotation = annotations.find(a => a.id === annotationId)
+        if (existingAnnotation) {
+          const updated = {
+            ...existingAnnotation,
+            components: {
+              ...existingAnnotation.components,
+              annotation: {
+                ...existingAnnotation.components.annotation!,
+                note: editNote,
+                color: editColor as any,
+              }
+            }
+          }
+          updateStoreAnnotation(documentId, annotationId, updated)
+        }
+
+        setEditingId(null)
+        toast.success('Annotation updated')
+      } else {
+        toast.error('Failed to update annotation')
+      }
+    } catch (err) {
+      toast.error('Failed to update annotation')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Cancel edit mode
+  function handleCancel() {
+    setEditingId(null)
+    setEditNote('')
+    setEditColor('yellow')
+  }
+
+  // Get color for left border
+  function getColorClass(color: string): string {
+    const colorMap: Record<string, string> = {
+      yellow: 'border-l-yellow-400',
+      green: 'border-l-green-400',
+      blue: 'border-l-blue-400',
+      red: 'border-l-red-400',
+      purple: 'border-l-purple-400',
+      orange: 'border-l-orange-400',
+      pink: 'border-l-pink-400'
+    }
+    return colorMap[color] || colorMap.yellow
   }
 
   // Empty state
-  if (annotations.length === 0) {
+  if (sortedAnnotations.length === 0) {
     return (
       <div className="p-4 space-y-3">
         <div className="text-sm text-muted-foreground mb-4">
@@ -119,39 +228,133 @@ export function AnnotationsList({ documentId, onAnnotationClick }: AnnotationsLi
 
   // Annotations list
   return (
-    <div className="p-4 space-y-3">
+    <div ref={scrollAreaRef} className="p-4 space-y-3">
       <div className="text-sm text-muted-foreground mb-4">
-        {annotations.length} {annotations.length === 1 ? 'annotation' : 'annotations'}
+        {sortedAnnotations.length} {sortedAnnotations.length === 1 ? 'annotation' : 'annotations'}
       </div>
 
-      {annotations.map((annotation) => {
+      {sortedAnnotations.map((annotation) => {
         const annotationData = annotation.components.annotation
         const positionData = annotation.components.position
+        const isVisible = visibleAnnotationIds.has(annotation.id)
+        const isEditing = editingId === annotation.id
 
         if (!annotationData) return null
+
+        const colorBorderClass = getColorClass(annotationData.color)
 
         return (
           <Card
             key={annotation.id}
-            className="p-3 hover:bg-accent cursor-pointer transition-colors"
-            onClick={() => onAnnotationClick?.(annotation.id)}
+            ref={(el) => {
+              if (el) {
+                annotationRefs.current.set(annotation.id, el)
+              } else {
+                annotationRefs.current.delete(annotation.id)
+              }
+            }}
+            className={cn(
+              "cursor-pointer hover:bg-muted/50 transition-all border-2 border-l-4",
+              colorBorderClass,
+              isVisible ? "bg-primary/5 border-primary/30" : "border-border",
+              "group"
+            )}
+            onClick={() => !isEditing && handleAnnotationCardClick(annotation)}
           >
-            <div className="space-y-2">
-              {/* Header: Color badge and tags */}
+            <div className="p-3 space-y-2">
+              {/* Header: Tags and edit button */}
               <div className="flex items-start justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-1">
-                  {getColorBadge(annotationData.color)}
-                  {annotationData.tags?.filter(tag => tag !== 'readwise-import').map((tag) => (
-                    <Badge key={tag} variant="outline" className="text-xs">
-                      {tag}
-                    </Badge>
-                  ))}
-                  {annotationData.tags?.includes('readwise-import') && (
-                    <Badge variant="secondary" className="text-xs">
-                      Readwise
-                    </Badge>
+                <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
+                  {isEditing ? (
+                    /* Color selector - constrained width */
+                    <div className="flex flex-wrap gap-1 max-w-full">
+                      {(['yellow', 'green', 'blue', 'red', 'purple', 'orange', 'pink'] as const).map(c => (
+                        <button
+                          key={c}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditColor(c)
+                          }}
+                          className={cn(
+                            "w-6 h-6 rounded border-2 transition-all flex-shrink-0",
+                            `border-${c}-400`,
+                            editColor === c ? 'ring-2 ring-primary ring-offset-1 scale-110' : 'hover:scale-105'
+                          )}
+                          style={{
+                            backgroundColor: c === 'yellow' ? '#fef08a' :
+                                           c === 'green' ? '#86efac' :
+                                           c === 'blue' ? '#93c5fd' :
+                                           c === 'red' ? '#fca5a5' :
+                                           c === 'purple' ? '#d8b4fe' :
+                                           c === 'orange' ? '#fdba74' :
+                                           '#f9a8d4'
+                          }}
+                          title={c.charAt(0).toUpperCase() + c.slice(1)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <>
+                      {annotationData.tags?.filter(tag => tag !== 'readwise-import').map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-xs flex-shrink-0">
+                          {tag}
+                        </Badge>
+                      ))}
+                      {annotationData.tags?.includes('readwise-import') && (
+                        <Badge variant="secondary" className="text-xs flex-shrink-0">
+                          Readwise
+                        </Badge>
+                      )}
+                      {isVisible && (
+                        <Badge variant="default" className="text-xs ml-1 flex-shrink-0">
+                          In view
+                        </Badge>
+                      )}
+                    </>
                   )}
                 </div>
+
+                {/* Edit/Save buttons */}
+                {!isEditing ? (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground transition-all flex-shrink-0"
+                    onClick={(e) => handleEditClick(annotation, e)}
+                    title="Edit annotation"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                ) : (
+                  <div className="flex gap-1 flex-shrink-0">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 hover:bg-green-100 hover:text-green-700"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSave(annotation.id)
+                      }}
+                      disabled={saving}
+                      title="Save changes"
+                    >
+                      {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 hover:bg-red-100 hover:text-red-700"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleCancel()
+                      }}
+                      disabled={saving}
+                      title="Cancel"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* Annotation text */}
@@ -161,23 +364,33 @@ export function AnnotationsList({ documentId, onAnnotationClick }: AnnotationsLi
                 </p>
               </div>
 
-              {/* Note (if exists) */}
-              {annotationData.note && (
+              {/* Note - editable in edit mode */}
+              {isEditing ? (
+                <div className="max-w-full">
+                  <Textarea
+                    value={editNote}
+                    onChange={(e) => setEditNote(e.target.value)}
+                    placeholder="Add a note..."
+                    className="min-h-[60px] text-xs w-full"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+              ) : annotationData.note ? (
                 <div className="bg-muted/50 p-2 rounded-sm">
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground break-words">
                     <span className="font-medium">Note: </span>
                     {annotationData.note}
                   </p>
                 </div>
-              )}
+              ) : null}
 
               {/* Metadata footer */}
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>
+              <div className="flex items-center justify-between text-xs text-muted-foreground flex-wrap gap-1">
+                <span className="flex-shrink-0">
                   {formatDistanceToNow(new Date(annotation.created_at), { addSuffix: true })}
                 </span>
-                {positionData?.method && positionData.method !== 'exact' && (
-                  <Badge variant="outline" className="text-xs">
+                {positionData?.method && positionData.method !== 'exact' && !isEditing && (
+                  <Badge variant="outline" className="text-xs flex-shrink-0">
                     {positionData.method} ({(positionData.confidence * 100).toFixed(0)}%)
                   </Badge>
                 )}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useAnnotationStore } from '@/stores/annotation-store'
+import { useConnectionStore } from '@/stores/connection-store'
 import { useDebounce } from '@/hooks/useDebounce'
 import { createClient } from '@/lib/supabase/client'
 import { ConnectionCard } from './ConnectionCard'
@@ -32,6 +32,13 @@ interface ConnectionsListProps {
   documentId: string
   visibleChunkIds: string[]  // NEW: From Phase 2 VirtualizedReader viewport tracking
   onNavigateToChunk?: (chunkId: string) => void
+  onConnectionsChange?: (connections: Array<{
+    id: string
+    source_chunk_id: string
+    target_chunk_id: string
+    strength: number
+  }>) => void
+  onActiveConnectionCountChange?: (count: number) => void
 }
 
 /**
@@ -56,8 +63,17 @@ interface ConnectionsListProps {
  * @param props.visibleChunkIds - Array of chunk IDs currently in viewport
  * @returns Connections list component with grouped sections
  */
-export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk }: ConnectionsListProps) {
-  const { weights, enabledEngines, strengthThreshold } = useAnnotationStore()
+export function ConnectionsList({
+  documentId,
+  visibleChunkIds,
+  onNavigateToChunk,
+  onConnectionsChange,
+  onActiveConnectionCountChange
+}: ConnectionsListProps) {
+  const weights = useConnectionStore(state => state.weights)
+  const enabledEngines = useConnectionStore(state => state.enabledEngines)
+  const strengthThreshold = useConnectionStore(state => state.strengthThreshold)
+
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(false)
@@ -72,8 +88,11 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
     async function fetchConnections() {
       console.log('[ConnectionsList] Fetching connections for chunks:', debouncedChunkIds)
 
-      if (debouncedChunkIds.length === 0) {
-        console.log('[ConnectionsList] No visible chunks, clearing connections')
+      // Filter out 'no-chunk' placeholders (gap regions without chunk coverage)
+      const validChunkIds = debouncedChunkIds.filter(id => id !== 'no-chunk')
+
+      if (validChunkIds.length === 0) {
+        console.log('[ConnectionsList] No valid chunks (gap region or empty), clearing connections')
         setConnections([])
         return
       }
@@ -85,7 +104,7 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
         const { data, error } = await supabase
           .from('connections')
           .select('*')
-          .in('source_chunk_id', debouncedChunkIds)
+          .in('source_chunk_id', validChunkIds)
           .order('strength', { ascending: false })
           .limit(100)
 
@@ -150,6 +169,25 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
     return result
   }, [connections, weights, enabledEngines, strengthThreshold])  // Minimize re-computation
 
+  // Notify parent when connections change (for heatmap)
+  useEffect(() => {
+    if (onConnectionsChange) {
+      // Map to simpler format for heatmap
+      const simplifiedConnections = connections.map(c => ({
+        id: c.id,
+        source_chunk_id: c.source_chunk_id,
+        target_chunk_id: c.target_chunk_id,
+        strength: c.strength
+      }))
+      onConnectionsChange(simplifiedConnections)
+    }
+
+    // Notify parent of active connection count
+    if (onActiveConnectionCountChange) {
+      onActiveConnectionCountChange(filteredConnections.length)
+    }
+  }, [connections, filteredConnections, onConnectionsChange, onActiveConnectionCountChange])
+
   // Group connections by engine type for sectioned display
   const groupedConnections = useMemo(() => {
     return filteredConnections.reduce((acc, connection) => {
@@ -186,11 +224,13 @@ export function ConnectionsList({ documentId, visibleChunkIds, onNavigateToChunk
 
   // Empty state when no connections match filters
   if (filteredConnections.length === 0) {
+    const validChunkIds = visibleChunkIds.filter(id => id !== 'no-chunk')
+
     return (
       <div className="p-8 text-center">
         <p className="text-sm text-muted-foreground">
-          {visibleChunkIds.length === 0
-            ? 'No chunks visible in viewport'
+          {validChunkIds.length === 0
+            ? 'No semantic metadata available for this section'
             : connections.length === 0
             ? 'No connections found for visible chunks'
             : 'No connections match current filters'}

@@ -25,10 +25,12 @@ This is a personal tool optimized for aggressive connection detection and knowle
 ## Core Architecture
 
 ### 1. Multi-Format Document Processing ✅ COMPLETE
-- **6 Input Methods**: PDF, YouTube, Web URLs, Markdown (as-is/clean), Text, Paste
+- **7 Input Methods**: PDF, EPUB, YouTube, Web URLs, Markdown (as-is/clean), Text, Paste
 - **AI Pipeline**: Gemini 2.0 for extraction, cleaning, and semantic analysis
 - **Modular Processors**: Each format has dedicated processor with error recovery
 - **YouTube Enhancement**: Transcript cleaning, fuzzy positioning for annotations
+- **EPUB Support**: Full EPUB book processing with metadata extraction
+
 
 ### The 3-Engine System
 
@@ -128,13 +130,15 @@ Dropped from 7 engines to 3. Each does something distinct:
 - Batch processing optimizations
 
 #### Database & Storage
-- 20+ migrations applied (latest: chunk-based connections, timestamp cleanup)
+- 41+ migrations applied (latest: import_pending for Readwise, connection validation)
 - ECS tables (entities, components)
 - Chunks with embeddings and metadata
 - User preferences for weight tuning
 - Hybrid storage (files + database)
 - Background jobs table
 - Chunk connections table (3-engine system)
+- Import pending table (Readwise integration)
+- Obsidian settings table
 
 #### Worker Module
 - Modular processor architecture
@@ -147,11 +151,16 @@ Dropped from 7 engines to 3. Each does something distinct:
 ### 🚧 IN PROGRESS
 
 #### Document Reader & Annotations
-- [ ] Markdown renderer
-- [ ] Virtual scrolling for performance
-- [ ] Text selection → annotation flow
-- [ ] Annotation persistence with ECS
+- [x] Markdown renderer (react-markdown with KaTeX)
+- [x] Virtual scrolling (react-virtuoso)
+- [x] Text selection → annotation flow
+- [x] Annotation persistence with ECS
 - [ ] Right panel for connections display
+
+#### Readwise Integration
+- [x] Import pending table for review workflow
+- [x] Highlight import with metadata
+- [ ] UI for reviewing and importing highlights
 
 ### 📋 NOT STARTED
 
@@ -324,7 +333,7 @@ src/
 └── stores/               # Zustand stores (client state)
 
 worker/                   # Document processing module (separate Node.js app)
-├── processors/           # Format-specific processors (pdf, youtube, web, etc.)
+├── processors/           # Format-specific processors (pdf, epub, youtube, web, markdown, text, paste)
 ├── engines/             # 3 collision detection engines (semantic-similarity, contradiction-detection, thematic-bridge)
 │   ├── base-engine.ts   # Shared engine interface
 │   ├── orchestrator.ts  # Coordinates all engines
@@ -400,7 +409,7 @@ npm run dev:next             # Next.js on port 3000
 2. **Never store markdown in DB** - Use Supabase Storage
 3. **Never parse PDFs directly** - Use Gemini Files API
 4. **Never create service classes** - Use ECS for entities
-5. **Never mix storage patterns** - Files OR database, not both
+5. **Storage for source of truth + portability, Database for queryable cache + derived data**
 6. **Never skip error handling** - Especially for AI operations
 7. **Never test without mocks in CI** - Use `validate:metadata` not `validate:metadata:real`
 8. **Never commit node_modules** - Check .gitignore in both root and worker/
@@ -535,12 +544,17 @@ npm run validate:metadata      # Metadata extraction validation
 npm run validate:metadata:real # Use real AI (not mocks)
 npm run validate:semantic-accuracy  # Semantic engine accuracy tests
 
-# Benchmarking
-npm run benchmark:all          # All performance benchmarks
-npm run benchmark:pdf          # PDF processing benchmarks
-npm run benchmark:semantic-engine  # Semantic similarity benchmarks
-npm run benchmark:cache        # Cache performance benchmarks
-npm run benchmark:report       # Detailed benchmark report
+# Benchmarking (from worker directory)
+npm run benchmark:all                    # All performance benchmarks
+npm run benchmark:batch-processing       # Batch processing benchmarks
+npm run benchmark:pdf-processing         # PDF processing benchmarks
+npm run benchmark:orchestration          # Orchestration benchmarks
+npm run benchmark:semantic-engine        # Semantic similarity benchmarks
+npm run benchmark:metadata-quality       # Metadata quality benchmarks
+npm run benchmark:metadata-quality:real  # Metadata quality with real AI
+npm run benchmark:quick                  # Quick benchmarks only
+npm run benchmark:report                 # Comprehensive report
+npm run benchmark:compare                # Compare with baseline
 ```
 
 
@@ -831,6 +845,97 @@ const { data: crossDoc } = await supabase
 - **Worker Module**: `worker/README.md` - Document processing system
 - **Gemini Processing**: `docs/GEMINI_PROCESSING.md` - AI processing patterns
 
+
+## Zustand Checklist
+
+### ✅ Use Zustand for:
+- [ ] State shared across multiple components
+- [ ] State that persists across unmounts
+- [ ] State updated from multiple locations
+- [ ] Complex state requiring coordinated updates
+- [ ] Personal preferences (engine weights, UI settings)
+
+### ❌ Don't use Zustand for:
+- [ ] Component-local UI state (hover, focus)
+- [ ] Form inputs and validation
+- [ ] Temporary loading indicators
+- [ ] Animation states
+- [ ] Props that don't need to be shared
+
+### 🎯 Best Practices:
+- [ ] Subscribe to minimal state slices
+- [ ] Normalize complex state (weights sum to 1.0)
+- [ ] Define actions for all state mutations
+- [ ] Use persist middleware for user preferences
+- [ ] Batch related state updates
+- [ ] Test store actions independently
+- [ ] Reset state when appropriate
+
+---
+
+## Zustand Quick Reference
+
+### Import Statements
+```typescript
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+```
+
+### Basic Store Template
+```typescript
+interface MyState {
+  value: number
+  setValue: (value: number) => void
+}
+
+export const useMyStore = create<MyState>((set, get) => ({
+  value: 0,
+  setValue: (value) => set({ value })
+}))
+```
+
+### Usage in Components
+```typescript
+// Subscribe to specific value
+const value = useMyStore(state => state.value)
+
+// Get action
+const setValue = useMyStore(state => state.setValue)
+
+// Get state outside React
+const currentValue = useMyStore.getState().value
+```
+
+### Persistence
+```typescript
+export const useMyStore = create<MyState>()(
+  persist(
+    (set, get) => ({ /* store definition */ }),
+    {
+      name: 'my-storage',
+      partialize: (state) => ({ value: state.value })
+    }
+  )
+)
+```
+
+
+## Readwise Integration
+
+Rhizome includes a Readwise highlight import system with a review workflow:
+
+### Import Flow
+1. User imports highlights from Readwise
+2. Highlights stored in `import_pending` table for review
+3. User reviews and selects which highlights to import
+4. Selected highlights converted to annotations via ECS
+5. Annotations attached to chunks with proper positioning
+
+### Database Schema
+- `import_pending` table stores highlights awaiting review
+- Each highlight has: content, book_title, author, location, highlight_url, tags
+- After approval, highlights become annotation components in ECS
+
 ## Other Docs
 
 - Virtuoso - https://virtuoso.dev/ - Virtual Scrolling for our document reader
@@ -838,7 +943,13 @@ const { data: crossDoc } = await supabase
 - Marked.js - https://marked.js.org/ - a low-level markdown compiler for parsing markdown without caching or blocking for long periods of time.
 
 ## Miscellaneous Rules
-- Always check database migration number and increment by one, ie if the last one is 024, yours should be named 025 (see migrations folder for examples) 
-
+- Always check database migration number and increment by one. **Current latest: 041** (see supabase/migrations folder for examples)
+- When creating migrations, use format: `NNN_descriptive_name.sql` where NNN is zero-padded number
+- EPUB files are supported as a source type alongside PDF - handle both when implementing document features
+- Readwise import uses a review workflow via `import_pending` table before creating documents 
+- shadcn/ui Pattern: Always use npx shadcn@latest add <component> to install UI components rather than creating them manually. This ensures:
+  - Correct Radix UI primitives
+  - Consistent styling with the design system
+  - Proper TypeScript types
 
 Remember: This is an AI-first personal tool. Prioritize connection discovery and knowledge synthesis over traditional features.

@@ -10,6 +10,18 @@
  */
 
 /**
+ * Options for page artifact cleanup.
+ */
+export interface CleanupOptions {
+  /**
+   * Skip automatic heading generation from all-caps text.
+   * Useful when source already has structured headings (e.g., Docling PDFs).
+   * @default false
+   */
+  skipHeadingGeneration?: boolean
+}
+
+/**
  * Clean page artifacts from extracted PDF markdown.
  *
  * Handles common patterns:
@@ -18,10 +30,11 @@
  * - Garbled headers (all caps, no spaces from poor OCR)
  * - PDF metadata (CSS styling, margin settings)
  * - Page number + header combinations
- * - Formats standalone chapter numbers as headings
+ * - Formats standalone chapter numbers as headings (optional)
  * - Preserves intentional paragraph breaks
  *
  * @param markdown - Raw markdown from Gemini extraction
+ * @param options - Cleanup options
  * @returns Cleaned markdown with artifacts removed
  *
  * @example
@@ -30,9 +43,10 @@
  *
  * @example
  * // Input: "**THETHREESTIGMATAOFPALMERELDRITCH**\n\n@page { margin: 5pt }\n\n**THREE**\n\nIn a bar..."
- * // Output: "## THREE\n\nIn a bar..."
+ * // Output: "## THREE\n\nIn a bar..." (if skipHeadingGeneration = false)
  */
-export function cleanPageArtifacts(markdown: string): string {
+export function cleanPageArtifacts(markdown: string, options: CleanupOptions = {}): string {
+  const { skipHeadingGeneration = false } = options
   let cleaned = markdown
 
   // Pattern 1: Remove garbled all-caps running headers (no spaces, 20+ chars)
@@ -126,20 +140,36 @@ export function cleanPageArtifacts(markdown: string): string {
   )
 
   // Pattern 10: Format standalone chapter numbers/titles as headings
+  // CONDITIONAL: Skip if source already has structure (e.g., Docling)
   // Matches: **THREE** or THREE (short all-caps text, 1-3 words)
   // Only if it appears after cleanup and isn't already a heading
-  cleaned = cleaned.replace(
-    /\n\n(\*\*)?([A-Z]+(?:\s+[A-Z]+){0,2})(\*\*)?\n\n/g,
-    (match, _bold1, text, _bold2) => {
-      const words = text.split(/\s+/)
-      // Only if it's short (1-3 words) and all caps (likely chapter heading)
-      if (words.length <= 3 && words.every((w: string) => w === w.toUpperCase())) {
-        console.log(`[text-cleanup] Formatted as chapter heading: ${text}`)
-        return `\n\n## ${text}\n\n`
+  if (!skipHeadingGeneration) {
+    cleaned = cleaned.replace(
+      /\n\n(\*\*)?([A-Z]+(?:\s+[A-Z]+){0,2})(\*\*)?\n\n/g,
+      (match, _bold1, text, _bold2) => {
+        const words = text.split(/\s+/)
+
+        // Reject common false positives
+        const singleLetterOrRoman = /^[IVXLCDM]$|^\d+$/i.test(text)
+        const tooShort = text.length < 3
+        const tooLong = text.length > 60
+        const commonIndexTerms = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|A|B|C|D|E|INDEX|NOTES|PAGE|PART|SECTION|CHAPTER)$/i.test(text)
+
+        if (singleLetterOrRoman || tooShort || tooLong || commonIndexTerms) {
+          return match // Keep as-is, not a heading
+        }
+
+        // Only format if it's a plausible chapter heading (2+ words OR >5 chars)
+        if (words.length <= 3 && words.every((w: string) => w === w.toUpperCase())) {
+          if (words.length >= 2 || text.length > 5) {
+            console.log(`[text-cleanup] Formatted as chapter heading: ${text}`)
+            return `\n\n## ${text}\n\n`
+          }
+        }
+        return match
       }
-      return match
-    }
-  )
+    )
+  }
 
   // Pattern 11: Clean up multiple consecutive spaces (from our replacements)
   cleaned = cleaned.replace(/ {2,}/g, ' ')
@@ -164,9 +194,10 @@ export function cleanPageArtifacts(markdown: string): string {
  * More aggressive = higher chance of removing legitimate content.
  *
  * @param markdown - Raw markdown from Gemini extraction
+ * @param options - Cleanup options
  * @returns Aggressively cleaned markdown
  */
-export function aggressiveCleanPageArtifacts(markdown: string): string {
+export function aggressiveCleanPageArtifacts(markdown: string, options: CleanupOptions = {}): string {
   let cleaned = markdown
 
   // Remove ANY line that's just a number + capitalized text between sentences

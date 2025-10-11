@@ -7,7 +7,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, AlertTriangle, Trash2, type LucideIcon } from 'lucide-react'
-import { forceFailJob, forceFailAllProcessing, clearFailedJobs } from '@/app/actions/admin'
+import { forceFailJob, forceFailAllProcessing, clearFailedJobs, cancelAndDeleteJob } from '@/app/actions/admin'
 
 const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?: Record<string, string> }> = {
   download: { 
@@ -49,11 +49,33 @@ const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?
       storing: 'Saving to database'
     }
   },
-  complete: { 
-    icon: CheckCircle2, 
+  complete: {
+    icon: CheckCircle2,
     label: '✅ Complete',
     substages: {
       done: 'All done!'
+    }
+  },
+  reprocessing: {
+    icon: RefreshCw,
+    label: '🔄 Reprocessing',
+    substages: {}
+  },
+  awaiting_manual_review: {
+    icon: RefreshCw,
+    label: '⏸️ Awaiting Review',
+    substages: {
+      waiting: 'Exported to Obsidian - edit when ready',
+      ready: 'Click "Continue Processing" to resume'
+    }
+  },
+  continue_processing: {
+    icon: Sparkles,
+    label: '▶️ Resuming',
+    substages: {
+      chunking: 'Creating semantic chunks',
+      embedding: 'Generating embeddings',
+      connections: 'Detecting connections'
     }
   }
 }
@@ -280,14 +302,14 @@ export function ProcessingDock() {
   }
 
   async function handleForceFailAll() {
-    if (!confirm('Force fail all processing jobs? They will retry immediately.')) return
+    if (!confirm('Stop and DELETE all processing jobs? This cannot be undone.')) return
 
     setIsForceFailingAll(true)
     const result = await forceFailAllProcessing()
 
     if (result.success) {
-      // Jobs will be updated by realtime subscription
-      console.log('Force failed all processing jobs')
+      // Jobs will be removed by realtime subscription
+      console.log('Stopped and deleted all processing jobs')
     }
 
     setIsForceFailingAll(false)
@@ -301,6 +323,28 @@ export function ProcessingDock() {
       console.log('Force failed job:', jobId)
     }
   }
+
+  async function handleCancelAndDelete(jobId: string) {
+    // Mark as deleting for UI feedback
+    setDeletingIds(prev => new Set(prev).add(jobId))
+
+    const result = await cancelAndDeleteJob(jobId)
+
+    if (result.success) {
+      // Job will be removed by realtime subscription
+      console.log('Cancelled and deleted job:', jobId)
+
+      // Update local state immediately for better UX
+      setJobs(prev => prev.filter(j => j.id !== jobId))
+    }
+
+    // Clear deleting state
+    setDeletingIds(prev => {
+      const next = new Set(prev)
+      next.delete(jobId)
+      return next
+    })
+  }
   
   const getJobTitle = (job: Job): string => {
     if (job.job_type === 'process_document') {
@@ -310,6 +354,12 @@ export function ProcessingDock() {
     if (job.job_type === 'detect-connections') {
       const docId = job.input_data?.document_id?.slice(0, 8) || 'Unknown'
       return `Detecting Connections ${docId}...`
+    }
+    if (job.job_type === 'obsidian-sync') {
+      return `Syncing from Obsidian`
+    }
+    if (job.job_type === 'obsidian-export') {
+      return `Exporting to Obsidian`
     }
     return job.job_type
   }
@@ -436,14 +486,29 @@ export function ProcessingDock() {
                   
                   <div className="flex-shrink-0 flex gap-2">
                     {job.status === 'processing' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleForceFailJob(job.id)}
-                      >
-                        <AlertTriangle className="h-4 w-4 mr-1" />
-                        Force Fail
-                      </Button>
+                      <>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleCancelAndDelete(job.id)}
+                          disabled={deletingIds.has(job.id)}
+                        >
+                          {deletingIds.has(job.id) ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <X className="h-4 w-4 mr-1" />
+                          )}
+                          Cancel & Delete
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleForceFailJob(job.id)}
+                        >
+                          <AlertTriangle className="h-4 w-4 mr-1" />
+                          Force Fail
+                        </Button>
+                      </>
                     )}
                     {job.status === 'failed' && (
                       <Button
@@ -455,18 +520,20 @@ export function ProcessingDock() {
                         Retry
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeJob(job.id)}
-                      disabled={deletingIds.has(job.id)}
-                    >
-                      {deletingIds.has(job.id) ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <X className="h-4 w-4" />
-                      )}
-                    </Button>
+                    {(job.status === 'completed' || job.status === 'failed') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeJob(job.id)}
+                        disabled={deletingIds.has(job.id)}
+                      >
+                        {deletingIds.has(job.id) ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <X className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>

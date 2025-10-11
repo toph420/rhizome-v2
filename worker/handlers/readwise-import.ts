@@ -146,13 +146,17 @@ async function createAnnotationFromMatch(
   match: { startOffset: number; endOffset: number; text: string },
   chunks: Chunk[]
 ): Promise<string> {
-  // Find which chunk contains this annotation
+  // Find which chunk contains this annotation (may be null for gap regions)
   const containingChunk = chunks.find(
     c => c.start_offset <= match.startOffset && c.end_offset >= match.endOffset
   )
 
+  // Log warning for gap regions but continue (annotations work without chunks now)
   if (!containingChunk) {
-    throw new Error('No chunk found for annotation position')
+    console.warn(
+      `[Readwise Import] No chunk coverage for position ${match.startOffset}-${match.endOffset}. ` +
+      `Creating annotation in gap region.`
+    )
   }
 
   // Get document owner - CRITICAL for frontend display
@@ -183,6 +187,11 @@ async function createAnnotationFromMatch(
 
   // Create 3 components matching frontend expectations
   // Frontend expects: annotation, position, source (lowercase)
+  // Handle gap regions where containingChunk is null
+  const chunkIds = containingChunk ? [containingChunk.id] : []
+  const chunkId = containingChunk?.id || null
+  const chunkIndex = containingChunk?.chunk_index ?? -1
+
   const components = [
     {
       entity_id: entity.id,
@@ -195,7 +204,7 @@ async function createAnnotationFromMatch(
         range: {
           startOffset: match.startOffset,
           endOffset: match.endOffset,
-          chunkIds: [containingChunk.id]
+          chunkIds
         },
         textContext: {
           before: '',  // TODO: Extract context if needed
@@ -208,7 +217,7 @@ async function createAnnotationFromMatch(
       entity_id: entity.id,
       component_type: 'position',
       data: {
-        chunkIds: [containingChunk.id],
+        chunkIds,
         startOffset: match.startOffset,
         endOffset: match.endOffset,
         confidence: 1.0,
@@ -217,7 +226,7 @@ async function createAnnotationFromMatch(
           before: '',
           after: ''
         },
-        originalChunkIndex: containingChunk.chunk_index
+        originalChunkIndex: chunkIndex >= 0 ? chunkIndex : undefined
       },
       document_id: documentId
     },
@@ -225,11 +234,11 @@ async function createAnnotationFromMatch(
       entity_id: entity.id,
       component_type: 'source',
       data: {
-        chunk_id: containingChunk.id,
-        chunk_ids: [containingChunk.id],
+        chunk_id: chunkId,
+        chunk_ids: chunkIds,
         document_id: documentId
       },
-      chunk_id: containingChunk.id,
+      chunk_id: chunkId,
       document_id: documentId
     }
   ]

@@ -1,29 +1,36 @@
 /**
- * EPUB document processor with chapter-based batch boundaries.
- * Uses same AI chunking pipeline as PDFs but with natural chapter divisions.
+ * EPUB Processor with Two-Pass AI Cleanup
  *
- * Processing stages:
- * 1. Download and parse EPUB (FREE - local processing)
- * 2. Extract metadata and cover image (FREE - local OPF parsing)
- * 3. Convert HTML→markdown (FREE - deterministic Turndown)
- * 4. AI chunk each chapter ($0.02 per chapter batch)
- * 5. Upload cover image to storage
+ * Linear processing flow:
+ * 1. Parse EPUB (local, free)
+ * 2. Local regex cleanup per chapter
+ * 3. AI cleanup per chapter (zero-stitching)
+ * 4. Review checkpoint (optional pause)
+ * 5. AI semantic chunking
+ * 6. Return results
  *
- * Cost: ~$0.40 per 500-page book (20% savings vs PDF)
+ * AI Cleanup Strategy (Optional):
+ * - Per-chapter cleanup (natural semantic boundaries)
+ * - Deterministic joining with \n\n---\n\n
+ * - No overlap, no stitching, no content drift
+ * - Controlled by cleanMarkdown flag (default: true)
+ *
+ * Cost:
+ * - With AI cleanup: ~$1.10 per 500-page book ($0.60 cleanup + $0.50 chunking)
+ * - Without AI cleanup: ~$0.50 per 500-page book (chunking only)
+ * Time: <25 minutes with cleanup, <15 minutes without
  */
 
 import { SourceProcessor } from './base.js'
-import type { ProcessResult } from '../types/processor.js'
+import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { parseEPUB } from '../lib/epub/epub-parser.js'
-import { inferDocumentType } from '../lib/epub/type-inference.js'
-import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
-import type { MetadataExtractionProgress } from '../types/chunking.js'
-import { GEMINI_MODEL } from '../lib/model-config.js'
 import { cleanEpubArtifacts } from '../lib/epub/epub-cleaner.js'
+import { cleanEpubChaptersWithAI } from '../lib/markdown-cleanup-ai.js'
+import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
 
 export class EPUBProcessor extends SourceProcessor {
   /**
-   * Process EPUB document with chapter-based batching.
+   * Process EPUB document with simplified pipeline.
    *
    * @returns Processed markdown, chunks, and metadata
    * @throws Error if EPUB is corrupted or processing fails
@@ -62,7 +69,7 @@ export class EPUBProcessor extends SourceProcessor {
     if (coverImage) {
       await this.updateProgress(25, 'parse', 'cover', 'Uploading cover image')
 
-      // Refresh connection before first storage operation
+      // Refresh connection before storage operation
       await this.refreshConnection()
 
       await this.withRetry(
@@ -84,102 +91,212 @@ export class EPUBProcessor extends SourceProcessor {
       console.log(`[EPUBProcessor] Cover image uploaded`)
     }
 
-    // Stage 4: Combine chapters into full document (30%)
-    await this.updateProgress(30, 'convert', 'merging', 'Combining chapters')
+    // Stage 4: Local regex cleanup per chapter (30%)
+    await this.updateProgress(30, 'cleanup_local', 'processing', 'Cleaning EPUB artifacts')
 
-    const rawMarkdown = chapters
-      .map(ch => `# ${ch.title}\n\n${ch.markdown}`)
-      .join('\n\n---\n\n')
+    const cleanedChapters = chapters.map(ch => ({
+      title: ch.title,
+      markdown: cleanEpubArtifacts(ch.markdown)
+    }))
 
-    // Clean EPUB artifacts BEFORE chunking (TOC links, filename headings, boilerplate)
-    const fullMarkdown = cleanEpubArtifacts(rawMarkdown)
+    console.log(`[EPUBProcessor] Regex cleaned ${cleanedChapters.length} chapters`)
 
-    const markdownKB = Math.round(fullMarkdown.length / 1024)
-    console.log(`[EPUBProcessor] Combined ${chapters.length} chapters into ${markdownKB}KB clean markdown`)
+    await this.updateProgress(35, 'cleanup_local', 'complete', 'Local cleanup done')
 
-    // Stage 5: AI chunking with chapter boundaries (30-70%)
-    const documentType = inferDocumentType(metadata)
-    console.log(`[EPUBProcessor] Inferred document type: ${documentType}`)
+    // Stage 5: AI cleanup per chapter (35-50%) - CONDITIONAL on cleanMarkdown flag
+    const cleanMarkdownEnabled = this.job.input_data?.cleanMarkdown !== false // Default true
 
-    await this.updateProgress(
-      35,
-      'extract',
-      'chunking',
-      `AI chunking ${chapters.length} chapters (${documentType})`
-    )
+    let combinedMarkdown: string
 
-    // Calculate absolute offsets for each chapter
-    const customBatches = chapters.map((ch, i) => {
-      const chapterWithTitle = `# ${ch.title}\n\n${ch.markdown}`
-      const precedingChapters = chapters.slice(0, i)
+    if (cleanMarkdownEnabled) {
+      await this.updateProgress(40, 'cleanup_ai', 'processing', 'AI cleaning chapters')
+      console.log('[EPUBProcessor] Starting AI cleanup (per-chapter, no stitching)')
 
-      // Calculate start offset: sum of all previous chapters + separators
-      const startOffset = precedingChapters.reduce((offset, prevCh) => {
-        const prevChapterLength = `# ${prevCh.title}\n\n${prevCh.markdown}`.length
-        const separatorLength = i === 0 ? 0 : '\n\n---\n\n'.length
-        return offset + prevChapterLength + separatorLength
-      }, 0)
-
-      const endOffset = startOffset + chapterWithTitle.length
-
-      return {
-        content: chapterWithTitle, // AI processes chapter WITH title for accurate offsets
-        startOffset,
-        endOffset
-      }
-    })
-
-    const progressCallback = (progress: MetadataExtractionProgress) => {
-      const percentage = 35 + Math.floor(((progress.batchesProcessed + 1) / progress.totalBatches) * 35)
-      this.updateProgress(
-        percentage,
-        'extract',
-        'metadata',
-        `AI metadata: chapter ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks)`
+      try {
+        combinedMarkdown = await cleanEpubChaptersWithAI(
+        this.ai,
+        cleanedChapters,
+        {
+          enableProgress: true,
+          onProgress: async (chapterNum, totalChapters) => {
+            const percent = 40 + Math.floor((chapterNum / totalChapters) * 10) // 40-50%
+            await this.updateProgress(
+              percent,
+              'cleanup_ai',
+              'processing',
+              `AI cleaning chapter ${chapterNum}/${totalChapters}`
+            )
+          }
+        }
       )
+
+        console.log(`[EPUBProcessor] AI cleanup complete`)
+        await this.updateProgress(50, 'cleanup_ai', 'complete', 'AI cleanup done')
+      } catch (error: any) {
+        console.error(`[EPUBProcessor] AI cleanup failed: ${error.message}`)
+        console.warn('[EPUBProcessor] Falling back to regex-cleaned markdown')
+
+        // Fallback: Use regex-cleaned chapters without AI cleanup
+        combinedMarkdown = cleanedChapters
+          .map(ch => {
+            const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
+            const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+
+            if (startsWithHeading || isFilename) {
+              return ch.markdown
+            }
+            return `# ${ch.title}\n\n${ch.markdown}`
+          })
+          .join('\n\n---\n\n')
+
+        await this.updateProgress(50, 'cleanup_ai', 'fallback', 'Using regex cleanup only')
+      }
+    } else {
+      // AI cleanup disabled by user - use regex-only
+      console.log('[EPUBProcessor] AI cleanup disabled - using regex cleanup only')
+
+      combinedMarkdown = cleanedChapters
+        .map(ch => {
+          const startsWithHeading = /^#+\s/.test(ch.markdown.trim())
+          const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(ch.title)
+
+          if (startsWithHeading || isFilename) {
+            return ch.markdown
+          }
+          return `# ${ch.title}\n\n${ch.markdown}`
+        })
+        .join('\n\n---\n\n')
+
+      await this.updateProgress(50, 'cleanup_ai', 'skipped', 'AI cleanup disabled by user')
     }
 
-    const chunks = await this.withRetry(
-      async () => batchChunkAndExtractMetadata(
-        fullMarkdown,
-        {
-          apiKey: process.env.GOOGLE_AI_API_KEY,
-          modelName: GEMINI_MODEL,
-          enableProgress: true,
-          customBatches // Use chapter boundaries instead of arbitrary windows
+    // Stage 6: Check for review mode BEFORE expensive AI chunking
+    const reviewBeforeChunking = this.job.input_data?.reviewBeforeChunking
+
+    if (reviewBeforeChunking) {
+      console.log('[EPUBProcessor] Review mode enabled - skipping AI chunking')
+      console.log('[EPUBProcessor] Markdown will be chunked after Obsidian review')
+      console.log('[EPUBProcessor] Saved ~$0.50 by skipping pre-review chunking (already AI cleaned)')
+
+      await this.updateProgress(90, 'finalize', 'awaiting_review', 'Ready for manual review')
+
+      return {
+        markdown: combinedMarkdown,
+        chunks: [], // No chunks - will be created after review
+        metadata: {
+          title: metadata.title,
+          author: metadata.author,
+          extra: {
+            isbn: metadata.isbn,
+            publisher: metadata.publisher,
+            publication_date: metadata.publicationDate,
+            language: metadata.language,
+            description: metadata.description,
+            cover_image_url: coverImage ? `${storagePath}/cover.jpg` : undefined
+          }
         },
-        progressCallback,
-        documentType // Use type-specific chunking prompt
-      ),
-      'AI metadata extraction'
+        wordCount: combinedMarkdown.split(/\s+/).length
+      }
+    }
+
+    // Stage 7: AI semantic chunking with metadata extraction (50-90%)
+    await this.updateProgress(55, 'chunking', 'processing', 'Creating semantic chunks')
+
+    const markdownKB = Math.round(combinedMarkdown.length / 1024)
+    console.log(`[EPUBProcessor] Starting AI chunking on ${markdownKB}KB markdown`)
+
+    const chunks = await this.withRetry(
+      async () => {
+        return await batchChunkAndExtractMetadata(
+          combinedMarkdown,
+          {
+            apiKey: process.env.GOOGLE_AI_API_KEY,
+            maxBatchSize: 20000, // 20K chars per batch
+            enableProgress: true
+          },
+          async (progress) => {
+            // Map progress phases to percentages: 55-90%
+            const basePercent = 55
+            const rangePercent = 35
+
+            let phaseProgress = 0
+            if (progress.phase === 'batching') phaseProgress = 0
+            else if (progress.phase === 'ai_chunking') {
+              phaseProgress = (progress.batchesProcessed / progress.totalBatches) * 0.8
+            } else if (progress.phase === 'deduplication') phaseProgress = 0.9
+            else if (progress.phase === 'complete') phaseProgress = 1.0
+
+            const stagePercent = basePercent + Math.floor(phaseProgress * rangePercent)
+            await this.updateProgress(
+              stagePercent,
+              'chunking',
+              'processing',
+              `Processing batch ${progress.batchesProcessed}/${progress.totalBatches}`
+            )
+          },
+          'fiction' // Document type for specialized chunking
+        )
+      },
+      'Semantic chunking with metadata extraction'
     )
 
-    console.log(`[EPUBProcessor] Created ${chunks.length} semantic chunks from ${chapters.length} chapters`)
+    console.log(`[EPUBProcessor] Created ${chunks.length} semantic chunks with AI metadata`)
 
-    // Stage 6: Finalize (75%)
-    // Note: Handler will upload markdown to storage (not processor responsibility)
-    await this.updateProgress(75, 'finalize', 'complete', `Created ${chunks.length} chunks with AI metadata`)
+    await this.updateProgress(90, 'chunking', 'complete', `${chunks.length} chunks created`)
 
-    // Convert AI chunks to ProcessedChunk format with proper metadata mapping
-    const enrichedChunks = chunks.map((aiChunk, index) => {
-      return this.mapAIChunkToDatabase(aiChunk)
-    })
+    // Stage 7: Finalize (90-100%)
+    await this.updateProgress(95, 'finalize', 'formatting', 'Finalizing')
+
+    // Convert to ProcessedChunk format
+    // batchChunkAndExtractMetadata returns chunks with metadata already extracted
+    const enrichedChunks = chunks.map((chunk, idx) => {
+      // Calculate word count if not provided
+      const wordCount = chunk.content.split(/\s+/).filter(w => w.length > 0).length
+
+      return {
+        document_id: this.job.document_id,
+        content: chunk.content,
+        chunk_index: idx, // Use array index for sequential numbering
+        start_offset: chunk.start_offset,
+        end_offset: chunk.end_offset,
+        word_count: wordCount,
+        themes: chunk.metadata.themes || [],
+        importance_score: chunk.metadata.importance || 0.5,
+        summary: chunk.metadata.summary || null,
+        emotional_metadata: {
+          polarity: chunk.metadata.emotional?.polarity || 0,
+          primaryEmotion: chunk.metadata.emotional?.primaryEmotion || 'neutral',
+          intensity: chunk.metadata.emotional?.intensity || 0
+        },
+        conceptual_metadata: {
+          concepts: chunk.metadata.concepts || []
+        },
+        domain_metadata: chunk.metadata.domain ? {
+          primaryDomain: chunk.metadata.domain,
+          confidence: 0.8
+        } : null,
+        metadata_extracted_at: new Date().toISOString()
+      }
+    }) as unknown as ProcessedChunk[]
+
+    await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
 
     return {
-      markdown: fullMarkdown,
+      markdown: combinedMarkdown,
       chunks: enrichedChunks,
       metadata: {
         title: metadata.title,
         author: metadata.author,
-        document_type: documentType,
-        isbn: metadata.isbn,
-        publisher: metadata.publisher,
-        publication_date: metadata.publicationDate,
-        language: metadata.language,
-        description: metadata.description,
-        cover_image_url: coverImage ? `${storagePath}/cover.jpg` : undefined
+        extra: {
+          isbn: metadata.isbn,
+          publisher: metadata.publisher,
+          publication_date: metadata.publicationDate,
+          language: metadata.language,
+          description: metadata.description,
+          cover_image_url: coverImage ? `${storagePath}/cover.jpg` : undefined
+        }
       },
-      wordCount: fullMarkdown.split(/\s+/).length
+      wordCount: combinedMarkdown.split(/\s+/).length
     }
   }
 }

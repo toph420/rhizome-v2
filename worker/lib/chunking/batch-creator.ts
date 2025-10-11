@@ -8,10 +8,11 @@
 import type { MetadataExtractionBatch } from '../../types/chunking'
 
 /**
- * Overlap size between batches (2K chars).
+ * Overlap size between batches (1K chars).
  * Prevents chunks from being cut mid-sentence at batch boundaries.
+ * Reduced from 2K to match smaller batch size (20K).
  */
-export const OVERLAP_SIZE = 2000
+export const OVERLAP_SIZE = 1000
 
 /**
  * Creates windowed batches with overlap for large document processing.

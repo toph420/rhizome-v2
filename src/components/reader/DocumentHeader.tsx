@@ -3,11 +3,19 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { ExternalLink, RefreshCw, Loader2, BookMarked } from 'lucide-react'
+import { ExternalLink, RefreshCw, Loader2, BookMarked, Compass, BookOpen, GraduationCap, Zap, ArrowLeft } from 'lucide-react'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useRouter } from 'next/navigation'
 
 interface DocumentHeaderProps {
   documentId: string
   title: string
+  wordCount?: number
+  chunkCount?: number
+  connectionCount?: number
+  viewMode?: 'explore' | 'focus' | 'study'
+  onViewModeChange?: (mode: 'explore' | 'focus' | 'study') => void
+  onQuickSpark?: () => void
 }
 
 /**
@@ -21,7 +29,17 @@ interface DocumentHeaderProps {
  * Uses invisible iframe for Obsidian URI (NOT window.open)
  * This ensures protocol handler works reliably across platforms
  */
-export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
+export function DocumentHeader({
+  documentId,
+  title,
+  wordCount,
+  chunkCount,
+  connectionCount,
+  viewMode = 'explore',
+  onViewModeChange,
+  onQuickSpark
+}: DocumentHeaderProps) {
+  const router = useRouter()
   const [isExporting, setIsExporting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -72,14 +90,42 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
   }
 
   /**
-   * Sync edited markdown from Obsidian vault
+   * Poll job status until completion
+   */
+  async function pollJobStatus(jobId: string): Promise<any> {
+    const maxAttempts = 900 // 30 minutes
+    const intervalMs = 2000 // 2 seconds
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await fetch(`/api/obsidian/status/${jobId}`)
+      const data = await response.json()
+
+      if (data.status === 'completed') {
+        return data.result
+      }
+
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Job failed')
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    throw new Error('Sync timeout - processing took too long')
+  }
+
+  /**
+   * Sync edited markdown from Obsidian vault (async version)
    * Triggers reprocessing pipeline with annotation recovery
+   * Uses client-side polling to avoid API timeout issues
    */
   async function handleSync() {
     setIsSyncing(true)
 
     try {
-      const response = await fetch('/api/obsidian/sync', {
+      // Start sync job
+      const response = await fetch('/api/obsidian/sync-async', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentId })
@@ -90,7 +136,15 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
         throw new Error(error.message || 'Sync failed')
       }
 
-      const { changed, recovery } = await response.json()
+      const { jobId } = await response.json()
+
+      toast.info('Sync Started', {
+        description: 'Processing document - this may take several minutes for large files',
+        duration: 3000
+      })
+
+      // Poll for completion
+      const { changed, recovery } = await pollJobStatus(jobId)
 
       if (!changed) {
         toast.info('No Changes', {
@@ -171,11 +225,64 @@ export function DocumentHeader({ documentId, title }: DocumentHeaderProps) {
 
   return (
     <header className="flex items-center justify-between px-6 py-4 border-b bg-background">
-      <div className="flex-1">
-        <h1 className="text-2xl font-semibold truncate">{title}</h1>
+      <div className="flex items-center gap-4 min-w-0 flex-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => router.push('/')}
+          title="Back to Library"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold truncate">{title}</h1>
+          {(wordCount || chunkCount || connectionCount) && (
+            <p className="text-xs text-muted-foreground">
+              {wordCount && `${wordCount.toLocaleString()} words`}
+              {wordCount && chunkCount && ' • '}
+              {chunkCount && `${chunkCount} chunks`}
+              {chunkCount && connectionCount && ' • '}
+              {connectionCount !== undefined && `${connectionCount} connections`}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Reading Mode Toggle */}
+        {onViewModeChange && (
+          <ToggleGroup
+            type="single"
+            value={viewMode}
+            onValueChange={(value) => {
+              if (value) onViewModeChange(value as 'explore' | 'focus' | 'study')
+            }}
+          >
+            <ToggleGroupItem value="explore" title="Explore (sidebar visible)">
+              <Compass className="h-4 w-4" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="focus" title="Focus (hide sidebar)">
+              <BookOpen className="h-4 w-4" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="study" title="Study (flashcards)">
+              <GraduationCap className="h-4 w-4" />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        )}
+
+        {/* Quick Spark Button */}
+        {onQuickSpark && (
+          <Button variant="outline" size="sm" onClick={onQuickSpark}>
+            <Zap className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Quick Spark</span>
+            <kbd className="hidden sm:inline-flex ml-2 h-5 items-center gap-1 rounded border bg-gray-100 dark:bg-gray-800 px-1.5 font-mono text-xs">
+              ⌘K
+            </kbd>
+          </Button>
+        )}
+
+        <div className="w-px h-6 bg-border" />
         <Button
           onClick={handleImportFromReadwise}
           disabled={isExporting || isSyncing || isImporting}

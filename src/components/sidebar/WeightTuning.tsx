@@ -4,7 +4,7 @@ import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { useAnnotationStore } from '@/stores/annotation-store'
+import { useConnectionStore } from '@/stores/connection-store'
 import type { EngineWeights } from '@/types/annotations'
 
 const ENGINE_LABELS: Record<keyof EngineWeights, string> = {
@@ -26,7 +26,9 @@ const ENGINE_DESCRIPTIONS: Record<keyof EngineWeights, string> = {
  * @returns React element with weight sliders and preset buttons.
  */
 export function WeightTuning() {
-  const { weights, setWeight, applyPreset } = useAnnotationStore()
+  const weights = useConnectionStore(state => state.weights)
+  const setWeight = useConnectionStore(state => state.setWeight)
+  const applyPreset = useConnectionStore(state => state.applyPreset)
 
   return (
     <div className="space-y-4 p-4">

@@ -8,34 +8,34 @@ import { BlockRenderer } from './BlockRenderer'
 import { QuickCapturePanel } from './QuickCapturePanel'
 import { AnnotationsDebugPanel } from './AnnotationsDebugPanel'
 import { useTextSelection } from '@/hooks/useTextSelection'
+import { useAnnotationStore } from '@/stores/annotation-store'
+import { useReaderStore } from '@/stores/reader-store'
 import { getAnnotations } from '@/app/actions/annotations'
-import type { Chunk, StoredAnnotation, OptimisticAnnotation, TextSelection } from '@/types/annotations'
+import type { StoredAnnotation, OptimisticAnnotation, TextSelection } from '@/types/annotations'
 
-interface VirtualizedReaderProps {
-  markdown: string
-  chunks: Chunk[]
-  documentId: string
-  onVisibleChunksChange?: (chunkIds: string[]) => void
-}
+// Constant empty array to prevent infinite loops from new references
+const EMPTY_ANNOTATIONS: StoredAnnotation[] = []
 
 /**
  * Virtualized document reader with annotation support.
+ * Gets document content from ReaderStore (no props needed).
  * Handles progressive loading, text selection, and highlight injection.
- * @param props - Component props.
- * @param props.markdown - Markdown content to render.
- * @param props.chunks - Document chunks with offsets.
- * @param props.documentId - Document ID for annotation queries.
- * @param props.onVisibleChunksChange - Callback for visible chunk changes.
  * @returns React element with virtualized rendering.
  */
-export function VirtualizedReader({
-  markdown,
-  chunks,
-  documentId,
-  onVisibleChunksChange,
-}: VirtualizedReaderProps) {
-  // Server annotations (source of truth from database)
-  const [serverAnnotations, setServerAnnotations] = useState<StoredAnnotation[]>([])
+export function VirtualizedReader() {
+  // Get document data from ReaderStore (replaces props)
+  const markdown = useReaderStore(state => state.markdownContent)
+  const chunks = useReaderStore(state => state.chunks)
+  const documentId = useReaderStore(state => state.documentId)
+  const updateScroll = useReaderStore(state => state.updateScroll)
+  // Zustand store for annotations (document-keyed)
+  // Use constant empty array reference to prevent infinite loop
+  const annotations = useAnnotationStore(
+    state => state.annotations[documentId ?? ''] ?? EMPTY_ANNOTATIONS
+  )
+  const setAnnotations = useAnnotationStore(state => state.setAnnotations)
+  const addAnnotation = useAnnotationStore(state => state.addAnnotation)
+  const updateStoreAnnotation = useAnnotationStore(state => state.updateAnnotation)
 
   // Optimistic annotations (temporary, for instant UI updates)
   const [optimisticAnnotations, setOptimisticAnnotations] = useState<
@@ -62,13 +62,15 @@ export function VirtualizedReader({
     }
   }, [selection, captureSelection])
 
-  // Load annotations from database
+  // Load annotations from database into Zustand store
   useEffect(() => {
+    if (!documentId) return
+
     async function loadAnnotations() {
       try {
-        const result = await getAnnotations(documentId)
+        const result = await getAnnotations(documentId!)
         if (result.success) {
-          setServerAnnotations(result.data)
+          setAnnotations(documentId!, result.data)
         } else {
           console.error('[VirtualizedReader] Failed to load annotations:', result.error)
         }
@@ -78,19 +80,19 @@ export function VirtualizedReader({
     }
 
     void loadAnnotations()
-  }, [documentId])
+  }, [documentId, setAnnotations])
 
   // Parse markdown into blocks (without annotations - injection happens in BlockRenderer)
   const blocks = useMemo(() => {
     return parseMarkdownToBlocks(markdown, chunks)
   }, [markdown, chunks])
 
-  // Merge server annotations with optimistic ones
+  // Merge store annotations with optimistic ones
   const allAnnotations = useMemo(() => {
-    // Start with server annotations converted to simple format
+    // Start with store annotations converted to simple format
     // IMPORTANT: Read offsets from position component (has recovered offsets after reprocessing)
     // annotation.range has ORIGINAL offsets, position has CURRENT/RECOVERED offsets
-    const serverAnnotationsSimple = serverAnnotations
+    const storeAnnotationsSimple = annotations
       .filter(ann => ann.components.position && ann.components.annotation)
       .map(ann => ({
         id: ann.id,
@@ -120,11 +122,11 @@ export function VirtualizedReader({
       })
     })
 
-    // Merge: optimistic annotations override server ones with same offsets
-    const merged = [...serverAnnotationsSimple]
+    // Merge: optimistic annotations override store ones with same offsets
+    const merged = [...storeAnnotationsSimple]
 
     optimisticArray.forEach(optAnn => {
-      // Check if this annotation already exists in server data
+      // Check if this annotation already exists in store data
       const existingIndex = merged.findIndex(
         ann =>
           ann.startOffset === optAnn.startOffset &&
@@ -132,10 +134,10 @@ export function VirtualizedReader({
       )
 
       if (existingIndex >= 0) {
-        // Replace server annotation with optimistic (has real ID now)
+        // Replace store annotation with optimistic (has real ID now)
         merged[existingIndex] = optAnn
       } else if (!optAnn.id.startsWith('temp-')) {
-        // Real ID but not in server data yet - add it
+        // Real ID but not in store data yet - add it
         merged.push(optAnn)
       } else {
         // Temp ID - add it for immediate display
@@ -144,28 +146,47 @@ export function VirtualizedReader({
     })
 
     return merged
-  }, [serverAnnotations, optimisticAnnotations])
+  }, [annotations, optimisticAnnotations])
 
   // Convert to format expected by BlockRenderer
   const annotationsForBlocks = useMemo(() => {
     return allAnnotations
   }, [allAnnotations])
 
-  // Track visible chunk IDs
+  // Track visible blocks and update ReaderStore scroll position
   const handleVisibleRangeChange = useCallback(
     (range: { startIndex: number; endIndex: number }) => {
-      if (!onVisibleChunksChange) return
+      if (blocks.length === 0 || !markdown) return
 
-      const visibleChunkIds = new Set<string>()
-      for (let i = range.startIndex; i <= range.endIndex; i++) {
-        const block = blocks[i]
-        if (block) visibleChunkIds.add(block.chunkId)
-      }
+      // Get visible blocks
+      const visibleBlocks = blocks.slice(range.startIndex, range.endIndex + 1)
+      if (visibleBlocks.length === 0) return
 
-      const chunkIdArray = Array.from(visibleChunkIds)
-      onVisibleChunksChange(chunkIdArray)
+      // Calculate viewport offsets from visible blocks
+      const firstBlock = visibleBlocks[0]
+      const lastBlock = visibleBlocks[visibleBlocks.length - 1]
+
+      const viewportStart = firstBlock?.startOffset || 0
+      const viewportEnd = lastBlock?.endOffset || markdown.length
+
+      // Calculate scroll percentage
+      const scrollPosition = markdown.length > 0
+        ? (viewportStart / markdown.length) * 100
+        : 0
+
+      console.log('[VirtualizedReader] Visible range:', {
+        blocks: `${range.startIndex}-${range.endIndex}`,
+        offsets: `${viewportStart}-${viewportEnd}`,
+        scrollPercent: scrollPosition.toFixed(1) + '%'
+      })
+
+      // Update ReaderStore (this triggers visibleChunks recalculation)
+      updateScroll(scrollPosition, {
+        start: viewportStart,
+        end: viewportEnd
+      })
     },
-    [blocks, onVisibleChunksChange]
+    [blocks, markdown, updateScroll]
   )
 
   // Handle optimistic annotation updates (for new annotations)
@@ -195,50 +216,51 @@ export function VirtualizedReader({
           }
         })
 
-        // Add to serverAnnotations for permanent storage and editing
-        setServerAnnotations((prevServer) => {
-          // Convert OptimisticAnnotation to StoredAnnotation format
-          const storedAnnotation: StoredAnnotation = {
-            id: annotation.id,
-            user_id: '',
-            created_at: annotation.created_at,
-            updated_at: annotation.created_at,
-            components: {
-              annotation: {
-                text: annotation.text,
-                note: annotation.note,
-                tags: annotation.tags || [],
-                color: annotation.color,
-                range: {
-                  startOffset: annotation.start_offset,
-                  endOffset: annotation.end_offset,
-                  chunkIds: annotation.chunk_ids,
-                },
-                textContext: annotation.text_context,
+        // Add to Zustand store for permanent storage and editing
+        const storedAnnotation: StoredAnnotation = {
+          id: annotation.id,
+          user_id: '',
+          created_at: annotation.created_at,
+          updated_at: annotation.created_at,
+          components: {
+            annotation: {
+              text: annotation.text,
+              note: annotation.note,
+              tags: annotation.tags || [],
+              color: annotation.color,
+              range: {
+                startOffset: annotation.start_offset,
+                endOffset: annotation.end_offset,
+                chunkIds: annotation.chunk_ids,
               },
-              position: undefined,
-              source: undefined,
+              textContext: annotation.text_context,
             },
-          }
+            position: {
+              startOffset: annotation.start_offset,
+              endOffset: annotation.end_offset,
+              chunkIds: annotation.chunk_ids,
+              confidence: 1.0,
+              method: 'exact',
+              textContext: annotation.text_context
+            },
+            source: undefined,
+          },
+        }
 
-          // Check if already exists (avoid duplicates)
-          const exists = prevServer.some(a => a.id === annotation.id)
-          if (exists) return prevServer
-
-          return [...prevServer, storedAnnotation]
-        })
+        // Add to store (avoids duplicates via store logic)
+        if (documentId) {
+          addAnnotation(documentId, storedAnnotation)
+        }
       }
 
       return next
     })
-  }, [])
+  }, [documentId, addAnnotation])
 
   // Handle annotation updates (for editing existing annotations)
   const handleAnnotationUpdated = useCallback((annotation: StoredAnnotation) => {
-    setServerAnnotations(prev => prev.map(ann =>
-      ann.id === annotation.id ? annotation : ann
-    ))
-  }, [])
+    updateStoreAnnotation(documentId, annotation.id, annotation)
+  }, [documentId, updateStoreAnnotation])
 
   // Handle annotation click to enter edit mode
   const handleAnnotationEdit = useCallback((annotationId: string, element: HTMLElement) => {
@@ -251,8 +273,8 @@ export function VirtualizedReader({
       return
     }
 
-    // Find annotation in serverAnnotations
-    const annotation = serverAnnotations.find(a => a.id === annotationId)
+    // Find annotation in store
+    const annotation = annotations.find(a => a.id === annotationId)
     if (!annotation || !annotation.components.annotation) {
       toast.error('Annotation not found', {
         description: 'This annotation may have been deleted',
@@ -274,12 +296,15 @@ export function VirtualizedReader({
     // Set edit mode
     setEditingAnnotation(annotation)
     setCaptureSelection(textSelection)
-  }, [serverAnnotations])
+  }, [annotations])
 
-  if (blocks.length === 0) {
+  // Guard: Wait for document to load
+  if (!documentId || blocks.length === 0) {
     return (
       <div className="container mx-auto p-8">
-        <p className="text-muted-foreground">No content to display</p>
+        <p className="text-muted-foreground">
+          {!documentId ? 'Loading document...' : 'No content to display'}
+        </p>
       </div>
     )
   }
@@ -306,7 +331,7 @@ export function VirtualizedReader({
       />
 
       {/* QuickCapture panel appears when text is selected */}
-      {captureSelection && (
+      {captureSelection && documentId && (
         <QuickCapturePanel
           selection={captureSelection}
           documentId={documentId}
@@ -320,11 +345,12 @@ export function VirtualizedReader({
           existingAnnotation={editingAnnotation}
           mode={editingAnnotation ? 'edit' : 'create'}
           chunks={chunks}
+          markdown={markdown}
         />
       )}
 
       {/* Debug panel to show annotations */}
-      <AnnotationsDebugPanel annotations={serverAnnotations} />
+      <AnnotationsDebugPanel annotations={annotations} />
     </>
   )
 }

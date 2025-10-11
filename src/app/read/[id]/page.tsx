@@ -135,10 +135,22 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     const signedUrl = data.signedUrl
     const job = await getDocumentJob(id)
     
-    // Query chunks ordered by index
+    // Query chunks ordered by index with metadata
     const { data: chunks, error: chunksError } = await supabase
       .from('chunks')
-      .select('id, content, chunk_index, start_offset, end_offset')
+      .select(`
+        id,
+        content,
+        chunk_index,
+        start_offset,
+        end_offset,
+        themes,
+        summary,
+        importance_score,
+        emotional_metadata,
+        conceptual_metadata,
+        domain_metadata
+      `)
       .eq('document_id', id)
       .order('chunk_index', { ascending: true })
     
@@ -182,9 +194,15 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
       reviewResults = null
     }
 
+    // Query connection count for header stats
+    const { count: connectionCount } = await supabase
+      .from('chunk_connections')
+      .select('*', { count: 'exact', head: true })
+      .or(`source_chunk_id.in.(${chunks.map(c => c.id).join(',')}),target_chunk_id.in.(${chunks.map(c => c.id).join(',')})`)
+
     return (
       <>
-        {!doc.embeddings_available && job && (
+        {!doc.embeddings_available && job && (job.status === 'processing' || job.status === 'pending') && (
           <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 fixed top-0 left-0 right-0 z-50">
             <div className="flex items-center gap-3">
               <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
@@ -205,6 +223,9 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           markdownUrl={signedUrl}
           chunks={chunks}
           annotations={annotations}
+          documentTitle={doc.title}
+          wordCount={doc.word_count}
+          connectionCount={connectionCount || 0}
           reviewResults={reviewResults}
         />
       </>

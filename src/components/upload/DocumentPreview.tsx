@@ -11,14 +11,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, X } from 'lucide-react'
+import { Upload, X, Sparkles } from 'lucide-react'
 import Image from 'next/image'
 import type { DetectedMetadata, DocumentType } from '@/types/metadata'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface DocumentPreviewProps {
   metadata: DetectedMetadata
   onConfirm: (edited: DetectedMetadata, coverImage: File | null) => void
   onCancel: () => void
+  reviewBeforeChunking?: boolean
+  onReviewBeforeChunkingChange?: (checked: boolean) => void
+  cleanMarkdown?: boolean
+  onCleanMarkdownChange?: (checked: boolean) => void
+  reviewDoclingExtraction?: boolean
+  onReviewDoclingExtractionChange?: (checked: boolean) => void
+  extractImages?: boolean
+  onExtractImagesChange?: (checked: boolean) => void
 }
 
 const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
@@ -33,7 +42,15 @@ const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
 export function DocumentPreview({
   metadata,
   onConfirm,
-  onCancel
+  onCancel,
+  reviewBeforeChunking = false,
+  onReviewBeforeChunkingChange,
+  cleanMarkdown = true,
+  onCleanMarkdownChange,
+  reviewDoclingExtraction = false,
+  onReviewDoclingExtractionChange,
+  extractImages = false,
+  onExtractImagesChange
 }: DocumentPreviewProps) {
   const [edited, setEdited] = useState(metadata)
   const [coverImage, setCoverImage] = useState<File | null>(null)
@@ -187,13 +204,106 @@ export function DocumentPreview({
       </div>
 
       {/* Actions */}
-      <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-        <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button onClick={() => onConfirm(edited, coverImage)}>
-          Process Document
-        </Button>
+      <div className="mt-6 pt-4 border-t space-y-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="review-docling-extraction-preview"
+              checked={reviewDoclingExtraction}
+              onCheckedChange={(checked) => {
+                console.log('[DocumentPreview] Review Docling extraction checkbox changed:', checked)
+                onReviewDoclingExtractionChange?.(checked as boolean)
+              }}
+            />
+            <label
+              htmlFor="review-docling-extraction-preview"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+            >
+              <Sparkles className="h-3 w-3" />
+              Review Docling extraction in Obsidian before AI cleanup
+            </label>
+          </div>
+          {reviewDoclingExtraction && (
+            <p className="text-xs text-muted-foreground ml-6">
+              You'll choose whether to run AI cleanup after reviewing the extraction
+            </p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="clean-markdown-preview"
+              checked={cleanMarkdown}
+              disabled={reviewDoclingExtraction}
+              onCheckedChange={(checked) => {
+                console.log('[DocumentPreview] Clean markdown checkbox changed:', checked)
+                onCleanMarkdownChange?.(checked as boolean)
+              }}
+            />
+            <label
+              htmlFor="clean-markdown-preview"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+            >
+              <Sparkles className="h-3 w-3" />
+              AI cleanup markdown (recommended)
+            </label>
+          </div>
+          {reviewDoclingExtraction && (
+            <p className="text-xs text-muted-foreground ml-6">
+              Disabled - AI cleanup choice deferred to review stage
+            </p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="review-before-chunking-preview"
+              checked={reviewBeforeChunking}
+              disabled={reviewDoclingExtraction}
+              onCheckedChange={(checked) => {
+                console.log('[DocumentPreview] Review before chunking checkbox changed:', checked)
+                onReviewBeforeChunkingChange?.(checked as boolean)
+              }}
+            />
+            <label
+              htmlFor="review-before-chunking-preview"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+            >
+              <Sparkles className="h-3 w-3" />
+              Review markdown before chunking
+            </label>
+          </div>
+          {reviewDoclingExtraction && (
+            <p className="text-xs text-muted-foreground ml-6">
+              Disabled - conflicts with early review checkpoint
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="extract-images-preview"
+            checked={extractImages}
+            onCheckedChange={(checked) => {
+              console.log('[DocumentPreview] Extract images checkbox changed:', checked)
+              onExtractImagesChange?.(checked as boolean)
+            }}
+          />
+          <label
+            htmlFor="extract-images-preview"
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
+          >
+            <Sparkles className="h-3 w-3" />
+            Extract images from PDF (slower, ~30-40% more time)
+          </label>
+        </div>
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={() => onConfirm(edited, coverImage)}>
+            Process Document
+          </Button>
+        </div>
       </div>
     </div>
   )

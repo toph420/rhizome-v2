@@ -20,5 +20,12 @@ if [ -n "$FUNC_PIDS" ]; then
   echo "$FUNC_PIDS" | xargs kill 2>/dev/null || true
 fi
 
+# Kill any Worker processes
+WORKER_PIDS=$(pgrep -f "tsx.*index.ts" || true)
+if [ -n "$WORKER_PIDS" ]; then
+  echo "🔄 Stopping Background Worker..."
+  echo "$WORKER_PIDS" | xargs kill 2>/dev/null || true
+fi
+
 echo ""
 echo "✅ All services stopped"

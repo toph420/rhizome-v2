@@ -23,23 +23,43 @@ import type { ReprocessResults, Chunk } from '../types/recovery.js'
  *
  * @param documentId - Document to reprocess
  * @param supabaseClient - Optional Supabase client (if not provided, creates new one)
+ * @param jobId - Optional job ID for progress tracking
  * @returns Recovery results for annotations and connections
  */
 export async function reprocessDocument(
   documentId: string,
-  supabaseClient?: any
+  supabaseClient?: any,
+  jobId?: string
 ): Promise<ReprocessResults> {
   const startTime = Date.now()
   const supabase = supabaseClient || createClient(
-    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
+
+  // Helper to update job progress
+  async function updateProgress(percent: number, message?: string) {
+    if (jobId) {
+      await supabase
+        .from('background_jobs')
+        .update({
+          progress: {
+            percent,
+            stage: 'reprocessing',
+            details: message || ''
+          }
+        })
+        .eq('id', jobId)
+      console.log(`[ReprocessDocument] Progress: ${percent}% ${message || ''}`)
+    }
+  }
 
   // Unique batch ID for this reprocessing attempt
   const reprocessingBatch = new Date().toISOString()
 
   console.log(`[ReprocessDocument] Starting for document ${documentId}`)
   console.log(`[ReprocessDocument] Batch ID: ${reprocessingBatch}`)
+  await updateProgress(5, 'Starting reprocessing...')
 
   try {
     // 1. Set processing status
@@ -68,6 +88,7 @@ export async function reprocessDocument(
     }
 
     const newMarkdown = await blob.text()
+    await updateProgress(10, 'Markdown fetched')
 
     // 3. Mark old chunks as not current (transaction safety)
     console.log('[ReprocessDocument] Marking old chunks as is_current: false')
@@ -76,9 +97,11 @@ export async function reprocessDocument(
       .update({ is_current: false })
       .eq('document_id', documentId)
       .eq('is_current', true)
+    await updateProgress(15, 'Old chunks marked')
 
     // 4. Reprocess markdown to create new chunks with metadata
     console.log('[ReprocessDocument] Creating new chunks from edited markdown...')
+    await updateProgress(20, 'Starting AI chunking (this may take several minutes)...')
 
     const { batchChunkAndExtractMetadata } = await import('../lib/ai-chunking-batch.js')
     const { generateEmbeddings } = await import('../lib/embeddings.js')
@@ -94,10 +117,13 @@ export async function reprocessDocument(
     )
 
     console.log(`[ReprocessDocument] Created ${aiChunks.length} chunks via AI`)
+    await updateProgress(60, `Created ${aiChunks.length} semantic chunks`)
 
     // 5. Generate embeddings for new chunks
     console.log('[ReprocessDocument] Generating embeddings...')
+    await updateProgress(65, 'Generating embeddings...')
     const embeddings = await generateEmbeddings(aiChunks.map(c => c.content))
+    await updateProgress(70, 'Embeddings generated')
 
     // 6. Insert new chunks with batch ID (transaction safety)
     // Map AI metadata to database schema (JSONB columns for 3-engine collision detection)
@@ -143,14 +169,17 @@ export async function reprocessDocument(
 
     const newChunks = insertedChunks
     console.log(`[ReprocessDocument] Inserted ${newChunks.length} new chunks`)
+    await updateProgress(73, 'New chunks inserted')
 
     // 7. Run collision detection (wrapped in try-catch - non-blocking)
     // Don't let connection failures block annotation recovery
     try {
       console.log('[ReprocessDocument] Running 3-engine collision detection...')
+      await updateProgress(75, 'Running collision detection...')
       const { processDocument } = await import('../engines/orchestrator.js')
       await processDocument(documentId)
       console.log('[ReprocessDocument] ✅ Collision detection complete')
+      await updateProgress(77, 'Collision detection complete')
     } catch (error) {
       console.error('[ReprocessDocument] ⚠️  Collision detection failed:', error)
       console.log('[ReprocessDocument] Continuing with annotation recovery (connections can be rebuilt later)')
@@ -158,6 +187,7 @@ export async function reprocessDocument(
 
     // 8. Recover annotations
     console.log('[ReprocessDocument] Starting annotation recovery...')
+    await updateProgress(80, 'Recovering annotations...')
     const annotationResults = await recoverAnnotations(
       documentId,
       newMarkdown,
@@ -179,18 +209,21 @@ export async function reprocessDocument(
     console.log(`  - Needs review: ${annotationResults.needsReview.length}`)
     console.log(`  - Lost: ${annotationResults.lost.length}`)
     console.log(`  - Rate: ${(recoveryRate * 100).toFixed(1)}%`)
+    await updateProgress(85, `Annotations recovered: ${annotationResults.success.length} success, ${annotationResults.needsReview.length} review`)
 
     // 9. Remap connections (queries old chunk data internally via join)
     // Wrapped in try-catch - don't let connection remapping block annotation recovery
     let connectionResults
     try {
       console.log('[ReprocessDocument] Starting connection remapping...')
+      await updateProgress(88, 'Remapping connections...')
       connectionResults = await remapConnections(
         documentId,
         newChunks as Chunk[],
         supabase
       )
       console.log('[ReprocessDocument] ✅ Connection remapping complete')
+      await updateProgress(92, 'Connections remapped')
     } catch (error) {
       console.error('[ReprocessDocument] ⚠️  Connection remapping failed:', error)
       console.log('[ReprocessDocument] Continuing without connection remapping (can be rebuilt later)')
@@ -200,6 +233,7 @@ export async function reprocessDocument(
     // 10. ALWAYS commit changes (let user review via UI)
     // Even if recovery rate is low, committed annotations are still valuable
     console.log('[ReprocessDocument] ✅ Committing changes (user can review via UI)')
+    await updateProgress(95, 'Committing changes...')
 
     // Set new chunks as current
     await supabase
@@ -227,6 +261,7 @@ export async function reprocessDocument(
 
     const executionTime = Date.now() - startTime
     console.log(`[ReprocessDocument] ✅ Complete in ${(executionTime / 1000).toFixed(1)}s`)
+    await updateProgress(100, `Complete in ${(executionTime / 1000).toFixed(1)}s`)
 
     return {
       annotations: annotationResults,

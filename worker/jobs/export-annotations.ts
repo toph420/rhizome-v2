@@ -14,71 +14,140 @@
 import cron from 'node-cron'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-interface AnnotationComponent {
+interface AnnotationData {
+  text: string
+  color?: string
+  note?: string
+  tags?: string[]
+  range?: {
+    chunkIds?: string[]
+    startOffset?: number
+    endOffset?: number
+  }
+  textContext?: {
+    before?: string
+    after?: string
+    content?: string
+  }
+}
+
+interface PositionData {
+  startOffset: number
+  endOffset: number
+  method?: string
+  confidence?: number
+  chunkIds?: string[]
+  textContext?: {
+    before?: string
+    after?: string
+  }
+  originalChunkIndex?: number
+}
+
+interface SourceData {
+  document_id: string
+  chunk_id?: string
+  chunk_ids?: string[]
+}
+
+interface ComponentRecord {
   id: string
   entity_id: string
   component_type: string
-  data: {
-    documentId?: string
-    document_id?: string
-    startOffset?: number
-    endOffset?: number
-    originalText?: string
-    note?: string
-    color?: string
-    type?: string
-    pageLabel?: string
-    textContext?: {
-      before: string
-      after: string
-    }
-  }
-  chunk_id?: string | null
-  chunk_ids?: string[] | null
+  data: any
   created_at: string
   updated_at: string
   recovery_method?: string | null
   recovery_confidence?: number | null
+  needs_review?: boolean | null
+  original_chunk_index?: number | null
 }
 
 interface PortableAnnotation {
+  // Annotation data
   text: string
   note?: string
   color?: string
-  type?: string
+  tags?: string[]
+
+  // Position data
   position: {
     start: number
     end: number
+    method?: string
+    confidence?: number
+    originalChunkIndex?: number
   }
-  pageLabel?: string
-  created_at: string
+
+  // Context
+  textContext?: {
+    before?: string
+    after?: string
+    content?: string
+  }
+
+  // Source references
+  chunkIds?: string[]
+
+  // Recovery metadata
   recovery?: {
     method: string
     confidence: number
+    needsReview: boolean
   }
+
+  // Timestamps
+  created_at: string
+  updated_at: string
 }
 
 /**
- * Transform annotation component to portable format
+ * Transform ECS components to portable format
+ * Merges annotation, position, and source components into single portable object
  */
-function transformToPortableFormat(annotation: AnnotationComponent): PortableAnnotation {
-  const data = annotation.data
+function transformToPortableFormat(
+  annotationData: AnnotationData,
+  positionComponent: ComponentRecord,
+  sourceData: SourceData
+): PortableAnnotation {
+  const posData = positionComponent.data as PositionData
+
+  // Safely access position data with fallbacks
+  const startOffset = posData?.startOffset ?? 0
+  const endOffset = posData?.endOffset ?? 0
 
   return {
-    text: data.originalText || '',
-    note: data.note,
-    color: data.color,
-    type: data.type,
+    // Annotation fields
+    text: annotationData.text,
+    note: annotationData.note,
+    color: annotationData.color,
+    tags: annotationData.tags,
+
+    // Position fields
     position: {
-      start: data.startOffset || 0,
-      end: data.endOffset || 0
+      start: startOffset,
+      end: endOffset,
+      method: posData?.method,
+      confidence: posData?.confidence,
+      originalChunkIndex: positionComponent.original_chunk_index ?? posData?.originalChunkIndex
     },
-    pageLabel: data.pageLabel,
-    created_at: annotation.created_at,
-    recovery: annotation.recovery_method ? {
-      method: annotation.recovery_method,
-      confidence: annotation.recovery_confidence || 0
-    } : undefined
+
+    // Context (prefer annotation context, fallback to position context)
+    textContext: annotationData.textContext || posData?.textContext,
+
+    // Source references (from position chunkIds or source chunk_ids)
+    chunkIds: posData?.chunkIds || sourceData.chunk_ids || (sourceData.chunk_id ? [sourceData.chunk_id] : undefined),
+
+    // Recovery metadata (if annotation was recovered after edit)
+    recovery: positionComponent.recovery_method ? {
+      method: positionComponent.recovery_method,
+      confidence: positionComponent.recovery_confidence || 0,
+      needsReview: positionComponent.needs_review || false
+    } : undefined,
+
+    // Timestamps
+    created_at: positionComponent.created_at,
+    updated_at: positionComponent.updated_at
   }
 }
 
@@ -92,37 +161,87 @@ async function exportDocumentAnnotations(
 ): Promise<number> {
   // Fetch annotations using entity_id join pattern (same as recover-annotations.ts)
   // First get entity_ids from source components
-  const { data: sourceComponents } = await supabase
+  const { data: sourceEntities } = await supabase
     .from('components')
     .select('entity_id')
     .eq('component_type', 'source')
     .eq('data->>document_id', documentId)
 
-  const entityIds = sourceComponents?.map(c => c.entity_id) || []
+  const entityIds = sourceEntities?.map(c => c.entity_id) || []
 
   if (entityIds.length === 0) {
     return 0
   }
 
-  // Then fetch position components by entity_id
-  const { data: annotations, error: fetchError } = await supabase
-    .from('components')
-    .select('*')
-    .eq('component_type', 'position')
-    .in('entity_id', entityIds)
-    .order('created_at', { ascending: true })
+  // Fetch all three component types in parallel
+  const [positionResult, annotationResult, sourceResult] = await Promise.all([
+    supabase
+      .from('components')
+      .select('*')
+      .eq('component_type', 'position')
+      .in('entity_id', entityIds)
+      .order('created_at', { ascending: true }),
 
-  if (fetchError) {
-    console.error(`Failed to fetch annotations for document ${documentId}:`, fetchError)
+    supabase
+      .from('components')
+      .select('entity_id, data')
+      .eq('component_type', 'annotation')
+      .in('entity_id', entityIds),
+
+    supabase
+      .from('components')
+      .select('entity_id, data')
+      .eq('component_type', 'source')
+      .in('entity_id', entityIds)
+  ])
+
+  if (positionResult.error) {
+    console.error(`Failed to fetch position components: ${positionResult.error.message}`)
     return 0
   }
 
-  if (!annotations || annotations.length === 0) {
+  if (annotationResult.error) {
+    console.error(`Failed to fetch annotation components: ${annotationResult.error.message}`)
     return 0
   }
 
-  // Transform to portable format
-  const portableAnnotations = annotations.map(transformToPortableFormat)
+  if (sourceResult.error) {
+    console.error(`Failed to fetch source components: ${sourceResult.error.message}`)
+    return 0
+  }
+
+  const positionComponents = positionResult.data || []
+  const annotationComponents = annotationResult.data || []
+  const sourceComponents = sourceResult.data || []
+
+  if (positionComponents.length === 0) {
+    return 0
+  }
+
+  // Create lookup maps
+  const annotationMap = new Map<string, AnnotationData>(
+    annotationComponents.map(c => [c.entity_id, c.data as AnnotationData])
+  )
+
+  const sourceMap = new Map<string, SourceData>(
+    sourceComponents.map(c => [c.entity_id, c.data as SourceData])
+  )
+
+  // Transform to portable format by merging all three components
+  const portableAnnotations = positionComponents
+    .map(positionComponent => {
+      const annotationData = annotationMap.get(positionComponent.entity_id)
+      const sourceData = sourceMap.get(positionComponent.entity_id)
+
+      // Skip if missing required components
+      if (!annotationData || !sourceData) {
+        console.warn(`Missing components for entity ${positionComponent.entity_id}`)
+        return null
+      }
+
+      return transformToPortableFormat(annotationData, positionComponent, sourceData)
+    })
+    .filter((ann): ann is PortableAnnotation => ann !== null)
 
   // Generate annotations file path (robust - handles any .md filename)
   // If markdown is at documents/doc-123/content.md or documents/doc-123/my-book.md
@@ -142,7 +261,7 @@ async function exportDocumentAnnotations(
     return 0
   }
 
-  return annotations.length
+  return portableAnnotations.length
 }
 
 /**
