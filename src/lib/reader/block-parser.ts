@@ -84,19 +84,26 @@ export function parseMarkdownToBlocks(
         ? token.depth
         : undefined
 
-    blocks.push({
-      id: `block_${blockIndex}`,
-      type: mapTokenType(token.type),
-      level: depth,
-      html,
-      startOffset: offset,
-      endOffset,
-      chunkId,
-      chunkPosition,
-    })
+    // Skip empty blocks (blank lines that become <p></p> or <p>\n</p>)
+    const isEmptyBlock = html.trim() === '' ||
+                         html.trim() === '<p></p>' ||
+                         /^<p>\s*<\/p>$/.test(html.trim())
+
+    if (!isEmptyBlock) {
+      blocks.push({
+        id: `block_${blockIndex}`,
+        type: mapTokenType(token.type),
+        level: depth,
+        html,
+        startOffset: offset,
+        endOffset,
+        chunkId,
+        chunkPosition,
+      })
+      blockIndex++
+    }
 
     offset = endOffset
-    blockIndex++
   }
 
   console.log(`📖 Parsed ${blocks.length} blocks from ${markdown.length} chars`)

@@ -11,7 +11,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2, Sparkles } from 'lucide-react'
-import { DocumentPreview } from '@/components/upload/DocumentPreview'
+import { DocumentPreview, workflowToFlags, type ReviewWorkflow } from '@/components/upload/DocumentPreview'
 import type { DetectedMetadata } from '@/types/metadata'
 
 type SourceType = 'pdf' | 'epub' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
@@ -78,15 +78,9 @@ export function UploadZone() {
   } | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [reviewBeforeChunking, setReviewBeforeChunking] = useState(false)
+  const [reviewWorkflow, setReviewWorkflow] = useState<ReviewWorkflow>('none')
   const [cleanMarkdown, setCleanMarkdown] = useState(true) // Default to true - cleanup enabled
-  const [reviewDoclingExtraction, setReviewDoclingExtraction] = useState(false)
   const [extractImages, setExtractImages] = useState(false)
-
-  // Debug: Log state changes
-  useEffect(() => {
-    console.log('[UploadZone] reviewBeforeChunking state changed to:', reviewBeforeChunking)
-  }, [reviewBeforeChunking])
 
   /**
    * Detects URL type (YouTube vs web article).
@@ -303,22 +297,14 @@ export function UploadZone() {
         formData.append('isbn', editedMetadata.isbn)
       }
 
-      // Add processing flags
-      console.log('[UploadZone] DEBUG reviewBeforeChunking state:', reviewBeforeChunking)
-      formData.append('reviewBeforeChunking', reviewBeforeChunking.toString())
-      console.log('[UploadZone] DEBUG formData value:', formData.get('reviewBeforeChunking'))
+      // Convert workflow to backend flags
+      const flags = workflowToFlags(reviewWorkflow, cleanMarkdown)
+      console.log('[UploadZone] Workflow flags:', flags)
 
-      console.log('[UploadZone] DEBUG cleanMarkdown state:', cleanMarkdown)
-      formData.append('cleanMarkdown', cleanMarkdown.toString())
-      console.log('[UploadZone] DEBUG cleanMarkdown formData value:', formData.get('cleanMarkdown'))
-
-      console.log('[UploadZone] DEBUG reviewDoclingExtraction state:', reviewDoclingExtraction)
-      formData.append('reviewDoclingExtraction', reviewDoclingExtraction.toString())
-      console.log('[UploadZone] DEBUG reviewDoclingExtraction formData value:', formData.get('reviewDoclingExtraction'))
-
-      console.log('[UploadZone] DEBUG extractImages state:', extractImages)
+      formData.append('reviewBeforeChunking', flags.reviewBeforeChunking.toString())
+      formData.append('cleanMarkdown', flags.cleanMarkdown.toString())
+      formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
       formData.append('extractImages', extractImages.toString())
-      console.log('[UploadZone] DEBUG extractImages formData value:', formData.get('extractImages'))
 
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
@@ -353,7 +339,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewBeforeChunking, cleanMarkdown, reviewDoclingExtraction, extractImages])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages])
 
   /**
    * Handles metadata preview cancellation.
@@ -380,9 +366,12 @@ export function UploadZone() {
       formData.append('file', selectedFile)
       formData.append('source_type', getSourceTypeForFile(selectedFile))
       formData.append('processing_requested', markdownProcessing === 'clean' ? 'true' : 'false')
-      console.log('[handleFileUpload] DEBUG reviewBeforeChunking state:', reviewBeforeChunking)
-      formData.append('reviewBeforeChunking', reviewBeforeChunking.toString())
-      console.log('[handleFileUpload] DEBUG formData value:', formData.get('reviewBeforeChunking'))
+
+      // Note: Non-PDF files don't go through DocumentPreview, so they use default workflow
+      const flags = workflowToFlags('none', cleanMarkdown)
+      formData.append('reviewBeforeChunking', flags.reviewBeforeChunking.toString())
+      formData.append('cleanMarkdown', flags.cleanMarkdown.toString())
+      formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
 
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
@@ -575,12 +564,10 @@ export function UploadZone() {
               metadata={detectedMetadata}
               onConfirm={handlePreviewConfirm}
               onCancel={handlePreviewCancel}
-              reviewBeforeChunking={reviewBeforeChunking}
-              onReviewBeforeChunkingChange={setReviewBeforeChunking}
+              reviewWorkflow={reviewWorkflow}
+              onReviewWorkflowChange={setReviewWorkflow}
               cleanMarkdown={cleanMarkdown}
               onCleanMarkdownChange={setCleanMarkdown}
-              reviewDoclingExtraction={reviewDoclingExtraction}
-              onReviewDoclingExtractionChange={setReviewDoclingExtraction}
               extractImages={extractImages}
               onExtractImagesChange={setExtractImages}
             />
@@ -676,44 +663,26 @@ export function UploadZone() {
                     </div>
                   )}
                   
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="review-before-chunking"
-                        checked={reviewBeforeChunking}
-                        onCheckedChange={(checked) => {
-                          console.log('[UploadZone main] Checkbox changed:', checked)
-                          setReviewBeforeChunking(checked as boolean)
-                        }}
-                      />
-                      <label
-                        htmlFor="review-before-chunking"
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Sparkles className="h-3 w-3" />
-                        Review markdown before chunking
-                      </label>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={handleFileUpload}
-                        disabled={isUploading || selectedFile?.type.includes('pdf')}
-                        className="flex-1"
-                      >
-                        {isUploading ? 'Processing...' : 'Process Document'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setSelectedFile(null)
-                          setCostEstimate(null)
-                        }}
-                        disabled={isUploading}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleFileUpload}
+                      disabled={isUploading || selectedFile?.type.includes('pdf')}
+                      className="flex-1"
+                    >
+                      {isUploading ? 'Processing...' : 'Process Document'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedFile(null)
+                        setCostEstimate(null)
+                      }}
+                      disabled={isUploading}
+                    >
+                      Cancel
+                    </Button>
                   </div>
+
                   {selectedFile?.type.includes('pdf') && (
                     <p className="text-xs text-muted-foreground text-center">
                       PDFs are processed after metadata confirmation

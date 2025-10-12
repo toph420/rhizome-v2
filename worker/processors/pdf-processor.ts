@@ -25,20 +25,46 @@
 
 import { SourceProcessor } from './base.js'
 import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
-import { extractPdfBuffer } from '../lib/docling-extractor.js'
+import {
+  extractPdfBuffer,
+  type DoclingChunk,
+  type DoclingStructure
+} from '../lib/docling-extractor.js'
 import { cleanPageArtifacts } from '../lib/text-cleanup.js'
 import { cleanPdfMarkdown } from '../lib/markdown-cleanup-ai.js'
 import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
+// Phase 3: Local cleanup imports
+import { cleanMarkdownLocal, cleanMarkdownRegexOnly } from '../lib/local/ollama-cleanup.js'
+import { OOMError } from '../lib/local/ollama-client.js'
+// Phase 4: Bulletproof matching imports
+import { bulletproofMatch, type MatchResult } from '../lib/local/bulletproof-matcher.js'
+// Phase 6: Local metadata enrichment imports
+import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-metadata.js'
+// Phase 7: Local embeddings imports
+import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
+import { generateEmbeddings } from '../lib/embeddings.js'
 
 export class PDFProcessor extends SourceProcessor {
   /**
    * Process PDF document with simplified pipeline.
+   *
+   * Phase 2: Added local mode with HybridChunker integration.
+   * - PROCESSING_MODE=local: Extract chunks with Docling for bulletproof matching
+   * - PROCESSING_MODE=cloud: Use existing Gemini pipeline (backward compatible)
    *
    * @returns Processed markdown, chunks, and metadata
    * @throws Error if PDF processing fails
    */
   async process(): Promise<ProcessResult> {
     const storagePath = this.getStoragePath()
+
+    // Phase 2: Check processing mode
+    const isLocalMode = process.env.PROCESSING_MODE === 'local'
+    console.log(`[PDFProcessor] Processing mode: ${isLocalMode ? 'LOCAL' : 'CLOUD'}`)
+
+    if (isLocalMode) {
+      console.log('[PDFProcessor] Local mode: Will extract chunks with Docling HybridChunker')
+    }
 
     // Stage 1: Download PDF from storage (10%)
     await this.updateProgress(10, 'download', 'fetching', 'Downloading PDF file')
@@ -60,6 +86,7 @@ export class PDFProcessor extends SourceProcessor {
     await this.updateProgress(15, 'download', 'complete', `Downloaded ${fileSizeKB}KB file`)
 
     // Stage 2: Extract PDF with Docling (15-50%)
+    // Phase 2: Enable chunking in local mode
     await this.updateProgress(20, 'extract', 'processing', 'Extracting PDF with Docling')
 
     const extractionResult = await this.withRetry(
@@ -67,16 +94,16 @@ export class PDFProcessor extends SourceProcessor {
         return await extractPdfBuffer(
           fileBuffer,
           {
+            // Phase 2: Enable HybridChunker in local mode
+            enableChunking: isLocalMode,
+            chunkSize: 512,
+            tokenizer: 'Xenova/all-mpnet-base-v2',
             ocr: false, // Enable if needed for scanned PDFs
-            timeout: 30 * 60 * 1000 // 30 minutes
-          },
-          async (progress) => {
-            // Map Docling progress to our percentage
-            if (progress.status === 'starting') {
-              await this.updateProgress(20, 'extract', 'processing', progress.message)
-            } else if (progress.status === 'converting') {
-              // Estimate progress based on status (we don't get page-by-page from Docling)
-              await this.updateProgress(35, 'extract', 'processing', progress.message)
+            timeout: 10 * 60 * 1000, // 10 minutes (Phase 2: reduced from 30 min)
+            onProgress: async (percent, stage, message) => {
+              // Map Docling's 0-100% to our 20-50% extraction stage
+              const ourPercent = 20 + Math.floor(percent * 0.3)
+              await this.updateProgress(ourPercent, 'extract', 'processing', message)
             }
           }
         )
@@ -87,8 +114,23 @@ export class PDFProcessor extends SourceProcessor {
     let markdown = extractionResult.markdown
     const markdownKB = Math.round(markdown.length / 1024)
 
-    console.log(`[PDFProcessor] Extracted ${extractionResult.pages} pages (${markdownKB}KB markdown)`)
-    console.log(`[PDFProcessor] Extraction time: ${(extractionResult.extractionTime / 1000).toFixed(1)}s`)
+    console.log(`[PDFProcessor] Extracted ${extractionResult.structure.total_pages} pages (${markdownKB}KB markdown)`)
+    console.log(`[PDFProcessor] Structure: ${extractionResult.structure.headings.length} headings`)
+    if (extractionResult.chunks) {
+      console.log(`[PDFProcessor] Docling chunks: ${extractionResult.chunks.length} segments`)
+    }
+
+    // Phase 2: Cache extraction result in job metadata
+    // This prevents re-extracting if AI cleanup fails or user reviews
+    // CRITICAL: Must store doclingChunks for Phase 4 bulletproof matching
+    this.job.metadata = {
+      ...this.job.metadata,
+      cached_extraction: {
+        markdown: extractionResult.markdown,
+        structure: extractionResult.structure,
+        doclingChunks: extractionResult.chunks // Phase 2: Required for matching
+      }
+    }
 
     await this.updateProgress(50, 'extract', 'complete', 'PDF extraction done')
 
@@ -122,36 +164,74 @@ export class PDFProcessor extends SourceProcessor {
     }
 
     // Stage 4: AI cleanup (55-70%) - CONDITIONAL on cleanMarkdown flag
+    // Phase 3: Added local mode support with Ollama
     const cleanMarkdownEnabled = this.job.input_data?.cleanMarkdown !== false // Default true
 
     if (cleanMarkdownEnabled) {
       await this.updateProgress(58, 'cleanup_ai', 'processing', 'AI cleaning markdown')
-      console.log('[PDFProcessor] Starting AI cleanup (heading-split for large docs)')
 
       try {
-        markdown = await cleanPdfMarkdown(
-        this.ai,
-        markdown,
-        {
-          onProgress: async (sectionNum, totalSections) => {
-            const percent = 58 + Math.floor((sectionNum / totalSections) * 12) // 58-70%
-            await this.updateProgress(
-              percent,
-              'cleanup_ai',
-              'processing',
-              `AI cleaning section ${sectionNum}/${totalSections}`
-            )
-          }
-        }
-      )
+        // Check if user wants to override cleanup method
+        const useGeminiCleanup = process.env.USE_GEMINI_CLEANUP === 'true'
 
-        console.log(`[PDFProcessor] AI cleanup complete`)
+        if (isLocalMode && !useGeminiCleanup) {
+          // Phase 3: Use local Ollama cleanup
+          console.log('[PDFProcessor] Using local Ollama cleanup (Qwen 32B)')
+
+          markdown = await cleanMarkdownLocal(markdown, {
+            onProgress: (stage, percent) => {
+              // Map Ollama's 0-100% to our 58-70% range
+              const ourPercent = 58 + Math.floor(percent * 0.12)
+              this.updateProgress(ourPercent, 'cleanup_ai', 'processing', 'AI cleanup in progress')
+            }
+          })
+
+          console.log('[PDFProcessor] Local AI cleanup complete')
+        } else {
+          // Use existing Gemini cleanup
+          console.log('[PDFProcessor] Using Gemini cleanup (heading-split for large docs)')
+
+          markdown = await cleanPdfMarkdown(
+            this.ai,
+            markdown,
+            {
+              onProgress: async (sectionNum, totalSections) => {
+                const percent = 58 + Math.floor((sectionNum / totalSections) * 12) // 58-70%
+                await this.updateProgress(
+                  percent,
+                  'cleanup_ai',
+                  'processing',
+                  `AI cleaning section ${sectionNum}/${totalSections}`
+                )
+              }
+            }
+          )
+
+          console.log('[PDFProcessor] Gemini AI cleanup complete')
+        }
+
         await this.updateProgress(70, 'cleanup_ai', 'complete', 'AI cleanup done')
       } catch (error: any) {
-        console.error(`[PDFProcessor] AI cleanup failed: ${error.message}`)
-        console.warn('[PDFProcessor] Falling back to regex-cleaned markdown')
-        // markdown already has regex cleanup, just continue
-        await this.updateProgress(70, 'cleanup_ai', 'fallback', 'Using regex cleanup only')
+        // Phase 3: Handle OOM errors with graceful fallback
+        if (error instanceof OOMError) {
+          console.warn('[PDFProcessor] Qwen OOM detected - falling back to regex-only cleanup')
+
+          // Use regex fallback
+          markdown = cleanMarkdownRegexOnly(markdown)
+
+          // Mark document for user review
+          await this.markForReview(
+            'ai_cleanup_oom',
+            'Qwen model out of memory during cleanup. Using regex-only cleanup. Review recommended.'
+          )
+
+          await this.updateProgress(70, 'cleanup_ai', 'skipped', 'AI cleanup skipped (OOM) - using regex only')
+        } else {
+          console.error(`[PDFProcessor] AI cleanup failed: ${error.message}`)
+          console.warn('[PDFProcessor] Falling back to regex-cleaned markdown')
+          // markdown already has regex cleanup, just continue
+          await this.updateProgress(70, 'cleanup_ai', 'fallback', 'Using regex cleanup only')
+        }
       }
     } else {
       // AI cleanup disabled by user - use regex-only
@@ -159,12 +239,12 @@ export class PDFProcessor extends SourceProcessor {
       await this.updateProgress(70, 'cleanup_ai', 'skipped', 'AI cleanup disabled by user')
     }
 
-    // Stage 5: Check for review mode BEFORE expensive AI chunking
+    // Stage 5: Check for review mode BEFORE expensive AI chunking/matching
     const reviewBeforeChunking = this.job.input_data?.reviewBeforeChunking
 
     if (reviewBeforeChunking) {
-      console.log('[PDFProcessor] Review mode enabled - skipping AI chunking')
-      console.log('[PDFProcessor] Markdown will be chunked after Obsidian review')
+      console.log('[PDFProcessor] Review mode enabled - skipping chunking/matching')
+      console.log('[PDFProcessor] Markdown will be processed after Obsidian review')
       console.log('[PDFProcessor] Saved ~$0.50 by skipping pre-review chunking (already AI cleaned)')
 
       await this.updateProgress(90, 'finalize', 'awaiting_review', 'Ready for manual review')
@@ -179,95 +259,366 @@ export class PDFProcessor extends SourceProcessor {
       }
     }
 
-    // Stage 5: AI semantic chunking with metadata extraction (70-95%)
-    await this.updateProgress(72, 'chunking', 'processing', 'Creating semantic chunks')
+    // Stage 6: Bulletproof Matching (LOCAL MODE ONLY) (70-75%)
+    // Phase 4: Remap Docling chunks to cleaned markdown with 100% recovery
+    let finalChunks: ProcessedChunk[]
 
-    const cleanedKB = Math.round(markdown.length / 1024)
-    console.log(`[PDFProcessor] Starting AI chunking on ${cleanedKB}KB markdown`)
+    if (isLocalMode && this.job.metadata?.cached_extraction?.doclingChunks) {
+      console.log('[PDFProcessor] LOCAL MODE: Using bulletproof matching (skipping AI chunking)')
 
-    const chunks = await this.withRetry(
-      async () => {
-        return await batchChunkAndExtractMetadata(
-          markdown,
-          {
-            apiKey: process.env.GOOGLE_AI_API_KEY,
-            maxBatchSize: 20000, // 20K chars per batch
-            enableProgress: true
-          },
-          async (progress) => {
-            // Map progress phases to percentages: 72-95%
-            const basePercent = 72
-            const rangePercent = 23
+      await this.updateProgress(72, 'matching', 'processing', 'Remapping chunks to cleaned markdown')
 
-            let phaseProgress = 0
-            if (progress.phase === 'batching') phaseProgress = 0
-            else if (progress.phase === 'ai_chunking') {
-              phaseProgress = (progress.batchesProcessed / progress.totalBatches) * 0.8
-            } else if (progress.phase === 'deduplication') phaseProgress = 0.9
-            else if (progress.phase === 'complete') phaseProgress = 1.0
+      const doclingChunks = this.job.metadata.cached_extraction.doclingChunks as DoclingChunk[]
 
-            const stagePercent = basePercent + Math.floor(phaseProgress * rangePercent)
-            await this.updateProgress(
-              stagePercent,
-              'chunking',
-              'processing',
-              `Processing batch ${progress.batchesProcessed}/${progress.totalBatches}`
-            )
-          },
-          'nonfiction_book' // Document type for specialized chunking
-        )
-      },
-      'Semantic chunking with metadata extraction'
-    )
+      console.log(`[PDFProcessor] Docling chunks available: ${doclingChunks.length} segments`)
+      console.log('[PDFProcessor] Running 5-layer bulletproof matching...')
 
-    console.log(`[PDFProcessor] Created ${chunks.length} semantic chunks with AI metadata`)
+      const { chunks: rematchedChunks, stats, warnings } = await bulletproofMatch(
+        markdown,
+        doclingChunks,
+        {
+          onProgress: async (layerNum, matched, remaining) => {
+            console.log(`[PDFProcessor] Layer ${layerNum}: ${matched} matched, ${remaining} remaining`)
+          }
+        }
+      )
 
-    await this.updateProgress(95, 'chunking', 'complete', `${chunks.length} chunks created`)
+      console.log(`[PDFProcessor] Bulletproof matching complete:`)
+      console.log(`  ✅ Exact: ${stats.exact}/${stats.total} (${(stats.exact / stats.total * 100).toFixed(1)}%)`)
+      console.log(`  🔍 High: ${stats.high}/${stats.total}`)
+      console.log(`  📍 Medium: ${stats.medium}/${stats.total}`)
+      console.log(`  ⚠️  Synthetic: ${stats.synthetic}/${stats.total} (${(stats.synthetic / stats.total * 100).toFixed(1)}%)`)
 
-    // Stage 6: Finalize (95-100%)
-    await this.updateProgress(97, 'finalize', 'formatting', 'Finalizing')
-
-    // Convert to ProcessedChunk format
-    // batchChunkAndExtractMetadata returns chunks with metadata already extracted
-    const enrichedChunks = chunks.map((chunk, idx) => {
-      // Calculate word count if not provided
-      const wordCount = chunk.content.split(/\s+/).filter(w => w.length > 0).length
-
-      return {
-        document_id: this.job.document_id,
-        content: chunk.content,
-        chunk_index: idx, // Use array index for sequential numbering
-        start_offset: chunk.start_offset,
-        end_offset: chunk.end_offset,
-        word_count: wordCount,
-        themes: chunk.metadata.themes || [],
-        importance_score: chunk.metadata.importance || 0.5,
-        summary: chunk.metadata.summary || null,
-        emotional_metadata: {
-          polarity: chunk.metadata.emotional?.polarity || 0,
-          primaryEmotion: chunk.metadata.emotional?.primaryEmotion || 'neutral',
-          intensity: chunk.metadata.emotional?.intensity || 0
-        },
-        conceptual_metadata: {
-          concepts: chunk.metadata.concepts || []
-        },
-        domain_metadata: chunk.metadata.domain ? {
-          primaryDomain: chunk.metadata.domain,
-          confidence: 0.8
-        } : null,
-        metadata_extracted_at: new Date().toISOString()
+      // Store warnings for UI display
+      this.job.metadata.matchingWarnings = warnings
+      if (warnings.length > 0) {
+        console.warn(`[PDFProcessor] ⚠️  ${warnings.length} synthetic chunks require validation`)
       }
-    }) as unknown as ProcessedChunk[]
 
+      // Convert MatchResult to ProcessedChunk format
+      // Combine Docling metadata (pages, headings, bboxes) + new offsets + confidence
+      finalChunks = rematchedChunks.map((result: MatchResult, idx: number) => {
+        const wordCount = result.chunk.content.split(/\s+/).filter((w: string) => w.length > 0).length
+
+        return {
+          document_id: this.job.document_id,
+          content: result.chunk.content,
+          chunk_index: idx,
+          start_offset: result.start_offset,
+          end_offset: result.end_offset,
+          word_count: wordCount,
+          // Phase 4: Store Docling metadata in database columns (migration 045)
+          page_start: result.chunk.meta.page_start || null,
+          page_end: result.chunk.meta.page_end || null,
+          heading_level: result.chunk.meta.heading_level || null,
+          heading_path: result.chunk.meta.heading_path || null,
+          section_marker: result.chunk.meta.section_marker || null,
+          bboxes: result.chunk.meta.bboxes || null,
+          position_confidence: result.confidence,
+          position_method: result.method,
+          position_validated: false,  // User can validate later
+          // Metadata extraction happens in next stage (Phase 6)
+          themes: [],
+          importance_score: 0.5,
+          summary: null,
+          emotional_metadata: {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          },
+          conceptual_metadata: {
+            concepts: []
+          },
+          domain_metadata: null,
+          metadata_extracted_at: null
+        }
+      })
+
+      console.log(`[PDFProcessor] Converted ${finalChunks.length} matched chunks to ProcessedChunk format`)
+
+      await this.updateProgress(75, 'matching', 'complete', `${finalChunks.length} chunks matched with metadata`)
+
+      // Stage 7: Metadata Enrichment (LOCAL MODE) (75-90%)
+      // Phase 6: Extract structured metadata using PydanticAI + Ollama
+      console.log('[PDFProcessor] Starting local metadata enrichment (PydanticAI + Ollama)')
+      await this.updateProgress(77, 'metadata', 'processing', 'Extracting structured metadata')
+
+      try {
+        const BATCH_SIZE = 10 // Process 10 chunks at a time (balance speed vs memory)
+        const enrichedChunks: ProcessedChunk[] = []
+
+        for (let i = 0; i < finalChunks.length; i += BATCH_SIZE) {
+          const batch = finalChunks.slice(i, i + BATCH_SIZE)
+
+          // Prepare batch for metadata extraction
+          const batchInput: ChunkInput[] = batch.map(chunk => ({
+            id: `${this.job.document_id}-${chunk.chunk_index}`,
+            content: chunk.content
+          }))
+
+          console.log(`[PDFProcessor] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(finalChunks.length / BATCH_SIZE)}`)
+
+          // Extract metadata
+          const metadataMap = await extractMetadataBatch(batchInput, {
+            onProgress: (processed, total) => {
+              const overallProgress = 77 + Math.floor(((i + processed) / finalChunks.length) * 13)
+              this.updateProgress(overallProgress, 'metadata', 'processing', `Enriching chunk ${i + processed}/${finalChunks.length}`)
+            }
+          })
+
+          // Enrich chunks with metadata
+          for (const chunk of batch) {
+            const chunkId = `${this.job.document_id}-${chunk.chunk_index}`
+            const metadata = metadataMap.get(chunkId)
+
+            if (metadata) {
+              enrichedChunks.push({
+                ...chunk,
+                themes: metadata.themes,
+                importance_score: metadata.importance,
+                summary: metadata.summary,
+                emotional_metadata: {
+                  polarity: metadata.emotional.polarity,
+                  primaryEmotion: metadata.emotional.primaryEmotion as any, // PydanticAI returns string
+                  intensity: metadata.emotional.intensity
+                },
+                conceptual_metadata: {
+                  concepts: metadata.concepts as any // PydanticAI returns simplified structure
+                },
+                domain_metadata: {
+                  primaryDomain: metadata.domain as any, // PydanticAI returns string
+                  confidence: 0.8 // PydanticAI extracts with high confidence
+                },
+                metadata_extracted_at: new Date().toISOString()
+              })
+            } else {
+              // Fallback: use default metadata if extraction failed
+              console.warn(`[PDFProcessor] Metadata extraction failed for chunk ${chunk.chunk_index} - using defaults`)
+              enrichedChunks.push(chunk) // Keep original chunk with default metadata
+            }
+          }
+
+          // Progress update after each batch
+          const progress = 77 + Math.floor(((i + batch.length) / finalChunks.length) * 13)
+          await this.updateProgress(progress, 'metadata', 'processing', `Batch ${Math.floor(i / BATCH_SIZE) + 1} complete`)
+        }
+
+        // Replace finalChunks with enriched version
+        finalChunks = enrichedChunks
+
+        console.log(`[PDFProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
+        await this.updateProgress(90, 'metadata', 'complete', 'Metadata enrichment done')
+
+      } catch (error: any) {
+        console.error(`[PDFProcessor] Metadata enrichment failed: ${error.message}`)
+        console.warn('[PDFProcessor] Continuing with default metadata')
+
+        // Mark document for review but don't fail processing
+        await this.markForReview(
+          'metadata_enrichment_failed',
+          `Local metadata enrichment failed: ${error.message}. Using default metadata.`
+        )
+
+        await this.updateProgress(90, 'metadata', 'fallback', 'Using default metadata')
+      }
+
+      // Stage 8: Local Embeddings (LOCAL MODE) (90-95%)
+      // Phase 7: Generate embeddings using Transformers.js
+      console.log('[PDFProcessor] Starting local embeddings generation (Transformers.js)')
+      await this.updateProgress(92, 'embeddings', 'processing', 'Generating local embeddings')
+
+      try {
+        // Extract content from chunks for embedding
+        const chunkContents = finalChunks.map(chunk => chunk.content)
+
+        console.log(`[PDFProcessor] Generating embeddings for ${chunkContents.length} chunks (Xenova/all-mpnet-base-v2)`)
+        const startTime = Date.now()
+
+        // Generate embeddings locally with Transformers.js
+        const embeddings = await generateEmbeddingsLocal(chunkContents)
+
+        const embeddingTime = Date.now() - startTime
+        console.log(`[PDFProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)
+
+        // Validate dimensions (should be 768)
+        if (embeddings.length !== finalChunks.length) {
+          throw new Error(`Embedding count mismatch: expected ${finalChunks.length}, got ${embeddings.length}`)
+        }
+
+        // Attach embeddings to chunks
+        finalChunks = finalChunks.map((chunk, idx) => ({
+          ...chunk,
+          embedding: embeddings[idx]
+        }))
+
+        console.log('[PDFProcessor] Embeddings attached to all chunks')
+        await this.updateProgress(95, 'embeddings', 'complete', 'Local embeddings generated')
+
+      } catch (error: any) {
+        console.error(`[PDFProcessor] Local embeddings failed: ${error.message}`)
+        console.warn('[PDFProcessor] Falling back to Gemini embeddings')
+
+        try {
+          // Fallback to Gemini embeddings if local fails
+          const chunkContents = finalChunks.map(chunk => chunk.content)
+          const embeddings = await generateEmbeddings(chunkContents)
+
+          finalChunks = finalChunks.map((chunk, idx) => ({
+            ...chunk,
+            embedding: embeddings[idx]
+          }))
+
+          console.log('[PDFProcessor] Gemini embeddings fallback successful')
+          await this.updateProgress(95, 'embeddings', 'fallback', 'Using Gemini embeddings')
+
+        } catch (fallbackError: any) {
+          console.error(`[PDFProcessor] Gemini embeddings also failed: ${fallbackError.message}`)
+
+          // Mark document for review but don't fail processing
+          await this.markForReview(
+            'embeddings_failed',
+            `Both local and Gemini embeddings failed. Chunks saved without embeddings. Error: ${fallbackError.message}`
+          )
+
+          await this.updateProgress(95, 'embeddings', 'failed', 'Embeddings generation failed')
+        }
+      }
+
+    } else {
+      // CLOUD MODE: Use existing AI semantic chunking
+      console.log('[PDFProcessor] CLOUD MODE: Using AI semantic chunking')
+
+      await this.updateProgress(72, 'chunking', 'processing', 'Creating semantic chunks')
+
+      const cleanedKB = Math.round(markdown.length / 1024)
+      console.log(`[PDFProcessor] Starting AI chunking on ${cleanedKB}KB markdown`)
+
+      const chunks = await this.withRetry(
+        async () => {
+          return await batchChunkAndExtractMetadata(
+            markdown,
+            {
+              apiKey: process.env.GOOGLE_AI_API_KEY,
+              maxBatchSize: 20000, // 20K chars per batch
+              enableProgress: true
+            },
+            async (progress) => {
+              // Map progress phases to percentages: 72-95%
+              const basePercent = 72
+              const rangePercent = 23
+
+              let phaseProgress = 0
+              if (progress.phase === 'batching') phaseProgress = 0
+              else if (progress.phase === 'ai_chunking') {
+                phaseProgress = (progress.batchesProcessed / progress.totalBatches) * 0.8
+              } else if (progress.phase === 'deduplication') phaseProgress = 0.9
+              else if (progress.phase === 'complete') phaseProgress = 1.0
+
+              const stagePercent = basePercent + Math.floor(phaseProgress * rangePercent)
+              await this.updateProgress(
+                stagePercent,
+                'chunking',
+                'processing',
+                `Processing batch ${progress.batchesProcessed}/${progress.totalBatches}`
+              )
+            },
+            'nonfiction_book' // Document type for specialized chunking
+          )
+        },
+        'Semantic chunking with metadata extraction'
+      )
+
+      console.log(`[PDFProcessor] Created ${chunks.length} semantic chunks with AI metadata`)
+
+      await this.updateProgress(95, 'chunking', 'complete', `${chunks.length} chunks created`)
+
+      // Convert to ProcessedChunk format
+      // batchChunkAndExtractMetadata returns chunks with metadata already extracted
+      finalChunks = chunks.map((chunk, idx) => {
+        // Calculate word count if not provided
+        const wordCount = chunk.content.split(/\s+/).filter(w => w.length > 0).length
+
+        return {
+          document_id: this.job.document_id,
+          content: chunk.content,
+          chunk_index: idx, // Use array index for sequential numbering
+          start_offset: chunk.start_offset,
+          end_offset: chunk.end_offset,
+          word_count: wordCount,
+          themes: chunk.metadata.themes || [],
+          importance_score: chunk.metadata.importance || 0.5,
+          summary: chunk.metadata.summary || null,
+          emotional_metadata: {
+            polarity: chunk.metadata.emotional?.polarity || 0,
+            primaryEmotion: (chunk.metadata.emotional?.primaryEmotion || 'neutral') as any,
+            intensity: chunk.metadata.emotional?.intensity || 0
+          },
+          conceptual_metadata: {
+            concepts: (chunk.metadata.concepts || []) as any
+          },
+          domain_metadata: chunk.metadata.domain ? {
+            primaryDomain: chunk.metadata.domain as any,
+            confidence: 0.8
+          } : null,
+          metadata_extracted_at: new Date().toISOString()
+        }
+      })
+    }
+
+    // Stage 9: Finalize (95-100%)
+    // Phase 7: Updated from Stage 8 (90-100%) to Stage 9 (95-100%)
+    await this.updateProgress(97, 'finalize', 'formatting', 'Finalizing')
     await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
+
+    // Phase 4: Note on bulletproof matching
+    // In local mode, chunks have Docling metadata (pages, headings, bboxes)
+    // In cloud mode, chunks have AI-extracted metadata only
+    // Both modes produce ProcessedChunk[] with compatible structure
 
     return {
       markdown,
-      chunks: enrichedChunks,
+      chunks: finalChunks,
       metadata: {
         sourceUrl: this.job.metadata?.source_url
+        // Phase 2: Structure info is stored in job.metadata.cached_extraction (local mode)
+        // Phase 4: Matching stats stored in job.metadata.matchingWarnings (local mode)
       },
       wordCount: markdown.split(/\s+/).length
+    }
+  }
+
+  /**
+   * Mark document for user review
+   * Sets review flag in database and stores warning in job metadata
+   *
+   * Phase 3: Used for OOM warnings during local cleanup
+   *
+   * @param reason - Short reason code (e.g., 'ai_cleanup_oom')
+   * @param message - Human-readable warning message
+   */
+  private async markForReview(reason: string, message: string): Promise<void> {
+    console.log(`[PDFProcessor] Marking document for review: ${reason}`)
+
+    // Update document status
+    await this.supabase
+      .from('documents')
+      .update({
+        processing_status: 'completed_with_warnings',
+        review_notes: message
+      })
+      .eq('id', this.job.document_id)
+
+    // Also store in job metadata for detailed tracking
+    this.job.metadata = {
+      ...this.job.metadata,
+      warnings: [
+        ...(this.job.metadata?.warnings || []),
+        {
+          reason,
+          message,
+          timestamp: new Date().toISOString()
+        }
+      ]
     }
   }
 }

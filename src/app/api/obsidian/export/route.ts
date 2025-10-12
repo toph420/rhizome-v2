@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const devUserId = process.env.DEV_USER_ID || '00000000-0000-0000-0000-000000000000'
+    const devUserId = process.env.NEXT_PUBLIC_DEV_USER_ID || process.env.DEV_USER_ID || '00000000-0000-0000-0000-000000000000'
 
     // Create background job for obsidian export
     const { data: job, error: jobError } = await supabase

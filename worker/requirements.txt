@@ -1,0 +1,14 @@
+# Local Processing Pipeline Dependencies
+# Phase 1: Core Infrastructure
+
+# Docling for PDF extraction with structural metadata
+docling==2.55.1
+
+# PydanticAI with Ollama support for structured LLM outputs
+pydantic-ai[ollama]>=1.0.17
+
+# Sentence-transformers for metadata extraction
+sentence-transformers>=5.1.1
+
+# Transformers for tokenizer (HybridChunker compatibility)
+transformers>=4.57.0

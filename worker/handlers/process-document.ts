@@ -206,10 +206,12 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     )
 
     // Upload markdown to storage
+    // CRITICAL: Must wrap in Blob to preserve newlines!
     console.log(`💾 Saving markdown to storage: ${markdownPath}`)
+    const markdownBlob = new Blob([result.markdown], { type: 'text/markdown' })
     const { error: uploadError } = await supabase.storage
       .from('documents')
-      .upload(markdownPath, result.markdown, {
+      .upload(markdownPath, markdownBlob, {
         contentType: 'text/markdown',
         upsert: true
       })

@@ -74,7 +74,7 @@ export async function exportToObsidian(
     // 1. Get document and Obsidian settings
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('title, markdown_path, obsidian_path')
+      .select('title, markdown_path, obsidian_path, storage_path')
       .eq('id', documentId)
       .single()
 
@@ -94,10 +94,27 @@ export async function exportToObsidian(
 
     const obsidianSettings = settings.obsidian_settings as ObsidianSettings
 
+    // Validate required fields are populated
+    if (!obsidianSettings.vaultPath || !obsidianSettings.vaultName) {
+      throw new Error(
+        'Obsidian vault not configured. Please set vaultPath and vaultName in user settings.\n' +
+        'Example: UPDATE user_settings SET obsidian_settings = jsonb_set(obsidian_settings, \'{vaultPath}\', \'"/path/to/vault"\')'
+      )
+    }
+
     // 2. Download markdown from storage
+    // Construct path: use markdown_path if available, otherwise fallback to storage_path/content.md
+    const markdownStoragePath = document.markdown_path || `${document.storage_path}/content.md`
+
+    if (!markdownStoragePath) {
+      throw new Error('Cannot determine markdown storage path: both markdown_path and storage_path are null')
+    }
+
+    console.log(`[Obsidian Export] Downloading markdown from: ${markdownStoragePath}`)
+
     const { data: markdownBlob, error: downloadError } = await supabase.storage
       .from('documents')
-      .download(document.markdown_path)
+      .download(markdownStoragePath)
 
     if (downloadError || !markdownBlob) {
       throw new Error(`Failed to download markdown: ${downloadError?.message}`)
@@ -180,7 +197,7 @@ export async function syncFromObsidian(
     // 1. Get document and Obsidian settings
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('markdown_path, obsidian_path, processing_status')
+      .select('markdown_path, obsidian_path, processing_status, storage_path')
       .eq('id', documentId)
       .single()
 
@@ -203,15 +220,32 @@ export async function syncFromObsidian(
     }
 
     const obsidianSettings = settings.obsidian_settings as ObsidianSettings
+
+    // Validate required fields are populated
+    if (!obsidianSettings.vaultPath || !obsidianSettings.vaultName) {
+      throw new Error(
+        'Obsidian vault not configured. Please set vaultPath and vaultName in user settings.'
+      )
+    }
+
     const vaultFilePath = path.join(obsidianSettings.vaultPath, document.obsidian_path)
 
     // 2. Read edited markdown from vault
     const editedMarkdown = await fs.readFile(vaultFilePath, 'utf-8')
 
     // 3. Get current storage version for comparison
+    // Construct path: use markdown_path if available, otherwise fallback to storage_path/content.md
+    const markdownStoragePath = document.markdown_path || `${document.storage_path}/content.md`
+
+    if (!markdownStoragePath) {
+      throw new Error('Cannot determine markdown storage path: both markdown_path and storage_path are null')
+    }
+
+    console.log(`[Obsidian Sync] Downloading current markdown from: ${markdownStoragePath}`)
+
     const { data: currentBlob, error: downloadError } = await supabase.storage
       .from('documents')
-      .download(document.markdown_path)
+      .download(markdownStoragePath)
 
     if (downloadError || !currentBlob) {
       throw new Error(`Failed to download current markdown: ${downloadError?.message}`)
@@ -238,9 +272,11 @@ export async function syncFromObsidian(
     console.log(`[Obsidian Sync] Changes detected`)
 
     // 5. Upload edited markdown to storage
+    console.log(`[Obsidian Sync] Uploading edited markdown to: ${markdownStoragePath}`)
+
     const { error: uploadError } = await supabase.storage
       .from('documents')
-      .update(document.markdown_path, new Blob([editedMarkdown], { type: 'text/markdown' }), {
+      .update(markdownStoragePath, new Blob([editedMarkdown], { type: 'text/markdown' }), {
         contentType: 'text/markdown',
         upsert: true
       })
@@ -255,8 +291,8 @@ export async function syncFromObsidian(
 
       return {
         success: true,
-        changed: true,
-        recovery: null // No recovery needed - annotations don't exist yet!
+        changed: true
+        // recovery is undefined - no recovery needed since annotations don't exist yet!
       }
     }
 

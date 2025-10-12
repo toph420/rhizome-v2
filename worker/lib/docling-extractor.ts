@@ -1,8 +1,10 @@
 /**
- * Docling PDF Extraction - TypeScript Bridge
+ * Docling PDF Extraction - TypeScript Bridge with HybridChunker Support
  *
  * Integrates Python Docling library via child_process for local PDF extraction.
- * Provides 100% reliable extraction without network dependency.
+ * Provides 100% reliable extraction with optional semantic chunking.
+ *
+ * Phase 2: Added HybridChunker integration for structural metadata extraction
  */
 
 import { spawn } from 'child_process'
@@ -15,79 +17,145 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// ============================================================================
+// NEW: Phase 2 Types for HybridChunker Support
+// ============================================================================
+
+/**
+ * Chunk structure from Docling HybridChunker.
+ * Contains content and rich structural metadata.
+ */
+export interface DoclingChunk {
+  /** Chunk index in document (0-based) */
+  index: number
+  /** Chunk text content */
+  content: string
+  /** Rich metadata from Docling */
+  meta: {
+    /** Starting page number (1-based) */
+    page_start?: number
+    /** Ending page number (1-based) */
+    page_end?: number
+    /** Heading path (e.g., ["Chapter 1", "Section 1.1"]) */
+    heading_path?: string[]
+    /** Heading level (depth in TOC) */
+    heading_level?: number
+    /** Section marker (for EPUB support) */
+    section_marker?: string
+    /** Bounding boxes for PDF coordinate highlighting */
+    bboxes?: Array<{
+      page: number
+      l: number  // left
+      t: number  // top
+      r: number  // right
+      b: number  // bottom
+    }>
+  }
+}
+
+/**
+ * Document structure extracted from Docling.
+ * Provides heading hierarchy for table of contents.
+ */
+export interface DoclingStructure {
+  /** Extracted headings with hierarchy */
+  headings: Array<{
+    level: number
+    text: string
+    page: number | null
+  }>
+  /** Total number of pages in document */
+  total_pages: number
+  /** Document sections (reserved for future use) */
+  sections: any[]
+}
+
+/**
+ * Extraction result from Docling Python script.
+ * Now includes optional chunks and structure.
+ */
+export interface DoclingExtractionResult {
+  /** Extracted markdown content */
+  markdown: string
+  /** Document structure (headings, pages) */
+  structure: DoclingStructure
+  /** Chunks with metadata (only if enableChunking=true) */
+  chunks?: DoclingChunk[]
+}
+
+// ============================================================================
+// Enhanced Options Interface
+// ============================================================================
+
 export interface DoclingOptions {
+  /** Enable HybridChunker for semantic chunking (Phase 2) */
+  enableChunking?: boolean
+  /** Chunk size in tokens (default: 512) */
+  chunkSize?: number
+  /** Tokenizer model name (default: 'Xenova/all-mpnet-base-v2') */
+  tokenizer?: string
   /** Enable OCR for scanned PDFs (slower) */
   ocr?: boolean
   /** Maximum number of pages to process (for testing) */
   maxPages?: number
   /** Page range to extract [start, end] (1-indexed) */
   pageRange?: [number, number]
-  /** Timeout in milliseconds (default: 30 minutes) */
+  /** Timeout in milliseconds (default: 10 minutes) */
   timeout?: number
   /** Python executable path (default: python3) */
   pythonPath?: string
-  /** Extract images from PDF (adds ~30-40% processing time) */
-  extractImages?: boolean
-  /** Image quality scale (1.0-2.0, default: 1.5) */
-  imagesScale?: number
-  /** Image mode: 'embedded' (base64 in markdown) or 'referenced' (separate PNG files) */
-  imageMode?: 'embedded' | 'referenced'
+  /** Progress callback */
+  onProgress?: (percent: number, stage: string, message: string) => void
 }
 
-export interface DoclingResult {
-  /** Extracted markdown content */
-  markdown: string
-  /** Number of pages processed */
-  pages: number
-  /** Extraction metadata */
-  metadata: {
-    pageCount: number
-    hasTables: boolean
-    extractionMethod: string
-  }
-  /** Extraction time in milliseconds */
-  extractionTime: number
-  /** Extracted images (if extractImages option enabled) */
-  images?: Array<{
-    /** Image filename */
-    filename: string
-    /** Image data (base64 if embedded, buffer if referenced) */
-    data: Buffer | string
-    /** Image index */
-    index: number
-  }>
-}
+// ============================================================================
+// Progress Type (Enhanced)
+// ============================================================================
 
 export interface DoclingProgress {
   type: 'progress'
-  status: 'starting' | 'converting' | 'complete'
+  /** Stage: 'extraction' or 'chunking' */
+  stage: string
+  /** Progress percentage (0-100) */
+  percent: number
+  /** Human-readable status message */
   message: string
-  page?: number
-  totalPages?: number
 }
+
+// ============================================================================
+// Core Extraction Functions
+// ============================================================================
 
 /**
  * Extract PDF using Docling (Python) via child process.
+ * Now supports optional HybridChunker integration.
  *
  * @param pdfPath - Path to PDF file (absolute path)
- * @param options - Extraction options
- * @param onProgress - Progress callback
- * @returns Extracted markdown and metadata
+ * @param options - Extraction and chunking options
+ * @returns Extracted markdown, structure, and optional chunks
  * @throws Error if extraction fails
  *
  * @example
+ * // Without chunking (cloud mode, backward compatible)
  * const result = await extractWithDocling('/tmp/document.pdf', {
- *   ocr: false,
- *   timeout: 600000 // 10 minutes
- * }, (progress) => {
- *   console.log(`Progress: ${progress.message}`)
+ *   enableChunking: false
+ * })
+ *
+ * @example
+ * // With chunking (local mode, Phase 2+)
+ * const result = await extractWithDocling('/tmp/document.pdf', {
+ *   enableChunking: true,
+ *   chunkSize: 512,
+ *   tokenizer: 'Xenova/all-mpnet-base-v2',
+ *   onProgress: (percent, stage, message) => {
+ *     console.log(`${stage}: ${percent}% - ${message}`)
+ *   }
  * })
  */
 export async function extractWithDocling(
   pdfPath: string,
-  options: DoclingOptions = {},
-  onProgress?: (progress: DoclingProgress) => void | Promise<void>
-): Promise<DoclingResult> {
+  options: DoclingOptions = {}
+): Promise<DoclingExtractionResult> {
   const startTime = Date.now()
 
   // Validate PDF path
@@ -98,141 +166,176 @@ export async function extractWithDocling(
     throw new Error(`PDF file not found: ${pdfAbsPath}`)
   }
 
-  // Prepare options JSON
-  const pythonOptions = {
+  // Prepare options for Python script
+  const pythonOptions: Record<string, any> = {
+    // Phase 2: Chunking options
+    enable_chunking: options.enableChunking || false,
+    chunk_size: options.chunkSize || 512,
+    tokenizer: options.tokenizer || 'Xenova/all-mpnet-base-v2',
+    // Legacy options
     ocr: options.ocr || false,
     max_pages: options.maxPages,
-    page_range: options.pageRange,
-    // TODO: Image extraction support (requires Python script updates)
-    // extract_images: options.extractImages || false,
-    // images_scale: options.imagesScale || 1.5,
-    // image_mode: options.imageMode || 'referenced'
+    page_range: options.pageRange
   }
 
   const scriptPath = path.join(__dirname, '../scripts/docling_extract.py')
   const pythonPath = options.pythonPath || 'python3'
-  const timeout = options.timeout || 30 * 60 * 1000 // 30 minutes default
+  const timeout = options.timeout || 10 * 60 * 1000 // 10 minutes default (Phase 2: increased from 30 min)
 
   console.log('[Docling] Starting extraction...')
   console.log(`  PDF: ${pdfAbsPath}`)
+  console.log(`  Mode: ${pythonOptions.enable_chunking ? 'LOCAL (with chunking)' : 'CLOUD (no chunking)'}`)
   console.log(`  Options: ${JSON.stringify(pythonOptions)}`)
 
+  return runDoclingScript(scriptPath, pdfAbsPath, pythonOptions, pythonPath, timeout, options.onProgress)
+}
+
+/**
+ * Run Docling Python script via subprocess.
+ * Handles progress messages and structured output parsing.
+ *
+ * CRITICAL: Python must flush stdout after every write or IPC hangs.
+ * Pattern from Phase 2: worker/lib/docling-extractor.ts:120-220
+ */
+async function runDoclingScript(
+  scriptPath: string,
+  pdfPath: string,
+  options: any,
+  pythonPath: string,
+  timeout: number,
+  onProgress?: (percent: number, stage: string, message: string) => void
+): Promise<DoclingExtractionResult> {
   return new Promise((resolve, reject) => {
-    // Spawn Python process with unbuffered output (-u flag)
+    // Spawn Python process with unbuffered output
+    // -u flag is CRITICAL for real-time progress
     const python = spawn(pythonPath, [
-      '-u', // Unbuffered output for real-time progress
+      '-u',  // Unbuffered output
       scriptPath,
-      pdfAbsPath,
-      JSON.stringify(pythonOptions)
+      pdfPath,
+      JSON.stringify(options)
     ], {
-      env: { ...process.env, PYTHONUNBUFFERED: '1' }
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      stdio: ['ignore', 'pipe', 'pipe']
     })
 
-    let stdout = ''
-    let stderr = ''
-    let timeoutHandle: NodeJS.Timeout
+    let stdoutData = ''
+    let stderrData = ''
+    let result: DoclingExtractionResult | null = null
+    let lineBuffer = ''  // Buffer for incomplete lines
 
-    // Set timeout
-    timeoutHandle = setTimeout(() => {
+    // Set timeout (10 minutes for large PDFs)
+    const timeoutHandle = setTimeout(() => {
       python.kill('SIGTERM')
       reject(new Error(`Docling extraction timeout after ${timeout}ms`))
     }, timeout)
 
-    // Capture stdout (result JSON)
+    // Handle stdout (progress + final result)
+    // CRITICAL: Large JSON output arrives in multiple chunks
     python.stdout.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stdout += text
+      // Append new data to buffer
+      lineBuffer += data.toString()
 
-      // Try to parse progress updates (one JSON per line)
-      const lines = text.split('\n').filter(l => l.trim())
-      for (const line of lines) {
+      // Split by newlines
+      const lines = lineBuffer.split('\n')
+
+      // Process all complete lines (all but the last, which may be incomplete)
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].trim()
+        if (!line) continue
+
         try {
-          const json = JSON.parse(line)
-          if (json.type === 'progress' && onProgress) {
-            onProgress(json as DoclingProgress)
+          const message = JSON.parse(line)
+
+          if (message.type === 'progress' && onProgress) {
+            // Progress update from Python
+            onProgress(message.percent, message.stage, message.message)
+          } else if (message.type === 'result') {
+            // Final result
+            result = message.data
+            console.log('[Docling] Received complete result JSON')
+          } else if (message.type === 'error') {
+            // Structured error from Python
+            reject(new Error(`Docling error: ${message.error}\n${message.traceback || ''}`))
           }
-        } catch {
-          // Not JSON, ignore
+        } catch (e) {
+          // Not JSON, might be debug output - accumulate for error reporting
+          stdoutData += line + '\n'
         }
       }
+
+      // Keep the last (potentially incomplete) line in the buffer
+      lineBuffer = lines[lines.length - 1]
     })
 
-    // Capture stderr (errors)
+    // Handle stderr (Python errors)
     python.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString()
+      stderrData += data.toString()
     })
 
     // Handle process exit
     python.on('close', (code) => {
       clearTimeout(timeoutHandle)
 
-      if (code === 0) {
-        // Success - parse final JSON result
-        try {
-          // Get last JSON object from stdout (final result)
-          const lines = stdout.trim().split('\n')
-          const lastLine = lines[lines.length - 1]
-          const result = JSON.parse(lastLine)
-
-          if (!result.success) {
-            reject(new Error(result.error || 'Docling extraction failed'))
-            return
-          }
-
-          const extractionTime = Date.now() - startTime
-
-          console.log('[Docling] Extraction complete')
-          console.log(`  Pages: ${result.pages}`)
-          console.log(`  Markdown size: ${Math.round(result.markdown.length / 1024)}KB`)
-          console.log(`  Time: ${(extractionTime / 1000).toFixed(1)}s`)
-
-          resolve({
-            markdown: result.markdown,
-            pages: result.pages,
-            metadata: result.metadata,
-            extractionTime
-          })
-        } catch (parseError: any) {
-          reject(new Error(`Failed to parse Docling output: ${parseError.message}\nOutput: ${stdout.slice(0, 500)}`))
+      if (code === 0 && result) {
+        // Success
+        console.log('[Docling] Extraction complete')
+        console.log(`  Structure: ${result.structure.total_pages} pages, ${result.structure.headings.length} headings`)
+        if (result.chunks) {
+          console.log(`  Chunks: ${result.chunks.length} segments`)
         }
+        console.log(`  Markdown size: ${Math.round(result.markdown.length / 1024)}KB`)
+
+        resolve(result)
+      } else if (code === 0 && !result) {
+        // Exit 0 but no result - parsing error
+        reject(new Error(
+          'Docling script completed but returned no result\n' +
+          `stdout: ${stdoutData.slice(0, 500)}\n` +
+          `stderr: ${stderrData.slice(0, 500)}`
+        ))
       } else {
-        // Error
-        let errorMessage = 'Docling extraction failed'
+        // Non-zero exit code
+        let errorMessage = `Docling script failed (exit code ${code})`
 
-        // Try to parse structured error from stderr
-        try {
-          const errorJson = JSON.parse(stderr)
-          errorMessage = errorJson.error || errorMessage
-        } catch {
-          // Not JSON, use raw stderr
-          errorMessage = stderr || stdout || errorMessage
+        if (stderrData) {
+          errorMessage += `\nstderr: ${stderrData}`
+        }
+        if (stdoutData) {
+          errorMessage += `\nstdout: ${stdoutData.slice(0, 500)}`
         }
 
-        reject(new Error(`${errorMessage} (exit code ${code})`))
+        reject(new Error(errorMessage))
       }
     })
 
-    // Handle spawn errors
+    // Handle process errors (e.g., Python not found)
     python.on('error', (error) => {
       clearTimeout(timeoutHandle)
-      reject(new Error(`Failed to spawn Python process: ${error.message}`))
+
+      if (error.message.includes('ENOENT')) {
+        reject(new Error(
+          'Python not found. Install Python 3.10+ and ensure it is in PATH.\n' +
+          `Tried to execute: ${pythonPath}`
+        ))
+      } else {
+        reject(new Error(`Failed to spawn Python process: ${error.message}`))
+      }
     })
   })
 }
 
 /**
  * Extract PDF from buffer (saves to temp file first).
+ * Convenience wrapper for extractWithDocling.
  *
- * @param pdfBuffer - PDF file buffer
- * @param options - Extraction options
- * @param onProgress - Progress callback
- * @returns Extracted markdown and metadata
+ * @param pdfBuffer - PDF file as ArrayBuffer or Buffer
+ * @param options - Extraction and chunking options
+ * @returns Extracted markdown, structure, and optional chunks
  */
 export async function extractPdfBuffer(
   pdfBuffer: ArrayBuffer | Buffer,
-  options: DoclingOptions = {},
-  onProgress?: (progress: DoclingProgress) => void | Promise<void>
-): Promise<DoclingResult> {
+  options: DoclingOptions = {}
+): Promise<DoclingExtractionResult> {
   // Save to temp file
   const tempDir = os.tmpdir()
   const tempPath = path.join(tempDir, `docling-${Date.now()}.pdf`)
@@ -243,11 +346,58 @@ export async function extractPdfBuffer(
   console.log(`[Docling] Saved PDF to temp file: ${tempPath} (${Math.round(buffer.length / 1024)}KB)`)
 
   try {
-    const result = await extractWithDocling(tempPath, options, onProgress)
+    const result = await extractWithDocling(tempPath, options)
     return result
   } finally {
     // Cleanup temp file
     await fs.unlink(tempPath).catch(() => {})
     console.log('[Docling] Cleaned up temp file')
+  }
+}
+
+// ============================================================================
+// Validation Utilities (Phase 2)
+// ============================================================================
+
+/**
+ * Validate Docling chunks have required metadata.
+ * Useful for debugging and ensuring data quality.
+ *
+ * @param chunks - Array of chunks to validate
+ * @returns Validation result with errors
+ *
+ * @example
+ * const validation = validateDoclingChunks(result.chunks)
+ * if (!validation.valid) {
+ *   console.warn('Chunk validation failed:', validation.errors)
+ * }
+ */
+export function validateDoclingChunks(chunks: DoclingChunk[]): {
+  valid: boolean
+  errors: string[]
+} {
+  const errors: string[] = []
+
+  for (const chunk of chunks) {
+    // Check content exists
+    if (!chunk.content || chunk.content.length === 0) {
+      errors.push(`Chunk ${chunk.index} has no content`)
+    }
+
+    // Check page numbers exist (critical for citations)
+    if (chunk.meta.page_start === null && chunk.meta.page_end === null) {
+      errors.push(`Chunk ${chunk.index} missing page numbers`)
+    }
+
+    // Check heading path exists (important for structure)
+    if (!chunk.meta.heading_path || chunk.meta.heading_path.length === 0) {
+      // This is a warning, not error - some chunks may not be under headings
+      // errors.push(`Chunk ${chunk.index} missing heading path`)
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
   }
 }

@@ -49,8 +49,10 @@
   "dependencies": {
     "@ai-sdk/google": "^2.0.17",
     "@google/genai": "^0.3.0",
+    "@huggingface/transformers": "^3.7.5",
     "@mozilla/readability": "^0.6.0",
     "@supabase/supabase-js": "^2.45.0",
+    "@types/turndown": "^5.0.5",
     "adm-zip": "^0.5.16",
     "ai": "^5.0.56",
     "axios": "^1.12.2",
@@ -61,6 +63,7 @@
     "jsdom": "^27.0.0",
     "jsonrepair": "^3.13.1",
     "node-cron": "^3.0.3",
+    "ollama": "^0.6.0",
     "tsx": "^4.7.0",
     "turndown": "^7.2.1",
     "youtube-transcript-plus": "^1.1.1"

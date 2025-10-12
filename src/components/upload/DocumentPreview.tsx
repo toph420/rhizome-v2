@@ -16,16 +16,53 @@ import Image from 'next/image'
 import type { DetectedMetadata, DocumentType } from '@/types/metadata'
 import { Checkbox } from '@/components/ui/checkbox'
 
+export type ReviewWorkflow = 'none' | 'after_extraction' | 'after_cleanup'
+
+export interface WorkflowFlags {
+  reviewDoclingExtraction: boolean
+  reviewBeforeChunking: boolean
+  cleanMarkdown: boolean
+}
+
+/**
+ * Convert user-friendly workflow enum to backend flags
+ */
+export function workflowToFlags(
+  workflow: ReviewWorkflow,
+  cleanMarkdown: boolean
+): WorkflowFlags {
+  switch (workflow) {
+    case 'none':
+      return {
+        reviewDoclingExtraction: false,
+        reviewBeforeChunking: false,
+        cleanMarkdown
+      }
+
+    case 'after_extraction':
+      return {
+        reviewDoclingExtraction: true,
+        reviewBeforeChunking: false,
+        cleanMarkdown: false // Deferred to resume stage
+      }
+
+    case 'after_cleanup':
+      return {
+        reviewDoclingExtraction: false,
+        reviewBeforeChunking: true,
+        cleanMarkdown
+      }
+  }
+}
+
 interface DocumentPreviewProps {
   metadata: DetectedMetadata
   onConfirm: (edited: DetectedMetadata, coverImage: File | null) => void
   onCancel: () => void
-  reviewBeforeChunking?: boolean
-  onReviewBeforeChunkingChange?: (checked: boolean) => void
+  reviewWorkflow?: ReviewWorkflow
+  onReviewWorkflowChange?: (workflow: ReviewWorkflow) => void
   cleanMarkdown?: boolean
   onCleanMarkdownChange?: (checked: boolean) => void
-  reviewDoclingExtraction?: boolean
-  onReviewDoclingExtractionChange?: (checked: boolean) => void
   extractImages?: boolean
   onExtractImagesChange?: (checked: boolean) => void
 }
@@ -39,16 +76,32 @@ const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   essay: 'Essay',
 }
 
+const REVIEW_WORKFLOW_OPTIONS = [
+  {
+    value: 'none' as const,
+    label: 'Fully Automatic',
+    description: 'Extract → Clean (optional) → Chunk → Done. Best for batch processing and trusted sources.'
+  },
+  {
+    value: 'after_extraction' as const,
+    label: 'Review After Extraction',
+    description: 'Extract → PAUSE → Review → Choose cleanup → Chunk. Best for checking if already clean.'
+  },
+  {
+    value: 'after_cleanup' as const,
+    label: 'Review After Cleanup',
+    description: 'Extract → Clean (optional) → PAUSE → Review → Chunk. Best for verifying cleanup quality.'
+  }
+] as const
+
 export function DocumentPreview({
   metadata,
   onConfirm,
   onCancel,
-  reviewBeforeChunking = false,
-  onReviewBeforeChunkingChange,
+  reviewWorkflow = 'none',
+  onReviewWorkflowChange,
   cleanMarkdown = true,
   onCleanMarkdownChange,
-  reviewDoclingExtraction = false,
-  onReviewDoclingExtractionChange,
   extractImages = false,
   onExtractImagesChange
 }: DocumentPreviewProps) {
@@ -203,40 +256,42 @@ export function DocumentPreview({
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Processing Options */}
       <div className="mt-6 pt-4 border-t space-y-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="review-docling-extraction-preview"
-              checked={reviewDoclingExtraction}
-              onCheckedChange={(checked) => {
-                console.log('[DocumentPreview] Review Docling extraction checkbox changed:', checked)
-                onReviewDoclingExtractionChange?.(checked as boolean)
-              }}
-            />
-            <label
-              htmlFor="review-docling-extraction-preview"
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
-            >
-              <Sparkles className="h-3 w-3" />
-              Review Docling extraction in Obsidian before AI cleanup
-            </label>
-          </div>
-          {reviewDoclingExtraction && (
-            <p className="text-xs text-muted-foreground ml-6">
-              You'll choose whether to run AI cleanup after reviewing the extraction
-            </p>
-          )}
+        {/* Review Workflow Selector */}
+        <div className="space-y-2">
+          <Label htmlFor="review-workflow">Review Workflow</Label>
+          <Select
+            value={reviewWorkflow}
+            onValueChange={(value: ReviewWorkflow) => {
+              onReviewWorkflowChange?.(value)
+            }}
+          >
+            <SelectTrigger id="review-workflow" className="mt-1.5">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {REVIEW_WORKFLOW_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  <div className="flex flex-col">
+                    <span className="font-medium">{option.label}</span>
+                    <span className="text-xs text-muted-foreground mt-0.5">
+                      {option.description}
+                    </span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <div className="space-y-1">
+
+        {/* AI Cleanup Option - Only show for 'none' and 'after_cleanup' workflows */}
+        {(reviewWorkflow === 'none' || reviewWorkflow === 'after_cleanup') && (
           <div className="flex items-center gap-2">
             <Checkbox
               id="clean-markdown-preview"
               checked={cleanMarkdown}
-              disabled={reviewDoclingExtraction}
               onCheckedChange={(checked) => {
-                console.log('[DocumentPreview] Clean markdown checkbox changed:', checked)
                 onCleanMarkdownChange?.(checked as boolean)
               }}
             />
@@ -248,43 +303,20 @@ export function DocumentPreview({
               AI cleanup markdown (recommended)
             </label>
           </div>
-          {reviewDoclingExtraction && (
-            <p className="text-xs text-muted-foreground ml-6">
-              Disabled - AI cleanup choice deferred to review stage
-            </p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="review-before-chunking-preview"
-              checked={reviewBeforeChunking}
-              disabled={reviewDoclingExtraction}
-              onCheckedChange={(checked) => {
-                console.log('[DocumentPreview] Review before chunking checkbox changed:', checked)
-                onReviewBeforeChunkingChange?.(checked as boolean)
-              }}
-            />
-            <label
-              htmlFor="review-before-chunking-preview"
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-1 cursor-pointer"
-            >
-              <Sparkles className="h-3 w-3" />
-              Review markdown before chunking
-            </label>
-          </div>
-          {reviewDoclingExtraction && (
-            <p className="text-xs text-muted-foreground ml-6">
-              Disabled - conflicts with early review checkpoint
-            </p>
-          )}
-        </div>
+        )}
+
+        {reviewWorkflow === 'after_extraction' && (
+          <p className="text-xs text-muted-foreground">
+            💡 You'll choose whether to run AI cleanup after reviewing the extraction
+          </p>
+        )}
+
+        {/* Extract Images Option */}
         <div className="flex items-center gap-2">
           <Checkbox
             id="extract-images-preview"
             checked={extractImages}
             onCheckedChange={(checked) => {
-              console.log('[DocumentPreview] Extract images checkbox changed:', checked)
               onExtractImagesChange?.(checked as boolean)
             }}
           />
@@ -296,7 +328,9 @@ export function DocumentPreview({
             Extract images from PDF (slower, ~30-40% more time)
           </label>
         </div>
-        <div className="flex justify-end gap-3">
+
+        {/* Action Buttons */}
+        <div className="flex justify-end gap-3 pt-2">
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>

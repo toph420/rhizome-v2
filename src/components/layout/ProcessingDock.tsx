@@ -147,9 +147,15 @@ export function ProcessingDock() {
         filter: `user_id=eq.${userId}`
       }, (payload) => {
         const job = payload.new as Job
-        
+
         if (payload.eventType === 'INSERT') {
-          setJobs(prev => [...prev, job])
+          // Deduplicate: only add if not already present (race with polling)
+          setJobs(prev => {
+            if (prev.some(j => j.id === job.id)) {
+              return prev // Already exists, skip
+            }
+            return [...prev, job]
+          })
         } else if (payload.eventType === 'UPDATE') {
           setJobs(prev => prev.map(j => j.id === job.id ? job : j))
         } else if (payload.eventType === 'DELETE') {
@@ -168,9 +174,14 @@ export function ProcessingDock() {
         .in('status', ['pending', 'processing', 'completed', 'failed'])
         .order('created_at', { ascending: false })
         .limit(10)
-      
+
       if (data) {
-        setJobs(data)
+        // Deduplicate by ID to prevent React key errors
+        setJobs(prevJobs => {
+          const jobMap = new Map(prevJobs.map(j => [j.id, j]))
+          data.forEach(job => jobMap.set(job.id, job))
+          return Array.from(jobMap.values())
+        })
       }
     }, 5000)
     

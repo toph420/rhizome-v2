@@ -3,7 +3,16 @@
  * Defines common interfaces used across all source processors.
  */
 
-import type { ChunkMetadata, PartialChunkMetadata } from './metadata.js'
+import type {
+  EmotionalMetadata,
+  ConceptualMetadata,
+  DomainMetadata,
+  NarrativeMetadata,
+  ReferenceMetadata,
+  StructuralMetadata,
+  MethodMetadata,
+  QualityMetadata
+} from './metadata.js'
 
 /**
  * Result from document processing operation.
@@ -29,8 +38,14 @@ export interface ProcessResult {
  * NOTE: YouTube timestamps are NOT stored at chunk level.
  * They belong in document.source_metadata and are calculated at display time
  * using character offsets (start_offset/end_offset).
+ *
+ * ARCHITECTURE: This interface uses FLAT metadata properties that match the
+ * database schema (migration 015). Each metadata type is stored in a separate
+ * JSONB column for optimal query performance with individual GIN indexes.
  */
 export interface ProcessedChunk {
+  /** Document ID (foreign key) */
+  document_id?: string
   /** Chunk text content */
   content: string
   /** Starting position in source document */
@@ -43,14 +58,67 @@ export interface ProcessedChunk {
   themes?: string[]
   /** Importance score (0-1) */
   importance_score?: number
-  /** AI-generated summary */
-  summary?: string
+  /** AI-generated summary (null if not extracted) */
+  summary?: string | null
   /** Word count for the chunk */
   word_count?: number
   /** Position context for fuzzy matching (confidence, method, snippets only) */
   positionContext?: PositionContext
-  /** Rich metadata extracted for 7-engine collision detection */
-  metadata?: ChunkMetadata | PartialChunkMetadata
+
+  // === PHASE 4/5: Local Pipeline Structural Metadata (Migration 045) ===
+  // These fields store Docling-extracted structural metadata for PDFs and EPUBs
+
+  /** Starting page number (PDF only, null for EPUB) */
+  page_start?: number | null
+  /** Ending page number (PDF only, null for EPUB) */
+  page_end?: number | null
+  /** Heading level in document structure */
+  heading_level?: number | null
+  /** Heading path array (e.g., ["Chapter 1", "Section 1.1"]) */
+  heading_path?: string[] | null
+  /** Section marker (EPUB only, generated from headings) */
+  section_marker?: string | null
+  /** PDF bounding boxes for coordinate highlighting */
+  bboxes?: Array<{
+    page: number
+    l: number  // left
+    t: number  // top
+    r: number  // right
+    b: number  // bottom
+  }> | null
+  /** Position matching confidence (exact, high, medium, synthetic) */
+  position_confidence?: string
+  /** Position matching method used */
+  position_method?: string
+  /** Whether position has been manually validated */
+  position_validated?: boolean
+
+  // === METADATA (Flat structure matching database schema) ===
+  // These correspond to individual JSONB columns in the chunks table (migration 015)
+  // Each has a GIN index for efficient queries by the 3-engine collision detection system
+  //
+  // NOTE: Metadata fields use Partial<T> to support gradual enrichment across different
+  // extraction methods (simple AI extraction vs full 7-engine analysis). The database
+  // JSONB columns are schema-less and can store partial structures.
+
+  /** Emotional tone and sentiment metadata (null if not extracted) */
+  emotional_metadata?: Partial<EmotionalMetadata> | null
+  /** Key concepts, entities, and relationships metadata (null if not extracted) */
+  conceptual_metadata?: Partial<ConceptualMetadata> | null
+  /** Domain classification and technical depth metadata (null if not extracted) */
+  domain_metadata?: Partial<DomainMetadata> | null
+  /** Narrative rhythm and writing style metadata (null if not extracted) */
+  narrative_metadata?: Partial<NarrativeMetadata> | null
+  /** Cross-references and citation metadata (null if not extracted) */
+  reference_metadata?: Partial<ReferenceMetadata> | null
+  /** Structural patterns (headings, lists, tables) metadata (null if not extracted) */
+  structural_metadata?: Partial<StructuralMetadata> | null
+  /** Method signatures metadata (for code chunks only, null if not applicable) */
+  method_metadata?: Partial<MethodMetadata> | null
+  /** Extraction quality and completeness metadata (null if not extracted) */
+  quality_metadata?: Partial<QualityMetadata> | null
+  /** Timestamp when metadata was last extracted (null if never extracted) */
+  metadata_extracted_at?: string | null
 }
 
 /**

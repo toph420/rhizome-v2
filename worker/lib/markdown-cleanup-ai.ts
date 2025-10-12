@@ -6,9 +6,13 @@
  *
  * Strategies:
  * - EPUBs: Per-chapter cleanup with deterministic joining (NO overlap, NO stitching)
- * - PDFs: Single-pass (<100K) or heading-split (>100K) with deterministic joining
+ * - PDFs: Single-pass (<100K) or paragraph-aware chunking (>100K, ~40K chars/chunk)
  *
- * Cost: ~$0.02-0.60 per document depending on size and type (uses Gemini 2.5 Flash)
+ * Cost: ~$0.02-0.06 per document (optimized character-based chunking)
+ *   - Small PDFs (<100K chars): Single pass = 1 AI call (~$0.002)
+ *   - Large PDFs (500K chars): ~12-15 chunks = 12-15 AI calls (~$0.03)
+ *   - EPUBs: Per-chapter (varies by book structure)
+ *
  * Speed: ~10-60 seconds depending on document size
  */
 
@@ -266,12 +270,13 @@ export async function cleanEpubChaptersWithAI(
  *
  * Strategy:
  * - Small documents (<100K chars): Single-pass cleanup
- * - Large documents (>100K chars): Split at ## headings, clean each section, join directly
+ * - Large documents (>100K chars): Split by character count (~40K/chunk) at paragraph boundaries
  *
- * Why this works:
- * - ## headings are structural markers that AI won't modify
- * - Splitting BEFORE headings keeps sections intact
- * - NO overlap, NO stitching - just clean and join
+ * Why character-based chunking:
+ * - Predictable chunk sizes = predictable cost (~12-15 chunks for 500-page book)
+ * - Paragraph-aware splitting prevents mid-sentence breaks
+ * - Cost optimization: $0.03 vs $0.59 for heading-based approach
+ * - NO overlap, NO stitching - just clean and join with \n\n
  *
  * @param ai - GoogleGenAI client instance
  * @param markdown - PDF markdown to clean
@@ -282,10 +287,53 @@ export async function cleanEpubChaptersWithAI(
  * @example
  * ```typescript
  * const cleaned = await cleanPdfMarkdown(ai, pdfMarkdown, {
- *   onProgress: (section, total) => console.log(`Section ${section}/${total}`)
+ *   onProgress: (chunk, total) => console.log(`Chunk ${chunk}/${total}`)
  * })
  * ```
  */
+/**
+ * Split markdown into chunks by character count with paragraph awareness.
+ * Ensures chunks don't exceed target size and don't split in the middle of paragraphs.
+ *
+ * @param markdown - Full markdown text
+ * @param targetCharsPerChunk - Target characters per chunk (default 40000 = ~10K tokens)
+ * @returns Array of markdown chunks
+ */
+function splitMarkdownByParagraphs(
+  markdown: string,
+  targetCharsPerChunk: number = 40000
+): string[] {
+  const chunks: string[] = []
+  const paragraphs = markdown.split(/\n\n+/)  // Split on blank lines (paragraph boundaries)
+
+  let currentChunk = ''
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i]
+    const potentialLength = currentChunk.length + paragraph.length + 2  // +2 for \n\n
+
+    // If adding this paragraph would exceed target, save current chunk and start new one
+    if (currentChunk && potentialLength > targetCharsPerChunk) {
+      chunks.push(currentChunk.trim())
+      currentChunk = paragraph
+    } else {
+      // Add paragraph to current chunk
+      if (currentChunk) {
+        currentChunk += '\n\n' + paragraph
+      } else {
+        currentChunk = paragraph
+      }
+    }
+  }
+
+  // Don't forget last chunk
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim())
+  }
+
+  return chunks
+}
+
 export async function cleanPdfMarkdown(
   ai: GoogleGenAI,
   markdown: string,
@@ -303,71 +351,29 @@ export async function cleanPdfMarkdown(
     })
   }
 
-  // Large documents: split at ## headings
-  console.log('[markdown-cleanup-ai] Large PDF (>100K chars), splitting at ## headings')
+  // Large documents: split by character count with paragraph awareness
+  console.log('[markdown-cleanup-ai] Large PDF (>100K chars), splitting by paragraphs')
 
-  const allSections = markdown.split(/(?=\n##\s)/)  // Split BEFORE ## headings
-  console.log(`[markdown-cleanup-ai] Raw split: ${allSections.length} sections`)
+  const TARGET_CHARS = 40000  // ~10K tokens input, well within Gemini's 65K output limit
+  const chunks = splitMarkdownByParagraphs(markdown, TARGET_CHARS)
 
-  // Filter out spurious headings (single letters, Roman numerals, etc.)
-  const sections: string[] = []
-  let currentMerged = ''
+  console.log(
+    `[markdown-cleanup-ai] Split into ${chunks.length} chunks ` +
+    `(target: ${TARGET_CHARS} chars/chunk, avg: ${Math.round(markdown.length / chunks.length)} chars/chunk)`
+  )
 
-  for (let i = 0; i < allSections.length; i++) {
-    const section = allSections[i]
+  const cleanedChunks: string[] = []
 
-    // Extract heading text if present
-    const headingMatch = section.match(/^##\s+(.+?)$/m)
-
-    if (!headingMatch) {
-      // No heading, merge with current
-      currentMerged += section
-      continue
-    }
-
-    const headingText = headingMatch[1].trim()
-
-    // Check if this is a false positive heading
-    const singleLetterOrRoman = /^[IVXLCDM]$|^\d+$/i.test(headingText)
-    const tooShort = headingText.length < 3
-    const commonIndexTerms = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|A|B|C|D|E|INDEX|NOTES|PAGE|PART|SECTION|CHAPTER)$/i.test(headingText)
-
-    if (singleLetterOrRoman || (tooShort && !headingText.match(/\s/)) || commonIndexTerms) {
-      // False positive - merge with current section
-      console.log(`[markdown-cleanup-ai] Filtering spurious heading: "${headingText}"`)
-      currentMerged += section
-      continue
-    }
-
-    // Valid heading - save current merged section if any
-    if (currentMerged) {
-      sections.push(currentMerged)
-      currentMerged = ''
-    }
-
-    // Start new section
-    currentMerged = section
-  }
-
-  // Don't forget last merged section
-  if (currentMerged) {
-    sections.push(currentMerged)
-  }
-
-  console.log(`[markdown-cleanup-ai] After filtering: ${sections.length} sections (removed ${allSections.length - sections.length} spurious headings)`)
-
-  const cleanedSections: string[] = []
-
-  for (let i = 0; i < sections.length; i++) {
-    const section = sections[i]
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]
 
     if (config.onProgress) {
-      await config.onProgress(i + 1, sections.length)
+      await config.onProgress(i + 1, chunks.length)
     }
 
     console.log(
-      `[markdown-cleanup-ai] Cleaning section ${i + 1}/${sections.length} ` +
-      `(${Math.round(section.length / 1024)}KB)`
+      `[markdown-cleanup-ai] Cleaning chunk ${i + 1}/${chunks.length} ` +
+      `(${Math.round(chunk.length / 1024)}KB)`
     )
 
     try {
@@ -376,7 +382,7 @@ export async function cleanPdfMarkdown(
         contents: [{
           parts: [
             { text: generateMarkdownCleanupPrompt() },
-            { text: `\n\nHere is the markdown to clean:\n\n${section}` }
+            { text: `\n\nHere is the markdown to clean:\n\n${chunk}` }
           ]
         }],
         config: {
@@ -386,7 +392,7 @@ export async function cleanPdfMarkdown(
       })
 
       if (!result || !result.text) {
-        throw new Error(`Section ${i + 1} returned empty response`)
+        throw new Error(`Chunk ${i + 1} returned empty response`)
       }
 
       let cleaned = result.text.trim()
@@ -398,22 +404,21 @@ export async function cleanPdfMarkdown(
         cleaned = cleaned.replace(/^```\s*\n?/, '').replace(/\n?```\s*$/, '')
       }
 
-      cleanedSections.push(cleaned)
+      cleanedChunks.push(cleaned)
     } catch (error: any) {
       console.error(
-        `[markdown-cleanup-ai] ❌ Section ${i + 1} cleanup failed: ${error.message}`
+        `[markdown-cleanup-ai] ❌ Chunk ${i + 1} cleanup failed: ${error.message}`
       )
-      throw new Error(`AI cleanup failed on section ${i + 1}: ${error.message}`)
+      throw new Error(`AI cleanup failed on chunk ${i + 1}: ${error.message}`)
     }
   }
 
-  // Join sections directly - NO STITCHING
-  // We split at headings, so joining with '' is deterministic
-  const joined = cleanedSections.join('')
+  // Join chunks with paragraph separator for smooth transitions
+  const joined = cleanedChunks.join('\n\n')
 
   console.log(
     `[markdown-cleanup-ai] ✅ PDF cleanup complete: ` +
-    `${sections.length} sections → ${Math.round(joined.length / 1024)}KB`
+    `${chunks.length} chunks → ${Math.round(joined.length / 1024)}KB`
   )
 
   return joined

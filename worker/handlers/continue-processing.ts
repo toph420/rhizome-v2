@@ -2,6 +2,10 @@
  * Continue Processing Handler
  * Resumes chunking pipeline after manual markdown review
  *
+ * Supports dual-mode processing:
+ * - LOCAL mode: Bulletproof matching + PydanticAI + Transformers.js (zero cost)
+ * - CLOUD mode: Gemini semantic chunking + embeddings ($0.50/book)
+ *
  * Simpler than reprocessing:
  * - No annotation recovery (annotations don't exist yet)
  * - No connection remapping (connections don't exist yet)
@@ -141,11 +145,11 @@ export async function continueProcessing(
 
       // Save cleaned markdown back to storage
       await updateProgress(51, 'Saving cleaned markdown...')
-      const markdownBlob = new Blob([markdown], { type: 'text/plain' })
+      const markdownBlob = new Blob([markdown], { type: 'text/markdown' })
       const { error: uploadError } = await supabase.storage
         .from('documents')
         .update(document.markdown_path, markdownBlob, {
-          contentType: 'text/plain',
+          contentType: 'text/markdown',
           upsert: true
         })
 
@@ -158,7 +162,33 @@ export async function continueProcessing(
       await updateProgress(55, 'AI cleanup complete')
     }
 
-    // 5. Set processing status and clear review_stage
+    // 5. Check processing mode and load cached data if LOCAL mode
+    const isLocalMode = process.env.PROCESSING_MODE === 'local'
+    console.log(`[ContinueProcessing] Processing mode: ${isLocalMode ? 'LOCAL' : 'CLOUD'}`)
+
+    // Get cached extraction from original process_document job (needed for LOCAL mode)
+    let cachedDoclingChunks = null
+    if (isLocalMode) {
+      const { data: originalJob } = await supabase
+        .from('background_jobs')
+        .select('metadata')
+        .eq('entity_id', documentId)
+        .eq('job_type', 'process_document')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      cachedDoclingChunks = originalJob?.metadata?.cached_extraction?.doclingChunks
+
+      if (!cachedDoclingChunks) {
+        console.warn('[ContinueProcessing] LOCAL mode but no cached Docling chunks found')
+        console.warn('[ContinueProcessing] Falling back to CLOUD mode for this document')
+      } else {
+        console.log(`[ContinueProcessing] Loaded ${cachedDoclingChunks.length} cached Docling chunks from original job`)
+      }
+    }
+
+    // 6. Set processing status and clear review_stage
     await supabase
       .from('documents')
       .update({
@@ -167,61 +197,241 @@ export async function continueProcessing(
       })
       .eq('id', documentId)
 
-    // 6. Run AI chunking
-    await updateProgress(60, 'Starting AI chunking...')
-    const { batchChunkAndExtractMetadata } = await import('../lib/ai-chunking-batch.js')
+    // 7. Chunking: LOCAL or CLOUD mode
+    let chunksToInsert: any[]
 
-    const aiChunks = await batchChunkAndExtractMetadata(
-      markdown,
-      {
-        apiKey: process.env.GOOGLE_AI_API_KEY,
-        modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-        enableProgress: false // We'll handle progress manually
+    if (isLocalMode && cachedDoclingChunks) {
+      // ============================================================
+      // LOCAL MODE: Bulletproof Matching + Local Metadata + Local Embeddings
+      // ============================================================
+      console.log('[ContinueProcessing] LOCAL MODE: Using bulletproof matching')
+      await updateProgress(60, 'Starting bulletproof matching...')
+
+      // Import LOCAL mode dependencies
+      const { bulletproofMatch } = await import('../lib/local/bulletproof-matcher.js')
+      const { extractMetadataBatch } = await import('../lib/chunking/pydantic-metadata.js')
+      const { generateEmbeddingsLocal } = await import('../lib/local/embeddings-local.js')
+      const { generateEmbeddings } = await import('../lib/embeddings.js')
+
+      // Step 1: Bulletproof matching (60-70%)
+      console.log('[ContinueProcessing] Running 5-layer bulletproof matching...')
+      const { chunks: rematchedChunks, stats } = await bulletproofMatch(
+        markdown,
+        cachedDoclingChunks,
+        {
+          onProgress: async (layerNum, matched, remaining) => {
+            console.log(`[ContinueProcessing] Layer ${layerNum}: ${matched} matched, ${remaining} remaining`)
+            const percent = 60 + Math.floor((layerNum / 5) * 10)
+            await updateProgress(percent, `Matching layer ${layerNum}/5`)
+          }
+        }
+      )
+
+      console.log(`[ContinueProcessing] Bulletproof matching complete:`)
+      console.log(`  ✅ Exact: ${stats.exact}/${stats.total} (${(stats.exact / stats.total * 100).toFixed(1)}%)`)
+      console.log(`  🔍 High: ${stats.high}/${stats.total}`)
+      console.log(`  📍 Medium: ${stats.medium}/${stats.total}`)
+      console.log(`  ⚠️  Synthetic: ${stats.synthetic}/${stats.total}`)
+
+      await updateProgress(70, `${rematchedChunks.length} chunks matched`)
+
+      // Step 2: Local metadata enrichment (70-80%)
+      console.log('[ContinueProcessing] Starting local metadata enrichment (PydanticAI + Ollama)')
+      await updateProgress(72, 'Extracting structured metadata...')
+
+      let enrichedChunks = rematchedChunks.map((result, idx) => {
+        const wordCount = result.chunk.content.split(/\s+/).filter((w: string) => w.length > 0).length
+        return {
+          document_id: documentId,
+          content: result.chunk.content,
+          chunk_index: idx,
+          start_offset: result.start_offset,
+          end_offset: result.end_offset,
+          word_count: wordCount,
+          // Docling metadata (LOCAL mode only)
+          page_start: result.chunk.meta.page_start || null,
+          page_end: result.chunk.meta.page_end || null,
+          heading_level: result.chunk.meta.heading_level || null,
+          heading_path: result.chunk.meta.heading_path || null,
+          section_marker: result.chunk.meta.section_marker || null,
+          bboxes: result.chunk.meta.bboxes || null,
+          position_confidence: result.confidence,
+          position_method: result.method,
+          position_validated: false,
+          // Default metadata (will be enriched)
+          themes: [],
+          importance_score: 0.5,
+          summary: null,
+          emotional_metadata: {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          },
+          conceptual_metadata: {
+            concepts: []
+          },
+          domain_metadata: null,
+          metadata_extracted_at: null
+        }
+      })
+
+      try {
+        const BATCH_SIZE = 10
+        const enrichedResults: any[] = []
+
+        for (let i = 0; i < enrichedChunks.length; i += BATCH_SIZE) {
+          const batch = enrichedChunks.slice(i, i + BATCH_SIZE)
+          const batchInput = batch.map(chunk => ({
+            id: `${documentId}-${chunk.chunk_index}`,
+            content: chunk.content
+          }))
+
+          console.log(`[ContinueProcessing] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(enrichedChunks.length / BATCH_SIZE)}`)
+
+          const metadataMap = await extractMetadataBatch(batchInput, {
+            onProgress: (processed) => {
+              const overallProgress = 72 + Math.floor(((i + processed) / enrichedChunks.length) * 8)
+              updateProgress(overallProgress, `Enriching chunk ${i + processed}/${enrichedChunks.length}`)
+            }
+          })
+
+          for (const chunk of batch) {
+            const chunkId = `${documentId}-${chunk.chunk_index}`
+            const metadata = metadataMap.get(chunkId)
+
+            if (metadata) {
+              enrichedResults.push({
+                ...chunk,
+                themes: metadata.themes,
+                importance_score: metadata.importance,
+                summary: metadata.summary,
+                emotional_metadata: {
+                  polarity: metadata.emotional.polarity,
+                  primaryEmotion: metadata.emotional.primaryEmotion,
+                  intensity: metadata.emotional.intensity
+                },
+                conceptual_metadata: {
+                  concepts: metadata.concepts
+                },
+                domain_metadata: {
+                  primaryDomain: metadata.domain,
+                  confidence: 0.8
+                },
+                metadata_extracted_at: new Date().toISOString()
+              })
+            } else {
+              console.warn(`[ContinueProcessing] Metadata extraction failed for chunk ${chunk.chunk_index}`)
+              enrichedResults.push(chunk)
+            }
+          }
+        }
+
+        enrichedChunks = enrichedResults
+        console.log(`[ContinueProcessing] Local metadata enrichment complete`)
+        await updateProgress(80, 'Metadata enrichment done')
+
+      } catch (error: any) {
+        console.error(`[ContinueProcessing] Metadata enrichment failed: ${error.message}`)
+        console.warn('[ContinueProcessing] Continuing with default metadata')
+        await updateProgress(80, 'Using default metadata (enrichment failed)')
       }
-    )
 
-    console.log(`[ContinueProcessing] Created ${aiChunks.length} chunks`)
-    await updateProgress(80, `Created ${aiChunks.length} semantic chunks`)
+      // Step 3: Local embeddings (80-85%)
+      console.log('[ContinueProcessing] Starting local embeddings (Transformers.js)')
+      await updateProgress(82, 'Generating local embeddings...')
 
-    // 7. Generate embeddings
-    await updateProgress(85, 'Generating embeddings...')
-    const { generateEmbeddings } = await import('../lib/embeddings.js')
-    const embeddings = await generateEmbeddings(aiChunks.map(c => c.content))
-    console.log(`[ContinueProcessing] Generated ${embeddings.length} embeddings`)
-    await updateProgress(88, 'Embeddings generated')
+      let embeddings: number[][]
+      try {
+        const chunkContents = enrichedChunks.map(c => c.content)
+        embeddings = await generateEmbeddingsLocal(chunkContents)
+        console.log(`[ContinueProcessing] Local embeddings complete: ${embeddings.length} vectors (768d)`)
+        await updateProgress(85, 'Local embeddings generated')
+      } catch (error: any) {
+        console.error(`[ContinueProcessing] Local embeddings failed: ${error.message}`)
+        console.warn('[ContinueProcessing] Falling back to Gemini embeddings')
 
-    // 8. Map chunks to database schema
-    const chunksToInsert = aiChunks.map((chunk, index) => ({
-      document_id: documentId,
-      chunk_index: index,
-      content: chunk.content,
-      start_offset: chunk.start_offset,
-      end_offset: chunk.end_offset,
-      word_count: chunk.content.split(/\s+/).length,
-      themes: chunk.metadata?.themes || [],
-      importance_score: chunk.metadata?.importance || 0.5,
-      summary: chunk.metadata?.summary || null,
+        try {
+          const chunkContents = enrichedChunks.map(c => c.content)
+          embeddings = await generateEmbeddings(chunkContents)
+          console.log('[ContinueProcessing] Gemini embeddings fallback successful')
+          await updateProgress(85, 'Gemini embeddings generated')
+        } catch (fallbackError: any) {
+          console.error(`[ContinueProcessing] Gemini embeddings also failed: ${fallbackError.message}`)
+          // Create empty embeddings as last resort
+          embeddings = enrichedChunks.map(() => new Array(768).fill(0))
+          await updateProgress(85, 'Embeddings generation failed')
+        }
+      }
 
-      // JSONB metadata columns for collision detection
-      emotional_metadata: chunk.metadata?.emotional ? {
-        polarity: chunk.metadata.emotional.polarity,
-        primaryEmotion: chunk.metadata.emotional.primaryEmotion,
-        intensity: chunk.metadata.emotional.intensity
-      } : null,
-      conceptual_metadata: chunk.metadata?.concepts ? {
-        concepts: chunk.metadata.concepts
-      } : null,
-      domain_metadata: chunk.metadata?.domain ? {
-        primaryDomain: chunk.metadata.domain,
-        confidence: 0.8
-      } : null,
+      // Attach embeddings and prepare for insertion
+      chunksToInsert = enrichedChunks.map((chunk, index) => ({
+        ...chunk,
+        embedding: embeddings[index],
+        is_current: true
+      }))
 
-      metadata_extracted_at: new Date().toISOString(),
-      embedding: embeddings[index],
-      is_current: true
-    }))
+      console.log(`[ContinueProcessing] LOCAL MODE complete: ${chunksToInsert.length} chunks ready`)
 
-    // 9. Insert chunks into database
+    } else {
+      // ============================================================
+      // CLOUD MODE: AI Semantic Chunking (existing path)
+      // ============================================================
+      console.log('[ContinueProcessing] CLOUD MODE: Using AI semantic chunking')
+      await updateProgress(60, 'Starting AI chunking...')
+
+      const { batchChunkAndExtractMetadata } = await import('../lib/ai-chunking-batch.js')
+
+      const aiChunks = await batchChunkAndExtractMetadata(
+        markdown,
+        {
+          apiKey: process.env.GOOGLE_AI_API_KEY,
+          modelName: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+          enableProgress: false
+        }
+      )
+
+      console.log(`[ContinueProcessing] Created ${aiChunks.length} semantic chunks`)
+      await updateProgress(75, `${aiChunks.length} semantic chunks created`)
+
+      // Generate embeddings
+      await updateProgress(78, 'Generating embeddings...')
+      const { generateEmbeddings } = await import('../lib/embeddings.js')
+      const embeddings = await generateEmbeddings(aiChunks.map(c => c.content))
+      console.log(`[ContinueProcessing] Generated ${embeddings.length} embeddings`)
+      await updateProgress(85, 'Embeddings generated')
+
+      // Map to database schema (CLOUD mode - no Docling metadata)
+      chunksToInsert = aiChunks.map((chunk, index) => ({
+        document_id: documentId,
+        chunk_index: index,
+        content: chunk.content,
+        start_offset: chunk.start_offset,
+        end_offset: chunk.end_offset,
+        word_count: chunk.content.split(/\s+/).length,
+        themes: chunk.metadata?.themes || [],
+        importance_score: chunk.metadata?.importance || 0.5,
+        summary: chunk.metadata?.summary || null,
+        emotional_metadata: chunk.metadata?.emotional ? {
+          polarity: chunk.metadata.emotional.polarity,
+          primaryEmotion: chunk.metadata.emotional.primaryEmotion,
+          intensity: chunk.metadata.emotional.intensity
+        } : null,
+        conceptual_metadata: chunk.metadata?.concepts ? {
+          concepts: chunk.metadata.concepts
+        } : null,
+        domain_metadata: chunk.metadata?.domain ? {
+          primaryDomain: chunk.metadata.domain,
+          confidence: 0.8
+        } : null,
+        metadata_extracted_at: new Date().toISOString(),
+        embedding: embeddings[index],
+        is_current: true
+      }))
+
+      console.log(`[ContinueProcessing] CLOUD MODE complete: ${chunksToInsert.length} chunks ready`)
+    }
+
+    // 8. Insert chunks into database (both modes converge here)
     console.log(`[ContinueProcessing] Saving ${chunksToInsert.length} chunks to database`)
     const { error: insertError } = await supabase
       .from('chunks')
@@ -234,7 +444,7 @@ export async function continueProcessing(
     console.log(`[ContinueProcessing] ✓ Saved ${chunksToInsert.length} chunks`)
     await updateProgress(90, 'Chunks saved to database')
 
-    // 10. Queue collision detection job
+    // 9. Queue collision detection job
     await updateProgress(92, 'Queueing collision detection...')
 
     // Check for existing active jobs to avoid duplicates
@@ -274,7 +484,7 @@ export async function continueProcessing(
 
     await updateProgress(95, 'Collision detection queued')
 
-    // 11. Mark document as completed
+    // 10. Mark document as completed
     await supabase
       .from('documents')
       .update({

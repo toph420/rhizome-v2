@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ChevronLeft, ChevronRight, Network, Highlighter, Zap, Brain, FileQuestion, Sliders } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Network, Highlighter, Zap, Brain, FileQuestion, Sliders, CheckCircle } from 'lucide-react'
 import { ConnectionsList } from './ConnectionsList'
 import { AnnotationsList } from './AnnotationsList'
 import { SparksTab } from './SparksTab'
@@ -13,6 +13,7 @@ import { FlashcardsTab } from './FlashcardsTab'
 import { TuneTab } from './TuneTab'
 import { ConnectionFilters } from './ConnectionFilters'
 import { AnnotationReviewTab } from './AnnotationReviewTab'
+import { ChunkQualityPanel } from './ChunkQualityPanel'
 import type { RecoveryResults } from '../../../worker/types/recovery'
 import { cn } from '@/lib/utils'
 
@@ -33,7 +34,7 @@ interface RightPanelProps {
   chunks?: any[]
 }
 
-type TabId = 'connections' | 'annotations' | 'sparks' | 'cards' | 'review' | 'tune'
+type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune'
 
 interface Tab {
   id: TabId
@@ -44,6 +45,7 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'connections', icon: Network, label: 'Connections' },
   { id: 'annotations', icon: Highlighter, label: 'Annotations' },
+  { id: 'quality', icon: CheckCircle, label: 'Quality' },
   { id: 'sparks', icon: Zap, label: 'Sparks' },
   { id: 'cards', icon: Brain, label: 'Cards' },
   { id: 'review', icon: FileQuestion, label: 'Review' },
@@ -51,16 +53,17 @@ const TABS: Tab[] = [
 ]
 
 /**
- * Fixed right panel with 6 icon-only tabs.
+ * Fixed right panel with 7 icon-only tabs.
  * Follows "Maximum Intelligence, Minimum Friction" philosophy.
  *
  * Tabs:
  * 1. Connections - 3-engine collision detection results
  * 2. Annotations - Highlights with notes
- * 3. Sparks - Quick captures with context (placeholder)
- * 4. Cards - Flashcards with FSRS (placeholder)
- * 5. Review - Annotation recovery
- * 6. Tune - Engine weights + settings
+ * 3. Quality - Chunk confidence indicators from local pipeline
+ * 4. Sparks - Quick captures with context (placeholder)
+ * 5. Cards - Flashcards with FSRS (placeholder)
+ * 6. Review - Annotation recovery
+ * 7. Tune - Engine weights + settings
  *
  * @param props - Component props.
  * @param props.documentId - Document identifier for filtering.
@@ -132,8 +135,8 @@ export function RightPanel({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            {/* Icon-only tabs (6 columns) */}
-            <div className="grid grid-cols-6 border-b p-2 gap-1">
+            {/* Icon-only tabs (7 columns) */}
+            <div className="grid grid-cols-7 border-b p-2 gap-1">
               {TABS.map(tab => {
                 const Icon = tab.icon
                 const isActive = activeTab === tab.id
@@ -191,6 +194,15 @@ export function RightPanel({
                   <AnnotationsList
                     documentId={documentId}
                     onAnnotationClick={onAnnotationClick}
+                  />
+                </ScrollArea>
+              )}
+
+              {activeTab === 'quality' && (
+                <ScrollArea className="h-full">
+                  <ChunkQualityPanel
+                    documentId={documentId}
+                    onNavigateToChunk={onNavigateToChunk}
                   />
                 </ScrollArea>
               )}

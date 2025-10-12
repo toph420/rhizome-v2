@@ -12,6 +12,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import { ChunkConnection } from './semantic-similarity';
 import { GEMINI_MODEL } from '../lib/model-config.js';
+import { jsonrepair } from 'jsonrepair';
 
 export interface ThematicBridgeConfig {
   minImportance?: number;          // Default: 0.6
@@ -150,10 +151,44 @@ Remember: Reference chunks by their summary/title in explanations.`;
           model: GEMINI_MODEL,
           contents: prompt
         });
-        const text = result.text;
-        const parsed = JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, ''));
+        const rawText = result.text;
 
-        for (const bridge of parsed.bridges || []) {
+        // Clean JSON response (strip markdown code fences)
+        let cleanedText = rawText
+          .replace(/```json\n?/g, '')
+          .replace(/```\n?/g, '')
+          .trim();
+
+        // Try to parse, using jsonrepair if needed
+        let parsed;
+        try {
+          parsed = JSON.parse(cleanedText);
+        } catch (parseError) {
+          // JSON parsing failed - try jsonrepair
+          console.log(`[ThematicBridge] Initial parse failed, attempting repair...`);
+
+          try {
+            const repaired = jsonrepair(cleanedText);
+            parsed = JSON.parse(repaired);
+            console.log(`[ThematicBridge] ✓ Successfully repaired malformed JSON`);
+          } catch (repairError) {
+            // Repair failed - log for debugging
+            console.error(`[ThematicBridge] JSON repair failed:`, repairError);
+            console.error(`[ThematicBridge] Raw response (first 500 chars):`, rawText.substring(0, 500));
+            console.error(`[ThematicBridge] Raw response (last 500 chars):`, rawText.substring(rawText.length - 500));
+            console.error(`[ThematicBridge] Skipping this batch`);
+            continue;
+          }
+        }
+
+        // Validate structure
+        if (!parsed || !Array.isArray(parsed.bridges)) {
+          console.error(`[ThematicBridge] Invalid response structure, expected { bridges: [...] }`);
+          console.error(`[ThematicBridge] Got:`, JSON.stringify(parsed).substring(0, 200));
+          continue;
+        }
+
+        for (const bridge of parsed.bridges) {
           if (bridge.strength < minStrength) continue;
 
           const targetChunk = batch[bridge.targetIndex];

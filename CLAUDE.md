@@ -31,6 +31,159 @@ This is a personal tool optimized for aggressive connection detection and knowle
 - **YouTube Enhancement**: Transcript cleaning, fuzzy positioning for annotations
 - **EPUB Support**: Full EPUB book processing with metadata extraction
 
+### 2. Local Processing Pipeline ✅ COMPLETE (Optional Mode)
+
+100% local document processing with **zero API costs** and **complete privacy**. Replaces cloud AI services with local alternatives.
+
+#### Architecture Overview
+- **Docling**: PDF/EPUB extraction with structural metadata via HybridChunker
+- **Ollama (Qwen 32B)**: Local LLM for cleanup and metadata extraction
+- **Transformers.js**: Local embeddings (768d vectors)
+- **5-Layer Bulletproof Matching**: 100% chunk recovery guarantee
+
+#### Key Components
+
+**Processing Stages:**
+1. **Extraction** - Docling with HybridChunker (tokenizer: `Xenova/all-mpnet-base-v2`)
+2. **Cleanup** - Ollama (Qwen) for markdown cleaning (optional, with OOM fallback)
+3. **Bulletproof Matching** - 5-layer system for chunk remapping:
+   - Layer 1: Enhanced fuzzy matching (exact, normalized, multi-anchor, sliding window)
+   - Layer 2: Embeddings-based matching (cosine similarity >0.85)
+   - Layer 3: LLM-assisted matching (Ollama for difficult cases)
+   - Layer 4: Anchor interpolation (synthetic chunks, never fails)
+   - Layer 5: Metadata preservation (Docling structural data)
+4. **Metadata** - PydanticAI with Ollama (structured outputs with validation)
+5. **Embeddings** - Transformers.js (aligned tokenizer, 768d)
+
+**Confidence Tracking:**
+- `exact`: Perfect match
+- `high`: >0.95 similarity or strong fuzzy match
+- `medium`: 0.85-0.95 similarity or LLM match
+- `synthetic`: Interpolated position (user validation recommended)
+
+**Review Checkpoints:**
+- After Docling extraction (before cleanup)
+- Before chunking (after cleanup)
+
+#### Configuration
+
+```bash
+# Enable local mode in .env.local
+PROCESSING_MODE=local                         # Set to 'cloud' for Gemini
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:32b-instruct-q4_K_M     # or 14b/7b for smaller RAM
+OLLAMA_TIMEOUT=600000
+```
+
+#### Performance & Cost
+
+**Processing Times (M1 Max 64GB):**
+- Small PDFs (<50 pages): 3-5 minutes
+- Medium PDFs (200 pages): 15-25 minutes
+- Large PDFs (500 pages): 60-80 minutes
+
+**Quality Metrics:**
+- Chunk recovery: 100% (guaranteed, no data loss)
+- Exact matches: 85-90%
+- Synthetic chunks: <5% (flagged for review)
+- API calls: 0 (completely local)
+
+**Cost Savings:**
+- Cloud (Gemini): $0.42/book (500 pages)
+- Local: $0.00/book
+- 1,000 books: Save $420
+- 10,000 books: Save $4,200
+- **Bonus**: Complete privacy, no rate limits, works offline
+
+#### System Requirements
+
+**Minimum:**
+- 24GB RAM (Qwen 14B)
+- Python 3.10+
+- Node.js 18+
+
+**Recommended:**
+- 64GB RAM (Qwen 32B - best quality)
+- Apple M1 Max/Ultra or equivalent
+
+#### Key Files
+- `worker/lib/local/ollama-client.ts` - Ollama integration
+- `worker/lib/local/bulletproof-matcher.ts` - 5-layer matching system
+- `worker/lib/local/embeddings-local.ts` - Local embeddings with Transformers.js
+- `worker/lib/local/ollama-cleanup.ts` - Markdown cleanup with OOM fallback
+- `worker/lib/chunking/pydantic-metadata.ts` - Structured metadata extraction
+- `worker/processors/pdf-processor.ts` - PDF pipeline orchestration
+- `worker/processors/epub-processor.ts` - EPUB pipeline orchestration
+- `worker/scripts/docling_extract.py` - Python Docling wrapper
+- `worker/scripts/extract_metadata_pydantic.py` - PydanticAI metadata script
+
+#### Setup & Usage
+
+**Quick Setup:**
+```bash
+# Install Python dependencies
+cd worker
+pip install docling==2.55.1 'pydantic-ai[ollama]' sentence-transformers transformers
+
+# Install Ollama and pull model
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5:32b-instruct-q4_K_M
+
+# Start Ollama server
+ollama serve
+
+# Install Node.js dependencies
+npm install ollama @huggingface/transformers
+
+# Configure environment
+export PROCESSING_MODE=local
+
+# Run worker
+npm run dev
+```
+
+**Validation:**
+```bash
+cd worker
+
+# Integration tests
+npm run test:integration
+
+# Metadata validation
+npm run validate:metadata
+
+# Test specific components
+npx tsx lib/local/__tests__/test-layer1-fuzzy.ts
+npx tsx lib/local/__tests__/test-orchestrator.ts <document_id>
+```
+
+**For detailed setup instructions, see:** `docs/local-pipeline-setup.md`
+
+#### Critical Anti-Patterns
+
+From implementation experience:
+- ❌ Don't skip Python `stdout.flush()` - IPC will hang
+- ❌ Don't use Ollama streaming for structured outputs - breaks JSON parsing
+- ❌ Don't mismatch tokenizer (HybridChunker must match embeddings model)
+- ❌ Don't use Q8 quantization on M1 Max - too slow, use Q4_K_M
+- ❌ Don't skip confidence tracking - user needs transparency
+- ❌ Don't assume 100% exact matches - plan for synthetic chunks
+- ❌ Don't test with real AI in CI - mock Ollama and Python subprocesses
+- ❌ Don't ignore OOM errors - graceful fallback to smaller model or regex-only
+
+#### Troubleshooting
+
+**Common Issues:**
+1. **Ollama not responding**: Verify `ollama serve` is running, check `http://127.0.0.1:11434/api/version`
+2. **OOM errors**: Switch to smaller model (`OLLAMA_MODEL=qwen2.5:14b-instruct-q4_K_M`)
+3. **High synthetic chunks (>10%)**: Check Docling extraction quality, verify PDF is text-based
+4. **Python subprocess hangs**: Ensure `sys.stdout.flush()` after every JSON write
+5. **Wrong embedding dimensions**: Verify `pooling: 'mean'` and `normalize: true` in Transformers.js
+
+**Documentation:**
+- Implementation details: `docs/tasks/local-processing-pipeline-v1/README.md`
+- Setup guide: `docs/local-pipeline-setup.md`
+- Architecture decisions: `docs/tasks/local-processing-pipeline-v1/PHASES_OVERVIEW.md`
 
 ### The 3-Engine System
 

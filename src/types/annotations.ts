@@ -147,6 +147,14 @@ export interface Chunk {
     context_before: string
     context_after: string
   }
+
+  // Local pipeline metadata (from migration 045)
+  position_confidence?: 'exact' | 'high' | 'medium' | 'synthetic'
+  position_method?: string
+  position_validated?: boolean
+  page_start?: number | null
+  page_end?: number | null
+  section_marker?: string | null
 }
 
 /**

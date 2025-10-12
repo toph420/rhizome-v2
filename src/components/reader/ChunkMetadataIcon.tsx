@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Badge } from '@/components/ui/badge'
-import { Info, TrendingUp } from 'lucide-react'
+import { Info, TrendingUp, CheckCircle, AlertTriangle } from 'lucide-react'
 import type { Chunk } from '@/types/annotations'
 
 interface ChunkMetadataIconProps {
@@ -13,7 +13,7 @@ interface ChunkMetadataIconProps {
 
 /**
  * Hoverable chunk metadata icon that appears in the left margin.
- * Shows chunk index, themes, and importance score on hover.
+ * Shows chunk index, themes, importance score, and confidence indicators on hover.
  *
  * @param props - Component props
  * @param props.chunk - Chunk data with metadata
@@ -29,6 +29,17 @@ export function ChunkMetadataIcon({ chunk, chunkIndex }: ChunkMetadataIconProps)
     return 'neutral'
   }
 
+  // Helper function for confidence badge color
+  const getConfidenceColor = (confidence?: string): 'default' | 'secondary' | 'outline' | 'destructive' => {
+    switch (confidence) {
+      case 'exact': return 'default'
+      case 'high': return 'secondary'
+      case 'medium': return 'outline'
+      case 'synthetic': return 'destructive'
+      default: return 'outline'
+    }
+  }
+
   // Extract metadata from chunk (now populated from database)
   const metadata = {
     themes: chunk.themes || [],
@@ -36,7 +47,13 @@ export function ChunkMetadataIcon({ chunk, chunkIndex }: ChunkMetadataIconProps)
     concepts: chunk.conceptual_metadata?.concepts?.slice(0, 5).map(c => c.text) || [],
     emotionalPolarity: getPolarity(chunk.emotional_metadata?.polarity),
     domain: chunk.domain_metadata?.primaryDomain,
-    summary: chunk.summary
+    summary: chunk.summary,
+    positionConfidence: chunk.position_confidence,
+    positionMethod: chunk.position_method,
+    positionValidated: chunk.position_validated,
+    pageStart: chunk.page_start,
+    pageEnd: chunk.page_end,
+    sectionMarker: chunk.section_marker
   }
 
   return (
@@ -66,6 +83,47 @@ export function ChunkMetadataIcon({ chunk, chunkIndex }: ChunkMetadataIconProps)
               </div>
             )}
           </div>
+
+          {/* Position Confidence (from local pipeline) */}
+          {metadata.positionConfidence && (
+            <div className="flex items-center justify-between border-t pt-2">
+              <div className="flex items-center gap-2">
+                {metadata.positionConfidence === 'synthetic' ? (
+                  <AlertTriangle className="h-3 w-3 text-orange-500" />
+                ) : (
+                  <CheckCircle className="h-3 w-3 text-green-500" />
+                )}
+                <span className="text-xs font-medium">Quality</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={getConfidenceColor(metadata.positionConfidence)} className="text-xs">
+                  {metadata.positionConfidence}
+                </Badge>
+                {metadata.positionValidated && (
+                  <CheckCircle className="h-3 w-3 text-green-500" title="User validated" />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Position Method & Location */}
+          {(metadata.positionMethod || metadata.pageStart !== null || metadata.sectionMarker) && (
+            <div className="text-xs space-y-1">
+              {metadata.positionMethod && (
+                <p><span className="text-muted-foreground">Method:</span> {metadata.positionMethod}</p>
+              )}
+              {metadata.pageStart !== null && (
+                <p>
+                  <span className="text-muted-foreground">Pages:</span>{' '}
+                  {metadata.pageStart}
+                  {metadata.pageEnd && metadata.pageEnd !== metadata.pageStart ? `-${metadata.pageEnd}` : ''}
+                </p>
+              )}
+              {metadata.sectionMarker && (
+                <p><span className="text-muted-foreground">Section:</span> {metadata.sectionMarker}</p>
+              )}
+            </div>
+          )}
 
           {/* Themes */}
           {metadata.themes.length > 0 && (
