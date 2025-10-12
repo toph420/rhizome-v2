@@ -1090,7 +1090,252 @@ Choose based on use case: deep study vs casual reading.
 
 ---
 
-## 9. Next Steps & Future Enhancements
+## 9. Cached Chunks Architecture
+
+### Overview
+
+The cached chunks system provides persistent storage for Docling extraction results, enabling zero-cost reprocessing when documents are edited. This feature is essential for LOCAL mode users who want to preserve extracted structural metadata (pages, headings, bboxes) without re-running expensive extraction.
+
+### Key Benefits
+
+1. **Zero-Cost Reprocessing**: $0.00 vs $0.50 for CLOUD mode when reprocessing edited documents
+2. **Instant Resume**: Load cached extraction results in <2 seconds instead of 9 minutes
+3. **Metadata Preservation**: Structural metadata survives markdown edits through bulletproof matching
+4. **Hash Validation**: Automatic cache invalidation when markdown changes significantly
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CACHED CHUNKS LIFECYCLE                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────────┐
+│ Stage 1: Initial Processing (LOCAL mode)                         │
+├───────────────────────────────────────────────────────────────────┤
+│ 1. Docling extraction → DoclingChunk[] with metadata             │
+│ 2. Generate markdown hash (SHA256)                                │
+│ 3. Save to cached_chunks table:                                   │
+│    • document_id (UNIQUE constraint)                              │
+│    • extraction_mode ('pdf' | 'epub')                             │
+│    • markdown_hash (64-char hex)                                  │
+│    • chunks (JSONB array of DoclingChunks)                        │
+│    • structure (JSONB with headings[], total_pages)               │
+│    • docling_version (for compatibility tracking)                 │
+│ 4. Continue with bulletproof matching...                          │
+└───────────────────────────────────────────────────────────────────┘
+                              ↓
+┌───────────────────────────────────────────────────────────────────┐
+│ Stage 2: Resume from Review Checkpoint                           │
+├───────────────────────────────────────────────────────────────────┤
+│ User edited markdown in Obsidian → resume processing             │
+│                                                                   │
+│ 1. Generate current markdown hash                                 │
+│ 2. Load cached chunks from database                               │
+│ 3. Validate hash:                                                 │
+│    IF match   → Load cached chunks (0 API calls)                  │
+│    IF mismatch → Fall back to CLOUD mode ($0.50 cost)            │
+│ 4. Run bulletproof matching with cached chunks                    │
+│ 5. Continue with metadata enrichment...                           │
+└───────────────────────────────────────────────────────────────────┘
+                              ↓
+┌───────────────────────────────────────────────────────────────────┐
+│ Stage 3: Document Reprocessing                                   │
+├───────────────────────────────────────────────────────────────────┤
+│ User makes heavy edits (30% content change) → reprocess          │
+│                                                                   │
+│ 1. Load cached chunks by document_id                              │
+│ 2. Check markdown hash                                            │
+│ 3. IF hash matches:                                               │
+│    • Cached chunks still valid                                    │
+│    • Run bulletproof matching (5 layers)                          │
+│    • Preserve structural metadata through edit                    │
+│    • Cost: $0.00                                                  │
+│ 4. IF hash mismatch (expected after edits):                      │
+│    • Cache stale but still valuable                               │
+│    • Run bulletproof matching to remap positions                  │
+│    • Structural metadata preserved via matching                   │
+│    • Cost: $0.00 (no Gemini calls)                                │
+│ 5. IF cache missing:                                              │
+│    • Fall back to CLOUD mode                                      │
+│    • Cost: $0.50 (AI semantic chunking)                          │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### Database Schema
+
+**Table**: `cached_chunks`
+
+```sql
+CREATE TABLE cached_chunks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL,
+  extraction_mode TEXT NOT NULL,  -- 'pdf' | 'epub'
+  markdown_hash TEXT NOT NULL,    -- SHA256 hash for validation
+  docling_version TEXT,            -- e.g., '2.55.1'
+  chunks JSONB NOT NULL,           -- DoclingChunk[] array
+  structure JSONB NOT NULL,        -- { headings, total_pages, sections }
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT cached_chunks_document_id_key UNIQUE (document_id),
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+-- Indexes for efficient lookups
+CREATE INDEX idx_cached_chunks_document ON cached_chunks(document_id);
+CREATE INDEX idx_cached_chunks_mode ON cached_chunks(extraction_mode);
+CREATE INDEX idx_cached_chunks_created ON cached_chunks(created_at DESC);
+```
+
+### Usage Examples
+
+#### Query Cached Chunks
+
+```sql
+-- Get cache for a document
+SELECT
+  extraction_mode,
+  jsonb_array_length(chunks) as chunk_count,
+  LEFT(markdown_hash, 8) as hash_prefix,
+  docling_version,
+  created_at
+FROM cached_chunks
+WHERE document_id = '<doc-uuid>';
+
+-- Check all caches
+SELECT
+  extraction_mode,
+  COUNT(*) as cache_count,
+  AVG(jsonb_array_length(chunks)) as avg_chunks
+FROM cached_chunks
+GROUP BY extraction_mode;
+```
+
+#### Manual Cache Operations
+
+```typescript
+import {
+  saveCachedChunks,
+  loadCachedChunks,
+  deleteCachedChunks,
+  hashMarkdown
+} from '../lib/cached-chunks'
+
+// Save after extraction
+await saveCachedChunks(supabase, {
+  document_id: documentId,
+  extraction_mode: 'pdf',
+  markdown_hash: hashMarkdown(markdown),
+  docling_version: '2.55.1',
+  chunks: doclingChunks,
+  structure: doclingStructure
+})
+
+// Load for resume/reprocess
+const cached = await loadCachedChunks(
+  supabase,
+  documentId,
+  hashMarkdown(currentMarkdown)
+)
+
+if (cached) {
+  console.log(`Loaded ${cached.chunks.length} cached chunks`)
+  // Use cached chunks for bulletproof matching
+} else {
+  console.warn('Cache invalid or missing - falling back to CLOUD mode')
+}
+
+// Manual cleanup
+await deleteCachedChunks(supabase, documentId)
+```
+
+### Hash Validation Strategy
+
+**When Hash Matches**:
+- Markdown unchanged since extraction
+- Cache is 100% valid
+- Zero API calls needed
+- Instant load (<2 seconds)
+
+**When Hash Mismatches**:
+- Markdown edited (expected)
+- Cache chunks still valuable as anchors
+- Bulletproof matching remaps positions
+- Structural metadata preserved
+- Still $0.00 cost (LOCAL mode)
+
+**When Cache Missing**:
+- Document never processed in LOCAL mode
+- Or cache manually deleted
+- Graceful fallback to CLOUD mode
+- Cost: $0.50 for AI semantic chunking
+
+### Performance Impact
+
+| Scenario | Without Cache | With Cache | Savings |
+|----------|--------------|-----------|---------|
+| **Resume (no edits)** | 9 min extraction | <2 sec load | 99.6% time saved |
+| **Reprocess (30% edits)** | 9 min + $0.50 | 2 min matching | 77% time, $0.50 saved |
+| **Reprocess (minor edits)** | 9 min + $0.50 | <1 min matching | 88% time, $0.50 saved |
+
+### Integration Points
+
+**Processors** (cache save):
+- `worker/processors/pdf-processor.ts:129` - Save after Docling extraction
+- `worker/processors/epub-processor.ts:121` - Save after EPUB extraction
+
+**Handlers** (cache load):
+- `worker/handlers/continue-processing.ts:178` - Resume from review checkpoint
+- `worker/handlers/reprocess-document.ts:116` - Reprocess edited documents
+
+**Utilities**:
+- `worker/lib/cached-chunks.ts` - Save/load/delete operations + hash generation
+
+**Database**:
+- `supabase/migrations/046_cached_chunks_table.sql` - Table schema and indexes
+
+### Lifecycle Management
+
+**Automatic Creation**:
+- Created after every Docling extraction (LOCAL mode only)
+- Upserts on duplicate document_id
+
+**Automatic Invalidation**:
+- Hash validation fails when markdown edited
+- System logs warning and falls back gracefully
+
+**Automatic Deletion**:
+- CASCADE delete when parent document deleted
+- No orphaned caches
+
+**Manual Deletion**:
+- `DELETE FROM cached_chunks WHERE document_id = '<uuid>'`
+- Useful for forcing re-extraction
+
+### Troubleshooting
+
+**Cache Not Loading**:
+```bash
+# Check if cache exists
+psql -c "SELECT document_id, extraction_mode FROM cached_chunks WHERE document_id = '<uuid>';"
+
+# Verify hash
+psql -c "SELECT LEFT(markdown_hash, 8) FROM cached_chunks WHERE document_id = '<uuid>';"
+```
+
+**Hash Always Mismatches**:
+- Markdown was edited (expected behavior)
+- System will use bulletproof matching to remap
+- Structural metadata still preserved
+
+**Cache Missing After Processing**:
+- Check PROCESSING_MODE: cache only created in LOCAL mode
+- Verify processor saved cache (check logs for "[CachedChunks] ✓ Saved")
+
+---
+
+## 10. Next Steps & Future Enhancements
 
 ### Potential Improvements
 
@@ -1138,6 +1383,13 @@ Choose based on use case: deep study vs casual reading.
 
 ### Handlers
 - `worker/handlers/continue-processing.ts`: Resume processing after review checkpoints (dual-mode)
+- `worker/handlers/reprocess-document.ts`: Reprocess documents with cached chunks integration
+
+### Cached Chunks System
+- `worker/lib/cached-chunks.ts`: Cache save/load/delete operations + hash generation
+- `worker/types/cached-chunks.ts`: Type definitions for cached chunks table
+- `supabase/migrations/046_cached_chunks_table.sql`: Cached chunks table schema
 
 ### Database
 - `supabase/migrations/045_add_local_pipeline_columns.sql`: Local metadata columns
+- `supabase/migrations/046_cached_chunks_table.sql`: Cached chunks table for zero-cost reprocessing

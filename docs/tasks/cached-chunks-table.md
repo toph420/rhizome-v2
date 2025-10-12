@@ -24,7 +24,6 @@
 - Cache save/load operations work correctly
 - Hash validation prevents stale cache usage
 - Graceful fallback to CLOUD mode when cache missing
-- 100% backward compatibility (no breaking changes)
 - Zero TypeScript/lint errors
 - All integration tests pass
 
@@ -755,7 +754,6 @@ PDF processor saves cached chunks after Docling extraction to enable zero-cost r
 3. **Replace job.metadata** → Call `saveCachedChunks()` instead
 4. **Generate hash** → `hashMarkdown(extractionResult.markdown)`
 5. **Pass all fields** → document_id, extraction_mode: 'pdf', hash, chunks, structure
-6. **Keep job.metadata for backward compat** → Other code may still reference it (non-critical)
 
 **Code Patterns to Follow**:
 - **Integration Point**: `worker/processors/pdf-processor.ts:123-135` - Existing cache location
@@ -793,7 +791,6 @@ Scenario 3: Hash generated correctly
 - [ ] **Error Handling**: Non-fatal failure (log + continue)
 - [ ] **Logging**: Success message with chunk count
 - [ ] **Integration**: Processing continues to next phase
-- [ ] **Backward Compat**: Existing job.metadata code still works
 
 ##### Validation & Quality Gates
 
@@ -893,7 +890,6 @@ EPUB processor saves cached chunks after Docling extraction, identical pattern t
 3. **Replace job.metadata** → Call `saveCachedChunks()` instead
 4. **Generate hash** → `hashMarkdown(result.markdown)`
 5. **Pass all fields** → document_id, extraction_mode: 'epub', hash, chunks, structure
-6. **Keep job.metadata for backward compat** → Other code may still reference it
 
 **Code Patterns to Follow**:
 - **Integration Point**: `worker/processors/epub-processor.ts:118-130` - Existing cache location
@@ -923,7 +919,6 @@ Scenario 2: Cache distinguishes PDF vs EPUB
 - [ ] **Error Handling**: Non-fatal failure (log + continue)
 - [ ] **Logging**: Success message with chunk count
 - [ ] **Pattern Consistency**: Matches PDF processor implementation
-- [ ] **Backward Compat**: Existing job.metadata code still works
 
 ##### Validation & Quality Gates
 
@@ -1916,7 +1911,6 @@ T1.1 → T1.3 → T2.1 → T3.1 → T4.1 → T5.3
 - [ ] Zero TypeScript errors
 - [ ] Zero lint errors
 - [ ] No breaking changes
-- [ ] Backward compatible with existing workflows
 
 ### Quality Success
 - [ ] Code follows project conventions

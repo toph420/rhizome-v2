@@ -13,6 +13,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { loadCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
 
 /**
  * Get Supabase client (lazy initialization)
@@ -166,25 +167,23 @@ export async function continueProcessing(
     const isLocalMode = process.env.PROCESSING_MODE === 'local'
     console.log(`[ContinueProcessing] Processing mode: ${isLocalMode ? 'LOCAL' : 'CLOUD'}`)
 
-    // Get cached extraction from original process_document job (needed for LOCAL mode)
+    // Load cached chunks from cached_chunks table (needed for LOCAL mode)
     let cachedDoclingChunks = null
     if (isLocalMode) {
-      const { data: originalJob } = await supabase
-        .from('background_jobs')
-        .select('metadata')
-        .eq('entity_id', documentId)
-        .eq('job_type', 'process_document')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
+      // Generate hash of current markdown for validation
+      const currentHash = hashMarkdown(markdown)
+      console.log(`[ContinueProcessing] Current markdown hash: ${currentHash.slice(0, 8)}...`)
 
-      cachedDoclingChunks = originalJob?.metadata?.cached_extraction?.doclingChunks
+      // Load cached chunks with hash validation
+      const cacheResult = await loadCachedChunks(supabase, documentId, currentHash)
 
-      if (!cachedDoclingChunks) {
-        console.warn('[ContinueProcessing] LOCAL mode but no cached Docling chunks found')
+      if (!cacheResult) {
+        console.warn('[ContinueProcessing] LOCAL mode but no valid cached chunks found (missing or stale)')
         console.warn('[ContinueProcessing] Falling back to CLOUD mode for this document')
       } else {
-        console.log(`[ContinueProcessing] Loaded ${cachedDoclingChunks.length} cached Docling chunks from original job`)
+        cachedDoclingChunks = cacheResult.chunks
+        console.log(`[ContinueProcessing] ✓ Loaded ${cachedDoclingChunks.length} cached chunks from cached_chunks table`)
+        console.log(`[ContinueProcessing]   Mode: ${cacheResult.extraction_mode}, Created: ${cacheResult.created_at}`)
       }
     }
 

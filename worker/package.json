@@ -44,7 +44,9 @@
     "benchmark:metadata-quality:real": "tsx benchmarks/metadata-quality-benchmark.ts --real-ai",
     "validate:semantic-accuracy": "tsx tests/validation/semantic-accuracy.ts",
     "test:ai-metadata-quality": "NODE_OPTIONS='--experimental-vm-modules' jest --config jest.config.cjs tests/validation/ai-metadata-quality.test.ts",
-    "test:ai-metadata-quality:verbose": "NODE_OPTIONS='--experimental-vm-modules' jest --config jest.config.cjs tests/validation/ai-metadata-quality.test.ts --verbose"
+    "test:ai-metadata-quality:verbose": "NODE_OPTIONS='--experimental-vm-modules' jest --config jest.config.cjs tests/validation/ai-metadata-quality.test.ts --verbose",
+    "test:dual-bridge": "tsx scripts/test-dual-bridge.ts",
+    "test:list-documents": "tsx scripts/list-testable-documents.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.17",

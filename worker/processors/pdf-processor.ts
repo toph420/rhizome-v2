@@ -43,6 +43,8 @@ import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-
 // Phase 7: Local embeddings imports
 import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
+// Cached chunks table integration
+import { saveCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
 
 export class PDFProcessor extends SourceProcessor {
   /**
@@ -120,15 +122,41 @@ export class PDFProcessor extends SourceProcessor {
       console.log(`[PDFProcessor] Docling chunks: ${extractionResult.chunks.length} segments`)
     }
 
-    // Phase 2: Cache extraction result in job metadata
-    // This prevents re-extracting if AI cleanup fails or user reviews
-    // CRITICAL: Must store doclingChunks for Phase 4 bulletproof matching
+    // Phase 2: Save extraction to cached_chunks table for reprocessing
+    // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
+    // CRITICAL: Must cache doclingChunks for future reprocessing workflows
+    // Use input_data.document_id as fallback if job.document_id is not set yet
+    if (isLocalMode && extractionResult.chunks) {
+      const documentId = this.job.document_id || this.job.input_data.document_id
+
+      if (!documentId) {
+        console.warn('[PDFProcessor] Cannot save cache: document_id not available')
+        console.warn('[PDFProcessor] Job details:', {
+          job_id: this.job.id,
+          job_document_id: this.job.document_id,
+          input_data_document_id: this.job.input_data?.document_id,
+          has_input_data: !!this.job.input_data
+        })
+      } else {
+        console.log(`[PDFProcessor] Saving cache for document ${documentId}`)
+        await saveCachedChunks(this.supabase, {
+          document_id: documentId,
+          extraction_mode: 'pdf',
+          markdown_hash: hashMarkdown(extractionResult.markdown),
+          docling_version: '2.55.1',
+          chunks: extractionResult.chunks,
+          structure: extractionResult.structure
+        })
+      }
+    }
+
+    // Keep job metadata for current session (backward compatibility)
     this.job.metadata = {
       ...this.job.metadata,
       cached_extraction: {
         markdown: extractionResult.markdown,
         structure: extractionResult.structure,
-        doclingChunks: extractionResult.chunks // Phase 2: Required for matching
+        doclingChunks: extractionResult.chunks
       }
     }
 

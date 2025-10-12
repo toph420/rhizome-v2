@@ -38,6 +38,8 @@ import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-
 // Phase 7: Local embeddings imports
 import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
+// Cached chunks table integration
+import { saveCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
 
 export class EPUBProcessor extends SourceProcessor {
   /**
@@ -113,14 +115,39 @@ export class EPUBProcessor extends SourceProcessor {
       console.log(`[EPUBProcessor] Docling extracted ${result.chunks.length} chunks`)
       console.log(`[EPUBProcessor] Book: "${metadata.title}" by ${metadata.author}`)
 
-      // Phase 5: Cache extraction result in job metadata
-      // CRITICAL: Must store doclingChunks for Phase 5 Task 19 bulletproof matching
+      // Phase 5: Save extraction to cached_chunks table for reprocessing
+      // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
+      // CRITICAL: Must cache doclingChunks for future reprocessing workflows
+      // Use input_data.document_id as fallback if job.document_id is not set yet
+      const documentId = this.job.document_id || this.job.input_data.document_id
+
+      if (!documentId) {
+        console.warn('[EPUBProcessor] Cannot save cache: document_id not available')
+        console.warn('[EPUBProcessor] Job details:', {
+          job_id: this.job.id,
+          job_document_id: this.job.document_id,
+          input_data_document_id: this.job.input_data?.document_id,
+          has_input_data: !!this.job.input_data
+        })
+      } else {
+        console.log(`[EPUBProcessor] Saving cache for document ${documentId}`)
+        await saveCachedChunks(this.supabase, {
+          document_id: documentId,
+          extraction_mode: 'epub',
+          markdown_hash: hashMarkdown(result.markdown),
+          docling_version: '2.55.1',
+          chunks: result.chunks,
+          structure: result.structure
+        })
+      }
+
+      // Keep job metadata for current session (backward compatibility)
       this.job.metadata = {
         ...this.job.metadata,
         cached_extraction: {
           markdown: result.markdown,
           structure: result.structure,
-          doclingChunks: result.chunks,  // Required for matching
+          doclingChunks: result.chunks,
           epubMetadata: result.epubMetadata
         }
       }
