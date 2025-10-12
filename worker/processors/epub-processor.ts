@@ -85,6 +85,7 @@ export class EPUBProcessor extends SourceProcessor {
     let doclingChunks: DoclingChunk[] | undefined
     let metadata: any
     let coverImage: Buffer | undefined
+    let extractedChapters: Array<{ title: string, markdown: string }> = []
 
     if (isLocalMode) {
       // LOCAL MODE: Use Docling extraction
@@ -112,36 +113,13 @@ export class EPUBProcessor extends SourceProcessor {
       doclingChunks = result.chunks
       metadata = result.epubMetadata
 
+      // Store chapters for potential Gemini cleanup
+      extractedChapters = (result as any).chapters || []
+
       console.log(`[EPUBProcessor] Docling extracted ${result.chunks.length} chunks`)
       console.log(`[EPUBProcessor] Book: "${metadata.title}" by ${metadata.author}`)
 
-      // Phase 5: Save extraction to cached_chunks table for reprocessing
-      // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
-      // CRITICAL: Must cache doclingChunks for future reprocessing workflows
-      // Use input_data.document_id as fallback if job.document_id is not set yet
-      const documentId = this.job.document_id || this.job.input_data.document_id
-
-      if (!documentId) {
-        console.warn('[EPUBProcessor] Cannot save cache: document_id not available')
-        console.warn('[EPUBProcessor] Job details:', {
-          job_id: this.job.id,
-          job_document_id: this.job.document_id,
-          input_data_document_id: this.job.input_data?.document_id,
-          has_input_data: !!this.job.input_data
-        })
-      } else {
-        console.log(`[EPUBProcessor] Saving cache for document ${documentId}`)
-        await saveCachedChunks(this.supabase, {
-          document_id: documentId,
-          extraction_mode: 'epub',
-          markdown_hash: hashMarkdown(result.markdown),
-          docling_version: '2.55.1',
-          chunks: result.chunks,
-          structure: result.structure
-        })
-      }
-
-      // Keep job metadata for current session (backward compatibility)
+      // Store Docling chunks in job metadata for bulletproof matching later in this processing run
       this.job.metadata = {
         ...this.job.metadata,
         cached_extraction: {
@@ -158,6 +136,31 @@ export class EPUBProcessor extends SourceProcessor {
       await this.updateProgress(52, 'cleanup_local', 'processing', 'Removing EPUB artifacts')
       markdown = cleanMarkdownRegexOnly(markdown)
       await this.updateProgress(55, 'cleanup_local', 'complete', 'Local cleanup done')
+
+      // Phase 5: Save extraction to cached_chunks table AFTER cleanup
+      // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
+      // CRITICAL: Hash the CLEANED markdown (same version saved to storage)
+      const documentId = this.job.document_id || this.job.input_data.document_id
+
+      if (!documentId) {
+        console.warn('[EPUBProcessor] Cannot save cache: document_id not available')
+        console.warn('[EPUBProcessor] Job details:', {
+          job_id: this.job.id,
+          job_document_id: this.job.document_id,
+          input_data_document_id: this.job.input_data?.document_id,
+          has_input_data: !!this.job.input_data
+        })
+      } else {
+        console.log(`[EPUBProcessor] Saving cache for document ${documentId}`)
+        await saveCachedChunks(this.supabase, {
+          document_id: documentId,
+          extraction_mode: 'epub',
+          markdown_hash: hashMarkdown(markdown), // Hash CLEANED markdown
+          docling_version: '2.55.1',
+          chunks: result.chunks,
+          structure: result.structure
+        })
+      }
 
       // Stage 3.5: Check for review-after-docling mode BEFORE AI cleanup
       const reviewDoclingExtraction = this.job.input_data?.reviewDoclingExtraction === true
@@ -187,24 +190,53 @@ export class EPUBProcessor extends SourceProcessor {
         }
       }
 
-      // Stage 4: AI cleanup with Ollama (55-70%)
+      // Stage 4: AI cleanup with Ollama or Gemini (55-70%)
       const cleanMarkdownEnabled = this.job.input_data?.cleanMarkdown !== false
 
       if (cleanMarkdownEnabled) {
         await this.updateProgress(58, 'cleanup_ai', 'processing', 'AI cleaning markdown')
 
         try {
-          console.log('[EPUBProcessor] Using local Ollama cleanup (Qwen 32B)')
+          // Check if user wants to override cleanup method
+          const useGeminiCleanup = process.env.USE_GEMINI_CLEANUP === 'true'
 
-          markdown = await cleanMarkdownLocal(markdown, {
-            onProgress: (stage, percent) => {
-              // Map Ollama's 0-100% to our 58-70% range
-              const ourPercent = 58 + Math.floor(percent * 0.12)
-              this.updateProgress(ourPercent, 'cleanup_ai', 'processing', 'AI cleanup in progress')
-            }
-          })
+          if (isLocalMode && !useGeminiCleanup) {
+            // Use local Ollama cleanup
+            console.log('[EPUBProcessor] Using local Ollama cleanup (Qwen 32B)')
 
-          console.log('[EPUBProcessor] Local AI cleanup complete')
+            markdown = await cleanMarkdownLocal(markdown, {
+              onProgress: (stage, percent) => {
+                // Map Ollama's 0-100% to our 58-70% range
+                const ourPercent = 58 + Math.floor(percent * 0.12)
+                this.updateProgress(ourPercent, 'cleanup_ai', 'processing', 'AI cleanup in progress')
+              }
+            })
+
+            console.log('[EPUBProcessor] Local AI cleanup complete')
+          } else {
+            // Use Gemini cleanup with individual chapters
+            console.log(`[EPUBProcessor] Using Gemini cleanup (${extractedChapters.length} chapters)`)
+
+            markdown = await cleanEpubChaptersWithAI(
+              this.ai,
+              extractedChapters,  // Use individual chapters, not combined markdown!
+              {
+                enableProgress: true,
+                onProgress: async (chapterNum, totalChapters) => {
+                  const percent = 58 + Math.floor((chapterNum / totalChapters) * 12) // 58-70%
+                  await this.updateProgress(
+                    percent,
+                    'cleanup_ai',
+                    'processing',
+                    `AI cleaning chapter ${chapterNum}/${totalChapters}`
+                  )
+                }
+              }
+            )
+
+            console.log('[EPUBProcessor] Gemini AI cleanup complete')
+          }
+
           await this.updateProgress(70, 'cleanup_ai', 'complete', 'AI cleanup done')
         } catch (error: any) {
           // Phase 5: Handle OOM errors with graceful fallback
@@ -440,7 +472,6 @@ export class EPUBProcessor extends SourceProcessor {
           page_start: null,  // Always null for EPUB
           page_end: null,    // Always null for EPUB
           heading_level: result.chunk.meta.heading_level || null,
-          heading_path: result.chunk.meta.heading_path || null,
           section_marker: result.chunk.meta.section_marker || null,  // Used instead of page numbers
           bboxes: null,  // Always null for EPUB (no PDF coordinates)
           position_confidence: result.confidence,

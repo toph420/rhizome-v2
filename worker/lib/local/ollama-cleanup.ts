@@ -147,7 +147,7 @@ Cleaned markdown (with ALL original content preserved):`
   try {
     const response = await ollama.chat(prompt, {
       temperature,
-      timeout: 300000  // 5 minutes per section
+      timeout: 600000  // 10 minutes per section (large books need more time)
     })
 
     let cleaned = response.trim()

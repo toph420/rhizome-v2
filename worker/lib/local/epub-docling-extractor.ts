@@ -42,9 +42,10 @@ export interface EpubMetadata {
  * Result of EPUB→HTML extraction
  */
 interface EpubToHtmlResult {
-  html: string              // Unified HTML in spine order
+  html: string              // Unified markdown in spine order
   metadata: EpubMetadata    // Book metadata from OPF
   spine: string[]           // Chapter file paths in reading order
+  chapters: Array<{ title: string, markdown: string }>  // Individual chapters for cleanup
 }
 
 // Export DoclingChunk type for EPUB processor to use
@@ -169,6 +170,7 @@ export async function extractEpubToHtml(
 
   // Extract HTML files in spine order
   const htmlChunks: string[] = []
+  const chapterTitles: string[] = []
   const spineItems: string[] = []
   const spineRefs = Array.isArray(spine) ? spine : [spine]
 
@@ -209,7 +211,12 @@ export async function extractEpubToHtml(
         continue
       }
 
+      // Extract chapter title from HTML <title> tag if present
+      const titleMatch = htmlContent.match(/<title[^>]*>([^<]+)<\/title>/i)
+      const chapterTitle = titleMatch ? titleMatch[1].trim() : `Chapter ${htmlChunks.length + 1}`
+
       htmlChunks.push(htmlContent)
+      chapterTitles.push(chapterTitle)
       spineItems.push(fullPath)
     } catch (err) {
       console.warn(`EPUB: Failed to read chapter ${fullPath}: ${(err as Error).message}`)
@@ -234,9 +241,24 @@ export async function extractEpubToHtml(
   })
 
   // Convert each chapter HTML to markdown
+  // CRITICAL: Prepend chapter title as heading if markdown doesn't start with one
+  // Pattern from CLOUD mode (epub-processor.ts lines 126-152)
   const markdownChapters: string[] = []
   for (let i = 0; i < htmlChunks.length; i++) {
-    const chapterMarkdown = turndown.turndown(htmlChunks[i])
+    let chapterMarkdown = turndown.turndown(htmlChunks[i])
+
+    // Check if markdown already starts with a heading
+    const startsWithHeading = /^#+\s/.test(chapterMarkdown.trim())
+
+    // Check if title is generic filename (should be replaced)
+    const isFilename = /^[A-Z0-9]+EPUB-\d+$|^chapter\d+$|^\d+$/i.test(chapterTitles[i])
+
+    // Prepend chapter title if needed
+    if (!startsWithHeading && !isFilename) {
+      chapterMarkdown = `# ${chapterTitles[i]}\n\n${chapterMarkdown}`
+      console.log(`[EPUB] Added heading for chapter ${i + 1}: "${chapterTitles[i]}"`)
+    }
+
     markdownChapters.push(chapterMarkdown)
     console.log(`[EPUB] Converted chapter ${i + 1}/${htmlChunks.length} to markdown`)
   }
@@ -246,10 +268,17 @@ export async function extractEpubToHtml(
 
   console.log(`[EPUB] Combined markdown: ${unifiedMarkdown.length} chars, ${markdownChapters.length} chapters`)
 
+  // Build chapter objects for Gemini cleanup
+  const chapters = markdownChapters.map((markdown, i) => ({
+    title: chapterTitles[i],
+    markdown
+  }))
+
   return {
     html: unifiedMarkdown,  // Actually markdown now, but keeping field name for compatibility
     metadata,
-    spine: spineItems
+    spine: spineItems,
+    chapters  // Individual chapters for Gemini cleanup
   }
 }
 

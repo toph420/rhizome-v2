@@ -13,7 +13,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { loadCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
+import { loadCachedChunksRaw } from '../lib/cached-chunks.js'
 
 /**
  * Get Supabase client (lazy initialization)
@@ -90,8 +90,8 @@ export async function continueProcessing(
       throw new Error('Document not found')
     }
 
-    if (document.processing_status !== 'awaiting_manual_review') {
-      throw new Error(`Invalid status: ${document.processing_status}. Expected: awaiting_manual_review`)
+    if (document.processing_status !== 'awaiting_manual_review' && document.processing_status !== 'failed') {
+      throw new Error(`Invalid status: ${document.processing_status}. Expected: awaiting_manual_review or failed`)
     }
 
     const reviewStage = document.review_stage as 'docling_extraction' | 'ai_cleanup' | null
@@ -167,23 +167,40 @@ export async function continueProcessing(
     const isLocalMode = process.env.PROCESSING_MODE === 'local'
     console.log(`[ContinueProcessing] Processing mode: ${isLocalMode ? 'LOCAL' : 'CLOUD'}`)
 
-    // Load cached chunks from cached_chunks table (needed for LOCAL mode)
+    // Load cached chunks (needed for LOCAL mode)
     let cachedDoclingChunks = null
     if (isLocalMode) {
-      // Generate hash of current markdown for validation
-      const currentHash = hashMarkdown(markdown)
-      console.log(`[ContinueProcessing] Current markdown hash: ${currentHash.slice(0, 8)}...`)
+      // Strategy 1: Check job metadata first (resume from checkpoint scenario)
+      // This is for when we just extracted and are resuming after review
+      const { data: job } = await supabase
+        .from('background_jobs')
+        .select('metadata')
+        .eq('job_type', 'process_document')
+        .eq('status', 'processing')
+        .contains('input_data', { document_id: documentId })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
 
-      // Load cached chunks with hash validation
-      const cacheResult = await loadCachedChunks(supabase, documentId, currentHash)
-
-      if (!cacheResult) {
-        console.warn('[ContinueProcessing] LOCAL mode but no valid cached chunks found (missing or stale)')
-        console.warn('[ContinueProcessing] Falling back to CLOUD mode for this document')
+      if (job?.metadata?.cached_extraction?.doclingChunks) {
+        cachedDoclingChunks = job.metadata.cached_extraction.doclingChunks
+        console.log(`[ContinueProcessing] ✓ Loaded ${cachedDoclingChunks.length} chunks from job metadata (resume from checkpoint)`)
       } else {
-        cachedDoclingChunks = cacheResult.chunks
-        console.log(`[ContinueProcessing] ✓ Loaded ${cachedDoclingChunks.length} cached chunks from cached_chunks table`)
-        console.log(`[ContinueProcessing]   Mode: ${cacheResult.extraction_mode}, Created: ${cacheResult.created_at}`)
+        // Strategy 2: Check cached_chunks table (true reprocessing scenario)
+        // This is for when job is gone and we're reprocessing months later
+        // Load WITHOUT hash validation - bulletproof matching handles markdown changes
+        console.log('[ContinueProcessing] No job metadata found, checking cached_chunks table...')
+
+        const cacheResult = await loadCachedChunksRaw(supabase, documentId)
+
+        if (!cacheResult) {
+          console.warn('[ContinueProcessing] No cached chunks found in cached_chunks table')
+          console.warn('[ContinueProcessing] Falling back to CLOUD mode for this document')
+        } else {
+          cachedDoclingChunks = cacheResult.chunks
+          console.log(`[ContinueProcessing] ✓ Loaded ${cachedDoclingChunks.length} cached chunks from cached_chunks table`)
+          console.log(`[ContinueProcessing]   Bulletproof matching will handle any markdown changes`)
+        }
       }
     }
 
@@ -251,7 +268,6 @@ export async function continueProcessing(
           page_start: result.chunk.meta.page_start || null,
           page_end: result.chunk.meta.page_end || null,
           heading_level: result.chunk.meta.heading_level || null,
-          heading_path: result.chunk.meta.heading_path || null,
           section_marker: result.chunk.meta.section_marker || null,
           bboxes: result.chunk.meta.bboxes || null,
           position_confidence: result.confidence,
@@ -274,66 +290,63 @@ export async function continueProcessing(
         }
       })
 
-      try {
-        const BATCH_SIZE = 10
-        const enrichedResults: any[] = []
+      // Use bulletproof extraction (zero-failure tolerance)
+      const { bulletproofExtractMetadata } = await import('../lib/chunking/bulletproof-metadata.js')
 
-        for (let i = 0; i < enrichedChunks.length; i += BATCH_SIZE) {
-          const batch = enrichedChunks.slice(i, i + BATCH_SIZE)
-          const batchInput = batch.map(chunk => ({
-            id: `${documentId}-${chunk.chunk_index}`,
-            content: chunk.content
-          }))
+      const batchInput = enrichedChunks.map(chunk => ({
+        id: `${documentId}-${chunk.chunk_index}`,
+        content: chunk.content
+      }))
 
-          console.log(`[ContinueProcessing] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(enrichedChunks.length / BATCH_SIZE)}`)
+      const results = await bulletproofExtractMetadata(batchInput, {
+        maxRetries: 5,
+        enableGeminiFallback: false, // Set to true if you want automatic Gemini fallback ($$$)
+        onProgress: (processed, total, status) => {
+          const overallProgress = 72 + Math.floor((processed / total) * 8)
+          updateProgress(overallProgress, `Enriching chunk ${processed}/${total} (${status})`)
+        }
+      })
 
-          const metadataMap = await extractMetadataBatch(batchInput, {
-            onProgress: (processed) => {
-              const overallProgress = 72 + Math.floor(((i + processed) / enrichedChunks.length) * 8)
-              updateProgress(overallProgress, `Enriching chunk ${i + processed}/${enrichedChunks.length}`)
-            }
-          })
+      // Apply extracted metadata to chunks
+      enrichedChunks = enrichedChunks.map(chunk => {
+        const chunkId = `${documentId}-${chunk.chunk_index}`
+        const result = results.get(chunkId)
 
-          for (const chunk of batch) {
-            const chunkId = `${documentId}-${chunk.chunk_index}`
-            const metadata = metadataMap.get(chunkId)
-
-            if (metadata) {
-              enrichedResults.push({
-                ...chunk,
-                themes: metadata.themes,
-                importance_score: metadata.importance,
-                summary: metadata.summary,
-                emotional_metadata: {
-                  polarity: metadata.emotional.polarity,
-                  primaryEmotion: metadata.emotional.primaryEmotion,
-                  intensity: metadata.emotional.intensity
-                },
-                conceptual_metadata: {
-                  concepts: metadata.concepts
-                },
-                domain_metadata: {
-                  primaryDomain: metadata.domain,
-                  confidence: 0.8
-                },
-                metadata_extracted_at: new Date().toISOString()
-              })
-            } else {
-              console.warn(`[ContinueProcessing] Metadata extraction failed for chunk ${chunk.chunk_index}`)
-              enrichedResults.push(chunk)
-            }
+        if (result) {
+          return {
+            ...chunk,
+            themes: result.metadata.themes,
+            importance_score: result.metadata.importance,
+            summary: result.metadata.summary,
+            emotional_metadata: {
+              polarity: result.metadata.emotional.polarity,
+              primaryEmotion: result.metadata.emotional.primaryEmotion,
+              intensity: result.metadata.emotional.intensity
+            },
+            conceptual_metadata: {
+              concepts: result.metadata.concepts
+            },
+            domain_metadata: {
+              primaryDomain: result.metadata.domain,
+              confidence: 0.8
+            },
+            metadata_extracted_at: new Date().toISOString()
           }
         }
 
-        enrichedChunks = enrichedResults
-        console.log(`[ContinueProcessing] Local metadata enrichment complete`)
-        await updateProgress(80, 'Metadata enrichment done')
+        // This should never happen with bulletproof extraction
+        console.warn(`[ContinueProcessing] No metadata for chunk ${chunk.chunk_index} (unexpected)`)
+        return chunk
+      })
 
-      } catch (error: any) {
-        console.error(`[ContinueProcessing] Metadata enrichment failed: ${error.message}`)
-        console.warn('[ContinueProcessing] Continuing with default metadata')
-        await updateProgress(80, 'Using default metadata (enrichment failed)')
-      }
+      console.log(`[ContinueProcessing] Bulletproof metadata enrichment complete`)
+      console.log(`  Quality distribution:`)
+      console.log(`    - Ollama 32B: ${[...results.values()].filter(r => r.source === 'ollama-32b').length}`)
+      console.log(`    - Ollama 14B: ${[...results.values()].filter(r => r.source === 'ollama-14b').length}`)
+      console.log(`    - Ollama 7B: ${[...results.values()].filter(r => r.source === 'ollama-7b').length}`)
+      console.log(`    - Regex: ${[...results.values()].filter(r => r.source === 'regex').length}`)
+      console.log(`    - Fallback: ${[...results.values()].filter(r => r.source === 'fallback').length}`)
+      await updateProgress(80, 'Metadata enrichment done')
 
       // Step 3: Local embeddings (80-85%)
       console.log('[ContinueProcessing] Starting local embeddings (Transformers.js)')

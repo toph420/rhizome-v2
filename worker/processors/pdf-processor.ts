@@ -101,7 +101,7 @@ export class PDFProcessor extends SourceProcessor {
             chunkSize: 512,
             tokenizer: 'Xenova/all-mpnet-base-v2',
             ocr: false, // Enable if needed for scanned PDFs
-            timeout: 10 * 60 * 1000, // 10 minutes (Phase 2: reduced from 30 min)
+            timeout: 30 * 60 * 1000, // 30 minutes
             onProgress: async (percent, stage, message) => {
               // Map Docling's 0-100% to our 20-50% extraction stage
               const ourPercent = 20 + Math.floor(percent * 0.3)
@@ -122,35 +122,7 @@ export class PDFProcessor extends SourceProcessor {
       console.log(`[PDFProcessor] Docling chunks: ${extractionResult.chunks.length} segments`)
     }
 
-    // Phase 2: Save extraction to cached_chunks table for reprocessing
-    // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
-    // CRITICAL: Must cache doclingChunks for future reprocessing workflows
-    // Use input_data.document_id as fallback if job.document_id is not set yet
-    if (isLocalMode && extractionResult.chunks) {
-      const documentId = this.job.document_id || this.job.input_data.document_id
-
-      if (!documentId) {
-        console.warn('[PDFProcessor] Cannot save cache: document_id not available')
-        console.warn('[PDFProcessor] Job details:', {
-          job_id: this.job.id,
-          job_document_id: this.job.document_id,
-          input_data_document_id: this.job.input_data?.document_id,
-          has_input_data: !!this.job.input_data
-        })
-      } else {
-        console.log(`[PDFProcessor] Saving cache for document ${documentId}`)
-        await saveCachedChunks(this.supabase, {
-          document_id: documentId,
-          extraction_mode: 'pdf',
-          markdown_hash: hashMarkdown(extractionResult.markdown),
-          docling_version: '2.55.1',
-          chunks: extractionResult.chunks,
-          structure: extractionResult.structure
-        })
-      }
-    }
-
-    // Keep job metadata for current session (backward compatibility)
+    // Store Docling chunks in job metadata for bulletproof matching later in this processing run
     this.job.metadata = {
       ...this.job.metadata,
       cached_extraction: {
@@ -169,6 +141,33 @@ export class PDFProcessor extends SourceProcessor {
     markdown = cleanPageArtifacts(markdown, { skipHeadingGeneration: true })
 
     console.log(`[PDFProcessor] Local cleanup complete (Docling mode: heading generation skipped)`)
+
+    // Phase 2: Save extraction to cached_chunks table AFTER cleanup
+    // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
+    // CRITICAL: Hash the CLEANED markdown (same version saved to storage)
+    if (isLocalMode && extractionResult.chunks) {
+      const documentId = this.job.document_id || this.job.input_data.document_id
+
+      if (!documentId) {
+        console.warn('[PDFProcessor] Cannot save cache: document_id not available')
+        console.warn('[PDFProcessor] Job details:', {
+          job_id: this.job.id,
+          job_document_id: this.job.document_id,
+          input_data_document_id: this.job.input_data?.document_id,
+          has_input_data: !!this.job.input_data
+        })
+      } else {
+        console.log(`[PDFProcessor] Saving cache for document ${documentId}`)
+        await saveCachedChunks(this.supabase, {
+          document_id: documentId,
+          extraction_mode: 'pdf',
+          markdown_hash: hashMarkdown(markdown), // Hash CLEANED markdown
+          docling_version: '2.55.1',
+          chunks: extractionResult.chunks,
+          structure: extractionResult.structure
+        })
+      }
+    }
 
     await this.updateProgress(55, 'cleanup_local', 'complete', 'Local cleanup done')
 
@@ -339,7 +338,6 @@ export class PDFProcessor extends SourceProcessor {
           page_start: result.chunk.meta.page_start || null,
           page_end: result.chunk.meta.page_end || null,
           heading_level: result.chunk.meta.heading_level || null,
-          heading_path: result.chunk.meta.heading_path || null,
           section_marker: result.chunk.meta.section_marker || null,
           bboxes: result.chunk.meta.bboxes || null,
           position_confidence: result.confidence,

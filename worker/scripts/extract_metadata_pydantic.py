@@ -25,6 +25,7 @@ import sys
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
 
 # CRITICAL: Flush stdout after EVERY write to prevent IPC hangs
 # Without flush, Node.js subprocess will hang waiting for data
@@ -65,11 +66,16 @@ class ChunkMetadata(BaseModel):
     )
 
 # Initialize PydanticAI Agent with Ollama model
-# CRITICAL: Use qwen2.5:32b format (not qwen2.5:32b-instruct-q4_K_M)
-# Ollama automatically selects the installed variant
+# CRITICAL: Use OpenAI-compatible provider format with provider='ollama'
+# Pattern from: https://ai.pydantic.dev/models/openai/#ollama
+ollama_model = OpenAIChatModel(
+    model_name='qwen2.5:32b',  # Use Ollama's model name format (with colons)
+    provider='ollama'  # PydanticAI knows about Ollama provider (connects to http://localhost:11434/v1)
+)
+
 agent = Agent(
-    model='ollama:qwen2.5:32b',  # PydanticAI uses 'ollama:' prefix
-    result_type=ChunkMetadata,
+    model=ollama_model,  # Pass OpenAIChatModel instance
+    output_type=ChunkMetadata,  # Correct parameter name in PydanticAI
     retries=3,  # Auto-retry if validation fails
     system_prompt="""You are a metadata extraction expert. Extract structured information from text chunks.
 
@@ -118,8 +124,8 @@ async def process_chunks():
             try:
                 result = await agent.run(content)  # Async execution
 
-                # result.data is a ChunkMetadata instance
-                metadata = result.data.model_dump()
+                # result.output is a ChunkMetadata instance (not .data!)
+                metadata = result.output.model_dump()
 
                 # Write successful result
                 sys.stdout.write(json.dumps({

@@ -121,7 +121,10 @@ async function cleanMarkdownSinglePass(
       `[markdown-cleanup-ai] ❌ Single-pass cleanup failed after ${Math.round(elapsedMs / 1000)}s:`,
       error.message
     )
-    throw new Error(`AI markdown cleanup failed: ${error.message}`)
+    console.warn('[markdown-cleanup-ai] Falling back to regex-cleaned markdown')
+
+    // Return original markdown (already regex-cleaned) instead of throwing
+    return markdown
   }
 }
 
@@ -245,7 +248,10 @@ export async function cleanEpubChaptersWithAI(
       console.error(
         `[markdown-cleanup-ai] ❌ Chapter ${i + 1} cleanup failed: ${error.message}`
       )
-      throw new Error(`AI cleanup failed on chapter ${i + 1} ("${chapter.title}"): ${error.message}`)
+      console.warn(`[markdown-cleanup-ai] Using regex-cleaned version for chapter ${i + 1}`)
+
+      // Use regex-cleaned chapter instead of throwing
+      cleanedChapters.push(chapterText)
     }
   }
 
@@ -409,7 +415,10 @@ export async function cleanPdfMarkdown(
       console.error(
         `[markdown-cleanup-ai] ❌ Chunk ${i + 1} cleanup failed: ${error.message}`
       )
-      throw new Error(`AI cleanup failed on chunk ${i + 1}: ${error.message}`)
+      console.warn(`[markdown-cleanup-ai] Using regex-cleaned version for chunk ${i + 1}`)
+
+      // Use regex-cleaned chunk instead of throwing
+      cleanedChunks.push(chunk)
     }
   }
 

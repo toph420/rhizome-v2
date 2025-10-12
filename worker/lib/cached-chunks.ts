@@ -108,6 +108,48 @@ export async function loadCachedChunks(
 }
 
 /**
+ * Load cached chunks without hash validation.
+ * Used during reprocessing when we know markdown has changed and we'll use bulletproof matching.
+ *
+ * @param supabase - Supabase client (service role)
+ * @param documentId - Document UUID
+ * @returns Cached chunks or null if not found
+ */
+export async function loadCachedChunksRaw(
+  supabase: ReturnType<typeof createClient>,
+  documentId: string
+): Promise<CachedChunksResult | null> {
+  try {
+    const { data, error } = await supabase
+      .from('cached_chunks')
+      .select('*')
+      .eq('document_id', documentId)
+      .single()
+
+    if (error || !data) {
+      console.log(`[CachedChunks] No cache found for document ${documentId}`)
+      return null
+    }
+
+    const cacheData = data as any
+
+    console.log(`[CachedChunks] ✓ Loaded ${cacheData.chunks.length} cached chunks (no hash validation)`)
+    console.log(`[CachedChunks]   Mode: ${cacheData.extraction_mode}, Created: ${cacheData.created_at}`)
+
+    return {
+      chunks: cacheData.chunks as DoclingChunk[],
+      structure: cacheData.structure as DoclingStructure,
+      extraction_mode: cacheData.extraction_mode,
+      created_at: cacheData.created_at
+    }
+
+  } catch (error) {
+    console.error(`[CachedChunks] Exception loading cache:`, error)
+    return null
+  }
+}
+
+/**
  * Delete cached chunks for document.
  * Used for manual cache invalidation or cleanup.
  *

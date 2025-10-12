@@ -119,7 +119,12 @@ export async function extractMetadataBatch(
       '-u',  // Unbuffered output
       scriptPath
     ], {
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        // CRITICAL: PydanticAI Ollama provider needs this env var
+        OLLAMA_BASE_URL: process.env.OLLAMA_HOST?.replace(/\/$/, '') + '/v1' || 'http://localhost:11434/v1'
+      },
       stdio: ['pipe', 'pipe', 'pipe']
     })
 

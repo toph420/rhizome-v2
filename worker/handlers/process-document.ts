@@ -325,11 +325,16 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     console.log(`💾 Saving chunks with embeddings to database`)
     const validChunks = result.chunks.filter(chunk => chunk.content && chunk.content.trim().length > 0)
 
-    const chunksWithEmbeddings = validChunks.map((chunk, i) => ({
-      ...chunk,  // Processor already mapped metadata correctly via mapAIChunkToDatabase
-      document_id,  // CRITICAL: Set document_id AFTER spread to prevent undefined override
-      embedding: embeddings[i]
-    }))
+    const chunksWithEmbeddings = validChunks.map((chunk, i) => {
+      // Remove heading_path (removed in migration 019)
+      const { heading_path, ...chunkWithoutHeadingPath } = chunk as any
+
+      return {
+        ...chunkWithoutHeadingPath,  // Processor already mapped metadata correctly
+        document_id,  // CRITICAL: Set document_id AFTER spread to prevent undefined override
+        embedding: embeddings[i]
+      }
+    })
 
     // ✅ CONDITIONAL CHUNK DELETION: Stage-aware cleanup to prevent FK violations
     // Only delete chunks if starting fresh, not if resuming from a checkpoint
