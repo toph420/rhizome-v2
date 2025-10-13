@@ -8,8 +8,19 @@ Options:
     - enable_chunking: bool (default: false)
     - chunk_size: int (default: 512 tokens)
     - tokenizer: str (default: 'Xenova/all-mpnet-base-v2')
-    - ocr: bool (enable OCR for scanned PDFs)
     - max_pages: int (limit pages for testing)
+
+Pipeline Options (PdfPipelineOptions):
+    - do_picture_classification: bool (default: false) - AI classification of image types
+    - do_picture_description: bool (default: false) - AI-generated image descriptions
+    - do_code_enrichment: bool (default: false) - AI analysis of code blocks
+    - generate_page_images: bool (default: false) - Extract page-level images
+    - generate_picture_images: bool (default: false) - Extract individual figures
+    - generate_table_images: bool (default: false) - Extract table images
+    - images_scale: float (default: 1.0) - Image DPI scaling (1.0 = 72 DPI, 2.0 = 144 DPI)
+    - page_batch_size: int (optional) - Process document in batches (for large docs)
+    - ocr: bool (default: false) - OCR for scanned PDFs
+    - do_table_structure: bool (default: true) - Extract table structure
 """
 
 import sys
@@ -18,7 +29,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 import traceback
 
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.chunking import HybridChunker
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.datamodel.document import InputFormat
@@ -181,10 +192,31 @@ def extract_with_chunking(pdf_path: str, options: Dict[str, Any]) -> Dict[str, A
         }
     """
 
-    # Initialize converter
-    emit_progress('extraction', 5, 'Initializing Docling converter')
+    # Initialize converter with pipeline options
+    emit_progress('extraction', 5, 'Initializing Docling converter with pipeline options')
 
-    converter = DocumentConverter()
+    # Configure pipeline options from options dict
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.do_picture_classification = options.get('do_picture_classification', False)
+    pipeline_options.do_picture_description = options.get('do_picture_description', False)
+    pipeline_options.do_code_enrichment = options.get('do_code_enrichment', False)
+    pipeline_options.generate_page_images = options.get('generate_page_images', False)
+    pipeline_options.do_ocr = options.get('ocr', False)  # Note: 'ocr' key for backward compat
+    pipeline_options.do_table_structure = options.get('do_table_structure', True)
+    pipeline_options.generate_picture_images = options.get('generate_picture_images', False)
+    pipeline_options.generate_table_images = options.get('generate_table_images', False)
+    pipeline_options.images_scale = options.get('images_scale', 1.0)
+
+    # Apply page batching if specified (for large documents)
+    if 'page_batch_size' in options:
+        pipeline_options.page_batch_size = options['page_batch_size']
+
+    # Create converter with configured pipeline
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    )
 
     # Convert document
     emit_progress('extraction', 10, 'Converting PDF with Docling')

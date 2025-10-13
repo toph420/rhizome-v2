@@ -20,6 +20,11 @@ Critical:
 - MUST generate section_marker from headings
 - MUST flush stdout after every JSON write
 - MUST match tokenizer with embeddings model (Phase 1)
+
+Pipeline Options (limited for EPUB/Markdown processing):
+- Note: Many PDF pipeline options don't apply to EPUB (no OCR, no PDF images)
+- tokenizer: str (default: 'Xenova/all-mpnet-base-v2')
+- chunk_size: int (default: 512 tokens)
 """
 
 import sys
@@ -169,8 +174,7 @@ def extract_epub_html(markdown_content: str, options: dict = None) -> dict:
         chunker = HybridChunker(
             tokenizer=options.get('tokenizer', 'Xenova/all-mpnet-base-v2'),
             max_tokens=options.get('chunk_size', 512),
-            merge_peers=True,
-            heading_as_metadata=True
+            merge_peers=True
         )
 
         chunk_iter = chunker.chunk(doc)
