@@ -45,6 +45,9 @@ export function parseMarkdownToBlocks(
     return aStart - bStart
   })
 
+  // Track position within each chunk
+  const chunkBlockCounts = new Map<string, number>()
+
   for (const token of tokens) {
     const raw = token.raw
     const endOffset = offset + raw.length
@@ -54,7 +57,6 @@ export function parseMarkdownToBlocks(
 
     // Always render content, even without chunk coverage (chunks are metadata overlays)
     const chunkId = chunk?.id || 'no-chunk'
-    const chunkPosition = chunk?.chunk_index ?? -1
 
     // Parse token to HTML with smart typography
     let html = ''
@@ -90,6 +92,25 @@ export function parseMarkdownToBlocks(
                          /^<p>\s*<\/p>$/.test(html.trim())
 
     if (!isEmptyBlock) {
+      // Calculate position within this chunk (0-indexed)
+      // IMPORTANT: Only count non-empty blocks for chunk positioning
+      let chunkPosition = -1
+      if (chunk) {
+        const currentCount = chunkBlockCounts.get(chunkId) || 0
+        chunkPosition = currentCount
+        chunkBlockCounts.set(chunkId, currentCount + 1)
+
+        // Debug: Log first block of each chunk
+        if (chunkPosition === 0) {
+          console.log(`[BlockParser] First block of chunk ${chunk.chunk_index}:`, {
+            chunkId,
+            offset,
+            tokenType: token.type,
+            chunkPosition
+          })
+        }
+      }
+
       blocks.push({
         id: `block_${blockIndex}`,
         type: mapTokenType(token.type),

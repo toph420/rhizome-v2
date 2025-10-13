@@ -94,6 +94,17 @@ export const BlockRenderer = memo(function BlockRenderer({
   // Show chunk boundary indicator on first block of each chunk
   const isChunkStart = chunk && block.chunkPosition === 0
 
+  // Debug: Log chunk boundary detection
+  if (isChunkStart && showChunkBoundaries) {
+    console.log('[BlockRenderer] Chunk boundary detected:', {
+      chunkIndex: chunk.chunk_index,
+      blockType: block.type,
+      chunkPosition: block.chunkPosition,
+      showChunkBoundaries,
+      isChunkStart
+    })
+  }
+
   // Generate color for chunk boundary (cycle through colors)
   const getChunkColor = (chunkIndex: number) => {
     const colors = [
