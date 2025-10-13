@@ -40,6 +40,10 @@ import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
 // Cached chunks table integration
 import { saveCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
+// Phase 1: Shared chunker configuration
+import { getChunkerOptions } from '../lib/chunking/chunker-config.js'
+// Phase 6: Chunk statistics for validation
+import { calculateChunkStatistics, logChunkStatistics } from '../lib/chunking/chunk-statistics.js'
 
 export class EPUBProcessor extends SourceProcessor {
   /**
@@ -97,8 +101,8 @@ export class EPUBProcessor extends SourceProcessor {
       const result = await this.withRetry(
         async () => {
           return await extractEpubWithDocling(fileData.buffer, {
-            tokenizer: 'Xenova/all-mpnet-base-v2',  // CRITICAL: Must match embeddings model
-            chunkSize: 512,
+            // Phase 1: Use shared chunker configuration (512 → 768 tokens)
+            ...JSON.parse(getChunkerOptions()),
             onProgress: async (percent, stage, message) => {
               // Map Docling's 0-100% to our 15-50% extraction stage
               const ourPercent = 15 + Math.floor(percent * 0.35)
@@ -467,10 +471,11 @@ export class EPUBProcessor extends SourceProcessor {
           start_offset: result.start_offset,
           end_offset: result.end_offset,
           word_count: wordCount,
-          // Phase 5: Store Docling EPUB metadata in database columns (migration 045)
+          // Phase 5: Store Docling EPUB metadata in database columns (migration 047)
           // CRITICAL: EPUBs have NO page numbers (always null)
           page_start: null,  // Always null for EPUB
           page_end: null,    // Always null for EPUB
+          heading_path: result.chunk.meta.heading_path || null,
           heading_level: result.chunk.meta.heading_level || null,
           section_marker: result.chunk.meta.section_marker || null,  // Used instead of page numbers
           bboxes: null,  // Always null for EPUB (no PDF coordinates)
@@ -497,6 +502,10 @@ export class EPUBProcessor extends SourceProcessor {
       console.log(`[EPUBProcessor] Converted ${finalChunks.length} matched chunks to ProcessedChunk format`)
 
       await this.updateProgress(75, 'matching', 'complete', `${finalChunks.length} chunks matched with metadata`)
+
+      // Phase 6: Log chunk statistics after matching
+      const matchingStats = calculateChunkStatistics(finalChunks, 768)
+      logChunkStatistics(matchingStats, 'EPUB Chunks (After Matching)')
 
       // Stage 7: Metadata Enrichment (LOCAL MODE) (75-90%)
       // Phase 6: Extract structured metadata using PydanticAI + Ollama
@@ -588,14 +597,48 @@ export class EPUBProcessor extends SourceProcessor {
       await this.updateProgress(92, 'embeddings', 'processing', 'Generating local embeddings')
 
       try {
-        // Extract content from chunks for embedding
-        const chunkContents = finalChunks.map(chunk => chunk.content)
+        // Phase 5: Import metadata-enhanced embedding functions
+        const { createEnhancedEmbeddingText, validateEnhancedText } = await import('../lib/embeddings/metadata-context.js')
 
-        console.log(`[EPUBProcessor] Generating embeddings for ${chunkContents.length} chunks (Xenova/all-mpnet-base-v2)`)
+        // Extract content from chunks for embedding
+        // Phase 5: Create enhanced text with metadata context for better retrieval
+        let enhancedCount = 0
+        let fallbackCount = 0
+
+        const chunkTexts = finalChunks.map((chunk) => {
+          // Enhance with metadata context (heading, section marker)
+          const enhancedText = createEnhancedEmbeddingText({
+            content: chunk.content,
+            heading_path: chunk.heading_path,
+            page_start: chunk.page_start, // Always null for EPUBs
+            section_marker: chunk.section_marker
+          })
+
+          // Validate enhancement doesn't exceed token limits
+          const validation = validateEnhancedText(chunk.content, enhancedText)
+          if (!validation.valid) {
+            console.warn(`[EPUBProcessor] ${validation.warning} - using original text for chunk ${chunk.chunk_index}`)
+            fallbackCount++
+            return chunk.content
+          }
+
+          if (enhancedText !== chunk.content) {
+            enhancedCount++
+          }
+
+          return enhancedText
+        })
+
+        console.log(`[EPUBProcessor] Generating embeddings for ${chunkTexts.length} chunks (Xenova/all-mpnet-base-v2)`)
+        console.log(`[EPUBProcessor] Metadata enhancement: ${enhancedCount}/${chunkTexts.length} (${((enhancedCount/chunkTexts.length)*100).toFixed(1)}%)`)
+        if (fallbackCount > 0) {
+          console.warn(`[EPUBProcessor] Fallback: ${fallbackCount} chunks exceeded token limits`)
+        }
+
         const startTime = Date.now()
 
         // Generate embeddings locally with Transformers.js
-        const embeddings = await generateEmbeddingsLocal(chunkContents)
+        const embeddings = await generateEmbeddingsLocal(chunkTexts)
 
         const embeddingTime = Date.now() - startTime
         console.log(`[EPUBProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)

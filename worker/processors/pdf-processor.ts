@@ -45,6 +45,12 @@ import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
 // Cached chunks table integration
 import { saveCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
+// Phase 1: Shared chunker configuration
+import { getChunkerOptions } from '../lib/chunking/chunker-config.js'
+// Phase 2: Flexible pipeline configuration
+import { getPipelineConfig, logPipelineConfig, formatPipelineConfigForPython } from '../lib/local/docling-config.js'
+// Phase 6: Chunk statistics for validation
+import { calculateChunkStatistics, logChunkStatistics } from '../lib/chunking/chunk-statistics.js'
 
 export class PDFProcessor extends SourceProcessor {
   /**
@@ -91,6 +97,15 @@ export class PDFProcessor extends SourceProcessor {
     // Phase 2: Enable chunking in local mode
     await this.updateProgress(20, 'extract', 'processing', 'Extracting PDF with Docling')
 
+    // Get pipeline configuration (defaults + env overrides + document hints)
+    // Note: page count not available yet, will be applied for large docs automatically
+    const pipelineConfig = getPipelineConfig({
+      pageCount: undefined  // Will be auto-detected by Docling
+    })
+
+    // Log configuration for transparency
+    logPipelineConfig(pipelineConfig)
+
     const extractionResult = await this.withRetry(
       async () => {
         return await extractPdfBuffer(
@@ -98,9 +113,10 @@ export class PDFProcessor extends SourceProcessor {
           {
             // Phase 2: Enable HybridChunker in local mode
             enableChunking: isLocalMode,
-            chunkSize: 512,
-            tokenizer: 'Xenova/all-mpnet-base-v2',
-            ocr: false, // Enable if needed for scanned PDFs
+            // Phase 1: Use shared chunker configuration (512 → 768 tokens)
+            ...JSON.parse(getChunkerOptions()),
+            // Phase 2: Apply pipeline configuration (image extraction, AI features, etc.)
+            ...JSON.parse(formatPipelineConfigForPython(pipelineConfig)),
             timeout: 30 * 60 * 1000, // 30 minutes
             onProgress: async (percent, stage, message) => {
               // Map Docling's 0-100% to our 20-50% extraction stage
@@ -334,9 +350,10 @@ export class PDFProcessor extends SourceProcessor {
           start_offset: result.start_offset,
           end_offset: result.end_offset,
           word_count: wordCount,
-          // Phase 4: Store Docling metadata in database columns (migration 045)
+          // Phase 4: Store Docling metadata in database columns (migration 047)
           page_start: result.chunk.meta.page_start || null,
           page_end: result.chunk.meta.page_end || null,
+          heading_path: result.chunk.meta.heading_path || null,
           heading_level: result.chunk.meta.heading_level || null,
           section_marker: result.chunk.meta.section_marker || null,
           bboxes: result.chunk.meta.bboxes || null,
@@ -363,6 +380,10 @@ export class PDFProcessor extends SourceProcessor {
       console.log(`[PDFProcessor] Converted ${finalChunks.length} matched chunks to ProcessedChunk format`)
 
       await this.updateProgress(75, 'matching', 'complete', `${finalChunks.length} chunks matched with metadata`)
+
+      // Phase 6: Log chunk statistics after matching
+      const matchingStats = calculateChunkStatistics(finalChunks, 768)
+      logChunkStatistics(matchingStats, 'PDF Chunks (After Matching)')
 
       // Stage 7: Metadata Enrichment (LOCAL MODE) (75-90%)
       // Phase 6: Extract structured metadata using PydanticAI + Ollama
@@ -454,14 +475,48 @@ export class PDFProcessor extends SourceProcessor {
       await this.updateProgress(92, 'embeddings', 'processing', 'Generating local embeddings')
 
       try {
-        // Extract content from chunks for embedding
-        const chunkContents = finalChunks.map(chunk => chunk.content)
+        // Phase 5: Import metadata-enhanced embedding functions
+        const { createEnhancedEmbeddingText, validateEnhancedText } = await import('../lib/embeddings/metadata-context.js')
 
-        console.log(`[PDFProcessor] Generating embeddings for ${chunkContents.length} chunks (Xenova/all-mpnet-base-v2)`)
+        // Extract content from chunks for embedding
+        // Phase 5: Create enhanced text with metadata context for better retrieval
+        let enhancedCount = 0
+        let fallbackCount = 0
+
+        const chunkTexts = finalChunks.map((chunk) => {
+          // Enhance with metadata context (heading, page, section)
+          const enhancedText = createEnhancedEmbeddingText({
+            content: chunk.content,
+            heading_path: chunk.heading_path,
+            page_start: chunk.page_start,
+            section_marker: chunk.section_marker
+          })
+
+          // Validate enhancement doesn't exceed token limits
+          const validation = validateEnhancedText(chunk.content, enhancedText)
+          if (!validation.valid) {
+            console.warn(`[PDFProcessor] ${validation.warning} - using original text for chunk ${chunk.chunk_index}`)
+            fallbackCount++
+            return chunk.content
+          }
+
+          if (enhancedText !== chunk.content) {
+            enhancedCount++
+          }
+
+          return enhancedText
+        })
+
+        console.log(`[PDFProcessor] Generating embeddings for ${chunkTexts.length} chunks (Xenova/all-mpnet-base-v2)`)
+        console.log(`[PDFProcessor] Metadata enhancement: ${enhancedCount}/${chunkTexts.length} (${((enhancedCount/chunkTexts.length)*100).toFixed(1)}%)`)
+        if (fallbackCount > 0) {
+          console.warn(`[PDFProcessor] Fallback: ${fallbackCount} chunks exceeded token limits`)
+        }
+
         const startTime = Date.now()
 
         // Generate embeddings locally with Transformers.js
-        const embeddings = await generateEmbeddingsLocal(chunkContents)
+        const embeddings = await generateEmbeddingsLocal(chunkTexts)
 
         const embeddingTime = Date.now() - startTime
         console.log(`[PDFProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)
