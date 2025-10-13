@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify'
 import { injectAnnotations } from '@/lib/annotations/inject'
 import { ChunkMetadataIcon } from './ChunkMetadataIcon'
 import { useUIStore } from '@/stores/ui-store'
+import { useReaderStore } from '@/stores/reader-store'
 import type { Block } from '@/lib/reader/block-parser'
 import type { Chunk } from '@/types/annotations'
 
@@ -45,12 +46,19 @@ export const BlockRenderer = memo(function BlockRenderer({
   onAnnotationClick
 }: BlockRendererProps) {
   const showChunkBoundaries = useUIStore(state => state.showChunkBoundaries)
+  const chunks = useReaderStore(state => state.chunks)
 
   // Find annotations that overlap this block
   const overlappingAnnotations = annotations.filter(
     (ann) =>
       ann.endOffset > block.startOffset &&
       ann.startOffset < block.endOffset
+  )
+
+  // BANDAID: Find all chunks that START within this block's offset range
+  // This catches chunks 3, 4, 8, 9 that are split mid-paragraph by Docling
+  const chunksStartingInBlock = chunks.filter(
+    c => c.start_offset >= block.startOffset && c.start_offset < block.endOffset
   )
 
   // Inject annotations into HTML
@@ -94,17 +102,6 @@ export const BlockRenderer = memo(function BlockRenderer({
   // Show chunk boundary indicator on first block of each chunk
   const isChunkStart = chunk && block.chunkPosition === 0
 
-  // Debug: Log chunk boundary detection
-  if (isChunkStart && showChunkBoundaries) {
-    console.log('[BlockRenderer] Chunk boundary detected:', {
-      chunkIndex: chunk.chunk_index,
-      blockType: block.type,
-      chunkPosition: block.chunkPosition,
-      showChunkBoundaries,
-      isChunkStart
-    })
-  }
-
   // Generate color for chunk boundary (cycle through colors)
   const getChunkColor = (chunkIndex: number) => {
     const colors = [
@@ -141,6 +138,20 @@ export const BlockRenderer = memo(function BlockRenderer({
           alwaysVisible={showChunkBoundaries}
         />
       )}
+
+      {/* BANDAID: Show icons for chunks that START in this block (mid-paragraph splits) */}
+      {chunksStartingInBlock.map((chunkInBlock, idx) => (
+        <ChunkMetadataIcon
+          key={chunkInBlock.id}
+          chunk={chunkInBlock}
+          chunkIndex={chunkInBlock.chunk_index}
+          alwaysVisible={showChunkBoundaries}
+          style={{
+            // Stack multiple icons vertically if multiple chunks start in same block
+            top: `${2 + idx * 2.5}rem`
+          }}
+        />
+      ))}
 
       {/* Chunk boundary label - shows when boundaries are enabled */}
       {showChunkBoundaries && isChunkStart && chunk && (

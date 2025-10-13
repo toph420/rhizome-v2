@@ -99,16 +99,6 @@ export function parseMarkdownToBlocks(
         const currentCount = chunkBlockCounts.get(chunkId) || 0
         chunkPosition = currentCount
         chunkBlockCounts.set(chunkId, currentCount + 1)
-
-        // Debug: Log first block of each chunk
-        if (chunkPosition === 0) {
-          console.log(`[BlockParser] First block of chunk ${chunk.chunk_index}:`, {
-            chunkId,
-            offset,
-            tokenType: token.type,
-            chunkPosition
-          })
-        }
       }
 
       blocks.push({

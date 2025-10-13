@@ -10,6 +10,7 @@ interface ChunkMetadataIconProps {
   chunk: Chunk
   chunkIndex: number
   alwaysVisible?: boolean
+  style?: React.CSSProperties
 }
 
 /**
@@ -20,9 +21,10 @@ interface ChunkMetadataIconProps {
  * @param props.chunk - Chunk data with metadata
  * @param props.chunkIndex - Sequential chunk index
  * @param props.alwaysVisible - If true, icon is always visible (not just on hover)
+ * @param props.style - Optional inline styles for positioning
  * @returns Hover card with chunk metadata
  */
-export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false }: ChunkMetadataIconProps) {
+export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, style }: ChunkMetadataIconProps) {
   // Helper function to determine polarity category
   const getPolarity = (polarity?: number): 'positive' | 'negative' | 'neutral' | null => {
     if (polarity === undefined || polarity === null) return null
@@ -65,6 +67,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false }: 
           className={`absolute left-0 -ml-12 top-2 w-6 h-6 rounded-full bg-muted/50 hover:bg-primary/20 transition-colors flex items-center justify-center ${
             alwaysVisible ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
+          style={style}
           whileHover={{ scale: 1.2 }}
           whileTap={{ scale: 0.95 }}
           transition={{ type: 'spring', stiffness: 400, damping: 25 }}
