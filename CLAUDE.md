@@ -112,6 +112,7 @@ OLLAMA_TIMEOUT=600000
 - `worker/lib/local/embeddings-local.ts` - Local embeddings with Transformers.js
 - `worker/lib/local/ollama-cleanup.ts` - Markdown cleanup with OOM fallback
 - `worker/lib/chunking/pydantic-metadata.ts` - Structured metadata extraction
+- `worker/lib/chunking/bulletproof-metadata.ts` - Dual-strategy chunk caching with 100% recovery
 - `worker/processors/pdf-processor.ts` - PDF pipeline orchestration
 - `worker/processors/epub-processor.ts` - EPUB pipeline orchestration
 - `worker/scripts/docling_extract.py` - Python Docling wrapper
@@ -283,9 +284,10 @@ Dropped from 7 engines to 3. Each does something distinct:
 - Batch processing optimizations
 
 #### Database & Storage
-- 41+ migrations applied (latest: import_pending for Readwise, connection validation)
+- 46+ migrations applied (latest: cached_chunks table for LOCAL mode optimization)
 - ECS tables (entities, components)
 - Chunks with embeddings and metadata
+- Cached chunks table (original Docling extractions for zero-cost reprocessing)
 - User preferences for weight tuning
 - Hybrid storage (files + database)
 - Background jobs table
@@ -977,7 +979,7 @@ const { data: crossDoc } = await supabase
 ### Core Documentation
 - **Project Vision**: `docs/APP_VISION.md` - Philosophy and long-term vision
 - **Implementation Status**: `docs/IMPLEMENTATION_STATUS.md` - What's built vs planned
-- **Architecture**: `docs/ARCHITECTURE.md` - Complete system design
+- **Architecture**: `docs/ARCHITECTURE.MD` - Complete system design
 - **Code Examples**: `docs/CODE_EXAMPLES.md` - Practical implementation patterns
 
 ### Development Guides
@@ -998,6 +1000,10 @@ const { data: crossDoc } = await supabase
 - **Worker Module**: `worker/README.md` - Document processing system
 - **Gemini Processing**: `docs/GEMINI_PROCESSING.md` - AI processing patterns
 
+### Processing Pipeline
+- **Processing Pipeline Overview**: `docs/PROCESSING_PIPELINE.md`
+- **Bullet Proof Metadata Extraction**: `docs/processing-pipeline/bulletproof-metadata-extraction.md`
+- **Docling Patterns**: `docs/processing-pipeline/docling-patterns.md`
 
 ## Zustand Checklist
 
@@ -1091,15 +1097,17 @@ Rhizome includes a Readwise highlight import system with a review workflow:
 
 ## Other Docs
 
-- Virtuoso - https://virtuoso.dev/ - Virtual Scrolling for our document reader
-- AI SDK - https://ai-sdk.dev/docs/introduction - The AI SDK is the TypeScript toolkit designed to help developers build AI-powered applications and agents with React, Next.js, Vue, Svelte, Node.js, and more.
-- Marked.js - https://marked.js.org/ - a low-level markdown compiler for parsing markdown without caching or blocking for long periods of time.
+- Virtuoso - `https://virtuoso.dev/` - Virtual Scrolling for our document reader
+- AI SDK - `https://ai-sdk.dev/docs/introduction` - The AI SDK is the TypeScript toolkit designed to help developers build AI-powered applications and agents with React, Next.js, Vue, Svelte, Node.js, and more.
+- Marked.js - `https://marked.js.org/` - a low-level markdown compiler for parsing markdown without caching or blocking for long periods of time.
+- Docling - `https://docling-project.github.io/docling/` -Docling simplifies document processing, parsing diverse formats — including advanced PDF understanding — and providing seamless integrations with the gen AI ecosystem.
 
 ## Miscellaneous Rules
-- Always check database migration number and increment by one. **Current latest: 041** (see supabase/migrations folder for examples)
+- Always check database migration number and increment by one. **Current latest: 046** (see supabase/migrations folder for examples)
 - When creating migrations, use format: `NNN_descriptive_name.sql` where NNN is zero-padded number
 - EPUB files are supported as a source type alongside PDF - handle both when implementing document features
-- Readwise import uses a review workflow via `import_pending` table before creating documents 
+- Readwise import uses a review workflow via `import_pending` table before creating documents
+- Cached chunks system: `cached_chunks` table stores original Docling chunks for zero-cost LOCAL mode reprocessing (migration 046)
 - shadcn/ui Pattern: Always use npx shadcn@latest add <component> to install UI components rather than creating them manually. This ensures:
   - Correct Radix UI primitives
   - Consistent styling with the design system

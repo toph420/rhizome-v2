@@ -224,7 +224,7 @@ CREATE INDEX idx_tables_structured_data ON tables USING GIN(structured_data);
 ```
 Supabase Storage Bucket: documents
 Path: {userId}/{documentId}/
-  ├── markdown.md              (source of truth)
+  ├── content.md              (source of truth)
   ├── images/                  (NEW)
   │   ├── page1_pic0.png
   │   ├── page3_pic1.png
