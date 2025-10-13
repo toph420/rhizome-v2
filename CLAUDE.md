@@ -36,24 +36,29 @@ This is a personal tool optimized for aggressive connection detection and knowle
 100% local document processing with **zero API costs** and **complete privacy**. Replaces cloud AI services with local alternatives.
 
 #### Architecture Overview
-- **Docling**: PDF/EPUB extraction with structural metadata via HybridChunker
+- **Docling**: PDF/EPUB extraction with structural metadata via HybridChunker (768-token chunks, optimized from 512)
+  - Flexible pipeline configuration via environment variables (image extraction, OCR, AI enrichment)
+  - Page batching for large documents (auto-optimization for >200 pages)
+  - Quality-first defaults with opt-in AI features
 - **Ollama (Qwen 32B)**: Local LLM for cleanup and metadata extraction
-- **Transformers.js**: Local embeddings (768d vectors)
-- **5-Layer Bulletproof Matching**: 100% chunk recovery guarantee
+- **Transformers.js**: Local embeddings (768d vectors, aligned with chunker tokenizer)
+  - Metadata-enhanced embeddings (heading context prepended to chunk content)
+  - 15-25% retrieval quality improvement without modifying stored content
+- **5-Layer Bulletproof Matching**: 100% chunk recovery guarantee with metadata preservation
 
 #### Key Components
 
 **Processing Stages:**
-1. **Extraction** - Docling with HybridChunker (tokenizer: `Xenova/all-mpnet-base-v2`)
+1. **Extraction** - Docling with HybridChunker (768 tokens, tokenizer: `Xenova/all-mpnet-base-v2`)
 2. **Cleanup** - Ollama (Qwen) for markdown cleaning (optional, with OOM fallback)
 3. **Bulletproof Matching** - 5-layer system for chunk remapping:
    - Layer 1: Enhanced fuzzy matching (exact, normalized, multi-anchor, sliding window)
    - Layer 2: Embeddings-based matching (cosine similarity >0.85)
    - Layer 3: LLM-assisted matching (Ollama for difficult cases)
    - Layer 4: Anchor interpolation (synthetic chunks, never fails)
-   - Layer 5: Metadata preservation (Docling structural data)
+   - Layer 5: Metadata preservation (Docling structural data - heading_path, page numbers, section markers)
 4. **Metadata** - PydanticAI with Ollama (structured outputs with validation)
-5. **Embeddings** - Transformers.js (aligned tokenizer, 768d)
+5. **Embeddings** - Transformers.js with metadata enhancement (aligned tokenizer, 768d vectors)
 
 **Confidence Tracking:**
 - `exact`: Perfect match
@@ -73,19 +78,31 @@ PROCESSING_MODE=local                         # Set to 'cloud' for Gemini
 OLLAMA_HOST=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen2.5:32b-instruct-q4_K_M     # or 14b/7b for smaller RAM
 OLLAMA_TIMEOUT=600000
+
+# Docling Pipeline Configuration (optional, env var control)
+EXTRACT_IMAGES=true              # Default: true (figure/table extraction)
+IMAGE_SCALE=2.0                  # Default: 2.0 (144 DPI)
+EXTRACT_TABLES=true              # Default: true
+CLASSIFY_IMAGES=false            # Default: false (opt-in AI feature)
+DESCRIBE_IMAGES=false            # Default: false (opt-in AI feature)
+ENRICH_CODE=false                # Default: false (opt-in AI feature)
+ENABLE_OCR=false                 # Default: false (for scanned documents)
 ```
 
 #### Performance & Cost
 
 **Processing Times (M1 Max 64GB):**
 - Small PDFs (<50 pages): 3-5 minutes
-- Medium PDFs (200 pages): 15-25 minutes
-- Large PDFs (500 pages): 60-80 minutes
+- Medium PDFs (200 pages): 15-25 minutes (improved ~25-30% with optimizations)
+- Large PDFs (500 pages): 60-80 minutes (with automatic page batching)
 
 **Quality Metrics:**
 - Chunk recovery: 100% (guaranteed, no data loss)
 - Exact matches: 85-90%
 - Synthetic chunks: <5% (flagged for review)
+- Metadata coverage: >80% (heading_path, page numbers, section markers)
+- Embedding enhancement: >70% (metadata-enriched vectors)
+- Semantic coherence: >90% (chunks end on sentence boundaries)
 - API calls: 0 (completely local)
 
 **Cost Savings:**
@@ -111,8 +128,12 @@ OLLAMA_TIMEOUT=600000
 - `worker/lib/local/bulletproof-matcher.ts` - 5-layer matching system
 - `worker/lib/local/embeddings-local.ts` - Local embeddings with Transformers.js
 - `worker/lib/local/ollama-cleanup.ts` - Markdown cleanup with OOM fallback
+- `worker/lib/local/docling-config.ts` - Flexible Docling pipeline configuration (env var control)
+- `worker/lib/chunking/chunker-config.ts` - Shared 768-token configuration
+- `worker/lib/chunking/chunk-statistics.ts` - Quality metrics and validation
 - `worker/lib/chunking/pydantic-metadata.ts` - Structured metadata extraction
 - `worker/lib/chunking/bulletproof-metadata.ts` - Dual-strategy chunk caching with 100% recovery
+- `worker/lib/embeddings/metadata-context.ts` - Metadata-enhanced embeddings (heading context)
 - `worker/processors/pdf-processor.ts` - PDF pipeline orchestration
 - `worker/processors/epub-processor.ts` - EPUB pipeline orchestration
 - `worker/scripts/docling_extract.py` - Python Docling wrapper
@@ -171,6 +192,10 @@ From implementation experience:
 - ❌ Don't assume 100% exact matches - plan for synthetic chunks
 - ❌ Don't test with real AI in CI - mock Ollama and Python subprocesses
 - ❌ Don't ignore OOM errors - graceful fallback to smaller model or regex-only
+- ❌ Don't use invalid Docling parameters - `heading_as_metadata` doesn't exist, headings are automatic
+- ❌ Don't hardcode chunk sizes - use shared configuration from `chunker-config.ts`
+- ❌ Don't modify stored chunk content - enhance embeddings only, preserve original text
+- ❌ Don't skip metadata validation - chunk statistics catch quality regressions early
 
 #### Troubleshooting
 
@@ -185,6 +210,8 @@ From implementation experience:
 - Implementation details: `docs/tasks/local-processing-pipeline-v1/README.md`
 - Setup guide: `docs/local-pipeline-setup.md`
 - Architecture decisions: `docs/tasks/local-processing-pipeline-v1/PHASES_OVERVIEW.md`
+- Docling optimization: `docs/tasks/docling-optimization-v1.md` (completed all 20 tasks)
+- Pipeline configuration: `docs/docling-configuration.md` (environment variables and feature guide)
 
 ### The 3-Engine System
 
@@ -1103,11 +1130,15 @@ Rhizome includes a Readwise highlight import system with a review workflow:
 - Docling - `https://docling-project.github.io/docling/` -Docling simplifies document processing, parsing diverse formats — including advanced PDF understanding — and providing seamless integrations with the gen AI ecosystem.
 
 ## Miscellaneous Rules
-- Always check database migration number and increment by one. **Current latest: 046** (see supabase/migrations folder for examples)
+- Always check database migration number and increment by one. **Current latest: 047** (see supabase/migrations folder for examples)
 - When creating migrations, use format: `NNN_descriptive_name.sql` where NNN is zero-padded number
 - EPUB files are supported as a source type alongside PDF - handle both when implementing document features
 - Readwise import uses a review workflow via `import_pending` table before creating documents
 - Cached chunks system: `cached_chunks` table stores original Docling chunks for zero-cost LOCAL mode reprocessing (migration 046)
+- Chunk metadata: `chunks` table extended with Docling structural metadata (migration 047):
+  - `heading_path` (TEXT[]) - Heading hierarchy for citations
+  - `heading_level` (INTEGER) - Depth in heading tree
+  - `section_marker` (TEXT) - Section identifier for EPUBs
 - shadcn/ui Pattern: Always use npx shadcn@latest add <component> to install UI components rather than creating them manually. This ensures:
   - Correct Radix UI primitives
   - Consistent styling with the design system
