@@ -1,12 +1,31 @@
 # Image and Table Extraction - Implementation Plan v2
 
-**Status**: Ready for Implementation
+**Status**: Ready for Implementation (With Critical Enhancements Applied)
 **Priority**: High (Natural extension of local pipeline)
-**Estimated Effort**: 5-6 days
+**Estimated Effort**: 7 days (REVISED from 5-6 days)
 **Dependencies**: Local Processing Pipeline v1 (Phases 1-10 complete)
 
-**Last Updated**: 2025-10-11
-**Version**: 2.0 (Revised with Obsidian integration and architectural fixes)
+**Last Updated**: 2025-01-10
+**Version**: 2.1 (Ultrathink analysis applied - Critical gaps addressed)
+
+---
+
+## 🔴 CRITICAL ENHANCEMENTS FROM ANALYSIS
+
+**Ultrathink analysis identified 3 blocking issues and 4 important enhancements:**
+
+### Blocking Issues (FIXED):
+1. **Migration Number**: 046 → 048 (047 already exists)
+2. **Reader UI Gap**: Added Phase 5.5 - StorageImage component (+4h)
+3. **Data Loss Risk**: Added version tracking to prevent figure orphaning (+2h)
+
+### Important Enhancements (ADDED):
+4. **Sync-Back Safety**: Path remapping prevents vault paths in source markdown
+5. **AI Validation**: Pre/post cleanup checks prevent image loss
+6. **Display Context**: Show "Chapter 3" not "section_003" for EPUBs
+7. **Enhanced Testing**: Reprocessing, round-trip, and preservation scenarios
+
+**Timeline Impact**: 6 days → 7 days (+1 day for production-ready implementation)
 
 ---
 
@@ -249,7 +268,9 @@ Path: {vaultPath}/{exportPath}/
 
 ### Phase 1: Database Migration (0.5 days)
 
-**File**: `supabase/migrations/046_add_figures_and_tables.sql`
+**File**: `supabase/migrations/048_add_figures_and_tables.sql`
+
+**⚠️ CRITICAL**: Migration number updated from 046 to 048 (current latest is 047)
 
 **Tasks**:
 1. Create `figures` table with indexes (3 indexes)
@@ -1640,7 +1661,14 @@ async function benchmarkImageExtraction() {
   - Manual testing
   - Performance benchmarks
 
-**Total: 6 days** (same as v1, but with architectural fixes)
+**Total: 7 days** ⭐ REVISED (original: 6 days)
+
+**Additional Day 7 Breakdown:**
+- Reader UI Integration (Phase 5.5): 4 hours
+- Enhanced critical testing: 3 hours
+- Database version tracking: 0.5 hours
+- Sync-back validation: 0.5 hours
+- **Worth it for**: Production-ready implementation with zero data loss risk
 
 ---
 

@@ -3,8 +3,41 @@
 **Source PRP**: [docs/todo/image-and-table-extraction-v2.md](/Users/topher/Code/rhizome-v2/docs/todo/image-and-table-extraction-v2.md)
 **Feature**: Image and Table Extraction for Local Processing Pipeline
 **Priority**: High
-**Total Estimated Effort**: 5-6 days (38-46 hours)
+**Total Estimated Effort**: 7 days (54 hours) - REVISED from original 6 days
 **Dependencies**: Local Processing Pipeline v1 (Phases 1-10) ✅ COMPLETE
+**Last Updated**: 2025-01-10 (Ultrathink Analysis Applied)
+
+---
+
+## 🔴 CRITICAL MODIFICATIONS FROM ULTRATHINK ANALYSIS
+
+**Original plan had 3 critical gaps that would block functionality:**
+
+1. **⚠️ Migration Number Conflict** (FIXED)
+   - Original: Migration 046
+   - **Corrected**: Migration 048 (current latest is 047)
+   - Impact: Would have blocked implementation
+
+2. **🚨 Missing Reader UI Component** (ADDED - Phase 5.5)
+   - **Gap**: Images with local refs `![caption](page1_pic0.png)` won't display in browser
+   - **Solution**: New StorageImage component resolves refs to signed URLs
+   - **Impact**: Without this, images won't display at all in reader UI
+   - **Effort**: +4 hours (new Phase 5.5)
+
+3. **💾 No Reprocessing Safety** (ENHANCED)
+   - **Gap**: Reprocessing documents would orphan old figures (data loss)
+   - **Solution**: Added `archived` flag and version tracking to schema
+   - **Impact**: Preserves "never lose data" principle
+   - **Effort**: +2 hours (schema enhancement)
+
+**Additional Enhancements:**
+- ✅ Sync-back path remapping (Obsidian → Storage portability)
+- ✅ Image preservation validation (AI cleanup safeguards)
+- ✅ Display context for EPUBs (show chapter names, not "section_003")
+- ✅ Automatic chunk-to-figure linking (enables richer queries)
+- ✅ Critical testing scenarios (reprocessing, round-trip, preservation)
+
+**Timeline Impact**: 6 days → 7 days (worth it for production-ready implementation)
 
 ---
 
@@ -77,19 +110,19 @@ This task breakdown extends the local processing pipeline to extract figures and
 
 **Technical Constraints**:
 - **Database**: PostgreSQL 14+ (Supabase)
-- **Migration Number**: 046 (next in sequence after 045)
+- **Migration Number**: 048 (next in sequence after 047 - chunk_validation_corrections)
 - **Code Standards**: Follow existing migration patterns
 
 **Implementation Details**
 
 **Files to Modify/Create**:
 ```
-├── supabase/migrations/046_add_figures_and_tables.sql - [Purpose: Create new tables and indexes]
+├── supabase/migrations/048_add_figures_and_tables.sql - [Purpose: Create new tables and indexes]
 ```
 
 **Key Implementation Steps**:
 
-1. **Create figures table** → Table with 10 columns for image metadata
+1. **Create figures table** → Table with 12 columns for image metadata (⭐ ENHANCED with version tracking)
    ```sql
    CREATE TABLE figures (
      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,11 +139,26 @@ This task breakdown extends the local processing pipeline to extract figures and
      width INTEGER,
      height INTEGER,
      file_size INTEGER,
+
+     -- ⭐ NEW: Version tracking for reprocessing safety
+     display_context TEXT,  -- "Page 5" (PDF) or "Chapter 3: Title" (EPUB)
+     archived BOOLEAN DEFAULT FALSE,  -- Mark old figures on reprocess
+     link_confidence TEXT,  -- 'exact', 'inferred', 'null' for chunk linking
+
      created_at TIMESTAMPTZ DEFAULT NOW(),
      updated_at TIMESTAMPTZ DEFAULT NOW(),
      UNIQUE(document_id, self_ref)
    );
+
+   COMMENT ON COLUMN figures.display_context IS 'Human-readable location for UI (e.g., "Page 5" or "Chapter 3")';
+   COMMENT ON COLUMN figures.archived IS 'Set to true when document reprocessed and new figures extracted';
+   COMMENT ON COLUMN figures.link_confidence IS 'Confidence level for chunk_id assignment: exact, inferred, null';
    ```
+
+   **RATIONALE**:
+   - `display_context`: Show "Chapter 3: Title" instead of "section_003" for EPUBs
+   - `archived`: Preserve old figures on reprocess (never lose data principle)
+   - `link_confidence`: Track automatic chunk-to-figure linking quality
 
 2. **Create tables table** → Table with 11 columns for structured data
    ```sql
@@ -155,8 +203,8 @@ This task breakdown extends the local processing pipeline to extract figures and
 
 ```gherkin
 Scenario 1: Migration applies successfully
-  Given a fresh database with migration 045 applied
-  When migration 046 is applied
+  Given a fresh database with migration 047 applied
+  When migration 048 is applied
   Then figures table exists with 10 columns
   And tables table exists with 11 columns
   And 6 indexes are created
@@ -181,7 +229,7 @@ Scenario 3: UNIQUE constraint enforced
 - [ ] **Indexes**: 6 total indexes created (3 for figures, 3 for tables)
 - [ ] **Constraints**: Foreign keys cascade delete properly
 - [ ] **Performance**: GIN index on tables.structured_data for JSONB queries
-- [ ] **Naming**: Migration numbered 046 in sequence
+- [ ] **Naming**: Migration numbered 048 in sequence
 - [ ] **Documentation**: COMMENT ON COLUMN for key fields
 
 **Validation & Quality Gates**
@@ -1319,6 +1367,259 @@ describe('Obsidian Image Export', () => {
 
 ---
 
+### Phase 5.5: Reader UI Integration (0.5 days / 4 hours) ⭐ NEW - CRITICAL
+
+#### T-014.5: Create StorageImage Component for Reader
+
+**Priority**: CRITICAL
+**Estimated Hours**: 4
+**Dependencies**: T-001, T-009
+
+**Context & Background**
+
+**Purpose**: Enable images to display in the React reader UI by creating a custom component that resolves local refs to signed storage URLs.
+
+**CRITICAL GAP**: The original plan assumed images with local refs `![caption](page1_pic0.png)` would "just work" in the browser, but **browsers need actual URLs**. Without this component, **images won't display at all in the reader UI**.
+
+**As a** reader UI
+**I need** a custom image component
+**So that** local image references are resolved to actual storage URLs for display
+
+**Technical Requirements**
+
+**Functional Requirements**:
+- REQ-1: When markdown contains `![caption](filename.png)`, resolve filename to storage URL
+- REQ-2: When displaying image, use Supabase signed URL for secure access
+- REQ-3: When image fails to load, show fallback placeholder
+
+**Non-Functional Requirements**:
+- **Performance**: Lazy loading for images outside viewport
+- **Security**: Use signed URLs with 1-hour expiration
+- **UX**: Show loading state while fetching signed URL
+
+**Implementation Details**
+
+**Files to Modify/Create**:
+```
+├── src/components/reader/StorageImage.tsx - [Purpose: NEW - Custom image component]
+├── src/components/reader/BlockRenderer.tsx - [Purpose: Add custom image renderer to ReactMarkdown]
+```
+
+**Key Implementation Steps**:
+
+1. **Create StorageImage component** → New component (~80 lines)
+   ```typescript
+   'use client'
+
+   import { useState, useEffect } from 'react'
+   import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+   import Image from 'next/image'
+
+   interface StorageImageProps {
+     documentId: string
+     filename: string
+     alt?: string
+     caption?: string
+   }
+
+   export function StorageImage({ documentId, filename, alt, caption }: StorageImageProps) {
+     const [signedUrl, setSignedUrl] = useState<string | null>(null)
+     const [loading, setLoading] = useState(true)
+     const [error, setError] = useState<string | null>(null)
+     const supabase = createClientComponentClient()
+
+     useEffect(() => {
+       async function getSignedUrl() {
+         try {
+           // Get user ID from session
+           const { data: { session } } = await supabase.auth.getSession()
+           if (!session) {
+             setError('Not authenticated')
+             setLoading(false)
+             return
+           }
+
+           const userId = session.user.id
+           const storagePath = `${userId}/${documentId}/images/${filename}`
+
+           // Get signed URL (1 hour expiration)
+           const { data, error } = await supabase.storage
+             .from('documents')
+             .createSignedUrl(storagePath, 3600)
+
+           if (error) throw error
+           setSignedUrl(data.signedUrl)
+         } catch (err) {
+           console.error('Failed to load image:', err)
+           setError('Failed to load image')
+         } finally {
+           setLoading(false)
+         }
+       }
+
+       getSignedUrl()
+     }, [documentId, filename, supabase])
+
+     if (loading) {
+       return (
+         <div className="flex items-center justify-center h-64 bg-gray-100 rounded">
+           <span className="text-gray-500">Loading image...</span>
+         </div>
+       )
+     }
+
+     if (error || !signedUrl) {
+       return (
+         <div className="flex items-center justify-center h-64 bg-gray-100 rounded">
+           <span className="text-gray-500">{alt || 'Image failed to load'}</span>
+         </div>
+       )
+     }
+
+     return (
+       <figure className="my-4">
+         <img
+           src={signedUrl}
+           alt={alt || caption || 'Figure'}
+           className="max-w-full h-auto rounded shadow-lg"
+           loading="lazy"
+         />
+         {caption && (
+           <figcaption className="text-sm text-gray-600 mt-2 text-center">
+             {caption}
+           </figcaption>
+         )}
+       </figure>
+     )
+   }
+   ```
+
+2. **Integrate with ReactMarkdown** → Modify BlockRenderer (~15 lines)
+   ```typescript
+   // In BlockRenderer.tsx
+   import { StorageImage } from './StorageImage'
+
+   <ReactMarkdown
+     components={{
+       img: ({ src, alt }) => {
+         // Check if this is a local image ref (not a full URL)
+         if (src && !src.startsWith('http') && src.endsWith('.png')) {
+           return (
+             <StorageImage
+               documentId={documentId}
+               filename={src}
+               alt={alt}
+             />
+           )
+         }
+         // Fallback for external images
+         return <img src={src} alt={alt} />
+       },
+       // ...other components
+     }}
+   >
+     {chunk.content}
+   </ReactMarkdown>
+   ```
+
+**Code Patterns to Follow**:
+- **Client Component**: Use `'use client'` directive for hooks
+- **Supabase Client**: `createClientComponentClient()` for client-side auth
+- **Lazy Loading**: `loading="lazy"` attribute for performance
+- **Error Handling**: Graceful fallback with placeholder
+
+**Acceptance Criteria**
+
+**Given-When-Then Scenarios**:
+
+```gherkin
+Scenario 1: Image displays in reader
+  Given markdown with ![Figure 1](page1_pic0.png)
+  When user views document in reader
+  Then StorageImage component renders
+  And signed URL fetched from storage
+  And image displays correctly
+
+Scenario 2: Image loading state
+  Given user scrolls to image
+  When signed URL is being fetched
+  Then loading placeholder shows
+  And replaces with image when ready
+
+Scenario 3: Image error handling
+  Given image file missing from storage
+  When StorageImage tries to load
+  Then error placeholder shows
+  And doesn't crash reader UI
+```
+
+**Rule-Based Criteria (Checklist)**:
+- [ ] **Functional**: Local refs resolved to storage URLs
+- [ ] **Security**: Uses signed URLs with expiration
+- [ ] **Performance**: Lazy loading implemented
+- [ ] **UX**: Loading and error states work
+- [ ] **Integration**: ReactMarkdown custom renderer works
+- [ ] **No Regression**: External images still work
+
+**Validation & Quality Gates**:
+
+```typescript
+// Test file: src/components/reader/__tests__/StorageImage.test.tsx
+
+describe('StorageImage', () => {
+  test('resolves local ref to signed URL', async () => {
+    render(
+      <StorageImage
+        documentId="doc-123"
+        filename="page1_pic0.png"
+        alt="Test image"
+      />
+    )
+
+    // Wait for signed URL to load
+    await waitFor(() => {
+      expect(screen.getByAlt('Test image')).toBeInTheDocument()
+    })
+
+    // Verify image src is signed URL
+    const img = screen.getByAlt('Test image')
+    expect(img.getAttribute('src')).toContain('token=')
+  })
+
+  test('shows loading state initially', () => {
+    render(<StorageImage documentId="doc-123" filename="test.png" />)
+    expect(screen.getByText('Loading image...')).toBeInTheDocument()
+  })
+
+  test('shows error state on failure', async () => {
+    // Mock storage error
+    mockSupabase.storage.from().createSignedUrl.mockRejectedValue(new Error('Not found'))
+
+    render(<StorageImage documentId="doc-123" filename="missing.png" />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to load/i)).toBeInTheDocument()
+    })
+  })
+})
+```
+
+**Definition of Done**:
+- [ ] StorageImage component created and tested
+- [ ] BlockRenderer updated with custom image renderer
+- [ ] Images display correctly in reader UI
+- [ ] Loading states work properly
+- [ ] Error handling tested with missing images
+- [ ] No regression in markdown rendering
+- [ ] Component tests passing
+
+**Resources & References**:
+- **Supabase Storage**: https://supabase.com/docs/guides/storage/serving/downloads - Signed URLs
+- **Next.js Image**: https://nextjs.org/docs/app/api-reference/components/image - Optimization
+- **ReactMarkdown**: https://github.com/remarkjs/react-markdown#use-custom-components - Custom renderers
+
+---
+
 ### Phase 6: PDF Processor Integration (1 day / 8 hours)
 
 #### T-015: Cache Extraction Results in Job Metadata
@@ -1944,7 +2245,7 @@ async function benchmarkImageExtraction() {
 ### Week 1 (Days 1-3)
 
 **Day 1: Database + Python PDF** (8 hours)
-- Morning: T-001 (Database migration) - 4 hours
+- Morning: T-001 (Database migration with enhancements) - 4.5 hours ⭐ +0.5h for version tracking
 - Afternoon: T-002, T-003 (Python PDF figures) - 2.5 hours
 
 **Day 2: Python PDF + EPUB** (8 hours)
@@ -1957,20 +2258,39 @@ async function benchmarkImageExtraction() {
 
 ### Week 2 (Days 4-6)
 
-**Day 4: Obsidian + PDF Integration** (8 hours)
-- Morning: T-012, T-013, T-014 (Obsidian export) - 6.5 hours
-- Afternoon: T-015, T-016 (PDF processor Stage 6) - 3.5 hours
+**Day 4: Obsidian + Reader UI + PDF Integration** (8 hours) ⭐ MODIFIED
+- Morning: T-012, T-013, T-014 (Obsidian export with sync-back remapping) - 7 hours ⭐ +0.5h
+- Afternoon: T-014.5 (Reader UI StorageImage component) - 4 hours ⭐ NEW Phase 5.5
+  - Spillover to Day 5 morning
 
-**Day 5: Processor Integration + AI Cleanup** (8 hours)
-- Morning: T-017, T-018 (PDF processor testing) - 3 hours
-- Afternoon: T-019, T-020 (EPUB processor) - 2.5 hours
-- Evening: T-021, T-022 (AI cleanup enhancement) - 2.5 hours
+**Day 5: Reader UI + Processor Integration + AI Cleanup** (8 hours) ⭐ MODIFIED
+- Morning: T-014.5 continued + T-015, T-016 (PDF processor Stage 6) - 4 hours
+- Afternoon: T-017, T-018 (PDF processor testing) - 2 hours
+- Evening: T-019, T-020 (EPUB processor) - 2 hours
 
-**Day 6: Testing & Validation** (8 hours)
-- Morning: T-023, T-024 (Unit + integration tests) - 4 hours
-- Afternoon: T-025, T-026 (Manual testing + benchmarks) - 3.5 hours
+**Day 6: AI Cleanup + Testing** (8 hours) ⭐ MODIFIED
+- Morning: T-021, T-022 (AI cleanup with validation guards) - 3 hours ⭐ +0.5h
+- Afternoon: T-023, T-024 (Unit + integration tests) - 4 hours
 
-**Total: 6 days (48 hours)**
+### Week 2.5 (Day 7) ⭐ NEW DAY
+
+**Day 7: Critical Testing & Validation** (6 hours) ⭐ NEW
+- Morning: Enhanced critical tests - 3 hours
+  - Reprocessing data loss scenarios
+  - Obsidian round-trip with path remapping
+  - Image preservation through AI cleanup
+  - Chunk-to-figure linking validation
+- Afternoon: T-025, T-026 (Manual testing + benchmarks) - 3 hours
+- Final validation & documentation updates
+
+**Total: 7 days (54 hours)** ⭐ REVISED from 6 days (48 hours)
+
+**Additional 6 hours breakdown**:
+- Database enhancements (version tracking): +0.5h
+- Reader UI component (Phase 5.5): +4h
+- Sync-back remapping: +0.5h
+- Enhanced testing scenarios: +1h
+- **Total**: +6h → Worth it for production-ready, data-safe implementation
 
 ---
 

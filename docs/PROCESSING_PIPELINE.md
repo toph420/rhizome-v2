@@ -183,6 +183,12 @@ Rhizome V2 features a **dual-mode processing architecture** that balances cost, 
 │   • confidence (exact/high/medium/synthetic)                      │
 │   • method (which layer matched)                                  │
 │   • similarity score                                              │
+│                                                                   │
+│ Validation Warnings (NEW - Migration 047):                       │
+│   • Warnings persisted to database for user review                │
+│   • Saved to chunks.validation_warning + validation_details       │
+│   • Surfaced in ChunkQualityPanel UI for validation/correction   │
+│   • See "User Validation Workflow" section below                  │
 └───────────────────────────────────────────────────────────────────┘
               ↓
 ┌───────────────────────────────────────────────────────────────────┐
@@ -594,6 +600,55 @@ for (let i = 1; i < allMatched.length; i++) {
   }
 }
 ```
+
+### User Validation Workflow
+
+After bulletproof matching completes, validation warnings are **persisted to the database** for user review:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Processing Complete → Warnings Saved to Database            │
+├─────────────────────────────────────────────────────────────┤
+│ chunks.validation_warning: "Position overlap corrected..."  │
+│ chunks.validation_details: { type, original_offsets, ... }  │
+│ chunks.position_validated: FALSE                            │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│ UI: ChunkQualityPanel (src/components/sidebar/)             │
+├─────────────────────────────────────────────────────────────┤
+│ useUnvalidatedChunks(documentId)                            │
+│ → Query: position_validated = FALSE                         │
+│ → Returns: { synthetic, overlapCorrected, all }             │
+│                                                              │
+│ User Actions:                                                │
+│ 1. ✅ Validate → validateChunkPosition()                    │
+│ 2. 🔧 Fix → Enter correction mode → updateChunkOffsets()    │
+│ 3. 📍 View → Navigate to chunk in reader                    │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Correction Workflow (if user selects "Fix")                │
+├─────────────────────────────────────────────────────────────┤
+│ 1. Reader enters correction mode                            │
+│ 2. User selects correct text span                           │
+│ 3. Calculate markdown offsets (offset-calculator.ts)        │
+│ 4. Overlap detection: Check adjacent chunks                 │
+│ 5. Update database + correction_history                     │
+│ 6. Set position_validated = TRUE                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Server Actions** (`src/app/actions/chunks.ts`):
+- `validateChunkPosition()`: Mark chunk as correct (no changes)
+- `updateChunkOffsets()`: Adjust boundaries with overlap detection and history tracking
+
+**Key Files**:
+- `src/hooks/use-unvalidated-chunks.ts` (replaces useSyntheticChunks)
+- `src/app/actions/chunks.ts` (validation/correction server actions)
+- `src/components/sidebar/ChunkQualityPanel.tsx` (UI for review)
+
+**Why This Matters**: Closes the quality loop from "warnings generated" → "warnings persisted" → "user validates" → "system learns"
 
 #### Statistics Example
 
@@ -1017,6 +1072,24 @@ interface LocalModeExtras {
   position_method: 'exact_match' | 'normalized_match' | 'multi_anchor_search' |
                    'sliding_window' | 'embeddings' | 'llm_assisted' | 'interpolation'
   position_validated: boolean    // User can validate synthetic chunks
+
+  // Validation & Correction tracking (Migration 047)
+  validation_warning: string | null           // "Position overlap corrected..."
+  validation_details: {                       // Machine-readable warning metadata
+    type: 'overlap_corrected' | 'synthetic' | 'low_similarity'
+    original_offsets?: { start: number; end: number }
+    adjusted_offsets?: { start: number; end: number }
+    reason?: string
+    confidence_downgrade?: string
+  } | null
+  overlap_corrected: boolean                  // TRUE if offsets adjusted during matching
+  position_corrected: boolean                 // TRUE if user manually corrected boundaries
+  correction_history: Array<{                 // User correction audit trail
+    timestamp: string
+    old_offsets: { start: number; end: number }
+    new_offsets: { start: number; end: number }
+    reason: string
+  }>
 }
 ```
 
@@ -1031,6 +1104,34 @@ ALTER TABLE chunks ADD COLUMN bboxes jsonb;
 ALTER TABLE chunks ADD COLUMN position_confidence text;
 ALTER TABLE chunks ADD COLUMN position_method text;
 ALTER TABLE chunks ADD COLUMN position_validated boolean DEFAULT false;
+```
+
+### Migration: 047_chunk_validation_corrections.sql
+```sql
+-- Add validation metadata columns
+ALTER TABLE chunks
+  ADD COLUMN IF NOT EXISTS validation_warning TEXT,
+  ADD COLUMN IF NOT EXISTS validation_details JSONB,
+  ADD COLUMN IF NOT EXISTS overlap_corrected BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS position_corrected BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS correction_history JSONB DEFAULT '[]'::jsonb;
+
+-- Add index for querying unvalidated chunks
+CREATE INDEX IF NOT EXISTS idx_chunks_needs_validation
+  ON chunks(document_id, position_validated)
+  WHERE position_validated = FALSE;
+
+-- Add index for overlap-corrected chunks
+CREATE INDEX IF NOT EXISTS idx_chunks_overlap_corrected
+  ON chunks(document_id, overlap_corrected)
+  WHERE overlap_corrected = TRUE;
+
+-- Column comments for documentation
+COMMENT ON COLUMN chunks.validation_warning IS 'Human-readable warning message (e.g., "Position overlap corrected")';
+COMMENT ON COLUMN chunks.validation_details IS 'Machine-readable warning details: {type, original_offsets, adjusted_offsets, reason}';
+COMMENT ON COLUMN chunks.overlap_corrected IS 'TRUE if chunk offsets were adjusted due to overlap during matching';
+COMMENT ON COLUMN chunks.position_corrected IS 'TRUE if user manually corrected chunk boundaries';
+COMMENT ON COLUMN chunks.correction_history IS 'Array of correction records: [{timestamp, old_offsets, new_offsets, reason}]';
 ```
 
 ---
@@ -1087,6 +1188,17 @@ Even if all fuzzy matching fails, you still get 100% chunk recovery.
 - **CLOUD**: Faster (14 min) but $0.50/book, AI boundaries, no structural metadata
 
 Choose based on use case: deep study vs casual reading.
+
+### 8. User Validation Completes the Quality Loop
+Bulletproof matching generates confidence scores and warnings, but **user validation closes the feedback loop**:
+- Warnings persisted to database (not ephemeral logs)
+- UI surfaces synthetic and overlap-corrected chunks for review
+- Users validate correct positions or manually fix boundaries
+- Correction history tracked for audit and continuous improvement
+- System learns from user corrections to refine matching algorithms
+- Transforms processing quality from "black box" to "transparent partnership"
+
+**Why This Matters**: User validation isn't just error correction—it's a quality assurance system that builds trust and enables continuous improvement. The correction_history table becomes a training dataset for future enhancements.
 
 ---
 
@@ -1393,3 +1505,10 @@ psql -c "SELECT LEFT(markdown_hash, 8) FROM cached_chunks WHERE document_id = '<
 ### Database
 - `supabase/migrations/045_add_local_pipeline_columns.sql`: Local metadata columns
 - `supabase/migrations/046_cached_chunks_table.sql`: Cached chunks table for zero-cost reprocessing
+- `supabase/migrations/047_chunk_validation_corrections.sql`: Validation/correction tracking columns
+
+### Chunk Validation & Correction System
+- `src/app/actions/chunks.ts`: Server actions for validation and correction
+- `src/hooks/use-unvalidated-chunks.ts`: Hook for querying chunks needing validation (replaces useSyntheticChunks)
+- `src/components/sidebar/ChunkQualityPanel.tsx`: UI for reviewing and correcting chunks
+- `src/lib/reader/offset-calculator.ts`: Text selection to markdown offset conversion

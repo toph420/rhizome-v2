@@ -311,10 +311,11 @@ Dropped from 7 engines to 3. Each does something distinct:
 - Batch processing optimizations
 
 #### Database & Storage
-- 46+ migrations applied (latest: cached_chunks table for LOCAL mode optimization)
+- 47+ migrations applied (latest: 047_chunk_validation_corrections for user validation workflow)
 - ECS tables (entities, components)
 - Chunks with embeddings and metadata
 - Cached chunks table (original Docling extractions for zero-cost reprocessing)
+- Chunk validation/correction system (warnings, overlap detection, correction history)
 - User preferences for weight tuning
 - Hybrid storage (files + database)
 - Background jobs table
