@@ -918,6 +918,64 @@ function finalizeBulletproofMatch(
     )
   }
 
+  // CRITICAL FIX: Fill gaps between chunks to ensure binary search works
+  // Gaps occur when Docling skipped content (images, tables, page breaks)
+  // Binary search in block parser REQUIRES continuous chunk coverage
+  const chunksWithGapsFilled: MatchResult[] = []
+
+  for (let i = 0; i < allMatched.length; i++) {
+    const curr = allMatched[i]
+    chunksWithGapsFilled.push(curr)
+
+    // Check for gap before next chunk
+    if (i < allMatched.length - 1) {
+      const next = allMatched[i + 1]
+      const gapSize = next.start_offset - curr.end_offset
+
+      if (gapSize > 0) {
+        console.warn(
+          `[Bulletproof Matcher] ⚠️  Gap detected: ${gapSize} chars between ` +
+          `Chunk ${curr.chunk.index} (ends ${curr.end_offset}) and ` +
+          `Chunk ${next.chunk.index} (starts ${next.start_offset})`
+        )
+
+        // Create synthetic chunk to fill the gap
+        // Use content from the actual markdown gap
+        const gapContent = cleanedMarkdown.slice(curr.end_offset, next.start_offset)
+
+        const gapChunk: MatchResult = {
+          chunk: {
+            index: curr.chunk.index + 0.5,  // Fractional index to maintain order
+            content: gapContent,
+            meta: {
+              ...curr.chunk.meta,
+              note: 'Gap-fill chunk (Docling skipped this content)'
+            }
+          },
+          start_offset: curr.end_offset,
+          end_offset: next.start_offset,
+          confidence: 'synthetic',
+          method: 'interpolation',
+          similarity: 0
+        }
+
+        chunksWithGapsFilled.push(gapChunk)
+
+        warnings.push(
+          `Gap-fill chunk inserted between Chunk ${curr.chunk.index} and ${next.chunk.index} ` +
+          `(${gapSize} chars at ${curr.end_offset}-${next.start_offset}). ` +
+          `Docling likely skipped structural content (images/tables/page breaks).`
+        )
+      }
+    }
+  }
+
+  // Replace allMatched with gap-filled version
+  allMatched.length = 0
+  allMatched.push(...chunksWithGapsFilled)
+
+  console.log(`[Bulletproof Matcher] Gap filling complete: ${chunksWithGapsFilled.length} total chunks (${originalChunks.length} original + ${chunksWithGapsFilled.length - originalChunks.length} gap-fill)`)
+
   // Calculate statistics
   const stats: MatchStats = {
     total: originalChunks.length,
@@ -936,12 +994,18 @@ function finalizeBulletproofMatch(
     }
   }
 
-  // Validation check
-  if (allMatched.length !== originalChunks.length) {
+  // Validation check: Ensure we have at least the original chunks (may have gap-fill chunks too)
+  if (allMatched.length < originalChunks.length) {
     console.error(
       `[Bulletproof Matcher] ❌ CRITICAL: Expected ${originalChunks.length} chunks, got ${allMatched.length}`
     )
-    throw new Error('Bulletproof matching failed: Chunk count mismatch')
+    throw new Error('Bulletproof matching failed: Lost chunks during processing')
+  }
+
+  // Count original vs gap-fill chunks
+  const gapFillCount = allMatched.length - originalChunks.length
+  if (gapFillCount > 0) {
+    console.log(`[Bulletproof Matcher] Note: ${gapFillCount} gap-fill chunks added (total: ${allMatched.length})`)
   }
 
   console.log(`[Bulletproof Matcher] ✅ Complete: ${stats.total} chunks matched in ${stats.processingTime}ms`)
