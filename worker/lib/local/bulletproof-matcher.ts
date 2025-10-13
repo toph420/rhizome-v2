@@ -754,7 +754,7 @@ export async function bulletproofMatch(
 
     if (remaining.length === 0) {
       console.log('[Bulletproof Matcher] ✅ 100% recovery achieved in Layer 1')
-      return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings)
+      return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings, cleanedMarkdown)
     }
   }
 
@@ -770,7 +770,7 @@ export async function bulletproofMatch(
 
     if (remaining.length === 0) {
       console.log('[Bulletproof Matcher] ✅ 100% recovery achieved in Layer 2')
-      return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings)
+      return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings, cleanedMarkdown)
     }
   }
 
@@ -786,7 +786,7 @@ export async function bulletproofMatch(
 
     if (remaining.length === 0) {
       console.log('[Bulletproof Matcher] ✅ 100% recovery achieved in Layer 3')
-      return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings)
+      return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings, cleanedMarkdown)
     }
   }
 
@@ -810,7 +810,7 @@ export async function bulletproofMatch(
     console.log('[Bulletproof Matcher] ✅ 100% recovery GUARANTEED by Layer 4')
   }
 
-  return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings)
+  return finalizeBulletproofMatch(allMatched, doclingChunks, startTime, warnings, cleanedMarkdown)
 }
 
 /**
@@ -820,7 +820,8 @@ function finalizeBulletproofMatch(
   allMatched: MatchResult[],
   originalChunks: DoclingChunk[],
   startTime: number,
-  warnings: string[]
+  warnings: string[],
+  cleanedMarkdown: string
 ): {
   chunks: MatchResult[]
   stats: MatchStats
@@ -865,6 +866,56 @@ function finalizeBulletproofMatch(
         `Adjusted: [${curr.start_offset}-${curr.end_offset}]. Validation recommended.`
       )
     }
+  }
+
+  // CRITICAL FIX: Validate final offsets don't exceed markdown length
+  // This fixes cascading errors from sequential ordering using wrong content lengths
+  const markdownLength = cleanedMarkdown.length
+  const lastChunk = allMatched[allMatched.length - 1]
+
+  if (lastChunk.end_offset > markdownLength) {
+    console.warn(
+      `[Bulletproof Matcher] ⚠️  Final offsets exceed markdown length ` +
+      `(${lastChunk.end_offset} > ${markdownLength}). ` +
+      `Proportionally scaling all offsets to fit.`
+    )
+
+    // Calculate scaling factor to fit all chunks within markdown
+    const scaleFactor = markdownLength / lastChunk.end_offset
+
+    console.log(`[Bulletproof Matcher] Scaling factor: ${scaleFactor.toFixed(3)}`)
+
+    // Scale all offsets proportionally
+    for (const chunk of allMatched) {
+      const originalStart = chunk.start_offset
+      const originalEnd = chunk.end_offset
+
+      chunk.start_offset = Math.floor(chunk.start_offset * scaleFactor)
+      chunk.end_offset = Math.floor(chunk.end_offset * scaleFactor)
+
+      // Ensure end doesn't exceed markdown length
+      chunk.end_offset = Math.min(chunk.end_offset, markdownLength)
+
+      // Ensure start < end (minimum 1 char)
+      if (chunk.end_offset <= chunk.start_offset) {
+        chunk.end_offset = Math.min(chunk.start_offset + 1, markdownLength)
+      }
+
+      // Downgrade confidence since we had to scale
+      if (chunk.confidence !== 'synthetic') {
+        chunk.confidence = 'medium'
+      }
+
+      console.log(
+        `  Chunk ${chunk.chunk.index}: [${originalStart}-${originalEnd}] → ` +
+        `[${chunk.start_offset}-${chunk.end_offset}]`
+      )
+    }
+
+    warnings.push(
+      `All chunk offsets were scaled by ${scaleFactor.toFixed(3)}x to fit within markdown length (${markdownLength} chars). ` +
+      `Sequential ordering used Docling content lengths which didn't match cleaned markdown.`
+    )
   }
 
   // Calculate statistics
