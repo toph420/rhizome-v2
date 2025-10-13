@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,15 +12,15 @@ import {
 } from '@/components/ui/accordion'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useChunkStats } from '@/hooks/use-chunk-stats'
-import { useSyntheticChunks } from '@/hooks/use-synthetic-chunks'
-import { CheckCircle, AlertTriangle, FileText } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { useUnvalidatedChunks } from '@/hooks/use-unvalidated-chunks'
+import { CheckCircle, AlertTriangle, FileText, Wrench } from 'lucide-react'
+import { validateChunkPosition } from '@/app/actions/chunks'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 interface ChunkQualityPanelProps {
   documentId: string
-  onNavigateToChunk?: (chunkId: string) => void
+  onNavigateToChunk?: (chunkId: string, correctionMode?: boolean) => void
 }
 
 interface StatCardProps {
@@ -49,17 +49,19 @@ function StatCard({ label, count, color }: StatCardProps) {
 
 /**
  * ChunkQualityPanel displays chunk quality indicators from the local processing pipeline.
- * Shows confidence level statistics and lists synthetic chunks that need validation.
+ * Shows confidence level statistics and lists unvalidated chunks that need validation.
  *
  * **Quality Levels**:
  * - **Exact**: Perfect string match from Layer 1 fuzzy matching
  * - **High**: Embedding or multi-anchor match (>0.95 similarity)
  * - **Medium**: LLM-assisted match or lower embedding similarity (>0.85)
  * - **Synthetic**: Position interpolated from anchors (Layer 4 fallback)
+ * - **Overlap-Corrected**: Offsets adjusted to prevent overlap with adjacent chunks
  *
  * **User Actions**:
- * - View synthetic chunks (positions approximate, metadata preserved)
- * - Validate chunk position correctness
+ * - View unvalidated chunks (synthetic, overlap-corrected, low similarity)
+ * - Validate chunk position correctness (mark as OK)
+ * - Fix chunk position (enter correction mode)
  * - Navigate to chunk in document
  *
  * @param props - Component props
@@ -71,33 +73,30 @@ export function ChunkQualityPanel({
   onNavigateToChunk
 }: ChunkQualityPanelProps) {
   const { data: stats, isLoading: statsLoading } = useChunkStats(documentId)
-  const { data: syntheticChunks, isLoading: syntheticLoading } = useSyntheticChunks(documentId)
+  const { data: unvalidatedChunks, isLoading: unvalidatedLoading } = useUnvalidatedChunks(documentId)
 
   const handleValidateChunk = useCallback(async (chunkId: string) => {
     try {
-      const supabase = createClient()
+      const result = await validateChunkPosition(chunkId, documentId)
 
-      const { error } = await supabase
-        .from('chunks')
-        .update({ position_validated: true })
-        .eq('id', chunkId)
-
-      if (error) throw error
-
-      toast.success('Chunk position validated', {
-        description: 'Marked as manually verified'
-      })
+      if (result.success) {
+        toast.success('Chunk position validated', {
+          description: 'Marked as manually verified'
+        })
+      } else {
+        throw new Error(result.error || 'Unknown error')
+      }
     } catch (err) {
       console.error('[ChunkQualityPanel] Error validating chunk:', err)
       toast.error('Failed to validate chunk', {
-        description: 'Please try again'
+        description: err instanceof Error ? err.message : 'Please try again'
       })
     }
-  }, [])
+  }, [documentId])
 
   const handleShowInDocument = useCallback((chunkId: string) => {
     if (onNavigateToChunk) {
-      onNavigateToChunk(chunkId)
+      onNavigateToChunk(chunkId, false)
     } else {
       toast.info('Navigation not available', {
         description: 'This feature requires onNavigateToChunk callback'
@@ -105,12 +104,54 @@ export function ChunkQualityPanel({
     }
   }, [onNavigateToChunk])
 
+  const handleFixPosition = useCallback((chunkId: string) => {
+    if (onNavigateToChunk) {
+      onNavigateToChunk(chunkId, true) // true = enter correction mode
+      toast.info('Correction mode activated', {
+        description: 'Select the correct text span for this chunk in the document'
+      })
+    } else {
+      toast.info('Navigation not available', {
+        description: 'This feature requires onNavigateToChunk callback'
+      })
+    }
+  }, [onNavigateToChunk])
+
+  const handleAcceptAll = useCallback(async (chunkIds: string[], categoryName: string) => {
+    if (chunkIds.length === 0) return
+
+    try {
+      // Validate all chunks in parallel
+      const results = await Promise.all(
+        chunkIds.map(id => validateChunkPosition(id, documentId))
+      )
+
+      const successCount = results.filter(r => r.success).length
+      const failCount = results.length - successCount
+
+      if (successCount > 0) {
+        toast.success(`Accepted ${successCount} chunk${successCount > 1 ? 's' : ''}`, {
+          description: `All ${categoryName} chunks marked as validated${failCount > 0 ? ` (${failCount} failed)` : ''}`
+        })
+      }
+
+      if (failCount > 0) {
+        toast.error(`${failCount} chunk${failCount > 1 ? 's' : ''} failed to validate`)
+      }
+    } catch (err) {
+      console.error('[ChunkQualityPanel] Error accepting all chunks:', err)
+      toast.error('Failed to validate chunks', {
+        description: 'Please try again'
+      })
+    }
+  }, [documentId])
+
   // Loading state
-  if (statsLoading || syntheticLoading) {
+  if (statsLoading || unvalidatedLoading) {
     return (
       <div className="p-4 space-y-4">
         <div className="grid grid-cols-2 gap-2">
-          {[1, 2, 3, 4].map(i => (
+          {[1, 2, 3, 4, 5].map(i => (
             <Card key={i}>
               <CardContent className="p-3">
                 <Skeleton className="h-8 w-16 mb-1" />
@@ -149,105 +190,349 @@ export function ChunkQualityPanel({
           <StatCard label="High" count={stats.high} color="blue" />
           <StatCard label="Medium" count={stats.medium} color="yellow" />
           <StatCard label="Synthetic" count={stats.synthetic} color="orange" />
+          {stats.overlapCorrected > 0 && (
+            <StatCard label="Overlap-Corrected" count={stats.overlapCorrected} color="yellow" />
+          )}
         </div>
         <p className="text-xs text-muted-foreground mt-2">
           Total chunks: {stats.total} • {Math.round((stats.synthetic / stats.total) * 100)}% synthetic
+          {stats.overlapCorrected > 0 && ` • ${stats.overlapCorrected} overlap-corrected`}
         </p>
       </div>
 
-      {/* Synthetic chunks list (needs validation) */}
-      {syntheticChunks && syntheticChunks.length > 0 && (
+      {/* Unvalidated chunks list (needs validation) */}
+      {unvalidatedChunks && unvalidatedChunks.all.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-orange-500" />
-              Synthetic Chunks
+              Chunks Needing Validation
             </CardTitle>
             <CardDescription>
-              These chunks have interpolated positions. Please validate or review.
+              These chunks need manual validation or correction. Review warnings and take action.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Accordion type="single" collapsible>
-              {syntheticChunks.map(chunk => (
-                <AccordionItem key={chunk.id} value={chunk.id}>
+              {/* Synthetic chunks */}
+              {unvalidatedChunks.synthetic.length > 0 && (
+                <AccordionItem value="synthetic-category">
                   <AccordionTrigger className="hover:no-underline">
-                    <div className="flex items-center gap-2 text-sm">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
                       <Badge variant="outline" className="bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20">
-                        Synthetic
+                        Synthetic ⚠️
                       </Badge>
-                      <span>Chunk {chunk.chunk_index}</span>
-                      {chunk.page_start !== null && (
-                        <span className="text-muted-foreground">(Page {chunk.page_start})</span>
-                      )}
-                      {chunk.section_marker && (
-                        <span className="text-muted-foreground text-xs">({chunk.section_marker})</span>
-                      )}
-                      {chunk.position_validated && (
-                        <CheckCircle className="h-3 w-3 text-green-500 ml-auto" />
-                      )}
+                      <span>{unvalidatedChunks.synthetic.length} chunk{unvalidatedChunks.synthetic.length > 1 ? 's' : ''}</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
-                    <div className="space-y-3 pt-2">
-                      {/* Chunk preview */}
-                      <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
-                        <FileText className="h-3 w-3 inline mr-1" />
-                        {chunk.content.substring(0, 150)}
-                        {chunk.content.length > 150 && '...'}
-                      </div>
-
-                      {/* Metadata */}
-                      <div className="text-xs space-y-1">
-                        <p><span className="font-semibold">Method:</span> {chunk.position_method || 'Layer 4 (interpolation)'}</p>
-                        {chunk.page_start !== null && (
-                          <p><span className="font-semibold">Pages:</span> {chunk.page_start}{chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ''}</p>
-                        )}
-                        {chunk.section_marker && (
-                          <p><span className="font-semibold">Section:</span> {chunk.section_marker}</p>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex gap-2">
-                        {!chunk.position_validated && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleValidateChunk(chunk.id)}
-                            className="text-xs"
-                          >
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Position Correct
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleShowInDocument(chunk.id)}
-                          className="text-xs"
-                        >
-                          <FileText className="h-3 w-3 mr-1" />
-                          View in Document
-                        </Button>
-                      </div>
+                    <div className="space-y-3 mb-4">
+                      <p className="text-xs text-muted-foreground p-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900 rounded">
+                        <strong className="text-orange-900 dark:text-orange-100">⚠️ Requires Review:</strong> These chunks have <strong>estimated positions</strong> (Layer 4 interpolation). No exact match was found in cleaned content. Please verify chunk positions are correct.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAcceptAll(unvalidatedChunks.synthetic.map(c => c.id), 'synthetic')}
+                        className="w-full text-xs"
+                      >
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Accept All Synthetic Chunks
+                      </Button>
                     </div>
+                    <Accordion type="single" collapsible className="pl-2">
+                      {unvalidatedChunks.synthetic.map(chunk => (
+                        <AccordionItem key={chunk.id} value={chunk.id}>
+                          <AccordionTrigger className="hover:no-underline">
+                            <div className="flex items-center gap-2 text-sm">
+                              <span>Chunk {chunk.chunk_index}</span>
+                              {chunk.page_start !== null && (
+                                <span className="text-muted-foreground">(Page {chunk.page_start})</span>
+                              )}
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <div className="space-y-3 pt-2">
+                              {/* Warning message */}
+                              {chunk.validation_warning && (
+                                <div className="text-xs p-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900 rounded">
+                                  <p className="font-semibold text-orange-900 dark:text-orange-100">⚠️ {chunk.validation_warning}</p>
+                                </div>
+                              )}
+
+                              {/* Chunk preview - full content */}
+                              <div className="text-xs text-muted-foreground bg-muted p-2 rounded max-h-[200px] overflow-y-auto">
+                                <FileText className="h-3 w-3 inline mr-1" />
+                                {chunk.content}
+                              </div>
+
+                              {/* Metadata */}
+                              <div className="text-xs space-y-1">
+                                <p><span className="font-semibold">Method:</span> {chunk.position_method || 'Layer 4 (interpolation)'}</p>
+                                {chunk.page_start !== null && (
+                                  <p><span className="font-semibold">Pages:</span> {chunk.page_start}{chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ''}</p>
+                                )}
+                                {chunk.start_offset !== null && chunk.end_offset !== null && (
+                                  <p><span className="font-semibold">Offsets:</span> {chunk.start_offset} - {chunk.end_offset}</p>
+                                )}
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleValidateChunk(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Position OK
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleFixPosition(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <Wrench className="h-3 w-3 mr-1" />
+                                  Fix Position
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleShowInDocument(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                              </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      ))}
+                    </Accordion>
                   </AccordionContent>
                 </AccordionItem>
-              ))}
+              )}
+
+              {/* Overlap-corrected chunks */}
+              {unvalidatedChunks.overlapCorrected.length > 0 && (
+                <AccordionItem value="overlap-category">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20">
+                        Overlap-Corrected ✅
+                      </Badge>
+                      <span>{unvalidatedChunks.overlapCorrected.length} chunk{unvalidatedChunks.overlapCorrected.length > 1 ? 's' : ''}</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-3 mb-4">
+                      <p className="text-xs text-muted-foreground p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded">
+                        <strong className="text-yellow-900 dark:text-yellow-100">✅ Matched Successfully:</strong> These chunks <strong>matched correctly</strong> but had overlapping boundaries that were auto-adjusted. Content is correct, verify boundaries if needed.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAcceptAll(unvalidatedChunks.overlapCorrected.map(c => c.id), 'overlap-corrected')}
+                        className="w-full text-xs"
+                      >
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Accept All Overlap-Corrected Chunks
+                      </Button>
+                    </div>
+                    <Accordion type="single" collapsible className="pl-2">
+                      {unvalidatedChunks.overlapCorrected.map(chunk => (
+                        <AccordionItem key={chunk.id} value={chunk.id}>
+                          <AccordionTrigger className="hover:no-underline">
+                            <div className="flex items-center gap-2 text-sm">
+                              <span>Chunk {chunk.chunk_index}</span>
+                              {chunk.page_start !== null && (
+                                <span className="text-muted-foreground">(Page {chunk.page_start})</span>
+                              )}
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <div className="space-y-3 pt-2">
+                              {/* Warning message */}
+                              {chunk.validation_warning && (
+                                <div className="text-xs p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded">
+                                  <p className="font-semibold text-yellow-900 dark:text-yellow-100">⚠️ {chunk.validation_warning}</p>
+                                </div>
+                              )}
+
+                              {/* Validation details */}
+                              {chunk.validation_details && (
+                                <div className="text-xs space-y-1 p-2 bg-muted rounded">
+                                  {chunk.validation_details.original_offsets && chunk.validation_details.adjusted_offsets && (
+                                    <>
+                                      <p><span className="font-semibold">Original:</span> {chunk.validation_details.original_offsets.start} - {chunk.validation_details.original_offsets.end}</p>
+                                      <p><span className="font-semibold">Adjusted:</span> {chunk.validation_details.adjusted_offsets.start} - {chunk.validation_details.adjusted_offsets.end}</p>
+                                    </>
+                                  )}
+                                  {chunk.validation_details.reason && (
+                                    <p><span className="font-semibold">Reason:</span> {chunk.validation_details.reason}</p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Chunk preview - full content */}
+                              <div className="text-xs text-muted-foreground bg-muted p-2 rounded max-h-[200px] overflow-y-auto">
+                                <FileText className="h-3 w-3 inline mr-1" />
+                                {chunk.content}
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleValidateChunk(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Position OK
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleFixPosition(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <Wrench className="h-3 w-3 mr-1" />
+                                  Fix Position
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleShowInDocument(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                              </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      ))}
+                    </Accordion>
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
+              {/* Low similarity chunks */}
+              {unvalidatedChunks.lowSimilarity.length > 0 && (
+                <AccordionItem value="low-similarity-category">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20">
+                        Low Similarity 📊
+                      </Badge>
+                      <span>{unvalidatedChunks.lowSimilarity.length} chunk{unvalidatedChunks.lowSimilarity.length > 1 ? 's' : ''}</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-3 mb-4">
+                      <p className="text-xs text-muted-foreground p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded">
+                        <strong className="text-yellow-900 dark:text-yellow-100">📊 Medium Confidence:</strong> These chunks matched with <strong>0.85-0.95 similarity</strong> or needed LLM assistance. Content is likely correct but worth verifying.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAcceptAll(unvalidatedChunks.lowSimilarity.map(c => c.id), 'low-similarity')}
+                        className="w-full text-xs"
+                      >
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Accept All Low Similarity Chunks
+                      </Button>
+                    </div>
+                    <Accordion type="single" collapsible className="pl-2">
+                      {unvalidatedChunks.lowSimilarity.map(chunk => (
+                        <AccordionItem key={chunk.id} value={chunk.id}>
+                          <AccordionTrigger className="hover:no-underline">
+                            <div className="flex items-center gap-2 text-sm">
+                              <span>Chunk {chunk.chunk_index}</span>
+                              {chunk.page_start !== null && (
+                                <span className="text-muted-foreground">(Page {chunk.page_start})</span>
+                              )}
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <div className="space-y-3 pt-2">
+                              {/* Warning message */}
+                              {chunk.validation_warning && (
+                                <div className="text-xs p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded">
+                                  <p className="font-semibold text-yellow-900 dark:text-yellow-100">⚠️ {chunk.validation_warning}</p>
+                                </div>
+                              )}
+
+                              {/* Chunk preview - full content */}
+                              <div className="text-xs text-muted-foreground bg-muted p-2 rounded max-h-[200px] overflow-y-auto">
+                                <FileText className="h-3 w-3 inline mr-1" />
+                                {chunk.content}
+                              </div>
+
+                              {/* Metadata */}
+                              <div className="text-xs space-y-1">
+                                <p><span className="font-semibold">Method:</span> {chunk.position_method || 'Unknown'}</p>
+                                {chunk.page_start !== null && (
+                                  <p><span className="font-semibold">Pages:</span> {chunk.page_start}{chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ''}</p>
+                                )}
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleValidateChunk(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Position OK
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleFixPosition(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <Wrench className="h-3 w-3 mr-1" />
+                                  Fix Position
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleShowInDocument(chunk.id)}
+                                  className="text-xs"
+                                >
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                              </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      ))}
+                    </Accordion>
+                  </AccordionContent>
+                </AccordionItem>
+              )}
             </Accordion>
           </CardContent>
         </Card>
       )}
 
-      {/* No synthetic chunks - all good! */}
-      {syntheticChunks && syntheticChunks.length === 0 && (
+      {/* All chunks validated - success state */}
+      {unvalidatedChunks && unvalidatedChunks.all.length === 0 && (
         <Card>
           <CardContent className="p-4 flex items-center gap-2">
             <CheckCircle className="h-5 w-5 text-green-500" />
             <div>
-              <p className="text-sm font-semibold">All chunks matched successfully</p>
-              <p className="text-xs text-muted-foreground">No synthetic chunks requiring validation</p>
+              <p className="text-sm font-semibold">All chunks validated</p>
+              <p className="text-xs text-muted-foreground">No chunks requiring validation</p>
             </div>
           </CardContent>
         </Card>

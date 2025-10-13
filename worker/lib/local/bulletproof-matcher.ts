@@ -63,6 +63,19 @@ export interface MatchResult {
   method: MatchMethod
   /** Similarity score (0-1, only for fuzzy/embeddings) */
   similarity?: number
+  /** Validation warning (for UI review) */
+  validation_warning?: string
+  /** Structured validation details */
+  validation_details?: {
+    type: 'overlap_corrected' | 'synthetic' | 'low_similarity'
+    original_offsets?: { start: number; end: number }
+    adjusted_offsets?: { start: number; end: number }
+    confidence_downgrade?: string
+    reason: string
+    metadata?: Record<string, any>
+  }
+  /** Whether offsets were adjusted to prevent overlap */
+  overlap_corrected?: boolean
 }
 
 /**
@@ -79,6 +92,8 @@ export interface MatchStats {
   medium: number
   /** Synthetic chunks (interpolated positions) */
   synthetic: number
+  /** Chunks with overlap corrections */
+  overlapCorrected: number
   /** Processing time in milliseconds */
   processingTime: number
   /** Stats by layer */
@@ -675,7 +690,17 @@ function layer4_interpolation(
       end_offset: estimatedEnd,
       confidence: 'synthetic',
       method: 'interpolation',
-      similarity: 0  // Synthetic position, no similarity score
+      similarity: 0,  // Synthetic position, no similarity score
+      validation_warning: `Chunk ${chunk.index} (page ${chunk.meta.page_start || 'unknown'}): Position approximate, metadata preserved. Validation recommended.`,
+      validation_details: {
+        type: 'synthetic',
+        reason: 'Layer 4 interpolation (no exact match found). Position calculated using surrounding anchor chunks.',
+        metadata: {
+          before_anchor: beforeAnchor ? beforeAnchor.chunk.index : null,
+          after_anchor: afterAnchor ? afterAnchor.chunk.index : null,
+          interpolation_method: beforeAnchor && afterAnchor ? 'between_anchors' : beforeAnchor ? 'extrapolate_forward' : afterAnchor ? 'extrapolate_backward' : 'no_anchors'
+        }
+      }
     })
   }
 
@@ -844,6 +869,7 @@ function finalizeBulletproofMatch(
 
       const originalStart = curr.start_offset
       const originalEnd = curr.end_offset
+      const originalConfidence = curr.confidence
 
       // Force sequential: current chunk starts where previous ended
       curr.start_offset = prev.end_offset
@@ -853,12 +879,28 @@ function finalizeBulletproofMatch(
       )
 
       // Downgrade confidence if we had to fix it
+      const confidenceDowngrade = originalConfidence
       if (curr.confidence === 'exact') {
         curr.confidence = 'high'
         curr.method = 'normalized_match'  // Adjusted from exact
       } else if (curr.confidence === 'high') {
         curr.confidence = 'medium'
       }
+
+      // Attach validation warning and details
+      curr.validation_warning = `Overlap correction: [${originalStart}, ${originalEnd}] → [${curr.start_offset}, ${curr.end_offset}] (page ${curr.chunk.meta.page_start || 'unknown'})`
+      curr.validation_details = {
+        type: 'overlap_corrected',
+        original_offsets: { start: originalStart, end: originalEnd },
+        adjusted_offsets: { start: curr.start_offset, end: curr.end_offset },
+        confidence_downgrade: `${confidenceDowngrade} → ${curr.confidence}`,
+        reason: `Chunk ${curr.chunk.index} overlapped with previous chunk ${prev.chunk.index}. Sequential ordering enforced.`,
+        metadata: {
+          prev_chunk_index: prev.chunk.index,
+          prev_chunk_end: prev.end_offset
+        }
+      }
+      curr.overlap_corrected = true
 
       warnings.push(
         `Chunk ${curr.chunk.index} (page ${curr.chunk.meta.page_start || 'unknown'}): ` +
@@ -983,6 +1025,7 @@ function finalizeBulletproofMatch(
     high: allMatched.filter(r => r.confidence === 'high').length,
     medium: allMatched.filter(r => r.confidence === 'medium').length,
     synthetic: allMatched.filter(r => r.confidence === 'synthetic').length,
+    overlapCorrected: allMatched.filter(r => r.overlap_corrected === true).length,
     processingTime: Date.now() - startTime,
     byLayer: {
       layer1: allMatched.filter(r =>
@@ -1012,7 +1055,9 @@ function finalizeBulletproofMatch(
   console.log(`  Exact: ${stats.exact} (${(stats.exact / stats.total * 100).toFixed(1)}%)`)
   console.log(`  High: ${stats.high} (${(stats.high / stats.total * 100).toFixed(1)}%)`)
   console.log(`  Medium: ${stats.medium} (${(stats.medium / stats.total * 100).toFixed(1)}%)`)
-  console.log(`  Synthetic: ${stats.synthetic} (${(stats.synthetic / stats.total * 100).toFixed(1)}%)`)
+  console.log(`  Layer 4 (Synthetic): ${stats.synthetic} (${(stats.synthetic / stats.total * 100).toFixed(1)}%)`)
+  console.log(`  Overlap corrections: ${stats.overlapCorrected}/${stats.total}`)
+  console.log(`  Total needing validation: ${stats.synthetic + stats.overlapCorrected} chunks`)
   console.log(`  By Layer: L1=${stats.byLayer.layer1}, L2=${stats.byLayer.layer2}, L3=${stats.byLayer.layer3}, L4=${stats.byLayer.layer4}`)
 
   return { chunks: allMatched, stats, warnings }

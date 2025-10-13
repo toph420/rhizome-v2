@@ -126,23 +126,47 @@ async function cleanSection(
 CRITICAL RULES - READ CAREFULLY:
 1. PRESERVE EVERY WORD - Do NOT summarize, condense, or shorten ANY text
 2. PRESERVE EVERY SENTENCE - Keep all paragraphs exactly as they are
-3. ONLY fix these specific issues:
+3. PRESERVE ALL FOOTNOTES - Keep footnote markers ([^1]) and definitions ([^1]: text) in their EXACT positions
+4. DO NOT MOVE FOOTNOTES - Footnote definitions stay where they are, do not relocate them
+5. ONLY fix these specific issues:
    - Remove OCR artifacts (misplaced characters like "ﬁ" → "fi")
    - Fix broken words across lines
    - Fix inconsistent spacing (but keep paragraph breaks)
-4. PRESERVE ALL headings, lists, and structure EXACTLY as written
-5. Output ONLY the cleaned markdown with NO explanations or comments
+6. PRESERVE ALL headings, lists, and structure EXACTLY as written
+7. Output ONLY the cleaned markdown with NO explanations or comments
 
-WRONG: Summarizing "This is a long paragraph about X, Y, and Z" → "Discussion of X, Y, Z"
-RIGHT: Keeping "This is a long paragraph about X, Y, and Z" exactly as is (just fix OCR)
+FOOTNOTE PRESERVATION:
+Markdown footnotes have TWO parts:
+- INLINE MARKERS: [^1], [^note] - appear in the text, DO NOT remove or move
+- DEFINITIONS: [^1]: Footnote content - stay in their original position, DO NOT move to end of document
 
-If you summarize or omit ANY content, this is a FAILURE.
+Example:
+"Text with note[^1].
+
+[^1]: Note content here.
+
+More text..."
+
+Keep this EXACTLY as is - do not move the footnote definition!
+
+WRONG BEHAVIORS:
+- Summarizing: "This is a long paragraph about X, Y, and Z" → "Discussion of X, Y, Z"
+- Removing footnote markers: "Text[^1]" → "Text"
+- Moving footnote definitions to different positions
+- Omitting ANY content
+
+RIGHT BEHAVIOR:
+- Keep "This is a long paragraph about X, Y, and Z" exactly as is (just fix OCR)
+- Keep "Text[^1]" with marker intact
+- Keep "[^1]: Note content" in its original position
+
+If you summarize, move footnotes, or omit ANY content, this is a FAILURE.
 
 Markdown to clean:
 
 ${text}
 
-Cleaned markdown (with ALL original content preserved):`
+Cleaned markdown (with ALL original content and footnotes preserved in their positions):`
 
   try {
     const response = await ollama.chat(prompt, {

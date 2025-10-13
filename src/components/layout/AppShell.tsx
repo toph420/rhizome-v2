@@ -12,16 +12,13 @@ export function AppShell({ children }: AppShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen flex flex-col">
       <Navigation open={mobileMenuOpen} onOpenChange={setMobileMenuOpen} />
+      <TopNav onMenuClick={() => setMobileMenuOpen(true)} />
 
-      <div className="flex-1 flex flex-col">
-        <TopNav onMenuClick={() => setMobileMenuOpen(true)} />
-
-        <main className="flex-1">
-          {children}
-        </main>
-      </div>
+      <main className="flex-1">
+        {children}
+      </main>
     </div>
   )
 }

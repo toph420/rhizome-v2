@@ -123,12 +123,6 @@ export const BlockRenderer = memo(function BlockRenderer({
       data-end-offset={block.endOffset}
       className={`${proseClass} py-2 min-h-[1rem] relative group`}
       onClick={handleClick}
-      style={{
-        borderLeft: showChunkBoundaries && isChunkStart && chunk
-          ? `4px solid ${getChunkColor(chunk.chunk_index)}`
-          : undefined,
-        paddingLeft: showChunkBoundaries && isChunkStart ? '0.75rem' : undefined
-      }}
     >
       {/* Chunk metadata icon in left margin - only show on first block of chunk */}
       {showMetadataIcon && block.chunkPosition === 0 && (

@@ -93,6 +93,20 @@ export interface ProcessedChunk {
   /** Whether position has been manually validated */
   position_validated?: boolean
 
+  // === PHASE 6: Validation and Correction System (Migration 048) ===
+  // These fields support LOCAL mode quality assurance workflow
+
+  /** Human-readable validation warning */
+  validation_warning?: string | null
+  /** Structured validation metadata */
+  validation_details?: ValidationDetails | null
+  /** Whether chunk offsets were adjusted to prevent overlap */
+  overlap_corrected?: boolean
+  /** Whether user has validated or corrected position */
+  position_corrected?: boolean
+  /** Audit trail of all corrections */
+  correction_history?: CorrectionHistoryEntry[]
+
   // === METADATA (Flat structure matching database schema) ===
   // These correspond to individual JSONB columns in the chunks table (migration 015)
   // Each has a GIN index for efficient queries by the 3-engine collision detection system
@@ -194,6 +208,40 @@ export interface PositionContext {
   originalSnippet?: string
   /** Estimated character offset */
   estimatedOffset?: number
+}
+
+/**
+ * Validation details for chunks that need review.
+ * Structured metadata about why chunk position needs validation.
+ */
+export interface ValidationDetails {
+  /** Type of validation warning */
+  type: 'overlap_corrected' | 'synthetic' | 'low_similarity'
+  /** Original offsets before correction (for overlap_corrected) */
+  original_offsets?: { start: number; end: number }
+  /** Adjusted offsets after correction (for overlap_corrected) */
+  adjusted_offsets?: { start: number; end: number }
+  /** Confidence level change (e.g., "exact → high") */
+  confidence_downgrade?: string
+  /** Reason for warning */
+  reason: string
+  /** Additional context-specific data */
+  metadata?: Record<string, any>
+}
+
+/**
+ * Correction history entry for audit trail.
+ * Records each user correction with full details.
+ */
+export interface CorrectionHistoryEntry {
+  /** Timestamp of correction */
+  timestamp: string
+  /** Offsets before correction */
+  old_offsets: { start: number; end: number }
+  /** Offsets after correction */
+  new_offsets: { start: number; end: number }
+  /** Reason for correction */
+  reason: string
 }
 
 /**

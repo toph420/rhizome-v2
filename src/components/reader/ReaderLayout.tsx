@@ -1,16 +1,29 @@
 'use client'
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
 import { RightPanel } from '../sidebar/RightPanel'
 import { ConnectionHeatmap } from './ConnectionHeatmap'
 import { QuickSparkModal } from './QuickSparkModal'
+import { CorrectionModePanel } from './CorrectionModePanel'
+import { CorrectionConfirmDialog } from './CorrectionConfirmDialog'
 import { toast } from 'sonner'
 import { useReaderStore } from '@/stores/reader-store'
 import { useConnectionStore } from '@/stores/connection-store'
 import { useUIStore } from '@/stores/ui-store'
+import { calculateOffsetsFromCurrentSelection } from '@/lib/reader/offset-calculator'
 import type { Chunk, StoredAnnotation } from '@/types/annotations'
+
+/**
+ * Correction mode state.
+ */
+interface CorrectionModeState {
+  chunkId: string
+  chunkIndex: number
+  originalStartOffset: number
+  originalEndOffset: number
+}
 
 interface ReaderLayoutProps {
   documentId: string
@@ -90,6 +103,8 @@ export function ReaderLayout({
   const loadDocument = useReaderStore(state => state.loadDocument)
   const visibleChunks = useReaderStore(state => state.visibleChunks)
   const scrollPosition = useReaderStore(state => state.scrollPosition)
+  const setCorrectionModeStore = useReaderStore(state => state.setCorrectionMode)
+  const setScrollToChunkId = useReaderStore(state => state.setScrollToChunkId)
 
   // ConnectionStore: Engine configuration and connections
   const setConnections = useConnectionStore(state => state.setConnections)
@@ -101,6 +116,15 @@ export function ReaderLayout({
   const showQuickSpark = useUIStore(state => state.quickCaptureOpen)
   const openQuickCapture = useUIStore(state => state.openQuickCapture)
   const closeQuickCapture = useUIStore(state => state.closeQuickCapture)
+
+  // Correction mode state
+  const [correctionMode, setCorrectionMode] = useState<CorrectionModeState | null>(null)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [selectedOffsets, setSelectedOffsets] = useState<{
+    startOffset: number
+    endOffset: number
+    selectedText: string
+  } | null>(null)
 
   // Initialize document in ReaderStore on mount
   useEffect(() => {
@@ -170,35 +194,77 @@ export function ReaderLayout({
 
 
   /**
-   * Navigates to a chunk by scrolling it into view.
-   * Finds the chunk element by data-chunk-id attribute and scrolls smoothly.
+   * Navigates to a chunk using Virtuoso's scrollToIndex API.
+   * VirtualizedReader watches scrollToChunkId in ReaderStore and scrolls precisely.
+   *
+   * @param chunkId - Chunk identifier to navigate to
+   * @param enterCorrectionMode - Whether to enter correction mode for this chunk
    */
-  const handleNavigateToChunk = useCallback((chunkId: string) => {
-    const chunkElement = document.querySelector(`[data-chunk-id="${chunkId}"]`)
+  const handleNavigateToChunk = useCallback((chunkId: string, enterCorrectionMode = false) => {
+    // Find chunk data
+    const chunk = chunks.find(c => c.id === chunkId)
 
-    if (chunkElement) {
-      chunkElement.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      })
-
-      // Highlight the chunk temporarily with Framer Motion classes
-      chunkElement.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
-      setTimeout(() => {
-        chunkElement.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
-      }, 2000)
-
-      toast.success('Navigated to connected chunk', {
-        duration: 2000,
-      })
-    } else {
-      console.warn(`Chunk element not found: ${chunkId}`)
+    if (!chunk) {
+      console.warn(`Chunk not found: ${chunkId}`)
       toast.info('Cross-document connection', {
         description: 'This connection points to another document. Cross-document navigation coming soon!',
         duration: 3000,
       })
+      return
     }
-  }, [])
+
+    // Trigger scroll via ReaderStore (VirtualizedReader will handle it)
+    setScrollToChunkId(chunkId)
+
+    // Wait for scroll to complete, then highlight and enter correction mode if needed
+    setTimeout(() => {
+      const chunkElements = document.querySelectorAll(`[data-chunk-id="${chunkId}"]`)
+
+      if (chunkElements.length > 0) {
+        // Highlight all blocks of this chunk temporarily
+        chunkElements.forEach((element) => {
+          element.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+        })
+
+        setTimeout(() => {
+          chunkElements.forEach((element) => {
+            element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
+          })
+        }, 2000)
+
+        // Enter correction mode or show success toast
+        if (enterCorrectionMode) {
+          setCorrectionMode({
+            chunkId: chunk.id,
+            chunkIndex: chunk.chunk_index,
+            originalStartOffset: chunk.start_offset ?? 0,
+            originalEndOffset: chunk.end_offset ?? 0,
+          })
+          setCorrectionModeStore(true)
+        } else {
+          toast.success('Navigated to chunk ' + chunk.chunk_index, {
+            duration: 2000,
+          })
+        }
+      } else {
+        console.warn(`Chunk not rendered after scrolling: ${chunkId}`)
+        toast.info('Scrolled to chunk ' + chunk.chunk_index, {
+          description: 'The chunk should be visible now'
+        })
+
+        // Still enter correction mode if requested
+        if (enterCorrectionMode) {
+          setCorrectionMode({
+            chunkId: chunk.id,
+            chunkIndex: chunk.chunk_index,
+            originalStartOffset: chunk.start_offset ?? 0,
+            originalEndOffset: chunk.end_offset ?? 0,
+          })
+          setCorrectionModeStore(true)
+        }
+      }
+    }, 800)
+  }, [chunks, setCorrectionModeStore, setScrollToChunkId])
 
   /**
    * Scrolls to annotation by finding element with data-annotation-id attribute.
@@ -304,6 +370,65 @@ export function ReaderLayout({
     }, 500)
   }, [])
 
+  /**
+   * Text selection handler for correction mode.
+   * Calculates offsets from DOM selection and shows confirmation dialog.
+   */
+  useEffect(() => {
+    if (!correctionMode) return
+
+    function handleMouseUp() {
+      // Small delay to ensure selection is complete
+      setTimeout(() => {
+        if (!correctionMode) return
+
+        const offsetResult = calculateOffsetsFromCurrentSelection(true)
+
+        if (offsetResult) {
+          console.log('[ReaderLayout] Text selected for correction:', {
+            chunkId: correctionMode.chunkId,
+            oldOffsets: [correctionMode.originalStartOffset, correctionMode.originalEndOffset],
+            newOffsets: [offsetResult.startOffset, offsetResult.endOffset],
+            text: offsetResult.selectedText.substring(0, 100)
+          })
+
+          setSelectedOffsets({
+            startOffset: offsetResult.startOffset,
+            endOffset: offsetResult.endOffset,
+            selectedText: offsetResult.selectedText
+          })
+          setShowConfirmDialog(true)
+        }
+      }, 100)
+    }
+
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => document.removeEventListener('mouseup', handleMouseUp)
+  }, [correctionMode])
+
+  /**
+   * Exits correction mode and clears state.
+   */
+  const handleCancelCorrection = useCallback(() => {
+    setCorrectionMode(null)
+    setShowConfirmDialog(false)
+    setSelectedOffsets(null)
+    // Re-enable annotation capture
+    setCorrectionModeStore(false)
+    toast.info('Correction cancelled')
+  }, [setCorrectionModeStore])
+
+  /**
+   * Handles successful correction submission.
+   */
+  const handleCorrectionSuccess = useCallback(() => {
+    setCorrectionMode(null)
+    setSelectedOffsets(null)
+    // Re-enable annotation capture
+    setCorrectionModeStore(false)
+    // Dialog will be closed by CorrectionConfirmDialog component
+  }, [setCorrectionModeStore])
+
   return (
     <div className="flex flex-col h-screen">
       {/* Enhanced document header with reading modes + Quick Spark */}
@@ -357,6 +482,33 @@ export function ReaderLayout({
           activeConnections={filteredConnections.length}
           scrollPosition={scrollPosition}
           onClose={closeQuickCapture}
+        />
+      )}
+
+      {/* Correction mode panel */}
+      {correctionMode && (
+        <CorrectionModePanel
+          chunkId={correctionMode.chunkId}
+          chunkIndex={correctionMode.chunkIndex}
+          onCancel={handleCancelCorrection}
+        />
+      )}
+
+      {/* Correction confirmation dialog */}
+      {correctionMode && selectedOffsets && (
+        <CorrectionConfirmDialog
+          open={showConfirmDialog}
+          onOpenChange={setShowConfirmDialog}
+          chunkId={correctionMode.chunkId}
+          chunkIndex={correctionMode.chunkIndex}
+          documentId={documentId}
+          oldStartOffset={correctionMode.originalStartOffset}
+          oldEndOffset={correctionMode.originalEndOffset}
+          newStartOffset={selectedOffsets.startOffset}
+          newEndOffset={selectedOffsets.endOffset}
+          selectedText={selectedOffsets.selectedText}
+          onSuccess={handleCorrectionSuccess}
+          onCancel={handleCancelCorrection}
         />
       )}
     </div>

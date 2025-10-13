@@ -330,12 +330,16 @@ export class PDFProcessor extends SourceProcessor {
       console.log(`  ✅ Exact: ${stats.exact}/${stats.total} (${(stats.exact / stats.total * 100).toFixed(1)}%)`)
       console.log(`  🔍 High: ${stats.high}/${stats.total}`)
       console.log(`  📍 Medium: ${stats.medium}/${stats.total}`)
-      console.log(`  ⚠️  Synthetic: ${stats.synthetic}/${stats.total} (${(stats.synthetic / stats.total * 100).toFixed(1)}%)`)
+      console.log(`  ⚠️  Layer 4 (Synthetic): ${stats.synthetic}/${stats.total} (${(stats.synthetic / stats.total * 100).toFixed(1)}%)`)
+      console.log(`  🔧 Overlap corrections: ${stats.overlapCorrected}/${stats.total}`)
+
+      const totalNeedingValidation = stats.synthetic + stats.overlapCorrected
+      console.log(`  📋 Total needing validation: ${totalNeedingValidation} chunks`)
 
       // Store warnings for UI display
       this.job.metadata.matchingWarnings = warnings
       if (warnings.length > 0) {
-        console.warn(`[PDFProcessor] ⚠️  ${warnings.length} synthetic chunks require validation`)
+        console.warn(`[PDFProcessor] ⚠️  ${totalNeedingValidation} chunks require validation (${stats.synthetic} synthetic + ${stats.overlapCorrected} overlap-corrected)`)
       }
 
       // Convert MatchResult to ProcessedChunk format
@@ -360,6 +364,12 @@ export class PDFProcessor extends SourceProcessor {
           position_confidence: result.confidence,
           position_method: result.method,
           position_validated: false,  // User can validate later
+          // Phase 4 Task T-006: Store validation metadata from bulletproof matching
+          validation_warning: result.validation_warning || null,
+          validation_details: result.validation_details || null,
+          overlap_corrected: result.overlap_corrected || false,
+          position_corrected: false,  // Not yet corrected by user
+          correction_history: [],  // Empty initially
           // Metadata extraction happens in next stage (Phase 6)
           themes: [],
           importance_score: 0.5,

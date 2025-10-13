@@ -36,6 +36,14 @@ interface ReaderState {
   viewportOffsets: { start: number; end: number }
   visibleChunks: Chunk[]
 
+  // Correction mode state (prevents annotation capture during chunk correction)
+  correctionModeActive: boolean
+  setCorrectionMode: (active: boolean) => void
+
+  // Scroll-to-chunk trigger (for programmatic navigation)
+  scrollToChunkId: string | null
+  setScrollToChunkId: (chunkId: string | null) => void
+
   // Actions
   loadDocument: (docId: string, title: string, markdown: string, chunks: Chunk[]) => void
   updateScroll: (position: number, offsets: { start: number; end: number }) => void
@@ -60,6 +68,24 @@ export const useReaderStore = create<ReaderState>()(
       scrollPosition: 0,
       viewportOffsets: { start: 0, end: 0 },
       visibleChunks: [],
+      correctionModeActive: false,
+      scrollToChunkId: null,
+
+      /**
+       * Sets correction mode state.
+       * When active, prevents QuickCapturePanel from appearing on text selection.
+       *
+       * @param active - Whether correction mode is active
+       */
+      setCorrectionMode: (active) => set({ correctionModeActive: active }),
+
+      /**
+       * Triggers scrolling to a specific chunk.
+       * VirtualizedReader watches this value and scrolls when it changes.
+       *
+       * @param chunkId - Chunk ID to scroll to, or null to clear
+       */
+      setScrollToChunkId: (chunkId) => set({ scrollToChunkId: chunkId }),
 
       /**
        * Loads a new document into the reader.

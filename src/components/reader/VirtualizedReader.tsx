@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useCallback, useState, useEffect } from 'react'
-import { Virtuoso } from 'react-virtuoso'
+import { useMemo, useCallback, useState, useEffect, useRef } from 'react'
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { toast } from 'sonner'
 import { parseMarkdownToBlocks } from '@/lib/reader/block-parser'
 import { BlockRenderer } from './BlockRenderer'
@@ -23,11 +23,16 @@ const EMPTY_ANNOTATIONS: StoredAnnotation[] = []
  * @returns React element with virtualized rendering.
  */
 export function VirtualizedReader() {
+  // Ref to Virtuoso for programmatic scrolling
+  const virtuosoRef = useRef<VirtuosoHandle>(null)
+
   // Get document data from ReaderStore (replaces props)
   const markdown = useReaderStore(state => state.markdownContent)
   const chunks = useReaderStore(state => state.chunks)
   const documentId = useReaderStore(state => state.documentId)
   const updateScroll = useReaderStore(state => state.updateScroll)
+  const scrollToChunk = useReaderStore(state => state.scrollToChunkId)
+  const setScrollToChunk = useReaderStore(state => state.setScrollToChunkId)
   // Zustand store for annotations (document-keyed)
   // Use constant empty array reference to prevent infinite loop
   const annotations = useAnnotationStore(
@@ -55,12 +60,15 @@ export function VirtualizedReader() {
     enabled: true,
   })
 
-  // When selection changes, capture it for the panel
+  // When selection changes, capture it for the panel (unless in correction mode)
+  const correctionModeActive = useReaderStore(state => state.correctionModeActive)
+
   useEffect(() => {
-    if (selection && !captureSelection) {
+    // Don't capture selection if in correction mode (fixing chunk positions)
+    if (selection && !captureSelection && !correctionModeActive) {
       setCaptureSelection(selection)
     }
-  }, [selection, captureSelection])
+  }, [selection, captureSelection, correctionModeActive])
 
   // Load annotations from database into Zustand store
   useEffect(() => {
@@ -86,6 +94,33 @@ export function VirtualizedReader() {
   const blocks = useMemo(() => {
     return parseMarkdownToBlocks(markdown, chunks)
   }, [markdown, chunks])
+
+  // Handle programmatic scrolling to chunk (triggered by ReaderLayout)
+  useEffect(() => {
+    if (!scrollToChunk || !virtuosoRef.current) return
+
+    // Find the first block index for this chunk
+    const targetBlockIndex = blocks.findIndex(block => block.chunkId === scrollToChunk)
+
+    if (targetBlockIndex >= 0) {
+      console.log(`[VirtualizedReader] Scrolling to chunk ${scrollToChunk} at block index ${targetBlockIndex}`)
+
+      // Use Virtuoso's scrollToIndex for precise scrolling
+      virtuosoRef.current.scrollToIndex({
+        index: targetBlockIndex,
+        align: 'center',
+        behavior: 'smooth'
+      })
+
+      // Clear the scroll trigger after 500ms
+      setTimeout(() => {
+        setScrollToChunk(null)
+      }, 500)
+    } else {
+      console.warn(`[VirtualizedReader] Chunk not found in blocks: ${scrollToChunk}`)
+      setScrollToChunk(null)
+    }
+  }, [scrollToChunk, blocks, setScrollToChunk])
 
   // Merge store annotations with optimistic ones
   const allAnnotations = useMemo(() => {
@@ -312,6 +347,7 @@ export function VirtualizedReader() {
   return (
     <>
       <Virtuoso
+        ref={virtuosoRef}
         data={blocks}
         itemContent={(index, block) => {
           // Find the chunk for this block
@@ -321,6 +357,7 @@ export function VirtualizedReader() {
             <div
               className="max-w-4xl mx-auto px-8 transition-all duration-300"
               data-chunk-id={block.chunkId}
+              data-block-index={index}
             >
               <BlockRenderer
                 block={block}
@@ -336,8 +373,8 @@ export function VirtualizedReader() {
         style={{ height: '100%', width: '100%' }}
       />
 
-      {/* QuickCapture panel appears when text is selected */}
-      {captureSelection && documentId && (
+      {/* QuickCapture panel appears when text is selected (but not in correction mode) */}
+      {captureSelection && documentId && !correctionModeActive && (
         <QuickCapturePanel
           selection={captureSelection}
           documentId={documentId}
