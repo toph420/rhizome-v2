@@ -1,108 +1,169 @@
 'use client'
 
 import { useState } from 'react'
-import { deleteDocument, retryDocument } from '@/app/actions/admin'
+import { clearAllJobs, clearCompletedJobs, clearFailedJobs, forceFailAllProcessing, clearAllJobsAndProcessingDocuments } from '@/app/actions/admin'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Trash2, RefreshCw } from 'lucide-react'
+import { Loader2, X, Trash2, AlertTriangle, Bomb } from 'lucide-react'
 
 interface AdminPanelProps {
-  documents: Array<{
-    id: string
-    title: string
-    status: string
-    created_at: string
-  }>
+  isOpen: boolean
+  onClose: () => void
 }
 
-export function AdminPanel({ documents }: AdminPanelProps) {
+export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
   const [loading, setLoading] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
-  const handleDelete = async (documentId: string, title: string) => {
-    if (!confirm(`Delete "${title}"? This cannot be undone.`)) return
-
-    setLoading(documentId)
+  const handleAction = async (action: () => Promise<any>, loadingKey: string, successMsg: string) => {
+    setLoading(loadingKey)
     setMessage(null)
 
-    const result = await deleteDocument(documentId)
+    const result = await action()
 
     if (result.success) {
-      setMessage(`Deleted: ${title}`)
+      setMessage(successMsg)
     } else {
       setMessage(`Error: ${result.error}`)
     }
 
     setLoading(null)
+
+    // Clear message after 3 seconds
+    setTimeout(() => setMessage(null), 3000)
   }
 
-  const handleRetry = async (documentId: string, title: string) => {
-    setLoading(documentId)
-    setMessage(null)
-
-    const result = await retryDocument(documentId)
-
-    if (result.success) {
-      setMessage(`Retry queued for: ${title}`)
-    } else {
-      setMessage(`Error: ${result.error}`)
-    }
-
-    setLoading(null)
-  }
-
-  if (documents.length === 0) {
-    return (
-      <Card className="p-4">
-        <p className="text-sm text-muted-foreground">No documents yet</p>
-      </Card>
-    )
-  }
+  if (!isOpen) return null
 
   return (
-    <Card className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Admin Controls</h3>
-        {message && (
-          <span className="text-sm text-muted-foreground">{message}</span>
-        )}
-      </div>
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/20 z-40"
+        onClick={onClose}
+      />
 
-      <div className="space-y-2">
-        {documents.map((doc) => (
-          <div
-            key={doc.id}
-            className="flex items-center justify-between p-3 rounded-lg border"
+      {/* Sidebar */}
+      <div className="fixed right-0 top-0 h-full w-80 bg-background border-l shadow-lg z-50 flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <h2 className="text-lg font-semibold">Job Controls</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
           >
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{doc.title}</p>
-              <p className="text-xs text-muted-foreground">
-                {doc.status} • {new Date(doc.created_at).toLocaleDateString()}
-              </p>
-            </div>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
 
-            <div className="flex items-center gap-2 ml-4">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleRetry(doc.id, doc.title)}
-                disabled={loading === doc.id}
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => handleDelete(doc.id, doc.title)}
-                disabled={loading === doc.id}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
+        {/* Message */}
+        {message && (
+          <div className="p-4 border-b bg-muted">
+            <p className="text-sm">{message}</p>
           </div>
-        ))}
+        )}
+
+        {/* Controls */}
+        <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Quick Actions</h3>
+
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => handleAction(clearCompletedJobs, 'clear-completed', 'Cleared completed jobs')}
+              disabled={loading === 'clear-completed'}
+            >
+              {loading === 'clear-completed' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Clear Completed Jobs
+            </Button>
+
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => handleAction(clearFailedJobs, 'clear-failed', 'Cleared failed jobs')}
+              disabled={loading === 'clear-failed'}
+            >
+              {loading === 'clear-failed' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Clear Failed Jobs
+            </Button>
+          </div>
+
+          <div className="space-y-2 pt-4 border-t">
+            <h3 className="text-sm font-medium text-muted-foreground">Emergency Controls</h3>
+
+            <Button
+              variant="destructive"
+              className="w-full justify-start"
+              onClick={() => {
+                if (!confirm('Stop all processing jobs? They will be cancelled immediately.')) return
+                handleAction(forceFailAllProcessing, 'force-fail-all', 'Stopped all processing jobs')
+              }}
+              disabled={loading === 'force-fail-all'}
+            >
+              {loading === 'force-fail-all' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <AlertTriangle className="h-4 w-4 mr-2" />
+              )}
+              Stop All Processing
+            </Button>
+
+            <Button
+              variant="destructive"
+              className="w-full justify-start"
+              onClick={() => {
+                if (!confirm('Delete ALL jobs? This cannot be undone.')) return
+                handleAction(clearAllJobs, 'clear-all', 'Cleared all jobs')
+              }}
+              disabled={loading === 'clear-all'}
+            >
+              {loading === 'clear-all' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Clear All Jobs
+            </Button>
+
+            <Button
+              variant="destructive"
+              className="w-full justify-start"
+              onClick={() => {
+                if (!confirm('⚠️ NUCLEAR OPTION: Delete ALL jobs AND all processing documents? This CANNOT be undone!')) return
+                handleAction(
+                  clearAllJobsAndProcessingDocuments,
+                  'nuclear',
+                  'Deleted all jobs and processing documents'
+                )
+              }}
+              disabled={loading === 'nuclear'}
+            >
+              {loading === 'nuclear' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Bomb className="h-4 w-4 mr-2" />
+              )}
+              Nuclear Reset
+            </Button>
+          </div>
+
+          <div className="pt-4 border-t">
+            <p className="text-xs text-muted-foreground">
+              These controls manage background jobs. Use "Stop All Processing" to cancel stuck jobs,
+              or "Clear Completed/Failed" to clean up the job queue.
+            </p>
+          </div>
+        </div>
       </div>
-    </Card>
+    </>
   )
 }
