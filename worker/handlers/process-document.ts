@@ -97,13 +97,18 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       // Create processor using router
       processor = ProcessorRouter.createProcessor(sourceType, ai, supabase, job)
 
-      // ✅ START HEARTBEAT: Update job timestamp every 5 minutes during long processing
-      // Also checks for job cancellation
+      // ✅ START HEARTBEAT: Check for cancellation every 10 seconds (responsive UI)
+      // Update timestamp every 5 minutes to prevent stale detection
       let jobCancelled = false
+      let heartbeatCount = 0
+      const CANCELLATION_CHECK_INTERVAL = 10 * 1000 // 10 seconds for responsive cancellation
+      const TIMESTAMP_UPDATE_EVERY = 30 // Update timestamp every 30 checks (5 minutes)
+
       const heartbeatInterval = setInterval(async () => {
-        console.log('[Heartbeat] Updating job timestamp to prevent stale detection...')
+        heartbeatCount++
+
         try {
-          // Check if job has been cancelled
+          // ALWAYS check for cancellation (every 10 seconds)
           const { data: currentJob } = await supabase
             .from('background_jobs')
             .select('status')
@@ -117,17 +122,20 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
             return
           }
 
-          // Update timestamp if still processing
-          await supabase
-            .from('background_jobs')
-            .update({
-              started_at: new Date().toISOString() // Reset timeout clock
-            })
-            .eq('id', job.id)
+          // Update timestamp periodically (every 5 minutes)
+          if (heartbeatCount % TIMESTAMP_UPDATE_EVERY === 0) {
+            console.log('[Heartbeat] Updating job timestamp to prevent stale detection...')
+            await supabase
+              .from('background_jobs')
+              .update({
+                started_at: new Date().toISOString() // Reset timeout clock
+              })
+              .eq('id', job.id)
+          }
         } catch (error) {
-          console.error('[Heartbeat] Failed to update timestamp:', error)
+          console.error('[Heartbeat] Failed to check status:', error)
         }
-      }, 5 * 60 * 1000) // Every 5 minutes
+      }, CANCELLATION_CHECK_INTERVAL)
 
       try {
         // Process document with AI

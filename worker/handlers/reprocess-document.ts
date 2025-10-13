@@ -16,7 +16,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { recoverAnnotations } from './recover-annotations.js'
 import { remapConnections } from './remap-connections.js'
-import { loadCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
+import { loadCachedChunksRaw } from '../lib/cached-chunks.js'
 import type { ReprocessResults, Chunk } from '../types/recovery.js'
 
 /**
@@ -117,15 +117,13 @@ export async function reprocessDocument(
       // ============================================================
       console.log('[ReprocessDocument] LOCAL MODE: Loading cached chunks for bulletproof matching')
 
-      // Generate hash of new markdown for validation
-      const currentHash = hashMarkdown(newMarkdown)
-      console.log(`[ReprocessDocument] Current markdown hash: ${currentHash.slice(0, 8)}...`)
-
-      // Load cached chunks with hash validation
-      const cacheResult = await loadCachedChunks(supabase, documentId, currentHash)
+      // Load cached chunks WITHOUT hash validation
+      // Bulletproof matching handles markdown changes - that's its entire purpose!
+      // Hash validation would reject cache on every edit (defeating the point)
+      const cacheResult = await loadCachedChunksRaw(supabase, documentId)
 
       if (!cacheResult) {
-        console.warn('[ReprocessDocument] LOCAL mode but no valid cached chunks found')
+        console.warn('[ReprocessDocument] LOCAL mode but no cached chunks found in cached_chunks table')
         console.warn('[ReprocessDocument] Falling back to CLOUD mode for this reprocessing')
         // Fall through to CLOUD mode path below
       } else {

@@ -9,6 +9,7 @@
 import { runSemanticSimilarity, saveChunkConnections } from './semantic-similarity';
 import { runContradictionDetection } from './contradiction-detection';
 import { runThematicBridge } from './thematic-bridge';
+import { runThematicBridgeQwen } from './thematic-bridge-qwen';
 import { ChunkConnection } from './semantic-similarity';
 
 export interface OrchestratorConfig {
@@ -68,7 +69,15 @@ export async function processDocument(
   if (enabledEngines.includes('thematic_bridge')) {
     console.log('\n[Orchestrator] Running ThematicBridge...');
     await onProgress?.(75, 'thematic-bridge', 'Finding thematic bridges');
-    const connections = await runThematicBridge(documentId, config.thematicBridge);
+
+    // Use Qwen for local mode, Gemini otherwise
+    const useLocalMode = process.env.PROCESSING_MODE === 'local';
+    console.log(`[Orchestrator] ThematicBridge mode: ${useLocalMode ? 'LOCAL (Qwen)' : 'CLOUD (Gemini)'}`);
+
+    const connections = useLocalMode
+      ? await runThematicBridgeQwen(documentId, config.thematicBridge)
+      : await runThematicBridge(documentId, config.thematicBridge);
+
     allConnections.push(...connections);
     byEngine.thematic_bridge = connections.length;
   }
