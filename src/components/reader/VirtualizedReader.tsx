@@ -313,18 +313,24 @@ export function VirtualizedReader() {
     <>
       <Virtuoso
         data={blocks}
-        itemContent={(index, block) => (
-          <div
-            className="max-w-4xl mx-auto px-8 transition-all duration-300"
-            data-chunk-id={block.chunkId}
-          >
-            <BlockRenderer
-              block={block}
-              annotations={annotationsForBlocks}
-              onAnnotationClick={handleAnnotationEdit}
-            />
-          </div>
-        )}
+        itemContent={(index, block) => {
+          // Find the chunk for this block
+          const chunk = chunks.find(c => c.id === block.chunkId)
+
+          return (
+            <div
+              className="max-w-4xl mx-auto px-8 transition-all duration-300"
+              data-chunk-id={block.chunkId}
+            >
+              <BlockRenderer
+                block={block}
+                annotations={annotationsForBlocks}
+                chunk={chunk}
+                onAnnotationClick={handleAnnotationEdit}
+              />
+            </div>
+          )
+        }}
         rangeChanged={handleVisibleRangeChange}
         overscan={2000}
         style={{ height: '100%', width: '100%' }}

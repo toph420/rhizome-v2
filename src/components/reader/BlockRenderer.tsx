@@ -4,6 +4,7 @@ import { memo } from 'react'
 import DOMPurify from 'dompurify'
 import { injectAnnotations } from '@/lib/annotations/inject'
 import { ChunkMetadataIcon } from './ChunkMetadataIcon'
+import { useUIStore } from '@/stores/ui-store'
 import type { Block } from '@/lib/reader/block-parser'
 import type { Chunk } from '@/types/annotations'
 
@@ -43,6 +44,8 @@ export const BlockRenderer = memo(function BlockRenderer({
   chunk,
   onAnnotationClick
 }: BlockRendererProps) {
+  const showChunkBoundaries = useUIStore(state => state.showChunkBoundaries)
+
   // Find annotations that overlap this block
   const overlappingAnnotations = annotations.filter(
     (ann) =>
@@ -88,6 +91,22 @@ export const BlockRenderer = memo(function BlockRenderer({
   // Only show metadata icon for first paragraph block of each chunk (avoid duplication)
   const showMetadataIcon = block.type === 'paragraph' && chunk && block.chunkPosition >= 0
 
+  // Show chunk boundary indicator on first block of each chunk
+  const isChunkStart = chunk && block.chunkPosition === 0
+
+  // Generate color for chunk boundary (cycle through colors)
+  const getChunkColor = (chunkIndex: number) => {
+    const colors = [
+      'rgb(59, 130, 246)',   // blue
+      'rgb(168, 85, 247)',   // purple
+      'rgb(236, 72, 153)',   // pink
+      'rgb(34, 197, 94)',    // green
+      'rgb(251, 146, 60)',   // orange
+      'rgb(14, 165, 233)',   // sky
+    ]
+    return colors[chunkIndex % colors.length]
+  }
+
   return (
     <div
       data-block-id={block.id}
@@ -96,10 +115,36 @@ export const BlockRenderer = memo(function BlockRenderer({
       data-end-offset={block.endOffset}
       className={`${proseClass} py-2 min-h-[1rem] relative group`}
       onClick={handleClick}
+      style={{
+        borderLeft: showChunkBoundaries && isChunkStart && chunk
+          ? `4px solid ${getChunkColor(chunk.chunk_index)}`
+          : undefined,
+        paddingLeft: showChunkBoundaries && isChunkStart ? '0.75rem' : undefined
+      }}
     >
       {/* Chunk metadata icon in left margin - only show on first block of chunk */}
       {showMetadataIcon && block.chunkPosition === 0 && (
-        <ChunkMetadataIcon chunk={chunk} chunkIndex={chunk.chunk_index} />
+        <ChunkMetadataIcon
+          chunk={chunk}
+          chunkIndex={chunk.chunk_index}
+          alwaysVisible={showChunkBoundaries}
+        />
+      )}
+
+      {/* Chunk boundary label - shows when boundaries are enabled */}
+      {showChunkBoundaries && isChunkStart && chunk && (
+        <div className="absolute -left-2 -top-6 flex items-center gap-2">
+          <div
+            className="px-2 py-0.5 text-[10px] font-mono font-medium rounded-sm shadow-sm border"
+            style={{
+              backgroundColor: `${getChunkColor(chunk.chunk_index)}15`,
+              borderColor: getChunkColor(chunk.chunk_index),
+              color: getChunkColor(chunk.chunk_index)
+            }}
+          >
+            Chunk {chunk.chunk_index}
+          </div>
+        </div>
       )}
 
       {/* Rendered content with injected annotations */}
