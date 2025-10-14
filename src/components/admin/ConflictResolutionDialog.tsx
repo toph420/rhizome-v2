@@ -27,6 +27,7 @@ import { importFromStorage } from '@/app/actions/documents'
 interface ConflictResolutionDialogProps {
   isOpen: boolean
   onClose: () => void
+  onCancel?: () => void
   conflict: ImportConflict
   documentId: string
   onResolved: (jobId: string) => void
@@ -39,6 +40,7 @@ interface ConflictResolutionDialogProps {
 export function ConflictResolutionDialog({
   isOpen,
   onClose,
+  onCancel,
   conflict,
   documentId,
   onResolved,
@@ -56,11 +58,19 @@ export function ConflictResolutionDialog({
         reprocessConnections: false,
       })
 
-      if (result.success && result.jobId) {
+      // Handle "skip" strategy (no-op, success but no jobId)
+      if (result.success && selectedStrategy === 'skip') {
+        console.log('[ConflictResolution] Skip strategy applied - no changes made')
+        // Call onResolved with special 'skip' marker
+        // DON'T call onClose() - let handleConflictResolved close the dialog
+        onResolved('skip')
+      } else if (result.success && result.jobId) {
+        // Normal flow: job created, call onResolved to track it
+        // DON'T call onClose() - let handleConflictResolved close the dialog
         onResolved(result.jobId)
-        onClose()
       } else {
-        console.error('Import failed:', result.error)
+        // Error occurred
+        console.error('Import failed:', result.error || 'Unknown error')
         // TODO: Show error toast
       }
     } catch (error) {
@@ -112,7 +122,12 @@ export function ConflictResolutionDialog({
   const warning = getStrategyWarning()
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      // When dialog is closed by user action (X, Esc, backdrop), call onCancel
+      if (!open) {
+        onCancel ? onCancel() : onClose()
+      }
+    }}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Import Conflict Detected</DialogTitle>
@@ -311,10 +326,19 @@ export function ConflictResolutionDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isApplying}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onCancel ? onCancel() : onClose()}
+            disabled={isApplying}
+          >
             Cancel
           </Button>
-          <Button onClick={handleApply} disabled={isApplying}>
+          <Button
+            type="button"
+            onClick={handleApply}
+            disabled={isApplying}
+          >
             {isApplying ? 'Applying...' : 'Apply Resolution'}
           </Button>
         </DialogFooter>

@@ -40,7 +40,7 @@ interface IntegrationJob {
   id: string
   job_type: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
-  details: string
+  error_message?: string | null
   created_at: string
   output_data?: {
     path?: string
@@ -119,7 +119,7 @@ export function IntegrationsTab() {
       const supabase = createClient()
       const { data, error } = await supabase
         .from('background_jobs')
-        .select('id, job_type, status, details, created_at, output_data')
+        .select('id, job_type, status, error_message, created_at, output_data')
         .in('job_type', ['obsidian_export', 'obsidian_sync', 'readwise_import'])
         .order('created_at', { ascending: false })
         .limit(10)
@@ -610,10 +610,10 @@ export function IntegrationsTab() {
                               {job.output_data.imported !== undefined &&
                                 `Imported: ${job.output_data.imported}, Needs Review: ${job.output_data.needsReview || 0}, Failed: ${job.output_data.failed || 0}`}
                             </span>
-                          ) : job.status === 'failed' && job.output_data?.error ? (
-                            <span className="text-red-600">{job.output_data.error}</span>
+                          ) : job.status === 'failed' ? (
+                            <span className="text-red-600">{job.error_message || job.output_data?.error || 'Failed'}</span>
                           ) : (
-                            job.details || 'Processing...'
+                            'Processing...'
                           )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">

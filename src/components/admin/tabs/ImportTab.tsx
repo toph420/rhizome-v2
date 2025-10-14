@@ -34,7 +34,7 @@ import { useBackgroundJobsStore, type JobStatus } from '@/stores/admin/backgroun
 export function ImportTab() {
   // Use Zustand stores
   const { scanResults, scanning, error: scanError, scan, invalidate } = useStorageScanStore()
-  const { jobs, registerJob, updateJob, activeJobs, completedJobs, failedJobs } = useBackgroundJobsStore()
+  const { jobs, registerJob, updateJob, replaceJob, removeJob, activeJobs, completedJobs, failedJobs } = useBackgroundJobsStore()
 
   // Selection state
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set())
@@ -48,6 +48,8 @@ export function ImportTab() {
     conflict: ImportConflict
     documentId: string
     title: string
+    onResolved?: (jobId: string) => void
+    onRejected?: () => void
   } | null>(null)
 
   // Import tracking
@@ -56,10 +58,11 @@ export function ImportTab() {
   // Success/error messages
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Auto-scan on mount
+  // Auto-scan on mount only (not on every render)
   useEffect(() => {
     scan()
-  }, [scan])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const toggleDocSelection = (documentId: string) => {
     const newSelected = new Set(selectedDocs)
@@ -97,37 +100,42 @@ export function ImportTab() {
     setMessage(null)
 
     const docsToImport = scanResults?.filter((d) => selectedDocs.has(d.documentId)) || []
+    let successfulImports = 0
 
     // Process each document sequentially
     for (const doc of docsToImport) {
-      await processImport(doc)
+      try {
+        await processImport(doc)
+        successfulImports++
+      } catch (error) {
+        // Import was cancelled or failed - continue to next document
+        console.log(`Import cancelled/failed for ${doc.title}:`, error)
+      }
     }
 
     setIsImporting(false)
 
-    // Show summary message
-    const importJobsList = Array.from(jobs.values()).filter(j => j.type === 'import_document')
-    const completed = importJobsList.filter((j) => j.status === 'completed').length
-    const failed = importJobsList.filter((j) => j.status === 'failed').length
+    // Only show summary if at least one import was attempted
+    if (successfulImports > 0) {
+      const importJobsList = Array.from(jobs.values()).filter(j => j.type === 'import_document')
+      const completed = importJobsList.filter((j) => j.status === 'completed').length
+      const failed = importJobsList.filter((j) => j.status === 'failed').length
 
-    if (failed === 0) {
-      setMessage({
-        type: 'success',
-        text: `Successfully imported ${completed} document(s)`,
-      })
-    } else {
-      setMessage({
-        type: 'error',
-        text: `Imported ${completed} document(s), ${failed} failed`,
-      })
-    }
+      if (failed === 0) {
+        setMessage({
+          type: 'success',
+          text: `Successfully imported ${completed} document(s). Click "Refresh List" to update sync states.`,
+        })
+      } else {
+        setMessage({
+          type: 'error',
+          text: `Imported ${completed} document(s), ${failed} failed. Click "Refresh List" to update.`,
+        })
+      }
 
-    // Invalidate cache and refresh scan after import
-    setTimeout(() => {
-      invalidate()
-      scan()
+      // Clear selections without refreshing
       setSelectedDocs(new Set())
-    }, 1000)
+    }
   }
 
   const processImport = async (doc: DocumentScanResult) => {
@@ -145,13 +153,8 @@ export function ImportTab() {
       })
 
       if (result.success && result.jobId) {
-        // Update with real job ID
-        updateJob(tempJobId, {
-          id: result.jobId,
-          status: 'processing',
-          progress: 30,
-          details: 'Import job created'
-        })
+        // Replace temp job with real job ID
+        replaceJob(tempJobId, result.jobId)
       } else if (result.needsResolution && result.conflict) {
         // Conflict detected - show dialog
         updateJob(tempJobId, {
@@ -160,30 +163,27 @@ export function ImportTab() {
           details: 'Awaiting conflict resolution...'
         })
 
-        return new Promise<void>((resolve) => {
+        return new Promise<void>((resolve, reject) => {
           setCurrentConflict({
             conflict: result.conflict!,
             documentId: doc.documentId,
             title: doc.title,
+            onResolved: (jobId: string) => {
+              // Handle 'skip' specially - just remove the temp job
+              if (jobId === 'skip') {
+                removeJob(tempJobId)
+              } else {
+                // Normal flow: replace temp job with real job ID
+                replaceJob(tempJobId, jobId)
+              }
+              setCurrentConflict(null)
+              resolve()
+            },
+            onRejected: () => {
+              setCurrentConflict(null)
+              reject(new Error('Import cancelled by user'))
+            },
           })
-
-          // Store the resolve callback to be called after conflict resolution
-          const originalOnResolved = (jobId: string) => {
-            updateJob(tempJobId, {
-              id: jobId,
-              status: 'processing',
-              progress: 30,
-              details: 'Import job created'
-            })
-            setCurrentConflict(null)
-            resolve()
-          }
-
-          // Monkey-patch the onResolved callback
-          setCurrentConflict((prev) => ({
-            ...prev!,
-            onResolved: originalOnResolved,
-          } as any))
         })
       } else {
         // Error occurred
@@ -207,16 +207,10 @@ export function ImportTab() {
 
   const handleConflictResolved = useCallback((jobId: string) => {
     if (currentConflict) {
-      const tempJobId = `import-${currentConflict.documentId}`
-      updateJob(tempJobId, {
-        id: jobId,
-        status: 'processing',
-        progress: 30,
-        details: 'Import job created'
-      })
+      // Call the Promise callback which handles job management and closes dialog
+      currentConflict.onResolved?.(jobId)
     }
-    setCurrentConflict(null)
-  }, [currentConflict, updateJob])
+  }, [currentConflict])
 
   // Filter to only show importable documents
   const importableDocuments =
@@ -505,7 +499,26 @@ export function ImportTab() {
       {currentConflict && (
         <ConflictResolutionDialog
           isOpen={true}
-          onClose={() => setCurrentConflict(null)}
+          onClose={() => {
+            if (currentConflict) {
+              // Dialog closed (X button or click outside) - remove temp job
+              const tempJobId = `import-${currentConflict.documentId}`
+              removeJob(tempJobId)
+
+              // Reject the Promise to unblock the import flow
+              currentConflict.onRejected?.()
+            }
+          }}
+          onCancel={() => {
+            if (currentConflict) {
+              // Cancel button clicked - remove temp job
+              const tempJobId = `import-${currentConflict.documentId}`
+              removeJob(tempJobId)
+
+              // Reject the Promise to unblock the import flow
+              currentConflict.onRejected?.()
+            }
+          }}
           conflict={currentConflict.conflict}
           documentId={currentConflict.documentId}
           onResolved={handleConflictResolved}

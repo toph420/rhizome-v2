@@ -1214,7 +1214,7 @@ Rhizome includes a Readwise highlight import system with a review workflow:
 - Docling - `https://docling-project.github.io/docling/` -Docling simplifies document processing, parsing diverse formats — including advanced PDF understanding — and providing seamless integrations with the gen AI ecosystem.
 
 ## Miscellaneous Rules
-- Always check database migration number and increment by one. **Current latest: 047** (see supabase/migrations folder for examples)
+- Always check database migration number and increment by one. **Current latest: 049** (see supabase/migrations folder for examples)
 - When creating migrations, use format: `NNN_descriptive_name.sql` where NNN is zero-padded number
 - EPUB files are supported as a source type alongside PDF - handle both when implementing document features
 - Readwise import uses a review workflow via `import_pending` table before creating documents

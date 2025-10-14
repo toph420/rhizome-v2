@@ -74,7 +74,7 @@ export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
             </div>
           </SheetHeader>
 
-          <div className="mt-6">
+          <div className="mt-6 p-6">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="scanner">Scanner</TabsTrigger>

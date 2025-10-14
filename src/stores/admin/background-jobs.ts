@@ -38,6 +38,7 @@ interface BackgroundJobsStore {
   // Actions
   registerJob: (jobId: string, type: JobStatus['type'], metadata?: any) => void
   updateJob: (jobId: string, update: Partial<JobStatus>) => void
+  replaceJob: (oldJobId: string, newJobId: string) => void
   removeJob: (jobId: string) => void
   clearCompleted: () => void
   startPolling: () => void
@@ -139,6 +140,58 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
         }
       },
 
+      replaceJob: (oldJobId, newJobId) => {
+        console.log(`[BackgroundJobs] Replacing job ${oldJobId} with ${newJobId}`)
+
+        let jobWasReplaced = false
+
+        set((state) => {
+          const newJobs = new Map(state.jobs)
+          const oldJob = newJobs.get(oldJobId)
+
+          if (oldJob) {
+            console.log(`[BackgroundJobs] Found old job, replacing with real job ID`)
+            // Remove old job
+            newJobs.delete(oldJobId)
+
+            // Create new job with same data but new ID
+            newJobs.set(newJobId, {
+              ...oldJob,
+              id: newJobId,
+              status: 'processing',
+              progress: 30,
+              details: 'Import job created'
+            })
+            jobWasReplaced = true
+          } else {
+            console.warn(`[BackgroundJobs] Old job ${oldJobId} not found! Creating new job instead.`)
+            // Old job doesn't exist - create a new one from scratch
+            newJobs.set(newJobId, {
+              id: newJobId,
+              type: 'import_document',
+              status: 'processing',
+              progress: 30,
+              details: 'Import job created',
+              createdAt: Date.now(),
+              metadata: {}
+            })
+            jobWasReplaced = true
+          }
+
+          return { jobs: newJobs }
+        })
+
+        // Ensure polling continues
+        if (jobWasReplaced) {
+          const { activeJobs, startPolling, polling } = get()
+          console.log(`[BackgroundJobs] Active jobs after replace: ${activeJobs().length}, polling: ${polling}`)
+          if (activeJobs().length > 0 && !polling) {
+            console.log('[BackgroundJobs] Restarting polling after job replacement')
+            startPolling()
+          }
+        }
+      },
+
       removeJob: (jobId) => {
         console.log(`[BackgroundJobs] Removing job: ${jobId}`)
         set((state) => {
@@ -146,6 +199,13 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
           newJobs.delete(jobId)
           return { jobs: newJobs }
         })
+
+        // Auto-stop polling when no active jobs
+        const { activeJobs, stopPolling, polling } = get()
+        if (activeJobs().length === 0 && polling) {
+          console.log('[BackgroundJobs] Auto-stopping polling (job removed, no active jobs)')
+          stopPolling()
+        }
       },
 
       clearCompleted: () => {
@@ -185,9 +245,20 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
 
           for (const job of active) {
             try {
+              // Skip polling temp jobs (IDs like "import-{uuid}", "export-{uuid}")
+              // These will be updated with real job IDs after conflict resolution
+              const isTempJob = job.id.startsWith('import-') ||
+                               job.id.startsWith('export-') ||
+                               job.id.startsWith('reprocess-')
+
+              if (isTempJob) {
+                // Don't query database for temp jobs, they don't exist yet
+                continue
+              }
+
               const { data: jobData, error } = await supabase
                 .from('background_jobs')
-                .select('status, progress, details, output_data')
+                .select('status, progress, output_data, error_message')
                 .eq('id', job.id)
                 .single()
 
@@ -197,12 +268,19 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
               }
 
               if (jobData) {
+                // Extract progress info from JSONB progress field
+                const progressData = jobData.progress as any
+                const progressPercent = typeof progressData === 'number'
+                  ? progressData
+                  : (progressData?.percentage || progressData?.progress || 0)
+                const progressMessage = progressData?.message || progressData?.stage || ''
+
                 if (jobData.status === 'completed') {
                   console.log(`[BackgroundJobs] Job completed: ${job.id}`)
                   updateJob(job.id, {
                     status: 'completed',
                     progress: 100,
-                    details: jobData.details || 'Completed successfully',
+                    details: progressMessage || 'Completed successfully',
                     result: jobData.output_data,
                   })
                 } else if (jobData.status === 'failed') {
@@ -210,14 +288,14 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                   updateJob(job.id, {
                     status: 'failed',
                     progress: 0,
-                    details: jobData.details || 'Job failed',
-                    error: jobData.output_data?.error || 'Unknown error',
+                    details: jobData.error_message || progressMessage || 'Job failed',
+                    error: jobData.output_data?.error || jobData.error_message || 'Unknown error',
                   })
                 } else if (jobData.status === 'processing') {
                   updateJob(job.id, {
                     status: 'processing',
-                    progress: jobData.progress || 50,
-                    details: jobData.details || 'Processing...',
+                    progress: progressPercent,
+                    details: progressMessage || 'Processing...',
                   })
                 }
               }

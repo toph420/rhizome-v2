@@ -101,6 +101,9 @@ export function ConnectionsTab() {
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const [jobResult, setJobResult] = useState<any>(null)
 
+  // Derived state: processing indicator
+  const processing = !!currentJobId
+
   // Load documents on mount
   useEffect(() => {
     loadDocuments()
@@ -150,33 +153,22 @@ export function ConnectionsTab() {
             .select('*', { count: 'exact', head: true })
             .eq('document_id', doc.id)
 
-          // Get chunk IDs for this document
-          const { data: chunks } = await supabase
-            .from('chunks')
-            .select('id')
-            .eq('document_id', doc.id)
+          // Use RPC function to count connections efficiently (avoids URL length issues)
+          const { data: connectionStats, error: statsError } = await supabase
+            .rpc('count_connections_for_document', { doc_id: doc.id })
 
-          const chunkIds = (chunks || []).map((c: any) => c.id)
+          if (statsError) {
+            console.error('Failed to count connections:', statsError)
+          }
 
-          // Count connections where source chunk belongs to this document
-          const { count: connectionCount } = await supabase
-            .from('chunk_connections')
-            .select('*', { count: 'exact', head: true })
-            .in('source_chunk_id', chunkIds.length > 0 ? chunkIds : ['none'])
-
-          // Count validated connections
-          const { count: validatedCount } = await supabase
-            .from('chunk_connections')
-            .select('*', { count: 'exact', head: true })
-            .in('source_chunk_id', chunkIds.length > 0 ? chunkIds : ['none'])
-            .eq('user_validated', true)
+          const stats = connectionStats?.[0] || { total_connections: 0, validated_connections: 0 }
 
           return {
             id: doc.id,
             title: doc.title,
             chunkCount: chunkCount || 0,
-            connectionCount: connectionCount || 0,
-            validatedConnectionCount: validatedCount || 0,
+            connectionCount: Number(stats.total_connections) || 0,
+            validatedConnectionCount: Number(stats.validated_connections) || 0,
           }
         })
       )

@@ -349,14 +349,24 @@ export abstract class SourceProcessor {
       const fullPath = `${storagePath}/${filename}`
 
       // Add metadata to all stage results
-      const enrichedData = {
-        ...data,
-        version: data.version || "1.0",
-        document_id: this.job.document_id,
-        stage: stage,
-        timestamp: new Date().toISOString(),
-        final: options?.final ?? false
-      }
+      // CRITICAL: Handle arrays properly (chunks are passed as array, not wrapped object)
+      const enrichedData = Array.isArray(data)
+        ? {
+            chunks: data,  // Wrap array in chunks property
+            version: "1.0",
+            document_id: this.job.document_id,
+            stage: stage,
+            timestamp: new Date().toISOString(),
+            final: options?.final ?? false
+          }
+        : {
+            ...data,  // Objects can be spread normally
+            version: data.version || "1.0",
+            document_id: this.job.document_id,
+            stage: stage,
+            timestamp: new Date().toISOString(),
+            final: options?.final ?? false
+          }
 
       // Save to Storage (non-fatal, logs warning on failure)
       await saveToStorage(this.supabase, fullPath, enrichedData)
