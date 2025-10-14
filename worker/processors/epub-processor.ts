@@ -136,10 +136,21 @@ export class EPUBProcessor extends SourceProcessor {
 
       await this.updateProgress(50, 'extract', 'complete', 'Docling extraction done')
 
+      // Checkpoint 1: Save extraction data
+      await this.saveStageResult('extraction', {
+        markdown: result.markdown,
+        doclingChunks: result.chunks,
+        structure: result.structure,
+        epubMetadata: result.epubMetadata
+      })
+
       // Stage 3: Local regex cleanup (50-55%)
       await this.updateProgress(52, 'cleanup_local', 'processing', 'Removing EPUB artifacts')
       markdown = cleanMarkdownRegexOnly(markdown)
       await this.updateProgress(55, 'cleanup_local', 'complete', 'Local cleanup done')
+
+      // Checkpoint 2: Save cleaned markdown
+      await this.saveStageResult('cleanup', { markdown })
 
       // Phase 5: Save extraction to cached_chunks table AFTER cleanup
       // This enables zero-cost LOCAL mode reprocessing with bulletproof matching
@@ -164,6 +175,15 @@ export class EPUBProcessor extends SourceProcessor {
           chunks: result.chunks,
           structure: result.structure
         })
+
+        // Checkpoint 2b: Save cached_chunks.json in LOCAL mode (for zero-cost reprocessing)
+        await this.saveStageResult('cached_chunks', {
+          extraction_mode: 'epub',
+          markdown_hash: hashMarkdown(markdown),
+          docling_version: '2.55.1',
+          chunks: result.chunks,
+          structure: result.structure
+        }, { final: true })
       }
 
       // Stage 3.5: Check for review-after-docling mode BEFORE AI cleanup
@@ -503,6 +523,9 @@ export class EPUBProcessor extends SourceProcessor {
 
       await this.updateProgress(75, 'matching', 'complete', `${finalChunks.length} chunks matched with metadata`)
 
+      // Checkpoint 3: Save remapped chunks (intermediate - before metadata enrichment)
+      await this.saveStageResult('chunking', finalChunks)
+
       // Phase 6: Log chunk statistics after matching
       const matchingStats = calculateChunkStatistics(finalChunks, 768)
       logChunkStatistics(matchingStats, 'EPUB Chunks (After Matching)')
@@ -577,6 +600,9 @@ export class EPUBProcessor extends SourceProcessor {
 
         console.log(`[EPUBProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(90, 'metadata', 'complete', 'Metadata enrichment done')
+
+        // Checkpoint 4: Save enriched chunks with metadata (final version before embeddings)
+        await this.saveStageResult('metadata', finalChunks, { final: true })
 
       } catch (error: any) {
         console.error(`[EPUBProcessor] Metadata enrichment failed: ${error.message}`)
@@ -735,6 +761,9 @@ export class EPUBProcessor extends SourceProcessor {
 
       await this.updateProgress(95, 'chunking', 'complete', `${chunks.length} chunks created`)
 
+      // Checkpoint 3 (CLOUD mode): Save AI-generated chunks
+      await this.saveStageResult('chunking', chunks)
+
       // Convert to ProcessedChunk format
       // batchChunkAndExtractMetadata returns chunks with metadata already extracted
       finalChunks = chunks.map((chunk, idx) => {
@@ -771,6 +800,31 @@ export class EPUBProcessor extends SourceProcessor {
     // Stage 9: Finalize (95-100%)
     // Phase 7: Updated from Stage 8 (90-100%) to Stage 9 (95-100%)
     await this.updateProgress(97, 'finalize', 'formatting', 'Finalizing')
+
+    // Checkpoint 5: Save final markdown and chunks with embeddings
+    await this.saveStageResult('markdown', { content: markdown }, { final: true })
+    await this.saveStageResult('chunks', finalChunks, { final: true })
+
+    // Checkpoint 6: Save manifest.json with processing metadata
+    const manifestData = {
+      document_id: this.job.document_id,
+      processing_mode: isLocalMode ? 'local' : 'cloud',
+      source_type: 'epub',
+      files: {
+        'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+        'metadata.json': { size: JSON.stringify(markdown).length, type: 'final' },
+        'manifest.json': { size: 0, type: 'final' },
+        ...(isLocalMode && doclingChunks ? {
+          'cached_chunks.json': { size: JSON.stringify(doclingChunks).length, type: 'final' }
+        } : {})
+      },
+      chunk_count: finalChunks.length,
+      word_count: markdown.split(/\s+/).length,
+      processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+      docling_version: isLocalMode ? '2.55.1' : undefined,
+      markdown_hash: isLocalMode ? hashMarkdown(markdown) : undefined
+    }
+    await this.saveStageResult('manifest', manifestData, { final: true })
 
     await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
 

@@ -150,6 +150,13 @@ export class PDFProcessor extends SourceProcessor {
 
     await this.updateProgress(50, 'extract', 'complete', 'PDF extraction done')
 
+    // Checkpoint 1: Save extraction data
+    await this.saveStageResult('extraction', {
+      markdown: extractionResult.markdown,
+      doclingChunks: extractionResult.chunks,
+      structure: extractionResult.structure
+    })
+
     // Stage 3: Local regex cleanup (50-55%)
     await this.updateProgress(52, 'cleanup_local', 'processing', 'Removing page artifacts')
 
@@ -186,6 +193,20 @@ export class PDFProcessor extends SourceProcessor {
     }
 
     await this.updateProgress(55, 'cleanup_local', 'complete', 'Local cleanup done')
+
+    // Checkpoint 2: Save cleaned markdown
+    await this.saveStageResult('cleanup', { markdown })
+
+    // Checkpoint 2b: Save cached_chunks.json in LOCAL mode (for zero-cost reprocessing)
+    if (isLocalMode && extractionResult.chunks) {
+      await this.saveStageResult('cached_chunks', {
+        extraction_mode: 'pdf',
+        markdown_hash: hashMarkdown(markdown),
+        docling_version: '2.55.1',
+        chunks: extractionResult.chunks,
+        structure: extractionResult.structure
+      }, { final: true })
+    }
 
     // Stage 3.5: Check for review-after-docling mode BEFORE AI cleanup
     const reviewDoclingExtraction = this.job.input_data?.reviewDoclingExtraction === true
@@ -391,6 +412,9 @@ export class PDFProcessor extends SourceProcessor {
 
       await this.updateProgress(75, 'matching', 'complete', `${finalChunks.length} chunks matched with metadata`)
 
+      // Checkpoint 3: Save remapped chunks (intermediate - before metadata enrichment)
+      await this.saveStageResult('chunking', finalChunks)
+
       // Phase 6: Log chunk statistics after matching
       const matchingStats = calculateChunkStatistics(finalChunks, 768)
       logChunkStatistics(matchingStats, 'PDF Chunks (After Matching)')
@@ -465,6 +489,9 @@ export class PDFProcessor extends SourceProcessor {
 
         console.log(`[PDFProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(90, 'metadata', 'complete', 'Metadata enrichment done')
+
+        // Checkpoint 4: Save enriched chunks with metadata (final version before embeddings)
+        await this.saveStageResult('metadata', finalChunks, { final: true })
 
       } catch (error: any) {
         console.error(`[PDFProcessor] Metadata enrichment failed: ${error.message}`)
@@ -623,6 +650,9 @@ export class PDFProcessor extends SourceProcessor {
 
       await this.updateProgress(95, 'chunking', 'complete', `${chunks.length} chunks created`)
 
+      // Checkpoint 3 (CLOUD mode): Save AI-generated chunks
+      await this.saveStageResult('chunking', chunks)
+
       // Convert to ProcessedChunk format
       // batchChunkAndExtractMetadata returns chunks with metadata already extracted
       finalChunks = chunks.map((chunk, idx) => {
@@ -659,6 +689,32 @@ export class PDFProcessor extends SourceProcessor {
     // Stage 9: Finalize (95-100%)
     // Phase 7: Updated from Stage 8 (90-100%) to Stage 9 (95-100%)
     await this.updateProgress(97, 'finalize', 'formatting', 'Finalizing')
+
+    // Checkpoint 5: Save final markdown and chunks with embeddings
+    await this.saveStageResult('markdown', { content: markdown }, { final: true })
+    await this.saveStageResult('chunks', finalChunks, { final: true })
+
+    // Checkpoint 6: Save manifest.json with processing metadata
+    const manifestData = {
+      document_id: this.job.document_id,
+      processing_mode: isLocalMode ? 'local' : 'cloud',
+      source_type: 'pdf',
+      files: {
+        'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+        'metadata.json': { size: JSON.stringify(markdown).length, type: 'final' },
+        'manifest.json': { size: 0, type: 'final' },
+        ...(isLocalMode && extractionResult.chunks ? {
+          'cached_chunks.json': { size: JSON.stringify(extractionResult.chunks).length, type: 'final' }
+        } : {})
+      },
+      chunk_count: finalChunks.length,
+      word_count: markdown.split(/\s+/).length,
+      processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+      docling_version: isLocalMode ? '2.55.1' : undefined,
+      markdown_hash: isLocalMode ? hashMarkdown(markdown) : undefined
+    }
+    await this.saveStageResult('manifest', manifestData, { final: true })
+
     await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
 
     // Phase 4: Note on bulletproof matching

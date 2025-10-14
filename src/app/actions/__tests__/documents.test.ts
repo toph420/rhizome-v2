@@ -1,4 +1,4 @@
-import { estimateProcessingCost, uploadDocument, triggerProcessing, retryProcessing, getDocumentJob } from '../documents'
+import { estimateProcessingCost, uploadDocument, triggerProcessing, retryProcessing, getDocumentJob, reprocessConnections } from '../documents'
 
 // Mock dependencies
 jest.mock('@/lib/supabase/server', () => ({
@@ -439,6 +439,299 @@ describe('Document Actions - Background Processing System', () => {
       const result = await getDocumentJob('doc-123')
 
       expect(result).toBeNull()
+    })
+  })
+
+  describe('reprocessConnections - Connection Reprocessing (T-015)', () => {
+    const mockSupabase = {
+      from: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      insert: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      single: jest.fn()
+    }
+
+    const mockUser = { id: 'user-123' }
+
+    beforeEach(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getSupabaseClient } = require('@/lib/auth')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getCurrentUser } = require('@/lib/auth')
+
+      getSupabaseClient.mockReturnValue(mockSupabase)
+      getCurrentUser.mockResolvedValue(mockUser)
+
+      jest.clearAllMocks()
+    })
+
+    test('Scenario 1: Create reprocess job with all options', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' },
+        error: null
+      })
+
+      // Mock job creation success
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'job-reprocess-123' },
+        error: null
+      })
+
+      const result = await reprocessConnections('doc-123', {
+        mode: 'smart',
+        engines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+        preserveValidated: true,
+        backupFirst: true
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.jobId).toBe('job-reprocess-123')
+      expect(result.error).toBeUndefined()
+
+      // Verify job was created with correct parameters
+      expect(mockSupabase.insert).toHaveBeenCalledWith({
+        user_id: 'user-123',
+        job_type: 'reprocess_connections',
+        entity_type: 'document',
+        entity_id: 'doc-123',
+        input_data: {
+          document_id: 'doc-123',
+          mode: 'smart',
+          engines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+          preserveValidated: true,
+          backupFirst: true
+        }
+      })
+    })
+
+    test('Scenario 2: Validation failure - empty engines array', async () => {
+      const result = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: []
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('At least one engine required')
+
+      // Verify no database operations were attempted
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    test('Scenario 3: Smart Mode with preservation defaults', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' },
+        error: null
+      })
+
+      // Mock job creation success
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'job-smart-456' },
+        error: null
+      })
+
+      const result = await reprocessConnections('doc-123', {
+        mode: 'smart',
+        engines: ['semantic_similarity']
+        // Not providing preserveValidated or backupFirst - should default to true
+      })
+
+      expect(result.success).toBe(true)
+
+      // Verify defaults were applied
+      expect(mockSupabase.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input_data: expect.objectContaining({
+            preserveValidated: true,
+            backupFirst: true
+          })
+        })
+      )
+    })
+
+    test('should validate invalid mode', async () => {
+      const result = await reprocessConnections('doc-123', {
+        mode: 'invalid_mode' as any,
+        engines: ['semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Invalid mode')
+
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    test('should validate invalid engine names', async () => {
+      const result = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['invalid_engine' as any, 'semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Invalid engines: invalid_engine')
+
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    test('should handle document not found', async () => {
+      // Mock document not found
+      mockSupabase.single.mockResolvedValue({
+        data: null,
+        error: { message: 'Document not found' }
+      })
+
+      const result = await reprocessConnections('nonexistent-doc', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Document not found')
+
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    test('should handle unauthorized access (wrong user)', async () => {
+      // Mock document exists but belongs to different user
+      mockSupabase.single.mockResolvedValue({
+        data: { id: 'doc-123', user_id: 'other-user', title: 'Test Doc' },
+        error: null
+      })
+
+      const result = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Not authorized to reprocess this document')
+
+      expect(mockSupabase.insert).not.toHaveBeenCalled()
+    })
+
+    test('should handle job creation failure', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValueOnce({
+        data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' },
+        error: null
+      })
+
+      // Mock job creation failure
+      mockSupabase.single.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'Database error' }
+      })
+
+      const result = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Job creation failed')
+    })
+
+    test('should handle invalid document ID', async () => {
+      const result = await reprocessConnections('', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Invalid document ID')
+
+      expect(mockSupabase.from).not.toHaveBeenCalled()
+    })
+
+    test('should handle not authenticated', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getCurrentUser } = require('@/lib/auth')
+      getCurrentUser.mockResolvedValue(null)
+
+      const result = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('Not authenticated')
+    })
+
+    test('should accept all three modes', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValue({
+        data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' },
+        error: null
+      })
+
+      // Mock job creation success (will be called 3 times)
+      mockSupabase.single
+        .mockResolvedValueOnce({ data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'job-1' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'job-2' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'job-3' }, error: null })
+
+      // Test 'all' mode
+      const result1 = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+      expect(result1.success).toBe(true)
+
+      // Test 'add_new' mode
+      const result2 = await reprocessConnections('doc-123', {
+        mode: 'add_new',
+        engines: ['semantic_similarity']
+      })
+      expect(result2.success).toBe(true)
+
+      // Test 'smart' mode
+      const result3 = await reprocessConnections('doc-123', {
+        mode: 'smart',
+        engines: ['semantic_similarity']
+      })
+      expect(result3.success).toBe(true)
+    })
+
+    test('should accept all three engines individually', async () => {
+      // Mock document exists
+      mockSupabase.single.mockResolvedValue({
+        data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' },
+        error: null
+      })
+
+      // Mock job creation success (will be called 3 times)
+      mockSupabase.single
+        .mockResolvedValueOnce({ data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'job-1' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'job-2' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'doc-123', user_id: 'user-123', title: 'Test Doc' }, error: null })
+        .mockResolvedValueOnce({ data: { id: 'job-3' }, error: null })
+
+      // Test semantic_similarity
+      const result1 = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['semantic_similarity']
+      })
+      expect(result1.success).toBe(true)
+
+      // Test contradiction_detection
+      const result2 = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['contradiction_detection']
+      })
+      expect(result2.success).toBe(true)
+
+      // Test thematic_bridge
+      const result3 = await reprocessConnections('doc-123', {
+        mode: 'all',
+        engines: ['thematic_bridge']
+      })
+      expect(result3.success).toBe(true)
     })
   })
 })

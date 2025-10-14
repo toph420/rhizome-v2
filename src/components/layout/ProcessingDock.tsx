@@ -6,9 +6,8 @@ import { SupabaseClient } from '@supabase/supabase-js'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, Settings2, type LucideIcon } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, RefreshCw, X, Download, FileText, Database, Sparkles, type LucideIcon } from 'lucide-react'
 import { cancelAndDeleteJob, clearCompletedJobs } from '@/app/actions/admin'
-import { AdminPanel } from '@/components/admin/AdminPanel'
 
 const STAGE_LABELS: Record<string, { icon: LucideIcon; label: string; substages?: Record<string, string> }> = {
   download: { 
@@ -104,7 +103,6 @@ export function ProcessingDock() {
   const [userId, setUserId] = useState<string | null>(null)
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
   const [isClearingCompleted, setIsClearingCompleted] = useState(false)
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   
   useEffect(() => {
     const supabase = createClient()
@@ -309,26 +307,11 @@ export function ProcessingDock() {
   const hasCompleted = jobs.some(j => j.status === 'completed')
 
   return (
-    <>
-      <AdminPanel
-        isOpen={isAdminPanelOpen}
-        onClose={() => setIsAdminPanelOpen(false)}
-      />
-
-      <div className="fixed bottom-0 left-0 right-0 border-t bg-background shadow-lg z-50">
+    <div className="fixed bottom-0 left-0 right-0 border-t bg-background shadow-lg z-50">
         <div className="container mx-auto p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-medium">Processing Jobs</h3>
             <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsAdminPanelOpen(true)}
-                title="Open job controls"
-              >
-                <Settings2 className="h-4 w-4 mr-1" />
-                Controls
-              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -461,6 +444,5 @@ export function ProcessingDock() {
         </div>
       </div>
     </div>
-    </>
   )
 }

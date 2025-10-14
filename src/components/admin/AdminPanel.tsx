@@ -1,9 +1,26 @@
 'use client'
 
 import { useState } from 'react'
-import { clearAllJobs, clearCompletedJobs, clearFailedJobs, forceFailAllProcessing, clearAllJobsAndProcessingDocuments } from '@/app/actions/admin'
+import { useHotkeys } from 'react-hotkeys-hook'
+import { HelpCircle } from 'lucide-react'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Loader2, X, Trash2, AlertTriangle, Bomb } from 'lucide-react'
+import {
+  ScannerTab,
+  ImportTab,
+  ExportTab,
+  ConnectionsTab,
+  IntegrationsTab,
+  JobsTab,
+} from './tabs'
+import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog'
 
 interface AdminPanelProps {
   isOpen: boolean
@@ -11,159 +28,95 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
-  const [loading, setLoading] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState('scanner')
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false)
 
-  const handleAction = async (action: () => Promise<any>, loadingKey: string, successMsg: string) => {
-    setLoading(loadingKey)
-    setMessage(null)
+  // Tab switching shortcuts (only when panel open)
+  useHotkeys('1', () => setActiveTab('scanner'), { enabled: isOpen })
+  useHotkeys('2', () => setActiveTab('import'), { enabled: isOpen })
+  useHotkeys('3', () => setActiveTab('export'), { enabled: isOpen })
+  useHotkeys('4', () => setActiveTab('connections'), { enabled: isOpen })
+  useHotkeys('5', () => setActiveTab('integrations'), { enabled: isOpen })
+  useHotkeys('6', () => setActiveTab('jobs'), { enabled: isOpen })
 
-    const result = await action()
+  // Help dialog shortcut
+  useHotkeys(
+    'shift+/',
+    () => {
+      setHelpDialogOpen(true)
+    },
+    { enabled: isOpen }
+  )
 
-    if (result.success) {
-      setMessage(successMsg)
-    } else {
-      setMessage(`Error: ${result.error}`)
-    }
-
-    setLoading(null)
-
-    // Clear message after 3 seconds
-    setTimeout(() => setMessage(null), 3000)
-  }
-
-  if (!isOpen) return null
+  // Close on Esc
+  useHotkeys('esc', () => onClose(), { enabled: isOpen })
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/20 z-40"
-        onClick={onClose}
+      <Sheet open={isOpen} onOpenChange={onClose}>
+        <SheetContent side="top" className="h-[85vh] overflow-auto">
+          <SheetHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <SheetTitle>Admin Panel</SheetTitle>
+                <SheetDescription>
+                  Manage documents, storage, and integrations
+                </SheetDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setHelpDialogOpen(true)}
+                title="Keyboard shortcuts (Shift + ?)"
+              >
+                <HelpCircle className="h-5 w-5" />
+              </Button>
+            </div>
+          </SheetHeader>
+
+          <div className="mt-6">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-6">
+                <TabsTrigger value="scanner">Scanner</TabsTrigger>
+                <TabsTrigger value="import">Import</TabsTrigger>
+                <TabsTrigger value="export">Export</TabsTrigger>
+                <TabsTrigger value="connections">Connections</TabsTrigger>
+                <TabsTrigger value="integrations">Integrations</TabsTrigger>
+                <TabsTrigger value="jobs">Jobs</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="scanner" className="mt-6">
+                <ScannerTab />
+              </TabsContent>
+
+              <TabsContent value="import" className="mt-6">
+                <ImportTab />
+              </TabsContent>
+
+              <TabsContent value="export" className="mt-6">
+                <ExportTab />
+              </TabsContent>
+
+              <TabsContent value="connections" className="mt-6">
+                <ConnectionsTab />
+              </TabsContent>
+
+              <TabsContent value="integrations" className="mt-6">
+                <IntegrationsTab />
+              </TabsContent>
+
+              <TabsContent value="jobs" className="mt-6">
+                <JobsTab />
+              </TabsContent>
+            </Tabs>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <KeyboardShortcutsDialog
+        isOpen={helpDialogOpen}
+        onClose={() => setHelpDialogOpen(false)}
       />
-
-      {/* Sidebar */}
-      <div className="fixed right-0 top-0 h-full w-80 bg-background border-l shadow-lg z-50 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-lg font-semibold">Job Controls</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* Message */}
-        {message && (
-          <div className="p-4 border-b bg-muted">
-            <p className="text-sm">{message}</p>
-          </div>
-        )}
-
-        {/* Controls */}
-        <div className="flex-1 p-4 space-y-3 overflow-y-auto">
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium text-muted-foreground">Quick Actions</h3>
-
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => handleAction(clearCompletedJobs, 'clear-completed', 'Cleared completed jobs')}
-              disabled={loading === 'clear-completed'}
-            >
-              {loading === 'clear-completed' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4 mr-2" />
-              )}
-              Clear Completed Jobs
-            </Button>
-
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => handleAction(clearFailedJobs, 'clear-failed', 'Cleared failed jobs')}
-              disabled={loading === 'clear-failed'}
-            >
-              {loading === 'clear-failed' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4 mr-2" />
-              )}
-              Clear Failed Jobs
-            </Button>
-          </div>
-
-          <div className="space-y-2 pt-4 border-t">
-            <h3 className="text-sm font-medium text-muted-foreground">Emergency Controls</h3>
-
-            <Button
-              variant="destructive"
-              className="w-full justify-start"
-              onClick={() => {
-                if (!confirm('Stop all processing jobs? They will be cancelled immediately.')) return
-                handleAction(forceFailAllProcessing, 'force-fail-all', 'Stopped all processing jobs')
-              }}
-              disabled={loading === 'force-fail-all'}
-            >
-              {loading === 'force-fail-all' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <AlertTriangle className="h-4 w-4 mr-2" />
-              )}
-              Stop All Processing
-            </Button>
-
-            <Button
-              variant="destructive"
-              className="w-full justify-start"
-              onClick={() => {
-                if (!confirm('Delete ALL jobs? This cannot be undone.')) return
-                handleAction(clearAllJobs, 'clear-all', 'Cleared all jobs')
-              }}
-              disabled={loading === 'clear-all'}
-            >
-              {loading === 'clear-all' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4 mr-2" />
-              )}
-              Clear All Jobs
-            </Button>
-
-            <Button
-              variant="destructive"
-              className="w-full justify-start"
-              onClick={() => {
-                if (!confirm('⚠️ NUCLEAR OPTION: Delete ALL jobs AND all processing documents? This CANNOT be undone!')) return
-                handleAction(
-                  clearAllJobsAndProcessingDocuments,
-                  'nuclear',
-                  'Deleted all jobs and processing documents'
-                )
-              }}
-              disabled={loading === 'nuclear'}
-            >
-              {loading === 'nuclear' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Bomb className="h-4 w-4 mr-2" />
-              )}
-              Nuclear Reset
-            </Button>
-          </div>
-
-          <div className="pt-4 border-t">
-            <p className="text-xs text-muted-foreground">
-              These controls manage background jobs. Use "Stop All Processing" to cancel stuck jobs,
-              or "Clear Completed/Failed" to clean up the job queue.
-            </p>
-          </div>
-        </div>
-      </div>
     </>
   )
 }

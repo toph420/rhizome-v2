@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, Settings, Library, Brain, Palette } from 'lucide-react'
+import { Menu, Settings, Library, Brain, Palette, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface TopNavProps {
   onMenuClick: () => void
+  onAdminClick: () => void
 }
 
 const navigation = [
@@ -34,7 +35,7 @@ const navigation = [
   },
 ]
 
-export function TopNav({ onMenuClick }: TopNavProps) {
+export function TopNav({ onMenuClick, onAdminClick }: TopNavProps) {
   const pathname = usePathname()
 
   return (
@@ -89,6 +90,17 @@ export function TopNav({ onMenuClick }: TopNavProps) {
 
         {/* Spacer for mobile to push content right */}
         <div className="flex-1 lg:hidden" />
+
+        {/* Admin Panel Button - Always visible */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onAdminClick}
+          title="Open Admin Panel (Cmd+Shift+A)"
+        >
+          <Database className="h-5 w-5" />
+          <span className="sr-only">Open Admin Panel</span>
+        </Button>
       </div>
     </header>
   )

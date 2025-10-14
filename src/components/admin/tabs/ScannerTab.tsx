@@ -1,0 +1,427 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { scanStorage, type DocumentScanResult, type SyncState } from '@/app/actions/documents'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info } from 'lucide-react'
+
+type FilterType = 'all' | 'missing_db' | 'out_sync' | 'healthy'
+
+export function ScannerTab() {
+  const [scanResults, setScanResults] = useState<DocumentScanResult[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [filter, setFilter] = useState<FilterType>('all')
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+
+  // Auto-scan on mount
+  useEffect(() => {
+    handleScan()
+  }, [])
+
+  const handleScan = async () => {
+    setLoading(true)
+    setError(null)
+
+    const result = await scanStorage()
+
+    if (result.success) {
+      setScanResults(result.documents)
+    } else {
+      setError(result.error || 'Failed to scan storage')
+    }
+
+    setLoading(false)
+  }
+
+  const toggleRow = (documentId: string) => {
+    const newExpanded = new Set(expandedRows)
+    if (newExpanded.has(documentId)) {
+      newExpanded.delete(documentId)
+    } else {
+      newExpanded.add(documentId)
+    }
+    setExpandedRows(newExpanded)
+  }
+
+  // Filter documents based on selected filter
+  const filteredDocuments = scanResults?.filter((doc) => {
+    if (filter === 'all') return true
+    if (filter === 'missing_db') return doc.syncState === 'missing_from_db'
+    if (filter === 'out_sync') return doc.syncState === 'out_of_sync'
+    if (filter === 'healthy') return doc.syncState === 'healthy'
+    return true
+  }) || []
+
+  // Calculate summary statistics
+  const stats = {
+    totalStorage: scanResults?.length || 0,
+    totalDb: scanResults?.filter(d => d.inDatabase).length || 0,
+    missingDb: scanResults?.filter(d => d.syncState === 'missing_from_db').length || 0,
+    outOfSync: scanResults?.filter(d => d.syncState === 'out_of_sync').length || 0,
+    healthy: scanResults?.filter(d => d.syncState === 'healthy').length || 0,
+    missingStorage: scanResults?.filter(d => d.syncState === 'missing_from_storage').length || 0,
+  }
+
+  const getSyncStateBadge = (syncState: SyncState) => {
+    const getBadgeContent = () => {
+      switch (syncState) {
+        case 'healthy':
+          return { badge: <Badge variant="default" className="bg-green-600">Healthy</Badge>, tooltip: 'Storage and Database are in sync' }
+        case 'missing_from_db':
+          return { badge: <Badge variant="destructive">Missing from DB</Badge>, tooltip: 'Document exists in Storage but not in Database. Click Import to restore.' }
+        case 'missing_from_storage':
+          return { badge: <Badge variant="secondary" className="bg-yellow-600">Missing from Storage</Badge>, tooltip: 'Document exists in Database but Storage files are missing' }
+        case 'out_of_sync':
+          return { badge: <Badge variant="secondary" className="bg-orange-600">Out of Sync</Badge>, tooltip: 'Storage and Database have different chunk counts. Click Sync to update.' }
+        default:
+          return { badge: <Badge variant="outline">Unknown</Badge>, tooltip: 'Unknown sync status' }
+      }
+    }
+
+    const { badge, tooltip } = getBadgeContent()
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {badge}
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{tooltip}</p>
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Storage Scanner</h3>
+          <p className="text-sm text-muted-foreground">
+            Compare Storage vs Database and sync documents
+          </p>
+        </div>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleScan}
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Scanning...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh Scan
+                </>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Scan Storage to compare with Database</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
+      {/* Summary Statistics */}
+      {scanResults && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="border rounded-lg p-4">
+            <div className="text-2xl font-bold">{stats.totalStorage}</div>
+            <div className="text-sm text-muted-foreground">Total in Storage</div>
+          </div>
+          <div className="border rounded-lg p-4">
+            <div className="text-2xl font-bold">{stats.totalDb}</div>
+            <div className="text-sm text-muted-foreground">Total in DB</div>
+          </div>
+          <div className="border rounded-lg p-4">
+            <div className="text-2xl font-bold text-red-600">{stats.missingDb}</div>
+            <div className="text-sm text-muted-foreground">Missing from DB</div>
+          </div>
+          <div className="border rounded-lg p-4">
+            <div className="text-2xl font-bold text-yellow-600">{stats.missingStorage}</div>
+            <div className="text-sm text-muted-foreground">Missing from Storage</div>
+          </div>
+          <div className="border rounded-lg p-4">
+            <div className="text-2xl font-bold text-orange-600">{stats.outOfSync}</div>
+            <div className="text-sm text-muted-foreground">Out of Sync</div>
+          </div>
+          <div className="border rounded-lg p-4">
+            <div className="text-2xl font-bold text-green-600">{stats.healthy}</div>
+            <div className="text-sm text-muted-foreground">Healthy</div>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      {scanResults && (
+        <div className="flex gap-2">
+          <Button
+            variant={filter === 'all' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setFilter('all')}
+          >
+            All ({stats.totalStorage})
+          </Button>
+          <Button
+            variant={filter === 'missing_db' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setFilter('missing_db')}
+          >
+            Missing from DB ({stats.missingDb})
+          </Button>
+          <Button
+            variant={filter === 'out_sync' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setFilter('out_sync')}
+          >
+            Out of Sync ({stats.outOfSync})
+          </Button>
+          <Button
+            variant={filter === 'healthy' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setFilter('healthy')}
+          >
+            Healthy ({stats.healthy})
+          </Button>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+          <p className="text-sm text-red-800">{error}</p>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading && !scanResults && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!loading && scanResults && filteredDocuments.length === 0 && (
+        <div className="border rounded-lg p-8 text-center space-y-2">
+          <p className="text-muted-foreground font-medium">
+            {filter === 'all'
+              ? 'No documents found in Storage'
+              : `No documents with "${filter}" status`}
+          </p>
+          {filter === 'all' && (
+            <p className="text-sm text-muted-foreground">
+              Process a document to get started. Your processed documents will be automatically backed up to Storage.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Results Table */}
+      {!loading && filteredDocuments.length > 0 && (
+        <div className="border rounded-lg">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[40px]"></TableHead>
+                <TableHead>Title</TableHead>
+                <TableHead>Storage Files</TableHead>
+                <TableHead>DB Status</TableHead>
+                <TableHead>Sync State</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredDocuments.map((doc) => (
+                <Collapsible
+                  key={doc.documentId}
+                  open={expandedRows.has(doc.documentId)}
+                  onOpenChange={() => toggleRow(doc.documentId)}
+                  asChild
+                >
+                  <>
+                    <TableRow className="cursor-pointer hover:bg-muted/50">
+                      <TableCell>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                            {expandedRows.has(doc.documentId) ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </CollapsibleTrigger>
+                      </TableCell>
+                      <TableCell className="font-medium">{doc.title}</TableCell>
+                      <TableCell>
+                        <span className="text-sm text-muted-foreground">
+                          {doc.storageFiles.length} files
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {doc.inDatabase ? (
+                          <span className="text-sm">
+                            {doc.chunkCount !== null ? `${doc.chunkCount} chunks` : 'In DB'}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">Not in DB</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{getSyncStateBadge(doc.syncState)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  console.log('Import:', doc.documentId)
+                                }}
+                              >
+                                Import
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Restore chunks from Storage to Database</p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  console.log('Sync:', doc.documentId)
+                                }}
+                              >
+                                Sync
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Update Database to match Storage files</p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  console.log('Export:', doc.documentId)
+                                }}
+                              >
+                                Export
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Download ZIP bundle with all document files</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Expandable File Details */}
+                    <CollapsibleContent asChild>
+                      <TableRow>
+                        <TableCell colSpan={6} className="bg-muted/30 p-4">
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-medium">Storage Files:</h4>
+                            {doc.storageFiles.length > 0 ? (
+                              <ul className="text-sm text-muted-foreground space-y-1 ml-4">
+                                {doc.storageFiles.map((file) => (
+                                  <li key={file} className="list-disc">
+                                    {file}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-sm text-muted-foreground ml-4">No files in Storage</p>
+                            )}
+                            <div className="mt-3 text-sm">
+                              <p className="text-muted-foreground">
+                                Document ID: <span className="font-mono text-xs">{doc.documentId}</span>
+                              </p>
+                              {doc.createdAt && (
+                                <p className="text-muted-foreground">
+                                  Created: {new Date(doc.createdAt).toLocaleString()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    </CollapsibleContent>
+                  </>
+                </Collapsible>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* Bulk Actions */}
+      {filteredDocuments.length > 0 && (
+        <div className="flex gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                onClick={() => console.log('Import All:', filteredDocuments.map(d => d.documentId))}
+              >
+                Import All ({filteredDocuments.length})
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Restore all filtered documents from Storage to Database</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                onClick={() => console.log('Sync All:', filteredDocuments.map(d => d.documentId))}
+              >
+                Sync All ({filteredDocuments.length})
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Update all filtered documents to match Storage files</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+    </div>
+  )
+}

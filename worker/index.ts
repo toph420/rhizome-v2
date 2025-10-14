@@ -7,6 +7,9 @@ import { detectConnectionsHandler } from './handlers/detect-connections.js'
 import { syncFromObsidian, exportToObsidian } from './handlers/obsidian-sync.js'
 import { reprocessDocument } from './handlers/reprocess-document.js'
 import { continueProcessing } from './handlers/continue-processing.js'
+import { importDocumentHandler } from './handlers/import-document.js'
+import { reprocessConnectionsHandler } from './handlers/reprocess-connections.js'
+import { exportDocumentHandler } from './handlers/export-document.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
 
@@ -20,6 +23,9 @@ config({ path: resolve(__dirname, '../.env.local') })
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,
   'detect-connections': detectConnectionsHandler,
+  'import_document': importDocumentHandler,
+  'reprocess_connections': reprocessConnectionsHandler,
+  'export_documents': exportDocumentHandler,
   'reprocess-document': async (supabase: any, job: any) => {
     const { documentId } = job.input_data
     const results = await reprocessDocument(documentId, supabase, job.id)  // Pass jobId for progress tracking

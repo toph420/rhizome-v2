@@ -5,15 +5,16 @@
 
 import { GoogleGenAI } from '@google/genai'
 import { SupabaseClient } from '@supabase/supabase-js'
-import type { 
-  ProcessResult, 
-  ProgressUpdate, 
+import type {
+  ProcessResult,
+  ProgressUpdate,
   ProcessingOptions,
   ProcessedChunk
 } from '../types/processor.js'
 import { classifyError, getUserFriendlyError } from '../lib/errors.js'
 import { batchInsertChunks, calculateOptimalBatchSize } from '../lib/batch-operations.js'
 import type { ChunkMetadata, PartialChunkMetadata } from '../types/metadata.js'
+import { saveToStorage } from '../lib/storage-helpers.js'
 
 /**
  * Background job interface from database.
@@ -273,17 +274,17 @@ export abstract class SourceProcessor {
 
   /**
    * Gets storage path for document files.
-   * 
+   *
    * @returns Storage path in format "userId/documentId"
    */
   protected getStoragePath(): string {
     const inputData = this.job.input_data || {}
-    return inputData.storage_path || `dev-user-123/${this.job.document_id}`
+    return (inputData as any).storage_path || `dev-user-123/${this.job.document_id}`
   }
 
   /**
    * Downloads a file from Supabase storage.
-   * 
+   *
    * @param path - Storage path to file
    * @returns File content as text
    * @throws Error if download fails
@@ -292,12 +293,87 @@ export abstract class SourceProcessor {
     const { data, error } = await this.supabase.storage
       .from('documents')
       .download(path)
-    
+
     if (error) {
       throw new Error(`Failed to download ${path}: ${error.message}`)
     }
 
     return data.text()
+  }
+
+  /**
+   * Save processing stage result to Storage for portability and resumability.
+   * Supports both intermediate stages (stage-*.json) and final outputs (*.json).
+   *
+   * Error handling: Non-fatal (logs warning, doesn't throw). Storage failures won't
+   * interrupt processing - data is still saved to database.
+   *
+   * @param stage - Stage name (e.g., "extraction", "chunking", "metadata", "manifest")
+   * @param data - Stage data to save (must be JSON-serializable)
+   * @param options - Optional configuration
+   * @param options.final - If true, saves to final filename (e.g., chunks.json).
+   *                        If false, saves to stage-{name}.json for checkpointing.
+   *
+   * @example
+   * ```typescript
+   * // Save intermediate stage (checkpointing)
+   * await this.saveStageResult('extraction', {
+   *   markdown: extractedMarkdown,
+   *   doclingChunks: rawChunks,
+   *   structure: doclingStructure
+   * }, { final: false })
+   * // → Saves to: documents/{userId}/{docId}/stage-extraction.json
+   *
+   * // Save final result (permanent export)
+   * await this.saveStageResult('chunks', enrichedChunks, { final: true })
+   * // → Saves to: documents/{userId}/{docId}/chunks.json
+   *
+   * // Save manifest (always final)
+   * await this.saveStageResult('manifest', manifestData, { final: true })
+   * // → Saves to: documents/{userId}/{docId}/manifest.json
+   * ```
+   */
+  protected async saveStageResult(
+    stage: string,
+    data: any,
+    options?: { final?: boolean }
+  ): Promise<void> {
+    try {
+      // Determine filename based on final flag
+      const filename = options?.final
+        ? `${stage}.json`  // Final: chunks.json, metadata.json, manifest.json
+        : `stage-${stage}.json`  // Intermediate: stage-extraction.json, stage-cleanup.json
+
+      // Build full Storage path: documents/{userId}/{documentId}/{filename}
+      const storagePath = this.getStoragePath()
+      const fullPath = `${storagePath}/${filename}`
+
+      // Add metadata to all stage results
+      const enrichedData = {
+        ...data,
+        version: data.version || "1.0",
+        document_id: this.job.document_id,
+        stage: stage,
+        timestamp: new Date().toISOString(),
+        final: options?.final ?? false
+      }
+
+      // Save to Storage (non-fatal, logs warning on failure)
+      await saveToStorage(this.supabase, fullPath, enrichedData)
+
+      console.log(
+        `[BaseProcessor] ✓ Saved ${options?.final ? 'final' : 'stage'} result: ${fullPath}`
+      )
+
+    } catch (error) {
+      // Non-fatal: log warning but continue processing
+      // Storage save failures should not interrupt document processing
+      console.warn(
+        `[BaseProcessor] Failed to save stage result for ${stage}:`,
+        error instanceof Error ? error.message : error
+      )
+      // Processing continues - data is still saved to database
+    }
   }
 
 }
