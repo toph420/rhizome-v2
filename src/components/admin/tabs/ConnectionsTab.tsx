@@ -17,12 +17,14 @@ import {
 } from '@/components/ui/select'
 import { Loader2, Play, AlertCircle, CheckCircle2, Info } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { serializeSupabaseError, getErrorMessage } from '@/lib/supabase/error-helpers'
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 
 // Types for document with connection stats
 interface DocumentWithStats {
@@ -75,6 +77,9 @@ const MODE_INFO = {
 } as const
 
 export function ConnectionsTab() {
+  // Use Zustand store for job tracking
+  const { jobs, registerJob, updateJob, activeJobs } = useBackgroundJobsStore()
+
   // Form state
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [mode, setMode] = useState<ReprocessMode>('smart')
@@ -89,15 +94,11 @@ export function ConnectionsTab() {
   // UI state
   const [documents, setDocuments] = useState<DocumentWithStats[]>([])
   const [loading, setLoading] = useState(false)
-  const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
-  // Job tracking
+  // Track current reprocessing job
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
-  const [jobProgress, setJobProgress] = useState(0)
-  const [jobStage, setJobStage] = useState<string>('')
-  const [jobDetails, setJobDetails] = useState<string>('')
   const [jobResult, setJobResult] = useState<any>(null)
 
   // Load documents on mount
@@ -105,47 +106,24 @@ export function ConnectionsTab() {
     loadDocuments()
   }, [])
 
-  // Poll job status when processing
+  // Watch for job completion
   useEffect(() => {
-    if (!currentJobId || !processing) return
+    if (!currentJobId) return
 
-    const interval = setInterval(async () => {
-      const supabase = createClient()
-      const { data: job } = await supabase
-        .from('background_jobs')
-        .select('*')
-        .eq('id', currentJobId)
-        .single()
+    const job = jobs.get(currentJobId)
+    if (!job) return
 
-      if (!job) return
-
-      // Update progress
-      if (job.progress) {
-        setJobProgress(job.progress.percent || 0)
-        setJobStage(job.progress.stage || '')
-        setJobDetails(job.progress.details || '')
-      }
-
-      // Handle completion
-      if (job.status === 'completed') {
-        setProcessing(false)
-        setJobResult(job.output_data)
-        setMessage('Reprocessing completed successfully!')
-        clearInterval(interval)
-        // Reload documents to update connection counts
-        loadDocuments()
-      }
-
-      // Handle failure
-      if (job.status === 'failed') {
-        setProcessing(false)
-        setError(job.last_error || 'Job failed')
-        clearInterval(interval)
-      }
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [currentJobId, processing])
+    if (job.status === 'completed') {
+      setMessage('Reprocessing completed successfully!')
+      setJobResult(job.result)
+      setCurrentJobId(null)
+      // Reload documents to update connection counts
+      loadDocuments()
+    } else if (job.status === 'failed') {
+      setError(job.error || 'Job failed')
+      setCurrentJobId(null)
+    }
+  }, [currentJobId, jobs])
 
   const loadDocuments = async () => {
     setLoading(true)
@@ -158,7 +136,7 @@ export function ConnectionsTab() {
       const { data: docs, error: docsError } = await supabase
         .from('documents')
         .select('id, title')
-        .eq('status', 'completed')
+        .eq('processing_status', 'completed')
         .order('created_at', { ascending: false })
 
       if (docsError) throw docsError
@@ -182,13 +160,13 @@ export function ConnectionsTab() {
 
           // Count connections where source chunk belongs to this document
           const { count: connectionCount } = await supabase
-            .from('connections')
+            .from('chunk_connections')
             .select('*', { count: 'exact', head: true })
             .in('source_chunk_id', chunkIds.length > 0 ? chunkIds : ['none'])
 
           // Count validated connections
           const { count: validatedCount } = await supabase
-            .from('connections')
+            .from('chunk_connections')
             .select('*', { count: 'exact', head: true })
             .in('source_chunk_id', chunkIds.length > 0 ? chunkIds : ['none'])
             .eq('user_validated', true)
@@ -210,8 +188,8 @@ export function ConnectionsTab() {
         setSelectedDocId(transformed[0].id)
       }
     } catch (err) {
-      console.error('Failed to load documents:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load documents')
+      console.error('Failed to load documents:', serializeSupabaseError(err))
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -262,13 +240,9 @@ export function ConnectionsTab() {
       if (!confirmed) return
     }
 
-    setProcessing(true)
     setError(null)
     setMessage(null)
     setJobResult(null)
-    setJobProgress(0)
-    setJobStage('')
-    setJobDetails('')
 
     try {
       const result = await reprocessConnections(selectedDocId, {
@@ -280,16 +254,21 @@ export function ConnectionsTab() {
 
       if (!result.success) {
         setError(result.error || 'Failed to start reprocessing')
-        setProcessing(false)
         return
       }
+
+      // Register job with store
+      const selectedDoc = documents.find(d => d.id === selectedDocId)
+      registerJob(result.jobId!, 'reprocess_connections', {
+        documentId: selectedDocId,
+        title: selectedDoc?.title || 'Unknown'
+      })
 
       setCurrentJobId(result.jobId!)
       setMessage('Reprocessing started...')
     } catch (err) {
       console.error('Reprocess error:', err)
       setError(err instanceof Error ? err.message : 'Failed to start reprocessing')
-      setProcessing(false)
     }
   }
 
@@ -522,23 +501,20 @@ export function ConnectionsTab() {
           )}
 
           {/* Progress */}
-          {processing && (
+          {currentJobId && jobs.get(currentJobId) && (
             <div className="space-y-3 border-t pt-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">{jobStage || 'Processing...'}</span>
-                  <span className="text-muted-foreground">{jobProgress}%</span>
+                  <span className="font-medium">{jobs.get(currentJobId)?.details || 'Processing...'}</span>
+                  <span className="text-muted-foreground">{jobs.get(currentJobId)?.progress || 0}%</span>
                 </div>
-                <Progress value={jobProgress} className="h-2" />
-                {jobDetails && (
-                  <p className="text-sm text-muted-foreground">{jobDetails}</p>
-                )}
+                <Progress value={jobs.get(currentJobId)?.progress || 0} className="h-2" />
               </div>
             </div>
           )}
 
           {/* Results */}
-          {jobResult && !processing && (
+          {jobResult && !currentJobId && (
             <div className="space-y-3 border-t pt-4">
               <h4 className="text-sm font-medium">Results</h4>
               <div className="grid grid-cols-2 gap-4">
@@ -592,10 +568,10 @@ export function ConnectionsTab() {
               <TooltipTrigger asChild>
                 <Button
                   onClick={handleReprocess}
-                  disabled={!selectedDocId || engines.length === 0 || processing}
+                  disabled={!selectedDocId || engines.length === 0 || !!currentJobId}
                   className="flex-1"
                 >
-                  {processing ? (
+                  {currentJobId ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Reprocessing...
@@ -625,7 +601,7 @@ export function ConnectionsTab() {
                     setMessage(null)
                     setJobResult(null)
                   }}
-                  disabled={processing}
+                  disabled={!!currentJobId}
                 >
                   Reset
                 </Button>

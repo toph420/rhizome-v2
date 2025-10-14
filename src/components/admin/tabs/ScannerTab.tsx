@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { scanStorage, type DocumentScanResult, type SyncState } from '@/app/actions/documents'
+import React, { useEffect, useState } from 'react'
+import { type DocumentScanResult, type SyncState } from '@/app/actions/documents'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -13,45 +13,27 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info } from 'lucide-react'
+import { useStorageScanStore } from '@/stores/admin/storage-scan'
 
 type FilterType = 'all' | 'missing_db' | 'out_sync' | 'healthy'
 
 export function ScannerTab() {
-  const [scanResults, setScanResults] = useState<DocumentScanResult[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Use Zustand store for scan state
+  const { scanResults, scanning, error, scan, invalidate } = useStorageScanStore()
+
+  // Local UI state only
   const [filter, setFilter] = useState<FilterType>('all')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   // Auto-scan on mount
   useEffect(() => {
-    handleScan()
-  }, [])
-
-  const handleScan = async () => {
-    setLoading(true)
-    setError(null)
-
-    const result = await scanStorage()
-
-    if (result.success) {
-      setScanResults(result.documents)
-    } else {
-      setError(result.error || 'Failed to scan storage')
-    }
-
-    setLoading(false)
-  }
+    scan()
+  }, [scan])
 
   const toggleRow = (documentId: string) => {
     const newExpanded = new Set(expandedRows)
@@ -128,10 +110,10 @@ export function ScannerTab() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleScan}
-              disabled={loading}
+              onClick={scan}
+              disabled={scanning}
             >
-              {loading ? (
+              {scanning ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Scanning...
@@ -222,14 +204,14 @@ export function ScannerTab() {
       )}
 
       {/* Loading State */}
-      {loading && !scanResults && (
+      {scanning && !scanResults && (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       )}
 
       {/* Empty State */}
-      {!loading && scanResults && filteredDocuments.length === 0 && (
+      {!scanning && scanResults && filteredDocuments.length === 0 && (
         <div className="border rounded-lg p-8 text-center space-y-2">
           <p className="text-muted-foreground font-medium">
             {filter === 'all'
@@ -245,7 +227,7 @@ export function ScannerTab() {
       )}
 
       {/* Results Table */}
-      {!loading && filteredDocuments.length > 0 && (
+      {!scanning && filteredDocuments.length > 0 && (
         <div className="border rounded-lg">
           <Table>
             <TableHeader>
@@ -260,24 +242,21 @@ export function ScannerTab() {
             </TableHeader>
             <TableBody>
               {filteredDocuments.map((doc) => (
-                <Collapsible
-                  key={doc.documentId}
-                  open={expandedRows.has(doc.documentId)}
-                  onOpenChange={() => toggleRow(doc.documentId)}
-                  asChild
-                >
-                  <>
-                    <TableRow className="cursor-pointer hover:bg-muted/50">
+                <React.Fragment key={doc.documentId}>
+                  <TableRow className="cursor-pointer hover:bg-muted/50">
                       <TableCell>
-                        <CollapsibleTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                            {expandedRows.has(doc.documentId) ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </CollapsibleTrigger>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => toggleRow(doc.documentId)}
+                        >
+                          {expandedRows.has(doc.documentId) ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </Button>
                       </TableCell>
                       <TableCell className="font-medium">{doc.title}</TableCell>
                       <TableCell>
@@ -353,8 +332,8 @@ export function ScannerTab() {
                     </TableRow>
 
                     {/* Expandable File Details */}
-                    <CollapsibleContent asChild>
-                      <TableRow>
+                    {expandedRows.has(doc.documentId) && (
+                      <TableRow key={`${doc.documentId}-expanded`}>
                         <TableCell colSpan={6} className="bg-muted/30 p-4">
                           <div className="space-y-2">
                             <h4 className="text-sm font-medium">Storage Files:</h4>
@@ -382,9 +361,8 @@ export function ScannerTab() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    </CollapsibleContent>
-                  </>
-                </Collapsible>
+                    )}
+                </React.Fragment>
               ))}
             </TableBody>
           </Table>

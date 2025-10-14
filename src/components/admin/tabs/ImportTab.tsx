@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  scanStorage,
   importFromStorage,
   type DocumentScanResult,
 } from '@/app/actions/documents'
@@ -23,27 +22,19 @@ import { Loader2, Download, CheckCircle2, XCircle, AlertCircle, Info } from 'luc
 import { ConflictResolutionDialog } from '@/components/admin/ConflictResolutionDialog'
 import type { ImportConflict } from '@/types/storage'
 import { createClient } from '@/lib/supabase/client'
+import { serializeSupabaseError } from '@/lib/supabase/error-helpers'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-
-interface ImportJob {
-  id: string
-  documentId: string
-  title: string
-  status: 'pending' | 'processing' | 'completed' | 'failed'
-  progress: number
-  details: string
-  error?: string
-}
+import { useStorageScanStore } from '@/stores/admin/storage-scan'
+import { useBackgroundJobsStore, type JobStatus } from '@/stores/admin/background-jobs'
 
 export function ImportTab() {
-  // Scanner state
-  const [scanResults, setScanResults] = useState<DocumentScanResult[] | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const [scanError, setScanError] = useState<string | null>(null)
+  // Use Zustand stores
+  const { scanResults, scanning, error: scanError, scan, invalidate } = useStorageScanStore()
+  const { jobs, registerJob, updateJob, activeJobs, completedJobs, failedJobs } = useBackgroundJobsStore()
 
   // Selection state
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set())
@@ -59,8 +50,7 @@ export function ImportTab() {
     title: string
   } | null>(null)
 
-  // Job tracking
-  const [importJobs, setImportJobs] = useState<ImportJob[]>([])
+  // Import tracking
   const [isImporting, setIsImporting] = useState(false)
 
   // Success/error messages
@@ -68,40 +58,8 @@ export function ImportTab() {
 
   // Auto-scan on mount
   useEffect(() => {
-    handleScan()
-  }, [])
-
-  // Job polling effect
-  useEffect(() => {
-    if (importJobs.length === 0) return
-
-    const activeJobs = importJobs.filter(
-      (j) => j.status === 'pending' || j.status === 'processing'
-    )
-    if (activeJobs.length === 0) return
-
-    const pollInterval = setInterval(() => {
-      pollJobProgress(activeJobs)
-    }, 2000)
-
-    return () => clearInterval(pollInterval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [importJobs])
-
-  const handleScan = async () => {
-    setScanning(true)
-    setScanError(null)
-
-    const result = await scanStorage()
-
-    if (result.success) {
-      setScanResults(result.documents)
-    } else {
-      setScanError(result.error || 'Failed to scan storage')
-    }
-
-    setScanning(false)
-  }
+    scan()
+  }, [scan])
 
   const toggleDocSelection = (documentId: string) => {
     const newSelected = new Set(selectedDocs)
@@ -140,18 +98,6 @@ export function ImportTab() {
 
     const docsToImport = scanResults?.filter((d) => selectedDocs.has(d.documentId)) || []
 
-    // Initialize import jobs
-    const jobs: ImportJob[] = docsToImport.map((doc) => ({
-      id: `import-${doc.documentId}`,
-      documentId: doc.documentId,
-      title: doc.title,
-      status: 'pending' as const,
-      progress: 0,
-      details: 'Starting import...',
-    }))
-
-    setImportJobs(jobs)
-
     // Process each document sequentially
     for (const doc of docsToImport) {
       await processImport(doc)
@@ -160,8 +106,9 @@ export function ImportTab() {
     setIsImporting(false)
 
     // Show summary message
-    const completed = importJobs.filter((j) => j.status === 'completed').length
-    const failed = importJobs.filter((j) => j.status === 'failed').length
+    const importJobsList = Array.from(jobs.values()).filter(j => j.type === 'import_document')
+    const completed = importJobsList.filter((j) => j.status === 'completed').length
+    const failed = importJobsList.filter((j) => j.status === 'failed').length
 
     if (failed === 0) {
       setMessage({
@@ -175,16 +122,21 @@ export function ImportTab() {
       })
     }
 
-    // Refresh scan after import
+    // Invalidate cache and refresh scan after import
     setTimeout(() => {
-      handleScan()
+      invalidate()
+      scan()
       setSelectedDocs(new Set())
     }, 1000)
   }
 
   const processImport = async (doc: DocumentScanResult) => {
-    // Update job status
-    updateJobStatus(doc.documentId, 'processing', 10, 'Checking for conflicts...')
+    // Register job in store
+    const tempJobId = `import-${doc.documentId}`
+    registerJob(tempJobId, 'import_document', {
+      documentId: doc.documentId,
+      title: doc.title
+    })
 
     try {
       const result = await importFromStorage(doc.documentId, {
@@ -193,11 +145,20 @@ export function ImportTab() {
       })
 
       if (result.success && result.jobId) {
-        // Job created successfully
-        updateJobStatus(doc.documentId, 'processing', 30, 'Import job created', result.jobId)
+        // Update with real job ID
+        updateJob(tempJobId, {
+          id: result.jobId,
+          status: 'processing',
+          progress: 30,
+          details: 'Import job created'
+        })
       } else if (result.needsResolution && result.conflict) {
         // Conflict detected - show dialog
-        updateJobStatus(doc.documentId, 'pending', 10, 'Awaiting conflict resolution...')
+        updateJob(tempJobId, {
+          status: 'pending',
+          progress: 10,
+          details: 'Awaiting conflict resolution...'
+        })
 
         return new Promise<void>((resolve) => {
           setCurrentConflict({
@@ -208,7 +169,12 @@ export function ImportTab() {
 
           // Store the resolve callback to be called after conflict resolution
           const originalOnResolved = (jobId: string) => {
-            updateJobStatus(doc.documentId, 'processing', 30, 'Import job created', jobId)
+            updateJob(tempJobId, {
+              id: jobId,
+              status: 'processing',
+              progress: 30,
+              details: 'Import job created'
+            })
             setCurrentConflict(null)
             resolve()
           }
@@ -221,108 +187,36 @@ export function ImportTab() {
         })
       } else {
         // Error occurred
-        updateJobStatus(
-          doc.documentId,
-          'failed',
-          0,
-          result.error || 'Import failed',
-          undefined,
-          result.error
-        )
+        updateJob(tempJobId, {
+          status: 'failed',
+          progress: 0,
+          details: result.error || 'Import failed',
+          error: result.error
+        })
       }
     } catch (error) {
       console.error('Import error:', error)
-      updateJobStatus(
-        doc.documentId,
-        'failed',
-        0,
-        'Unexpected error',
-        undefined,
-        error instanceof Error ? error.message : 'Unknown error'
-      )
-    }
-  }
-
-  const updateJobStatus = (
-    documentId: string,
-    status: ImportJob['status'],
-    progress: number,
-    details: string,
-    jobId?: string,
-    error?: string
-  ) => {
-    setImportJobs((prev) =>
-      prev.map((job) =>
-        job.documentId === documentId
-          ? { ...job, status, progress, details, error, id: jobId || job.id }
-          : job
-      )
-    )
-  }
-
-  const pollJobProgress = async (activeJobs: ImportJob[]) => {
-    const supabase = createClient()
-
-    for (const job of activeJobs) {
-      // Skip if job ID is not a real job ID (still pending)
-      if (job.id.startsWith('import-')) continue
-
-      try {
-        const { data: jobData, error } = await supabase
-          .from('background_jobs')
-          .select('status, progress, details, output_data')
-          .eq('id', job.id)
-          .single()
-
-        if (error) {
-          console.error('Error polling job:', error)
-          continue
-        }
-
-        if (jobData) {
-          if (jobData.status === 'completed') {
-            updateJobStatus(
-              job.documentId,
-              'completed',
-              100,
-              jobData.details || 'Import completed successfully'
-            )
-          } else if (jobData.status === 'failed') {
-            updateJobStatus(
-              job.documentId,
-              'failed',
-              0,
-              jobData.details || 'Import failed',
-              undefined,
-              jobData.output_data?.error || 'Unknown error'
-            )
-          } else if (jobData.status === 'processing') {
-            updateJobStatus(
-              job.documentId,
-              'processing',
-              jobData.progress || 50,
-              jobData.details || 'Processing...'
-            )
-          }
-        }
-      } catch (error) {
-        console.error('Polling error:', error)
-      }
+      updateJob(tempJobId, {
+        status: 'failed',
+        progress: 0,
+        details: 'Unexpected error',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
     }
   }
 
   const handleConflictResolved = useCallback((jobId: string) => {
     if (currentConflict) {
-      updateJobStatus(
-        currentConflict.documentId,
-        'processing',
-        30,
-        'Import job created',
-        jobId
-      )
+      const tempJobId = `import-${currentConflict.documentId}`
+      updateJob(tempJobId, {
+        id: jobId,
+        status: 'processing',
+        progress: 30,
+        details: 'Import job created'
+      })
     }
     setCurrentConflict(null)
-  }, [currentConflict])
+  }, [currentConflict, updateJob])
 
   // Filter to only show importable documents
   const importableDocuments =
@@ -336,7 +230,10 @@ export function ImportTab() {
   const allSelected =
     importableDocuments.length > 0 && selectedDocs.size === importableDocuments.length
 
-  const getStatusIcon = (status: ImportJob['status']) => {
+  // Get import jobs from store
+  const importJobsList = Array.from(jobs.values()).filter(j => j.type === 'import_document')
+
+  const getStatusIcon = (status: JobStatus['status']) => {
     switch (status) {
       case 'pending':
         return <AlertCircle className="size-4 text-yellow-600" />
@@ -362,7 +259,7 @@ export function ImportTab() {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="sm" onClick={handleScan} disabled={scanning}>
+            <Button variant="outline" size="sm" onClick={scan} disabled={scanning}>
               {scanning ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" />
@@ -570,16 +467,16 @@ export function ImportTab() {
       )}
 
       {/* Import Progress */}
-      {importJobs.length > 0 && (
+      {importJobsList.length > 0 && (
         <div className="space-y-4">
           <h4 className="text-sm font-medium">Import Progress</h4>
           <div className="space-y-3">
-            {importJobs.map((job) => (
-              <div key={job.documentId} className="border rounded-lg p-4 space-y-2">
+            {importJobsList.map((job) => (
+              <div key={job.id} className="border rounded-lg p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     {getStatusIcon(job.status)}
-                    <span className="font-medium text-sm">{job.title}</span>
+                    <span className="font-medium text-sm">{job.metadata?.title || 'Import Job'}</span>
                   </div>
                   <Badge
                     variant={

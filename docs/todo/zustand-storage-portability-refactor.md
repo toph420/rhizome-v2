@@ -1,10 +1,71 @@
 # Zustand Refactor: Storage Portability System
 
-**Status**: Planning
+**Status**: Ready to Implement
 **Priority**: High
 **Estimated Effort**: 2-3 days
 **Created**: 2025-10-13
+**Updated**: 2025-10-13 (Added implementation context + bug fixes completed)
 **Owner**: TBD
+
+## Session Context (Start Here!)
+
+### What's Been Completed ✅
+**Phase 1 Bug Fixes** are complete and ready for Zustand refactor:
+
+1. **ScannerTab Collapsible Structure** ✅
+   - Fixed React Fragment prop warning
+   - Correct structure: `Collapsible → TableRow + CollapsibleContent asChild → TableRow`
+   - File: `src/components/admin/tabs/ScannerTab.tsx`
+
+2. **Error Logging Improvements** ✅
+   - Created `src/lib/supabase/error-helpers.ts` with `serializeSupabaseError()` and `getErrorMessage()`
+   - Updated ConnectionsTab and ImportTab to use new helpers
+   - No more empty `{}` error objects in console
+
+3. **Database Schema Fix** ✅
+   - Fixed ConnectionsTab.tsx line 162: `status` → `processing_status`
+   - Documents table uses `processing_status` column, not `status`
+
+**Current State**: All admin panel tabs functional, no console errors. Ready for Zustand refactor.
+
+### Key Files to Know
+- `src/components/admin/tabs/ScannerTab.tsx` - Calls `scanStorage()` on mount (line 45)
+- `src/components/admin/tabs/ImportTab.tsx` - Calls `scanStorage()` on mount (line 95) **← DUPLICATE**
+- `src/components/admin/tabs/ConnectionsTab.tsx` - Job polling logic (lines 110-149)
+- `src/components/admin/tabs/ImportTab.tsx` - Job polling logic (lines 74-89)
+- `src/lib/supabase/error-helpers.ts` - New error serialization utilities
+- `src/app/actions/documents.ts` - Server actions for scanStorage, importFromStorage, etc.
+
+### Quick Start for Next Session
+
+**Step 1: Install Zustand**
+```bash
+npm install zustand
+```
+
+**Step 2: Create Store Structure**
+```bash
+mkdir -p src/stores/admin
+touch src/stores/admin/storage-scan.ts
+touch src/stores/admin/background-jobs.ts
+touch src/stores/admin/document-selection.ts
+touch src/stores/admin/import-export-prefs.ts
+touch src/stores/admin/index.ts
+```
+
+**Step 3: Implement `useStorageScanStore` First**
+- This store will eliminate the duplicate `scanStorage()` calls
+- Copy implementation from Task 1.3 below (lines 154-242)
+- Test in isolation before integrating
+
+**Step 4: Refactor ScannerTab, then ImportTab**
+- ScannerTab changes: ~30 lines removed, ~5 lines added
+- ImportTab immediately benefits from cached results
+- Verify in Network tab: only 1 `scanStorage()` call instead of 2
+
+**Step 5: Continue with Remaining Stores**
+- Follow the phased approach in Implementation Plan below
+- Each store is independent and can be tested separately
 
 ---
 
@@ -1126,7 +1187,52 @@ If issues arise:
    - Prevents duplicates
    - Matches React best practices
 
-### Common Pitfalls to Avoid
+### Common Pitfalls to Avoid (Including Lessons from Bug Fixes)
+
+**From Recent Bug Fixes:**
+
+1. **Don't assume column names - check the schema**
+   ```typescript
+   // ❌ WRONG - assumed column name
+   .eq('status', 'completed')
+
+   // ✅ RIGHT - verified schema first
+   .eq('processing_status', 'completed')
+
+   // How to verify:
+   // psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -c "\d table_name"
+   ```
+
+2. **Always use error serialization helpers**
+   ```typescript
+   // ❌ WRONG - logs empty {}
+   console.error('Error:', error)
+
+   // ✅ RIGHT - logs { message, code, details, hint }
+   import { serializeSupabaseError, getErrorMessage } from '@/lib/supabase/error-helpers'
+   console.error('Error:', serializeSupabaseError(error))
+   setError(getErrorMessage(error))
+   ```
+
+3. **Check Collapsible/asChild patterns carefully**
+   ```typescript
+   // ❌ WRONG - asChild on Fragment
+   <Collapsible asChild>
+     <>
+       <TableRow>...</TableRow>
+     </>
+   </Collapsible>
+
+   // ✅ RIGHT - asChild only on CollapsibleContent
+   <Collapsible>
+     <TableRow>...</TableRow>
+     <CollapsibleContent asChild>
+       <TableRow>...</TableRow>
+     </CollapsibleContent>
+   </Collapsible>
+   ```
+
+**Zustand-Specific Pitfalls:**
 
 1. **Don't mutate state directly**
    ```typescript
@@ -1229,4 +1335,74 @@ This refactor will:
 
 ---
 
+## Implementation Roadmap (TL;DR for Next Session)
+
+### Session 1: Foundation (4 hours)
+**Goal**: Install Zustand, create core stores, eliminate duplicate API calls
+
+```bash
+# Install
+npm install zustand
+
+# Create stores
+mkdir -p src/stores/admin
+# Create 4 store files (see Phase 1 above)
+```
+
+**Files to Create:**
+1. `storage-scan.ts` (5-min cache, eliminates duplicate scanStorage calls)
+2. `background-jobs.ts` (unified polling, replaces ~50 lines)
+3. `document-selection.ts` (cross-tab state)
+4. `import-export-prefs.ts` (localStorage persistence)
+5. `index.ts` (barrel exports)
+
+**Success Metric**: Network tab shows 1 scanStorage() call instead of 2 ✅
+
+---
+
+### Session 2: Integration (6 hours)
+**Goal**: Refactor all tabs to use stores
+
+**Refactor Order:**
+1. ScannerTab (remove ~30 lines, add ~5)
+2. ImportTab (remove ~80 lines, add ~10)
+3. ConnectionsTab (remove ~50 lines, add ~15)
+4. ExportTab (remove ~40 lines, add ~10)
+
+**Success Metrics:**
+- ~200 lines of code removed
+- Selections persist across tab switches
+- Preferences persist across sessions
+
+---
+
+### Session 3: Testing & Polish (2 hours)
+**Goal**: Verify quality and performance
+
+**Tests to Write:**
+1. `storage-scan.test.ts` - Cache behavior
+2. `background-jobs.test.ts` - Polling logic
+3. Integration tests - Tab interactions
+
+**Success Metrics:**
+- 50% API call reduction (Network tab)
+- No regressions (all tabs work)
+- Preferences survive page refresh
+
+---
+
+## Final Checklist Before Starting
+
+- [ ] Read "Session Context" section above
+- [ ] Review bug fixes completed (lines 13-29)
+- [ ] Check CLAUDE.md Zustand guidelines
+- [ ] Create feature branch: `git checkout -b feature/zustand-refactor`
+- [ ] Open Network tab in browser (to measure API reduction)
+- [ ] Have Admin Panel open: `Cmd+Shift+A`
+
+**Ready to code? Start with Phase 1, Task 1.1 (line 172) ⬆️**
+
+---
+
 **End of Document**
+**Last Updated**: 2025-10-13
