@@ -529,45 +529,49 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-### T-017: Test Smart Mode with Preservation
+### T-017: Test Smart Mode with Preservation ✅ COMPLETE (Session 7)
 
 **Goal**: Verify Smart Mode preserves user-validated connections
 
 1. **Mark Connections as Validated**
-   - [ ] Ensure 10+ connections marked as user_validated (from T-015 prep)
+   - [x] Ensure 10+ connections marked as user_validated (from T-015 prep)
 
 2. **Select Smart Mode**
-   - [ ] ConnectionsTab → Select mode: "Smart Mode"
-   - [ ] Check "Preserve user-validated connections"
-   - [ ] Check "Save backup before reprocessing"
-   - [ ] Select all 3 engines
+   - [x] ConnectionsTab → Select mode: "Smart Mode"
+   - [x] Check "Preserve user-validated connections"
+   - [x] Check "Save backup before reprocessing"
+   - [x] Select all 3 engines
 
 3. **Start Reprocessing**
-   - [ ] Click "Start Reprocessing"
-   - [ ] Monitor progress: should show "Backing up validated connections" stage
+   - [x] Click "Start Reprocessing"
+   - [x] Monitor progress: should show "Backing up validated connections" stage
 
 4. **Verify Results**
-   - [ ] Check database for validated connections:
+   - [x] Check database for validated connections:
      ```sql
-     SELECT COUNT(*) FROM chunk_connections
+     SELECT COUNT(*) FROM connections
      WHERE user_validated = true
-     AND source_chunk_id IN (SELECT id FROM chunks WHERE document_id = '<doc_id>');
+     AND source_chunk_id IN (SELECT id FROM chunks WHERE document_id = '870e4b89-6d28-4ed9-a86f-3b4caea637a2');
+     -- Result: 10 validated connections preserved ✅
      ```
-   - [ ] Should still have 10 validated connections
-   - [ ] Check Storage for backup file:
+   - [x] Should still have 10 validated connections
+   - [x] Check Storage for backup file:
      - Navigate to `documents/{userId}/{documentId}/`
      - Find `validated-connections-{timestamp}.json`
      - Download and verify JSON contains validated connections
 
 5. **Verify Backup File**
    ```bash
-   # Download validated-connections-*.json from Storage
-   # Verify structure:
-   cat validated-connections-*.json | jq '.connections | length'
-   # Should show 10
+   # Backup file: validated-connections-2025-10-15T06-04-00-960Z.json
+   # Verified structure:
+   # - version: 1.0
+   # - document_id: 870e4b89-6d28-4ed9-a86f-3b4caea637a2
+   # - connections: 10 (all user_validated: true)
    ```
 
 **Expected Result**: Smart Mode preserves validated connections and creates backup.
+
+**Session 7 Results**: ✅ Test passed. All 10 validated connections preserved, backup file created successfully. New connections added: 35 (total: 45).
 
 ---
 
@@ -956,9 +960,9 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ### Validation Results
 
-**Testing Sessions**: 6 sessions completed
-**Total Tests Executed**: 20 / 47 (43%)
-**Tests Passed**: 20 ✅
+**Testing Sessions**: 7 sessions completed
+**Total Tests Executed**: 21 / 47 (45%)
+**Tests Passed**: 21 ✅
 **Tests Failed**: 0 ❌
 **Bugs Found**: 23 (all fixed)
 
@@ -1245,7 +1249,50 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-**Issues Found**: 23 total (9 from Sessions 1-2, 11 from Session 3, 1 from Session 4, 1 from Session 5, 1 from Session 6)
+### Session 7 Progress (2025-10-15 - Smart Mode Validation)
+
+**Completed**:
+- ✅ T-017: Test Smart Mode with Preservation - Connection preservation and backup
+
+**Tests Executed**:
+
+1. **Smart Mode with Preservation (T-017)**
+   - Marked 10 connections as user_validated
+   - Selected Smart Mode with all 3 engines
+   - Enabled "Preserve user-validated connections" and "Save backup before reprocessing"
+   - Started reprocessing job (completed at 06:19:48)
+   - Verified results:
+     - Total connections: 45 (34 → 45)
+     - User-validated preserved: 10 (all preserved correctly)
+     - New connections generated: 35
+     - All connections are thematic_bridge type
+     - Backup file created: `validated-connections-2025-10-15T06-04-00-960Z.json`
+     - Backup verified: Version 1.0, 10 connections, all user_validated: true
+   - Result: ✅ PASSED
+
+**Backup File Verification**:
+- File: `validated-connections-2025-10-15T06-04-00-960Z.json`
+- Location: `documents/00000000-0000-0000-0000-000000000000/870e4b89-6d28-4ed9-a86f-3b4caea637a2/`
+- Structure validated:
+  - version: "1.0"
+  - document_id: "870e4b89-6d28-4ed9-a86f-3b4caea637a2"
+  - timestamp: "2025-10-15T06-04-00-960Z"
+  - connections: Array of 10 validated connections
+  - All connections have user_validated: true
+
+**Test Document**: "Oppose Book Worship" (document_id: `870e4b89-6d28-4ed9-a86f-3b4caea637a2`, 435 chunks)
+
+**Key Insights**:
+- Smart Mode correctly preserves user-validated connections during reprocessing
+- Backup file creation and storage working as designed
+- New connections generated without affecting validated ones
+- Connection count increased from 34 → 45 (10 preserved + 35 new)
+
+**Session Summary**: Phase 5 test T-017 complete. Smart Mode preservation and backup functionality verified and working correctly.
+
+---
+
+**Issues Found**: 23 total (9 from Sessions 1-2, 11 from Session 3, 1 from Session 4, 1 from Session 5, 1 from Session 6, 0 from Session 7)
 
 ### Critical Issues (P0)
 <!-- List any blocking issues found during testing -->
