@@ -48,18 +48,18 @@ function StatCard({ label, count, color }: StatCardProps) {
 }
 
 /**
- * ChunkQualityPanel displays chunk quality indicators from the local processing pipeline.
- * Shows confidence level statistics and lists unvalidated chunks that need validation.
+ * ChunkQualityPanel displays chunk quality indicators from the Chonkie integration pipeline.
+ * Shows Chonkie metadata confidence statistics and lists unvalidated chunks that need validation.
  *
- * **Quality Levels**:
- * - **Exact**: Perfect string match from Layer 1 fuzzy matching
- * - **High**: Embedding or multi-anchor match (>0.95 similarity)
- * - **Medium**: LLM-assisted match or lower embedding similarity (>0.85)
- * - **Synthetic**: Position interpolated from anchors (Layer 4 fallback)
- * - **Overlap-Corrected**: Offsets adjusted to prevent overlap with adjacent chunks
+ * **Chonkie Integration (Migration 050)**:
+ * Quality levels now represent Chonkie metadata transfer confidence:
+ * - **High**: 3+ Docling overlaps OR >70% coverage (excellent metadata transfer)
+ * - **Medium**: 1-2 overlaps with >30% coverage (good metadata transfer)
+ * - **Low**: <30% overlap (weak metadata transfer)
+ * - **Interpolated**: No Docling overlaps (metadata from nearest neighbors)
  *
  * **User Actions**:
- * - View unvalidated chunks (synthetic, overlap-corrected, low similarity)
+ * - View unvalidated chunks (interpolated, low/medium confidence)
  * - Validate chunk position correctness (mark as OK)
  * - Fix chunk position (enter correction mode)
  * - Navigate to chunk in document
@@ -182,21 +182,20 @@ export function ChunkQualityPanel({
 
   return (
     <div className="p-4 space-y-4">
-      {/* Quality statistics grid */}
+      {/* Chonkie metadata confidence statistics */}
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Quality Statistics</h3>
+        <h3 className="text-sm font-semibold">Metadata Confidence</h3>
         <div className="grid grid-cols-2 gap-2">
-          <StatCard label="Exact" count={stats.exact} color="green" />
-          <StatCard label="High" count={stats.high} color="blue" />
+          <StatCard label="High" count={stats.high} color="green" />
           <StatCard label="Medium" count={stats.medium} color="yellow" />
-          <StatCard label="Synthetic" count={stats.synthetic} color="orange" />
-          {stats.overlapCorrected > 0 && (
-            <StatCard label="Overlap-Corrected" count={stats.overlapCorrected} color="yellow" />
+          <StatCard label="Low" count={stats.low} color="orange" />
+          {stats.interpolated > 0 && (
+            <StatCard label="Interpolated" count={stats.interpolated} color="orange" />
           )}
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          Total chunks: {stats.total} • {Math.round((stats.synthetic / stats.total) * 100)}% synthetic
-          {stats.overlapCorrected > 0 && ` • ${stats.overlapCorrected} overlap-corrected`}
+          Total chunks: {stats.total} • {Math.round((stats.high / stats.total) * 100)}% high confidence
+          {stats.interpolated > 0 && ` • ${stats.interpolated} interpolated (no overlaps)`}
         </p>
       </div>
 
@@ -214,34 +213,34 @@ export function ChunkQualityPanel({
           </CardHeader>
           <CardContent>
             <Accordion type="single" collapsible>
-              {/* Synthetic chunks */}
-              {unvalidatedChunks.synthetic.length > 0 && (
-                <AccordionItem value="synthetic-category">
+              {/* Interpolated chunks (no Docling overlaps) */}
+              {unvalidatedChunks.interpolated.length > 0 && (
+                <AccordionItem value="interpolated-category">
                   <AccordionTrigger className="hover:no-underline">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <Badge variant="outline" className="bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20">
-                        Synthetic ⚠️
+                        Interpolated ⚠️
                       </Badge>
-                      <span>{unvalidatedChunks.synthetic.length} chunk{unvalidatedChunks.synthetic.length > 1 ? 's' : ''}</span>
+                      <span>{unvalidatedChunks.interpolated.length} chunk{unvalidatedChunks.interpolated.length > 1 ? 's' : ''}</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="space-y-3 mb-4">
                       <p className="text-xs text-muted-foreground p-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900 rounded">
-                        <strong className="text-orange-900 dark:text-orange-100">⚠️ Requires Review:</strong> These chunks have <strong>estimated positions</strong> (Layer 4 interpolation). No exact match was found in cleaned content. Please verify chunk positions are correct.
+                        <strong className="text-orange-900 dark:text-orange-100">⚠️ No Overlaps Found:</strong> These chunks had <strong>no overlapping Docling chunks</strong> during metadata transfer. Metadata was interpolated from nearest neighbors. Please verify accuracy.
                       </p>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleAcceptAll(unvalidatedChunks.synthetic.map(c => c.id), 'synthetic')}
+                        onClick={() => handleAcceptAll(unvalidatedChunks.interpolated.map(c => c.id), 'interpolated')}
                         className="w-full text-xs"
                       >
                         <CheckCircle className="h-3 w-3 mr-1" />
-                        Accept All Synthetic Chunks
+                        Accept All Interpolated Chunks
                       </Button>
                     </div>
                     <Accordion type="single" collapsible className="pl-2">
-                      {unvalidatedChunks.synthetic.map(chunk => (
+                      {unvalidatedChunks.interpolated.map(chunk => (
                         <AccordionItem key={chunk.id} value={chunk.id}>
                           <AccordionTrigger className="hover:no-underline">
                             <div className="flex items-center gap-2 text-sm">
@@ -266,9 +265,24 @@ export function ChunkQualityPanel({
                                 {chunk.content}
                               </div>
 
-                              {/* Metadata */}
+                              {/* Metadata with Chonkie confidence info */}
                               <div className="text-xs space-y-1">
-                                <p><span className="font-semibold">Method:</span> {chunk.position_method || 'Layer 4 (interpolation)'}</p>
+                                {chunk.metadata_confidence && (
+                                  <p>
+                                    <span className="font-semibold">Confidence:</span>{' '}
+                                    <Badge variant={
+                                      chunk.metadata_confidence === 'high' ? 'default' :
+                                      chunk.metadata_confidence === 'medium' ? 'secondary' :
+                                      'destructive'
+                                    } className="text-xs">
+                                      {chunk.metadata_confidence}
+                                    </Badge>
+                                  </p>
+                                )}
+                                {chunk.metadata_overlap_count !== null && chunk.metadata_overlap_count !== undefined && (
+                                  <p><span className="font-semibold">Docling Overlaps:</span> {chunk.metadata_overlap_count} {chunk.metadata_overlap_count === 0 ? '(interpolated)' : ''}</p>
+                                )}
+                                <p><span className="font-semibold">Method:</span> {chunk.position_method || chunk.metadata_confidence ? 'Chonkie + metadata transfer' : 'Unknown'}</p>
                                 {chunk.page_start !== null && (
                                   <p><span className="font-semibold">Pages:</span> {chunk.page_start}{chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ''}</p>
                                 )}
@@ -316,34 +330,34 @@ export function ChunkQualityPanel({
                 </AccordionItem>
               )}
 
-              {/* Overlap-corrected chunks */}
-              {unvalidatedChunks.overlapCorrected.length > 0 && (
-                <AccordionItem value="overlap-category">
+              {/* Low confidence chunks */}
+              {unvalidatedChunks.lowConfidence.length > 0 && (
+                <AccordionItem value="low-confidence-category">
                   <AccordionTrigger className="hover:no-underline">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20">
-                        Overlap-Corrected ✅
+                        Low Confidence ⚠️
                       </Badge>
-                      <span>{unvalidatedChunks.overlapCorrected.length} chunk{unvalidatedChunks.overlapCorrected.length > 1 ? 's' : ''}</span>
+                      <span>{unvalidatedChunks.lowConfidence.length} chunk{unvalidatedChunks.lowConfidence.length > 1 ? 's' : ''}</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="space-y-3 mb-4">
                       <p className="text-xs text-muted-foreground p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded">
-                        <strong className="text-yellow-900 dark:text-yellow-100">✅ Matched Successfully:</strong> These chunks <strong>matched correctly</strong> but had overlapping boundaries that were auto-adjusted. Content is correct, verify boundaries if needed.
+                        <strong className="text-yellow-900 dark:text-yellow-100">⚠️ Weak Overlaps:</strong> These chunks had <strong>&lt;30% overlap</strong> with Docling chunks during metadata transfer. Metadata may be less accurate. Please verify.
                       </p>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleAcceptAll(unvalidatedChunks.overlapCorrected.map(c => c.id), 'overlap-corrected')}
+                        onClick={() => handleAcceptAll(unvalidatedChunks.lowConfidence.map(c => c.id), 'low-confidence')}
                         className="w-full text-xs"
                       >
                         <CheckCircle className="h-3 w-3 mr-1" />
-                        Accept All Overlap-Corrected Chunks
+                        Accept All Low Confidence Chunks
                       </Button>
                     </div>
                     <Accordion type="single" collapsible className="pl-2">
-                      {unvalidatedChunks.overlapCorrected.map(chunk => (
+                      {unvalidatedChunks.lowConfidence.map(chunk => (
                         <AccordionItem key={chunk.id} value={chunk.id}>
                           <AccordionTrigger className="hover:no-underline">
                             <div className="flex items-center gap-2 text-sm">
@@ -381,6 +395,32 @@ export function ChunkQualityPanel({
                               <div className="text-xs text-muted-foreground bg-muted p-2 rounded max-h-[200px] overflow-y-auto">
                                 <FileText className="h-3 w-3 inline mr-1" />
                                 {chunk.content}
+                              </div>
+
+                              {/* Metadata with Chonkie confidence info */}
+                              <div className="text-xs space-y-1">
+                                {chunk.metadata_confidence && (
+                                  <p>
+                                    <span className="font-semibold">Confidence:</span>{' '}
+                                    <Badge variant={
+                                      chunk.metadata_confidence === 'high' ? 'default' :
+                                      chunk.metadata_confidence === 'medium' ? 'secondary' :
+                                      'destructive'
+                                    } className="text-xs">
+                                      {chunk.metadata_confidence}
+                                    </Badge>
+                                  </p>
+                                )}
+                                {chunk.metadata_overlap_count !== null && chunk.metadata_overlap_count !== undefined && (
+                                  <p><span className="font-semibold">Docling Overlaps:</span> {chunk.metadata_overlap_count}</p>
+                                )}
+                                <p><span className="font-semibold">Method:</span> {chunk.position_method || chunk.metadata_confidence ? 'Chonkie + metadata transfer' : 'Unknown'}</p>
+                                {chunk.page_start !== null && (
+                                  <p><span className="font-semibold">Pages:</span> {chunk.page_start}{chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ''}</p>
+                                )}
+                                {chunk.start_offset !== null && chunk.end_offset !== null && (
+                                  <p><span className="font-semibold">Offsets:</span> {chunk.start_offset} - {chunk.end_offset}</p>
+                                )}
                               </div>
 
                               {/* Actions */}
@@ -422,34 +462,34 @@ export function ChunkQualityPanel({
                 </AccordionItem>
               )}
 
-              {/* Low similarity chunks */}
-              {unvalidatedChunks.lowSimilarity.length > 0 && (
-                <AccordionItem value="low-similarity-category">
+              {/* Medium confidence chunks */}
+              {unvalidatedChunks.mediumConfidence.length > 0 && (
+                <AccordionItem value="medium-confidence-category">
                   <AccordionTrigger className="hover:no-underline">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20">
-                        Low Similarity 📊
+                        Medium Confidence 📊
                       </Badge>
-                      <span>{unvalidatedChunks.lowSimilarity.length} chunk{unvalidatedChunks.lowSimilarity.length > 1 ? 's' : ''}</span>
+                      <span>{unvalidatedChunks.mediumConfidence.length} chunk{unvalidatedChunks.mediumConfidence.length > 1 ? 's' : ''}</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="space-y-3 mb-4">
                       <p className="text-xs text-muted-foreground p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded">
-                        <strong className="text-yellow-900 dark:text-yellow-100">📊 Medium Confidence:</strong> These chunks matched with <strong>0.85-0.95 similarity</strong> or needed LLM assistance. Content is likely correct but worth verifying.
+                        <strong className="text-yellow-900 dark:text-yellow-100">📊 Decent Overlaps:</strong> These chunks had <strong>1-2 Docling overlaps with 30-70% coverage</strong>. Metadata is likely correct but worth verifying.
                       </p>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleAcceptAll(unvalidatedChunks.lowSimilarity.map(c => c.id), 'low-similarity')}
+                        onClick={() => handleAcceptAll(unvalidatedChunks.mediumConfidence.map(c => c.id), 'medium-confidence')}
                         className="w-full text-xs"
                       >
                         <CheckCircle className="h-3 w-3 mr-1" />
-                        Accept All Low Similarity Chunks
+                        Accept All Medium Confidence Chunks
                       </Button>
                     </div>
                     <Accordion type="single" collapsible className="pl-2">
-                      {unvalidatedChunks.lowSimilarity.map(chunk => (
+                      {unvalidatedChunks.mediumConfidence.map(chunk => (
                         <AccordionItem key={chunk.id} value={chunk.id}>
                           <AccordionTrigger className="hover:no-underline">
                             <div className="flex items-center gap-2 text-sm">
@@ -474,9 +514,24 @@ export function ChunkQualityPanel({
                                 {chunk.content}
                               </div>
 
-                              {/* Metadata */}
+                              {/* Metadata with Chonkie confidence info */}
                               <div className="text-xs space-y-1">
-                                <p><span className="font-semibold">Method:</span> {chunk.position_method || 'Unknown'}</p>
+                                {chunk.metadata_confidence && (
+                                  <p>
+                                    <span className="font-semibold">Confidence:</span>{' '}
+                                    <Badge variant={
+                                      chunk.metadata_confidence === 'high' ? 'default' :
+                                      chunk.metadata_confidence === 'medium' ? 'secondary' :
+                                      'destructive'
+                                    } className="text-xs">
+                                      {chunk.metadata_confidence}
+                                    </Badge>
+                                  </p>
+                                )}
+                                {chunk.metadata_overlap_count !== null && chunk.metadata_overlap_count !== undefined && (
+                                  <p><span className="font-semibold">Docling Overlaps:</span> {chunk.metadata_overlap_count}</p>
+                                )}
+                                <p><span className="font-semibold">Method:</span> {chunk.position_method || chunk.metadata_confidence ? 'Chonkie + metadata transfer' : 'Unknown'}</p>
                                 {chunk.page_start !== null && (
                                   <p><span className="font-semibold">Pages:</span> {chunk.page_start}{chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ''}</p>
                                 )}

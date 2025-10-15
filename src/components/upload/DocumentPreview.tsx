@@ -11,10 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, X, Sparkles } from 'lucide-react'
+import { Upload, X, Sparkles, Info } from 'lucide-react'
 import Image from 'next/image'
 import type { DetectedMetadata, DocumentType } from '@/types/metadata'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import type { ChunkerType } from '@/types/chunker'
+import { chunkerDescriptions, chunkerTimeEstimates, chunkerLabels } from '@/types/chunker'
 
 export type ReviewWorkflow = 'none' | 'after_extraction' | 'after_cleanup'
 
@@ -65,6 +68,8 @@ interface DocumentPreviewProps {
   onCleanMarkdownChange?: (checked: boolean) => void
   extractImages?: boolean
   onExtractImagesChange?: (checked: boolean) => void
+  chunkerType?: ChunkerType
+  onChunkerTypeChange?: (chunkerType: ChunkerType) => void
 }
 
 const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
@@ -103,7 +108,9 @@ export function DocumentPreview({
   cleanMarkdown = true,
   onCleanMarkdownChange,
   extractImages = false,
-  onExtractImagesChange
+  onExtractImagesChange,
+  chunkerType = 'recursive',
+  onChunkerTypeChange
 }: DocumentPreviewProps) {
   const [edited, setEdited] = useState(metadata)
   const [coverImage, setCoverImage] = useState<File | null>(null)
@@ -309,6 +316,49 @@ export function DocumentPreview({
           <p className="text-xs text-muted-foreground">
             💡 You'll choose whether to run AI cleanup after reviewing the extraction
           </p>
+        )}
+
+        {/* Chunker Strategy Selection */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="chunker-strategy">Chunking Strategy</Label>
+            <Info className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+          <Select
+            value={chunkerType}
+            onValueChange={(value: ChunkerType) => {
+              onChunkerTypeChange?.(value)
+            }}
+          >
+            <SelectTrigger id="chunker-strategy" className="mt-1.5">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="token">{chunkerLabels.token} ({chunkerTimeEstimates.token})</SelectItem>
+              <SelectItem value="sentence">{chunkerLabels.sentence} ({chunkerTimeEstimates.sentence})</SelectItem>
+              <SelectItem value="recursive">{chunkerLabels.recursive} ({chunkerTimeEstimates.recursive})</SelectItem>
+              <SelectItem value="semantic">{chunkerLabels.semantic} ({chunkerTimeEstimates.semantic})</SelectItem>
+              <SelectItem value="late">{chunkerLabels.late} ({chunkerTimeEstimates.late})</SelectItem>
+              <SelectItem value="code">{chunkerLabels.code} ({chunkerTimeEstimates.code})</SelectItem>
+              <SelectItem value="neural">{chunkerLabels.neural} ({chunkerTimeEstimates.neural})</SelectItem>
+              <SelectItem value="slumber">{chunkerLabels.slumber} ({chunkerTimeEstimates.slumber})</SelectItem>
+              <SelectItem value="table">{chunkerLabels.table} ({chunkerTimeEstimates.table})</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {chunkerDescriptions[chunkerType]}
+          </p>
+        </div>
+
+        {/* Non-default Chunker Warning */}
+        {chunkerType !== 'recursive' && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              Estimated processing time: <strong>{chunkerTimeEstimates[chunkerType]}</strong> for 500-page document.
+              {chunkerType === 'slumber' && ' ⚠️ Warning: Very slow, use only for critical documents.'}
+            </AlertDescription>
+          </Alert>
         )}
 
         {/* Extract Images Option */}

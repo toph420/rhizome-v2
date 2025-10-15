@@ -22,7 +22,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
   
   const { data: doc, error } = await supabase
     .from('documents')
-    .select('*, markdown_available, embeddings_available, processing_status, processing_stage')
+    .select('*, markdown_available, embeddings_available, processing_status, processing_stage, chunker_type')
     .eq('id', id)
     .single()
   
@@ -227,6 +227,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           wordCount={doc.word_count}
           connectionCount={connectionCount || 0}
           reviewResults={reviewResults}
+          chunkerType={doc.chunker_type}
         />
       </>
     )

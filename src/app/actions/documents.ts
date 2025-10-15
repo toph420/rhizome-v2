@@ -73,11 +73,14 @@ export async function uploadDocument(formData: FormData): Promise<{
     const extractImagesRaw = formData.get('extractImages')
     const extractImages = extractImagesRaw === 'true'
 
+    const chunkerStrategy = formData.get('chunkerStrategy') as string || 'recursive'
+
     console.log('[uploadDocument] Processing flags DEBUG:', {
       reviewBeforeChunking: { raw: reviewBeforeChunkingRaw, parsed: reviewBeforeChunking },
       cleanMarkdown: { raw: cleanMarkdownRaw, parsed: cleanMarkdown },
       reviewDoclingExtraction: { raw: reviewDoclingExtractionRaw, parsed: reviewDoclingExtraction },
-      extractImages: { raw: extractImagesRaw, parsed: extractImages }
+      extractImages: { raw: extractImagesRaw, parsed: extractImages },
+      chunkerStrategy: chunkerStrategy
     })
 
     // Extract document metadata (from preview)
@@ -226,6 +229,8 @@ export async function uploadDocument(formData: FormData): Promise<{
         source_url: sourceUrl,
         processing_requested: processingRequested,
         processing_status: 'pending',
+        // Chonkie strategy selection (migration 050)
+        chunker_type: chunkerStrategy,
         // Metadata fields
         document_type: documentType,
         author: author,
@@ -275,7 +280,8 @@ export async function uploadDocument(formData: FormData): Promise<{
           reviewBeforeChunking: reviewBeforeChunking,
           cleanMarkdown: cleanMarkdown,
           reviewDoclingExtraction: reviewDoclingExtraction,
-          extractImages: extractImages
+          extractImages: extractImages,
+          chunkerStrategy: chunkerStrategy
         }
       })
       .select()

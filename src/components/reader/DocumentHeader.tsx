@@ -2,10 +2,13 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import { ExternalLink, RefreshCw, Loader2, BookMarked, Compass, BookOpen, GraduationCap, Zap, ArrowLeft } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useRouter } from 'next/navigation'
+import { chunkerLabels, chunkerDescriptions, chunkerColors, type ChunkerType } from '@/types/chunker'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -13,6 +16,7 @@ interface DocumentHeaderProps {
   wordCount?: number
   chunkCount?: number
   connectionCount?: number
+  chunkerType?: string | null
   viewMode?: 'explore' | 'focus' | 'study'
   onViewModeChange?: (mode: 'explore' | 'focus' | 'study') => void
   onQuickSpark?: () => void
@@ -35,6 +39,7 @@ export function DocumentHeader({
   wordCount,
   chunkCount,
   connectionCount,
+  chunkerType,
   viewMode = 'explore',
   onViewModeChange,
   onQuickSpark
@@ -236,7 +241,28 @@ export function DocumentHeader({
         </Button>
 
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold truncate">{title}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold truncate">{title}</h1>
+            {chunkerType && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className={chunkerColors[chunkerType as ChunkerType] || chunkerColors.hybrid}
+                    >
+                      {chunkerLabels[chunkerType as ChunkerType] || 'Unknown'}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="max-w-xs">
+                      {chunkerDescriptions[chunkerType as ChunkerType] || 'No description available'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
           {(wordCount || chunkCount || connectionCount) && (
             <p className="text-xs text-muted-foreground">
               {wordCount && `${wordCount.toLocaleString()} words`}

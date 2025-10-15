@@ -33,6 +33,7 @@ interface ReaderLayoutProps {
   documentTitle: string
   wordCount?: number
   connectionCount?: number
+  chunkerType?: string | null
   reviewResults?: {
     success: Array<{
       id: string
@@ -97,6 +98,7 @@ export function ReaderLayout({
   documentTitle,
   wordCount,
   connectionCount,
+  chunkerType,
   reviewResults = null,
 }: ReaderLayoutProps) {
   // ReaderStore: Document content and scroll state
@@ -438,6 +440,7 @@ export function ReaderLayout({
         wordCount={wordCount}
         chunkCount={chunks.length}
         connectionCount={connectionCount}
+        chunkerType={chunkerType}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onQuickSpark={openQuickCapture}

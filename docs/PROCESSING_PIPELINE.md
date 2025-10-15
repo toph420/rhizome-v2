@@ -1,1514 +1,806 @@
-# Rhizome V2 Processing Pipeline Documentation
+# Rhizome V2 - Document Processing Pipeline
 
-**Last Updated**: 2025-10-11
-**Status**: Complete and Operational
+**Last Updated**: 2025-10-15
+**Pipeline Version**: Chonkie Integration (Unified Pipeline)
+**Status**: ✅ Fully Operational
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture Philosophy](#architecture-philosophy)
+3. [The 10-Stage Unified Pipeline](#the-10-stage-unified-pipeline)
+4. [Chonkie Chunking System](#chonkie-chunking-system)
+5. [Metadata Transfer System](#metadata-transfer-system)
+6. [Local Processing Pipeline](#local-processing-pipeline)
+7. [Performance & Cost](#performance--cost)
+8. [Quality Metrics](#quality-metrics)
+9. [Troubleshooting](#troubleshooting)
+
+---
 
 ## Overview
 
-Rhizome V2 features a **dual-mode processing architecture** that balances cost, privacy, quality, and speed. Both PDF and EPUB pipelines support LOCAL mode (100% local, zero API costs, complete privacy) and CLOUD mode (faster, $0.50/book, Gemini-powered).
+Rhizome V2 uses a **unified 10-stage processing pipeline** powered by Chonkie for semantic chunking. This architecture eliminates the previous 3 parallel chunking paths in favor of a single, predictable pipeline that offers 9 user-selectable chunking strategies.
 
 ### Key Features
 
-- **100% Chunk Recovery Guarantee**: 5-layer bulletproof matching system ensures no data loss
-- **Structural Metadata Preservation**: Page numbers, headings, bboxes maintained through text transformations
-- **Review Checkpoints**: "Think before you spend" gates allow user review before expensive operations
-- **Graceful Degradation**: Every stage has fallback strategies (OOM → regex, embeddings → Gemini → none)
-- **Cost Control**: LOCAL mode eliminates recurring API costs, CLOUD mode optimizes for speed
+- ✅ **9 Chunking Strategies**: From fastest (token) to highest quality (slumber)
+- ✅ **100% Local Processing**: Zero API costs with Docling + Ollama + Chonkie
+- ✅ **Metadata Preservation**: 70-90% overlap coverage via coordinate mapping
+- ✅ **Character Offset Validation**: Guaranteed accuracy for metadata transfer
+- ✅ **Quality Tracking**: Confidence scores (high/medium/low) for all chunks
 
-### Mode Comparison
+### Processing Times (500-Page Document)
 
-| Aspect | LOCAL Mode | CLOUD Mode |
-|--------|-----------|-----------|
-| **Cost** | $0.00 (one-time setup) | $0.50-$1.10/book |
-| **Speed** | ~15 min/book | ~10-14 min/book |
-| **Privacy** | 100% local, offline capable | Requires internet, data sent to Gemini |
-| **Metadata** | Full structural metadata (pages, headings, bboxes) | AI-extracted metadata only |
-| **Chunk Recovery** | 100% guaranteed, confidence tracking | AI semantic boundaries |
-| **Requirements** | 24GB+ RAM, Ollama, Qwen model | Just API key |
-| **Best For** | Academic study, citation needs, privacy | Quick ingestion, casual reading |
-
----
-
-## 1. PDF Processing Pipeline
-
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    PDF PROCESSING PIPELINE                          │
-│                                                                     │
-│  Mode Selection: PROCESSING_MODE = local | cloud                   │
-└─────────────────────────────────────────────────────────────────────┘
-
-╔═══════════════════════════════════════════════════════════════════╗
-║                         SHARED STAGES (Both Modes)                 ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 1: Download PDF (10-15%)                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│ • Fetch from Supabase Storage                                       │
-│ • Create signed URL → download to buffer                            │
-│ • File size logging                                                 │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 2: Docling Extraction (15-50%)                                │
-├─────────────────────────────────────────────────────────────────────┤
-│ Python Subprocess: docling_extract.py                               │
-│                                                                     │
-│ LOCAL MODE (enableChunking=true):                                  │
-│   • HybridChunker: 512 tokens, tokenizer='Xenova/all-mpnet-base-v2'│
-│   • Extracts ~382 chunks with metadata:                             │
-│     - page_start/page_end (1-based page numbers)                    │
-│     - heading_path (["Chapter 1", "Section 1.1"])                   │
-│     - heading_level (TOC depth)                                     │
-│     - bboxes (PDF coordinates for highlighting)                     │
-│   • Structure: headings[], total_pages                              │
-│                                                                     │
-│ CLOUD MODE (enableChunking=false):                                 │
-│   • Markdown only, no chunks                                        │
-│   • Structure info still extracted                                  │
-│                                                                     │
-│ CRITICAL: Caches to job.metadata.cached_extraction                  │
-│   → Prevents re-extraction if cleanup fails                         │
-│                                                                     │
-│ Output: markdown (150KB), chunks (382 segments), structure          │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 3: Local Regex Cleanup (50-55%)                              │
-├─────────────────────────────────────────────────────────────────────┤
-│ cleanPageArtifacts(markdown, { skipHeadingGeneration: true })       │
-│   • Remove page numbers, headers, footers                           │
-│   • Fix smart quotes, em dashes                                     │
-│   • Normalize whitespace                                            │
-│   • Skip heading generation (Docling already extracted structure)   │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 3.5: OPTIONAL Review Checkpoint                              │
-├─────────────────────────────────────────────────────────────────────┤
-│ IF reviewDoclingExtraction = true:                                  │
-│   • Pause BEFORE AI cleanup                                         │
-│   • Return markdown only (no chunks)                                │
-│   • User reviews/edits in Obsidian                                  │
-│   • Resume: Re-run job with flag=false                              │
-│   • Benefit: Skip AI cleanup if already clean                       │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 4: AI Cleanup (55-70%) - OPTIONAL                            │
-├─────────────────────────────────────────────────────────────────────┤
-│ IF cleanMarkdown = false: SKIP (use regex-only)                    │
-│ IF cleanMarkdown = true (default):                                 │
-│                                                                     │
-│ LOCAL MODE:                                                         │
-│   cleanMarkdownLocal(markdown) via Ollama (Qwen 32B)               │
-│   • Small docs (<100K): Single pass                                 │
-│   • Large docs (>100K): Split at ## headings                        │
-│   • Remove OCR artifacts, fix formatting                            │
-│   • Temperature: 0.3 (consistent, not creative)                     │
-│   • OOM Recovery: Catch OOMError → cleanMarkdownRegexOnly()        │
-│                    → markForReview('ai_cleanup_oom')               │
-│                                                                     │
-│ CLOUD MODE:                                                         │
-│   cleanPdfMarkdown(ai, markdown) via Gemini                         │
-│   • Heading-split strategy for large docs                           │
-│   • Parallel batch processing                                       │
-│   • Cost: ~$0.10 for 500-page book                                  │
-│                                                                     │
-│ Output: Cleaned markdown (140KB, OCR fixed)                         │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 5: OPTIONAL Review Checkpoint                                │
-├─────────────────────────────────────────────────────────────────────┤
-│ IF reviewBeforeChunking = true:                                    │
-│   • Pause BEFORE chunking/matching (most expensive stage)           │
-│   • Return markdown only (AI cleaned)                               │
-│   • Saves ~$0.50 by skipping chunking until user approves           │
-│   • User reviews in Obsidian, can fix cleanup issues                │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-                  ┌───────────────────┐
-                  │  MODE DIVERGENCE  │
-                  └───────────────────┘
-                              ↓
-                ┌─────────────┴─────────────┐
-                ↓                           ↓
-```
-
-### LOCAL MODE: Stages 6-9 (Bulletproof Matching Path)
-
-```
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 6: Bulletproof Matching (70-75%)                            │
-├───────────────────────────────────────────────────────────────────┤
-│ Input: cleaned markdown + doclingChunks (cached)                  │
-│                                                                   │
-│ bulletproofMatch() - 5-Layer System:                             │
-│                                                                   │
-│ Layer 1 - Enhanced Fuzzy (4 strategies):                         │
-│   • Exact indexOf                                                 │
-│   • Normalized whitespace                                         │
-│   • Multi-anchor search (start/middle/end)                        │
-│   • Sliding window with Levenshtein                               │
-│   Success Rate: 85-90%                                            │
-│                                                                   │
-│ Layer 2 - Embeddings:                                             │
-│   • Transformers.js (Xenova/all-mpnet-base-v2)                    │
-│   • Cosine similarity >0.85 threshold                             │
-│   • Sliding windows across markdown                               │
-│   Success Rate: 95-98% cumulative                                 │
-│                                                                   │
-│ Layer 3 - LLM Assisted:                                           │
-│   • Ollama Qwen finds chunk in search window                      │
-│   • Returns JSON with offsets                                     │
-│   Success Rate: 99.9% cumulative                                  │
-│                                                                   │
-│ Layer 4 - Interpolation (NEVER FAILS):                            │
-│   • Anchor-based position calculation                             │
-│   • Uses matched chunks to estimate unmatched positions           │
-│   • 100% GUARANTEED recovery                                      │
-│                                                                   │
-│ Validation:                                                       │
-│   • Enforce sequential ordering (no overlaps)                     │
-│   • Fix backwards jumps                                           │
-│   • Generate warnings for synthetic chunks                        │
-│                                                                   │
-│ Output: MatchResult[] with:                                       │
-│   • chunk (Docling metadata preserved)                            │
-│   • start_offset/end_offset (new positions)                       │
-│   • confidence (exact/high/medium/synthetic)                      │
-│   • method (which layer matched)                                  │
-│   • similarity score                                              │
-│                                                                   │
-│ Validation Warnings (NEW - Migration 047):                       │
-│   • Warnings persisted to database for user review                │
-│   • Saved to chunks.validation_warning + validation_details       │
-│   • Surfaced in ChunkQualityPanel UI for validation/correction   │
-│   • See "User Validation Workflow" section below                  │
-└───────────────────────────────────────────────────────────────────┘
-              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 7: Metadata Enrichment (75-90%)                             │
-├───────────────────────────────────────────────────────────────────┤
-│ PydanticAI + Ollama (Structured Extraction)                       │
-│                                                                   │
-│ Batch Processing: 10 chunks at a time                             │
-│                                                                   │
-│ Extracts:                                                         │
-│   • themes: string[] (key topics)                                 │
-│   • importance: 0-1 (chunk significance)                          │
-│   • summary: string (brief description)                           │
-│   • emotional: { polarity, primaryEmotion, intensity }            │
-│   • concepts: Concept[] (key ideas with relationships)            │
-│   • domain: string (academic field)                               │
-│                                                                   │
-│ Error Recovery:                                                   │
-│   • On failure: Use default metadata                              │
-│   • Mark for review but continue                                  │
-│   • Chunks still valid without enrichment                         │
-│                                                                   │
-│ Output: Enriched chunks with structured metadata                  │
-└───────────────────────────────────────────────────────────────────┘
-              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 8: Local Embeddings (90-95%)                                │
-├───────────────────────────────────────────────────────────────────┤
-│ generateEmbeddingsLocal() via Transformers.js                     │
-│                                                                   │
-│ Model: Xenova/all-mpnet-base-v2                                   │
-│   • MUST match HybridChunker tokenizer                            │
-│   • pooling='mean' (CRITICAL)                                     │
-│   • normalize=true (CRITICAL)                                     │
-│   • Dimensions: 768d vectors                                      │
-│                                                                   │
-│ Fallback Chain:                                                   │
-│   1. Local Transformers.js (free, fast)                           │
-│   2. Gemini embeddings (costs ~$0.02)                             │
-│   3. Save without embeddings + mark for review                    │
-│                                                                   │
-│ Output: Chunks with 768d embedding vectors                        │
-└───────────────────────────────────────────────────────────────────┘
-              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 9: Finalize (95-100%)                                       │
-├───────────────────────────────────────────────────────────────────┤
-│ Combine all data into ProcessedChunk[]:                           │
-│   • Docling metadata (pages, headings, bboxes)                    │
-│   • New offsets (from bulletproof matching)                       │
-│   • PydanticAI metadata (themes, emotions, concepts)              │
-│   • Local embeddings (768d vectors)                               │
-│   • Confidence tracking (exact/high/medium/synthetic)             │
-│                                                                   │
-│ Return ProcessResult with markdown + chunks + metadata            │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-### CLOUD MODE: Stages 6-8 (AI Semantic Chunking Path)
-
-```
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 6: AI Semantic Chunking (72-95%)                            │
-├───────────────────────────────────────────────────────────────────┤
-│ batchChunkAndExtractMetadata() via Gemini 2.5 Flash              │
-│                                                                   │
-│ Configuration:                                                    │
-│   • Batch size: 20K chars                                         │
-│   • Document type: 'nonfiction_book'                              │
-│   • Creates AI-determined semantic boundaries                     │
-│   • Extracts metadata in same pass                                │
-│                                                                   │
-│ Output: Chunks with AI metadata:                                  │
-│   • content, start_offset, end_offset                             │
-│   • themes, importance, summary                                   │
-│   • emotional metadata, concepts, domain                          │
-│                                                                   │
-│ Trade-offs:                                                       │
-│   • NO structural metadata (no page numbers, headings, bboxes)    │
-│   • Semantic boundaries may not align with document structure     │
-│   • Cost: ~$0.40 for 500-page book                                │
-│   • Faster than local matching (no 5-layer process)               │
-└───────────────────────────────────────────────────────────────────┘
-              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 7: Gemini Embeddings (95-97%)                               │
-├───────────────────────────────────────────────────────────────────┤
-│ Generate 768d embeddings via Gemini API                           │
-│ Cost: ~$0.02                                                      │
-└───────────────────────────────────────────────────────────────────┘
-              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 8: Finalize (97-100%)                                       │
-├───────────────────────────────────────────────────────────────────┤
-│ Convert to ProcessedChunk[] format                                │
-│ Return ProcessResult                                              │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-### Performance Metrics (500-page book)
-
-| Metric | LOCAL Mode | CLOUD Mode |
-|--------|-----------|-----------|
-| **Total Time** | ~15 minutes | ~14 minutes |
-| **Extraction** | 9 min (Docling) | 9 min (Docling) |
-| **Cleanup** | 3 min (Qwen) or 0 (OOM fallback) | 2 min (Gemini) |
-| **Chunking/Matching** | 2 min (5-layer) | 3 min (AI semantic) |
-| **Metadata** | 1 min (PydanticAI) | Included in chunking |
-| **Embeddings** | 30 sec (local) | Included (~$0.02) |
-| **Total Cost** | $0.00 | ~$0.50 |
-| **Exact Matches** | 85-90% | N/A (semantic) |
-| **Recovery Rate** | 100% guaranteed | 100% (AI boundaries) |
+| Chunker | Time | Use Case |
+|---------|------|----------|
+| **token** | 2-3 min | Fixed-size, compatibility |
+| **sentence** | 3-4 min | Simple boundaries |
+| **recursive** | 3-5 min | **Recommended default** |
+| **semantic** | 8-15 min | Narrative, thematic |
+| **late** | 10-20 min | High-quality RAG |
+| **code** | 5-10 min | Source code |
+| **neural** | 15-25 min | Academic papers |
+| **slumber** | 30-60 min | Critical documents |
+| **table** | 3-5 min | Table-heavy docs |
 
 ---
 
-## 2. EPUB Processing Pipeline
+## Architecture Philosophy
 
-### Key Differences from PDF
+### The Problem We Solved
 
-1. **No Page Numbers**: EPUBs are text-based, not page-based
-   - `page_start` and `page_end` are ALWAYS NULL
-   - Use `section_marker` (EPUB spine position) instead
-
-2. **No Bounding Boxes**: No PDF coordinates
-   - `bboxes` is ALWAYS NULL
-
-3. **Different Extractors**:
-   - LOCAL mode: `extractEpubWithDocling()` + HybridChunker
-   - CLOUD mode: `parseEPUB()` (native EPUB parser, faster)
-
-4. **Per-Chapter Cleanup** (CLOUD mode):
-   - More expensive: ~$0.60 cleanup + $0.50 chunking = $1.10/book
-   - Deterministic joining with `\n\n---\n\n` (no stitching)
-
-### Architecture Overview
-
+**Before Chonkie Integration (3 Parallel Paths):**
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    EPUB PROCESSING PIPELINE                         │
-│                                                                     │
-│  Mode Selection: PROCESSING_MODE = local | cloud                   │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 1: Download EPUB (10%)                                       │
-│ • Fetch from Supabase Storage → buffer                             │
-└─────────────────────────────────────────────────────────────────────┘
-                              ↓
-                  ┌───────────────────┐
-                  │  MODE DIVERGENCE  │
-                  │  (Different       │
-                  │   Extractors)     │
-                  └───────────────────┘
-                              ↓
-                ┌─────────────┴─────────────┐
-                ↓                           ↓
-
-╔═══════════════════════════╗     ╔═══════════════════════════════╗
-║      LOCAL MODE           ║     ║       CLOUD MODE              ║
-║  (Docling Extractor)      ║     ║  (Native EPUB Parser)         ║
-╚═══════════════════════════╝     ╚═══════════════════════════════╝
-
-┌───────────────────────────┐     ┌───────────────────────────────┐
-│ Stage 2: Docling Extract  │     │ Stage 2: Parse EPUB (20%)     │
-│ (10-50%)                  │     ├───────────────────────────────┤
-├───────────────────────────┤     │ parseEPUB(buffer)             │
-│ extractEpubWithDocling()  │     │                               │
-│                           │     │ • Extract chapters from spine │
-│ Python: docling_extract_  │     │ • Parse OPF metadata          │
-│         epub.py           │     │ • Extract cover image         │
-│                           │     │                               │
-│ HybridChunker produces:   │     │ Output:                       │
-│   • chunks with metadata: │     │   • chapters[]                │
-│     - page_start: NULL    │     │   • metadata (title, author,  │
-│     - page_end: NULL      │     │     ISBN, publisher, etc.)    │
-│     - heading_path ✓      │     │   • coverImage (buffer)       │
-│     - section_marker ✓    │     └───────────────────────────────┘
-│     - bboxes: NULL        │                   ↓
-│   • epubMetadata          │     ┌───────────────────────────────┐
-│                           │     │ Stage 3: Upload Cover (25%)   │
-│ Output: markdown, chunks, │     ├───────────────────────────────┤
-│         structure,        │     │ IF coverImage exists:         │
-│         epubMetadata      │     │   • Upload to storage:        │
-└───────────────────────────┘     │     {storagePath}/cover.jpg   │
-              ↓                   └───────────────────────────────┘
-┌───────────────────────────┐                   ↓
-│ Stage 3: Regex Cleanup    │     ┌───────────────────────────────┐
-│ (50-55%)                  │     │ Stage 4: Regex Cleanup        │
-├───────────────────────────┤     │ (30-35%)                      │
-│ cleanMarkdownRegexOnly()  │     ├───────────────────────────────┤
-│   • Simpler than PDF      │     │ Per-chapter:                  │
-│   • No page artifacts     │     │ cleanEpubArtifacts(chapter)   │
-│   • EPUB HTML remnants    │     │   • Remove HTML entities      │
-└───────────────────────────┘     │   • Fix EPUB-specific tags    │
-                                  └───────────────────────────────┘
-
-╔═══════════════════════════════════════════════════════════════════╗
-║                  MODES CONVERGE: Shared Cleanup & Chunking         ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-• Stage 3.5/4: OPTIONAL Review Checkpoints (same as PDF)
-• Stage 4/5: AI Cleanup (same as PDF, LOCAL: Ollama, CLOUD: Gemini)
-• Stage 6-8 (LOCAL): Bulletproof Matching + Metadata + Embeddings (IDENTICAL to PDF)
-• Stage 7 (CLOUD): AI Semantic Chunking with document type='fiction' (different strategy)
-
-CRITICAL DIFFERENCES in final ProcessedChunk:
-  • page_start: ALWAYS NULL (no pages in EPUB)
-  • page_end: ALWAYS NULL
-  • section_marker: EPUB spine position (e.g., "chapter003.xhtml")
-  • bboxes: ALWAYS NULL (no PDF coordinates)
-  • heading_path: Still extracted from EPUB TOC
+❌ Inline metadata (experimental, PDF only)
+❌ Bulletproof matcher AS chunking system
+❌ Cloud chunking (Gemini semantic)
 ```
 
-### Performance Metrics (500-page EPUB)
+**Issues:**
+- Complex branching logic (if LOCAL vs CLOUD, if inline metadata enabled)
+- ~823 lines of duplicate code across processors
+- Hard to maintain (fix bug in one path, forget others)
+- Limited flexibility (users can't choose chunking strategy)
 
-| Metric | LOCAL Mode | CLOUD Mode |
-|--------|-----------|-----------|
-| **Total Time** | ~12 minutes | ~10 minutes (if AI cleanup disabled) |
-| **Extraction** | 7 min (Docling) | 3 min (parseEPUB) |
-| **Cleanup** | Same as PDF | ~$0.60 (per-chapter more expensive) |
-| **Chunking** | Same as PDF | ~$0.50 |
-| **Total Cost** | $0.00 | $1.10 (with AI cleanup), $0.50 (without) |
+### The Solution (1 Unified Path)
 
-**Recommendation for EPUBs**: Use LOCAL mode or CLOUD with `cleanMarkdown=false` to avoid expensive per-chapter cleanup.
+**After Chonkie Integration:**
+```
+✅ Download → Docling Extract → Cleanup → Bulletproof (coord map) →
+   Review → Chonkie Chunk → Metadata Transfer → Enrich → Embed → Save
+```
+
+**Benefits:**
+- **Simplicity**: -223 net lines of code (removed 823, added 600)
+- **Flexibility**: 9 chunking strategies for different document types
+- **Quality**: 15%+ connection quality improvement (semantic/neural)
+- **Cost**: $0 additional (all LOCAL mode processing)
+- **Maintenance**: Single pipeline = easier debugging, testing, optimization
+
+### Key Architectural Decisions
+
+1. **ALWAYS run Chonkie** - No fast paths, no branching, no CLOUD/LOCAL split
+2. **Docling chunks = metadata anchors** - Heading paths, pages, bboxes
+3. **Chonkie chunks = actual chunks** - Used for search, connections, annotations
+4. **Bulletproof matcher = coordinate mapper** - Helps metadata transfer via overlap detection
+5. **Backward compatibility = not a concern** - This is a greenfield app
 
 ---
 
-## 3. Bulletproof Matching System (5-Layer Architecture)
+## The 10-Stage Unified Pipeline
 
-The crown jewel of LOCAL mode processing. Guarantees 100% chunk recovery while preserving structural metadata through text transformations.
-
-### Layer 1: Enhanced Fuzzy Matching (4 Strategies)
-
-**Expected Success Rate**: 85-90%
-
-#### Strategy 1: Exact Match
-```typescript
-const exactIndex = cleanedMarkdown.indexOf(chunk.content, searchHint)
-```
-- Fast O(n) scan with position hint
-- Confidence: EXACT
-- Success rate: ~70%
-
-#### Strategy 2: Normalized Match
-```typescript
-// Collapse whitespace, flexible regex
-const pattern = normalized.replace(/ /g, '\\s+')
-```
-- Handles AI cleanup that condenses spaces
-- Confidence: HIGH
-- Success rate: +10-12%
-
-#### Strategy 3: Multi-Anchor Search
-```typescript
-// Find start, middle, and end phrases
-const startAnchor = content.slice(0, 100)
-const middleAnchor = content.slice(middle - 50, middle + 50)
-const endAnchor = content.slice(-100)
-```
-- Finds chunks with 3x length variation
-- Verifies middle anchor for quality
-- Confidence: HIGH
-- Success rate: +3-5%
-
-#### Strategy 4: Sliding Window + Levenshtein
-```typescript
-// Slide window across markdown
-for (let i = startFrom; i < markdown.length; i += step) {
-  const similarity = calculateStringSimilarity(content, window)
-  if (similarity > 0.75) { /* match */ }
-}
-```
-- Computationally expensive (hard cap: 50 iterations)
-- Threshold: 75% minimum
-- Confidence: HIGH (≥80%), MEDIUM (75-80%)
-- Success rate: +2-3%
-
-**Layer 1 Output**: ~330/382 chunks matched (86%)
-
-### Layer 2: Embeddings-Based Matching
-
-**Expected Success Rate**: 95-98% cumulative
-
-```typescript
-// Generate embeddings for unmatched chunks
-const chunkEmbeddings = await generateEmbeddings(unmatchedChunks)
-
-// Create sliding windows of markdown
-const windows = createSlidingWindows(markdown, avgChunkSize, 0.5) // 50% overlap
-
-// Generate embeddings for windows
-const windowEmbeddings = await generateEmbeddings(windows)
-
-// Find best match via cosine similarity
-for (const chunk of unmatchedChunks) {
-  const bestWindow = findBestMatch(chunk, windows, threshold=0.85)
-}
-```
-
-**Technical Requirements**:
-- Model: `Xenova/all-mpnet-base-v2`
-- `pooling: 'mean'` (CRITICAL)
-- `normalize: true` (CRITICAL)
-- Dimensions: 768d
-- Threshold: 0.85 minimum
-- Confidence: HIGH (≥0.95), MEDIUM (0.85-0.95)
-
-**Layer 2 Output**: ~370/382 chunks matched (97%)
-
-### Layer 3: LLM-Assisted Matching
-
-**Expected Success Rate**: 99.9% cumulative
-
-```typescript
-// Create search window around estimated position
-const estimatedPos = (chunk.index / 400) × markdown.length
-const searchWindow = markdown.slice(estimatedPos - 5000, estimatedPos + 5000)
-
-// Ask LLM to find chunk in window
-const prompt = `Find where this CHUNK appears in the SEARCH WINDOW...`
-const response = await ollama.generateStructured(prompt)
-
-// Response: { found: true, start_offset: 1234, end_offset: 5678, confidence: "high" }
-```
-
-**Process**:
-1. Estimate position based on chunk index
-2. Create 10KB search window
-3. Prompt Ollama Qwen to find chunk
-4. LLM returns JSON with offsets
-5. Convert relative offsets to absolute
-
-**Confidence**: MEDIUM (LLM not deterministic)
-
-**Layer 3 Output**: ~381/382 chunks matched (99.7%)
-
-### Layer 4: Anchor Interpolation (NEVER FAILS)
-
-**Success Rate**: 100% GUARANTEED
-
-The safety net that ensures no chunk is ever lost.
-
-```typescript
-// Sort matched chunks by index to create anchors
-const anchors = matchedChunks.sort((a, b) => a.chunk.index - b.chunk.index)
-
-for (const unmatchedChunk of remaining) {
-  const beforeAnchor = findNearestAnchor(anchors, chunk.index, 'before')
-  const afterAnchor = findNearestAnchor(anchors, chunk.index, 'after')
-
-  if (beforeAnchor && afterAnchor) {
-    // Case A: Interpolate between two anchors
-    const ratio = (chunk.index - before.index) / (after.index - before.index)
-    const position = before.end + (after.start - before.end) × ratio
-
-  } else if (beforeAnchor) {
-    // Case B: Extrapolate forward after last anchor
-    const avgChunkSize = before.end - before.start
-    const distance = chunk.index - before.index
-    const position = before.end + (avgChunkSize × distance)
-
-  } else if (afterAnchor) {
-    // Case C: Extrapolate backward before first anchor
-    const avgChunkSize = after.end - after.start
-    const distance = after.index - chunk.index
-    const position = after.start - (avgChunkSize × distance)
-
-  } else {
-    // Case D: No anchors (should never happen)
-    const position = (chunk.index / 400) × markdown.length
-  }
-
-  // Clamp to valid range
-  const clampedPosition = Math.max(0, Math.min(position, markdown.length))
-}
-```
-
-**Output**:
-- Confidence: SYNTHETIC
-- Method: 'interpolation'
-- Similarity: 0 (no similarity score, calculated position)
-- Generates warning for user validation
-
-**Layer 4 Output**: 382/382 chunks matched (100%)
-
-### Validation & Finalization
-
-#### Sequential Ordering Enforcement
-
-CRITICAL for binary search in reader UI:
-
-```typescript
-// Enforce no overlaps or backwards jumps
-for (let i = 1; i < allMatched.length; i++) {
-  const prev = allMatched[i - 1]
-  const curr = allMatched[i]
-
-  if (curr.start_offset < prev.end_offset) {
-    // ⚠️ OVERLAP DETECTED - Force sequential
-    curr.start_offset = prev.end_offset
-    curr.end_offset = Math.max(curr.start_offset + curr.chunk.content.length, prev.end_offset + 1)
-
-    // Downgrade confidence
-    if (curr.confidence === 'exact') curr.confidence = 'high'
-    else if (curr.confidence === 'high') curr.confidence = 'medium'
-
-    // Generate warning
-    warnings.push(`Chunk ${curr.chunk.index}: Position overlap corrected. Validation recommended.`)
-  }
-}
-```
-
-### User Validation Workflow
-
-After bulletproof matching completes, validation warnings are **persisted to the database** for user review:
+### Stage Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Processing Complete → Warnings Saved to Database            │
-├─────────────────────────────────────────────────────────────┤
-│ chunks.validation_warning: "Position overlap corrected..."  │
-│ chunks.validation_details: { type, original_offsets, ... }  │
-│ chunks.position_validated: FALSE                            │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│ UI: ChunkQualityPanel (src/components/sidebar/)             │
-├─────────────────────────────────────────────────────────────┤
-│ useUnvalidatedChunks(documentId)                            │
-│ → Query: position_validated = FALSE                         │
-│ → Returns: { synthetic, overlapCorrected, all }             │
-│                                                              │
-│ User Actions:                                                │
-│ 1. ✅ Validate → validateChunkPosition()                    │
-│ 2. 🔧 Fix → Enter correction mode → updateChunkOffsets()    │
-│ 3. 📍 View → Navigate to chunk in reader                    │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│ Correction Workflow (if user selects "Fix")                │
-├─────────────────────────────────────────────────────────────┤
-│ 1. Reader enters correction mode                            │
-│ 2. User selects correct text span                           │
-│ 3. Calculate markdown offsets (offset-calculator.ts)        │
-│ 4. Overlap detection: Check adjacent chunks                 │
-│ 5. Update database + correction_history                     │
-│ 6. Set position_validated = TRUE                            │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│ Stage 1: Download (10-15%)                          │
+│  • Fetch PDF/EPUB from Supabase Storage             │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 2: Docling Extraction (15-50%)                │
+│  • ALWAYS run HybridChunker (768 tokens)            │
+│  • Save to cached_chunks table                      │
+│  • Purpose: Metadata anchors (pages, headings,      │
+│    bboxes, section markers)                         │
+│  • Output: ~382 chunks with structural metadata     │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 3: Cleanup (50-70%)                           │
+│  • Local regex cleanup                              │
+│  • Optional AI cleanup (Ollama if available)        │
+│  • Output: Cleaned markdown for Chonkie             │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 4: Bulletproof Matching (70-72%)              │
+│  • Map Docling chunks → cleaned markdown positions  │
+│  • 5-layer system creates coordinate map            │
+│  • Purpose: Know where metadata lives in cleaned    │
+│    markdown so we can detect overlaps               │
+│  • Output: MatchResult[] with offsets               │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 5: Review Checkpoint (Optional, 72%)          │
+│  • Skip if reviewBeforeChunking=false               │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 6: Chonkie Chunking (72-75%)                  │
+│  • ALWAYS run (no fast paths)                       │
+│  • User selects strategy (9 options)                │
+│  • Chunk from cleaned markdown                      │
+│  • Output: ~350-420 chunks (semantic boundaries)    │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 7: Overlap Metadata Transfer (75-77%)         │
+│  • For each Chonkie chunk:                          │
+│    1. Find overlapping Docling chunks via offsets   │
+│    2. Aggregate metadata (headings, pages, bboxes)  │
+│    3. Calculate confidence based on overlap count/  │
+│       percentage                                     │
+│  • Expected: 1-3 Docling overlaps per Chonkie chunk │
+│  • High overlap = good (means metadata transfers)   │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 8: Metadata Enrichment (77-90%)               │
+│  • PydanticAI + Ollama                              │
+│  • Extract themes, concepts, domains, emotions      │
+│  • Same for all chunker strategies                  │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 9: Embeddings Generation (90-95%)             │
+│  • Transformers.js (local, 768d)                    │
+│  • Metadata-enhanced (heading context prepended)    │
+│  • Same for all chunker strategies                  │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│ Stage 10: Finalize (95-100%)                        │
+│  • Save to database with chunker_type               │
+│  • Queue connection detection                       │
+└─────────────────────────────────────────────────────┘
 ```
 
-**Server Actions** (`src/app/actions/chunks.ts`):
-- `validateChunkPosition()`: Mark chunk as correct (no changes)
-- `updateChunkOffsets()`: Adjust boundaries with overlap detection and history tracking
+### Component Roles
 
-**Key Files**:
-- `src/hooks/use-unvalidated-chunks.ts` (replaces useSyntheticChunks)
-- `src/app/actions/chunks.ts` (validation/correction server actions)
-- `src/components/sidebar/ChunkQualityPanel.tsx` (UI for review)
+**Docling (Stage 2):**
+- **Role**: Metadata extraction
+- **Output**: Chunks with heading_path, page numbers, bboxes
+- **NOT actual chunks** (just metadata anchors)
 
-**Why This Matters**: Closes the quality loop from "warnings generated" → "warnings persisted" → "user validates" → "system learns"
+**Bulletproof Matcher (Stage 4):**
+- **Role**: Coordinate mapper
+- **Output**: MatchResult[] showing where Docling chunks map to cleaned markdown
+- **NOT a chunking system** (repurposed from old role)
 
-#### Statistics Example
+**Chonkie (Stage 6):**
+- **Role**: Actual chunking
+- **Output**: Final chunks used for search, connections, annotations
+- **9 strategies** for different use cases
 
-```
-Total: 382 chunks
-Exact: 268 (70%)
-High: 95 (25%)
-Medium: 18 (5%)
-Synthetic: 1 (<1%) ⚠️
-
-By Layer:
-  Layer 1 (Enhanced Fuzzy): 330 (86%)
-  Layer 2 (Embeddings): 40 (10%)
-  Layer 3 (LLM): 11 (3%)
-  Layer 4 (Interpolation): 1 (0.3%)
-
-Processing Time: 2-3 minutes
-```
-
-### Why This Matters
-
-1. **No Data Loss**: 100% chunk recovery guarantee means no content is ever lost
-2. **Metadata Preservation**: Page numbers, headings, bboxes survive text transformations
-3. **Citation Support**: Users can cite specific pages with confidence
-4. **Navigation**: Heading hierarchy enables TOC-based navigation
-5. **PDF Highlighting**: Bboxes enable precise highlighting in PDF viewer
-6. **Transparency**: Confidence tracking alerts users to synthetic positions needing validation
+**Metadata Transfer (Stage 7):**
+- **Role**: Bridge between Docling and Chonkie
+- **Mechanism**: Overlap detection (reuse bulletproof matcher logic)
+- **Output**: Chonkie chunks with Docling metadata
 
 ---
 
-## 4. Decision Tree & Configuration Guide
+## Chonkie Chunking System
 
-### Q1: What are your priorities?
+### Why Chonkie?
 
-#### Option A: Zero Cost + Privacy + Metadata
+Chonkie is a Python library offering 9 distinct chunking strategies, each optimized for different document types. It guarantees character offset accuracy, which is **critical** for our metadata transfer system.
+
+### Installation
+
 ```bash
-# LOCAL MODE
-export PROCESSING_MODE=local
-export OLLAMA_HOST=http://127.0.0.1:11434
-export OLLAMA_MODEL=qwen2.5:32b-instruct-q4_K_M
+# Basic installation (15 MiB)
+pip install chonkie
 
-# Requirements:
-# - 24GB RAM minimum (64GB recommended for Qwen 32B)
-# - Ollama + Qwen model installed
-# - Python 3.10+ with docling
-# - Node.js with @huggingface/transformers
+# With semantic/late chunkers (adds 62 MiB for sentence-transformers)
+pip install "chonkie[semantic]"
 
-# Performance:
-# - Time: ~15 min/book
-# - Cost: $0.00
-# - Quality: 85-90% exact matches, 100% recovery
+# With neural chunker (adds BERT models)
+pip install "chonkie[neural]"
+
+# With code chunker (adds tree-sitter)
+pip install "chonkie[code]"
+
+# With slumber chunker (adds LLM support, requires API key)
+pip install "chonkie[genie]"
+
+# Everything (680 MiB - not recommended unless needed)
+pip install "chonkie[all]"
 ```
 
-#### Option B: Speed + Convenience (OK with costs)
-```bash
-# CLOUD MODE
-export PROCESSING_MODE=cloud
-export GOOGLE_AI_API_KEY=<your-key>
+### The 9 Chunking Strategies
 
-# Requirements:
-# - Just an API key
-# - Internet connection
+#### 1. Token Chunker
+- **Use Case**: Fixed-size chunks, compatibility fallback
+- **Speed**: Fastest (2-3 min for 500 pages)
+- **Quality**: Basic
+- **How It Works**: Splits by token count (e.g., 512 tokens per chunk)
+- **When to Use**: Testing, compatibility, predictable chunk sizes
 
-# Performance:
-# - Time: ~14 min/book
-# - Cost: $0.50/book
-# - Quality: AI semantic boundaries, no structural metadata
-```
+#### 2. Sentence Chunker
+- **Use Case**: Simple sentence boundaries, clean text
+- **Speed**: Fast (3-4 min)
+- **Quality**: Good
+- **How It Works**: Splits on sentence boundaries, groups to target size
+- **When to Use**: Well-formatted text with clear sentence structure
 
-### Q2: Is the document already clean?
+#### 3. Recursive Chunker (RECOMMENDED DEFAULT)
+- **Use Case**: Structured docs (textbooks, manuals)
+- **Speed**: Fast (3-5 min)
+- **Quality**: High
+- **How It Works**: Hierarchical splitting (paragraph → sentence → token)
+- **When to Use**: 80% of documents, most flexible
+- **Why Default**: Best balance of speed, quality, and flexibility
 
-#### Clean Documents (Digital PDFs, Pre-processed EPUBs)
-```typescript
-// Skip AI cleanup for speed/cost savings
-job.input_data.cleanMarkdown = false
+#### 4. Semantic Chunker
+- **Use Case**: Narrative, thematic coherence (essays, novels)
+- **Speed**: Medium (8-15 min)
+- **Quality**: Very High
+- **How It Works**: Embeddings-based topic shift detection
+- **When to Use**: Narrative documents where topic coherence matters
 
-// Benefit:
-// - LOCAL: Save 3 min
-// - CLOUD: Save $0.10
-```
+#### 5. Late Chunker
+- **Use Case**: Contextual embeddings, high retrieval quality
+- **Speed**: Slow (10-20 min)
+- **Quality**: Very High
+- **How It Works**: Contextual embeddings for late interaction
+- **When to Use**: Critical RAG applications, high retrieval quality needs
 
-#### Messy Documents (Scanned PDFs, OCR Artifacts)
-```typescript
-// Enable AI cleanup (default)
-job.input_data.cleanMarkdown = true
+#### 6. Code Chunker
+- **Use Case**: Source code with AST-aware splitting
+- **Speed**: Medium (5-10 min)
+- **Quality**: High (for code only)
+- **How It Works**: Uses tree-sitter for AST parsing
+- **When to Use**: Source code files only
 
-// LOCAL: Uses Ollama Qwen 32B
-// CLOUD: Uses Gemini
-// Fixes: OCR artifacts, formatting issues
-// OOM fallback: Automatic regex-only cleanup
-```
+#### 7. Neural Chunker
+- **Use Case**: BERT-based semantic shifts (academic papers)
+- **Speed**: Slow (15-25 min)
+- **Quality**: Very High
+- **How It Works**: BERT model detects semantic boundaries
+- **When to Use**: Complex academic papers, research documents
 
-### Q3: Review before expensive processing?
+#### 8. Slumber Chunker
+- **Use Case**: Agentic LLM-powered (critical documents)
+- **Speed**: Very Slow (30-60 min)
+- **Quality**: Highest
+- **How It Works**: LLM analyzes content to determine optimal boundaries
+- **When to Use**: Most critical documents only, when quality is paramount
 
-The UI now uses a **single workflow selector** with three options instead of multiple checkboxes:
+#### 9. Table Chunker
+- **Use Case**: Markdown tables split by row
+- **Speed**: Fast (3-5 min)
+- **Quality**: Good (for tables only)
+- **How It Works**: Splits markdown tables row by row
+- **When to Use**: Table-heavy documents
 
-#### Option A: Fully Automatic (No Review)
-```typescript
-// UI: reviewWorkflow = 'none'
-// Backend flags:
+### Python Wrapper Implementation
+
+**File**: `worker/scripts/chonkie_chunk.py`
+
+**Key Features:**
+- stdin/stdout JSON IPC pattern (prevents mixing of logging and data)
+- `sys.stdout.flush()` after JSON write (CRITICAL: prevents IPC hangs)
+- Proper RecursiveRules initialization
+- Comprehensive error handling with stack traces
+- Character offset guarantee (start_index, end_index)
+
+**Input Format:**
+```json
 {
-  reviewDoclingExtraction: false,
-  reviewBeforeChunking: false,
-  cleanMarkdown: user_choice
-}
-
-// Use case: Batch processing, trusted sources
-```
-
-#### Option B: Review After Extraction
-```typescript
-// UI: reviewWorkflow = 'after_extraction'
-// Backend flags:
-{
-  reviewDoclingExtraction: true,
-  reviewBeforeChunking: false,
-  cleanMarkdown: false  // Deferred to resume
-}
-
-// Use case:
-// - Check if document is already clean
-// - Skip AI cleanup if extraction is good
-// - Edit markdown before cleanup
-
-// Saves:
-// - LOCAL: 3 min
-// - CLOUD: $0.10
-```
-
-#### Option C: Review After Cleanup
-```typescript
-// UI: reviewWorkflow = 'after_cleanup'
-// Backend flags:
-{
-  reviewDoclingExtraction: false,
-  reviewBeforeChunking: true,
-  cleanMarkdown: user_choice
-}
-
-// Use case:
-// - Verify cleanup quality
-// - Fix issues before locking chunk boundaries
-// - Most expensive stage (chunking/matching)
-
-// Saves:
-// - LOCAL: 2 min (matching overhead)
-// - CLOUD: $0.50 (AI chunking cost)
-```
-
-### Q4: What if Qwen runs out of memory? (LOCAL MODE)
-
-**Automatic OOM Handling**:
-```typescript
-try {
-  markdown = await cleanMarkdownLocal(markdown)
-} catch (error) {
-  if (error instanceof OOMError) {
-    // Automatic fallback to regex-only
-    markdown = cleanMarkdownRegexOnly(markdown)
-    await markForReview('ai_cleanup_oom', 'Qwen OOM. Using regex. Review recommended.')
+  "markdown": "# Chapter 1\n\nFirst paragraph...",
+  "config": {
+    "chunker_type": "recursive",
+    "chunk_size": 512,
+    "tokenizer": "gpt2"
   }
 }
 ```
 
-**User Options**:
-1. **Accept regex-only**: Complete but lower quality
-2. **Switch to smaller model**: `OLLAMA_MODEL=qwen2.5:14b` (requires 16GB RAM)
-3. **Disable AI cleanup**: `cleanMarkdown=false`
-4. **Use cloud mode**: `PROCESSING_MODE=cloud` (costs $0.50)
-
-**No data loss**: Document always completes processing
-
----
-
-## 5. Recommended Configurations
-
-### UI Implementation Note
-The review workflow selector in DocumentPreview.tsx provides a simplified UX:
-- Single dropdown: "Fully Automatic", "Review After Extraction", "Review After Cleanup"
-- Conditional cleanMarkdown checkbox (only shown for 'none' and 'after_cleanup')
-- No disabled states or confusing mutual exclusions
-- Converts to backend flags via `workflowToFlags()` utility
-
-### Academic Books (Deep Study)
-```bash
-# UI Selection
-reviewWorkflow: 'after_cleanup'
-cleanMarkdown: true
-
-# Backend
-PROCESSING_MODE=local
-cleanMarkdown=true
-reviewBeforeChunking=true
-
-# Why:
-# - Zero cost for large library
-# - Full metadata (pages, headings, bboxes)
-# - Review before locking chunks
-# - Best for citation and navigation
-# - Time: ~17 min (with review pause)
+**Output Format:**
+```json
+[
+  {
+    "text": "# Chapter 1\n\nFirst paragraph...",
+    "start_index": 0,
+    "end_index": 81,
+    "token_count": 18,
+    "chunker_type": "recursive"
+  }
+]
 ```
 
-### Quick Ingestion (Casual Reading)
-```bash
-# UI Selection
-reviewWorkflow: 'none'
-cleanMarkdown: false
+### TypeScript IPC Wrapper
 
-# Backend
-PROCESSING_MODE=cloud
-cleanMarkdown=false
+**File**: `worker/lib/chonkie/chonkie-chunker.ts`
 
-# Why:
-# - Fast (~10 min)
-# - Low cost (~$0.40)
-# - Good enough for one-time reads
-# - Time: ~10 min
-```
+**Key Features:**
+- Dynamic timeout based on chunker type + document size
+- Character offset validation after chunking (CRITICAL)
+- Proper error handling with descriptive messages
+- Subprocess spawn with stdin/stdout JSON IPC
 
-### Clean PDFs (Pre-processed)
-```bash
-# UI Selection
-reviewWorkflow: 'after_extraction'
-# cleanMarkdown deferred to review stage
-
-# Backend
-PROCESSING_MODE=local
-reviewDoclingExtraction=true
-cleanMarkdown=false
-
-# Why:
-# - Quick extraction check
-# - Skip cleanup if already good
-# - Zero cost
-# - Time: ~12 min
-```
-
-### Scanned/Messy PDFs (OCR Artifacts)
-```bash
-# UI Selection
-reviewWorkflow: 'none'
-cleanMarkdown: true
-
-# Backend
-PROCESSING_MODE=local
-cleanMarkdown=true
-
-# Why:
-# - Full AI cleanup (Qwen)
-# - Bulletproof matching
-# - Zero cost
-# - Time: ~15 min
-```
-
-### Limited RAM (<24GB)
-```bash
-# UI Selection
-reviewWorkflow: 'none'
-cleanMarkdown: true
-
-# Backend
-PROCESSING_MODE=cloud
-
-# Why:
-# - No Ollama required
-# - No local AI models
-# - Trade money for convenience
-# - Cost: $0.50/book
-```
-
-### Batch Processing (1000 books)
-```bash
-# UI Selection
-reviewWorkflow: 'none'
-cleanMarkdown: true
-
-# Backend
-PROCESSING_MODE=local
-reviewDoclingExtraction=false
-reviewBeforeChunking=false
-
-# Why:
-# - Fully automatic
-# - Zero cost → save $500 vs cloud
-# - Process overnight
-# - Time: ~250 hours for 1000 books
-```
-
----
-
-## 6. Error Recovery & Resilience
-
-### Philosophy
-
-Every stage has a fallback strategy. Nothing blocks processing. Graceful degradation over hard failures.
-
-### OOM Recovery (Ollama)
-```
-Error: Qwen out of memory during cleanup
-  ↓
-Fallback: cleanMarkdownRegexOnly() (basic regex fixes)
-  ↓
-Action: markForReview('ai_cleanup_oom', message)
-  ↓
-Continue: Processing continues with reduced quality
-  ↓
-User: Can re-run with smaller model or disable AI cleanup
-```
-
-### Embeddings Fallback Chain
-```
-Try 1: Local Transformers.js (free, fast)
-  ↓ (on failure)
-Try 2: Gemini embeddings (cloud, costs ~$0.02)
-  ↓ (on failure)
-Try 3: Save without embeddings + mark for review
-  ↓
-Result: Chunks still usable for reading (just no semantic search)
-```
-
-### Metadata Extraction Failure
-```
-Try: PydanticAI + Ollama structured extraction
-  ↓ (on failure)
-Fallback: Use default metadata (importance=0.5, neutral emotions)
-  ↓
-Action: markForReview('metadata_enrichment_failed', message)
-  ↓
-Continue: Processing continues, chunks valid but not enriched
-```
-
-### Bulletproof Matching Guarantees
-```
-Layer 1-3: May fail to match some chunks
-  ↓
-Layer 4: Interpolation NEVER fails
-  ↓
-Validation: Enforce sequential ordering, fix overlaps
-  ↓
-Warnings: Track synthetic chunks for user validation
-  ↓
-Result: 100% chunk recovery, always
-```
-
-### Review Checkpoint Recovery
-```
-Stage X: reviewDoclingExtraction=true or reviewBeforeChunking=true
-  ↓
-Pause: Return markdown only (no chunks)
-  ↓
-Cache: job.metadata.cached_extraction (extraction + doclingChunks)
-  ↓
-User: Reviews/edits in Obsidian
-  ↓
-Resume: continue-processing handler respects PROCESSING_MODE
-  ↓
-LOCAL MODE: bulletproofMatch(cachedDoclingChunks) → local metadata → local embeddings
-CLOUD MODE: batchChunkAndExtractMetadata() → Gemini embeddings
-  ↓
-Benefit: Skip expensive steps until user approves, mode preserved
-```
-
----
-
-## 7. Database Schema: ProcessedChunk
-
-### Shared Fields (Both Modes)
+**Timeout Calculation:**
 ```typescript
-interface ProcessedChunk {
-  document_id: string
-  chunk_index: number
-  content: string
-  start_offset: number      // Character position in markdown
-  end_offset: number        // Character position in markdown
-  word_count: number
+const baseTimeout = {
+  token: 60000,      // 1 minute
+  sentence: 60000,   // 1 minute
+  recursive: 90000,  // 1.5 minutes
+  semantic: 300000,  // 5 minutes
+  late: 600000,      // 10 minutes
+  code: 180000,      // 3 minutes
+  neural: 900000,    // 15 minutes
+  slumber: 1800000,  // 30 minutes
+  table: 90000       // 1.5 minutes
+}[config.chunker_type]
 
-  // AI-extracted metadata
-  themes: string[]
-  importance_score: number  // 0-1
-  summary: string | null
-  emotional_metadata: {
-    polarity: number        // -1 to 1
-    primaryEmotion: 'joy' | 'sadness' | 'anger' | 'fear' | 'surprise' | 'neutral'
-    intensity: number       // 0-1
-  }
-  conceptual_metadata: {
-    concepts: Concept[]
-  }
-  domain_metadata: {
-    primaryDomain: 'literature' | 'science' | 'history' | 'philosophy' | ...
-    confidence: number      // 0-1
-  } | null
-  metadata_extracted_at: string | null
+// Scale timeout with document size (1 minute per 100k characters)
+const docSizeMultiplier = Math.max(1, Math.ceil(markdown.length / 100000))
+const timeout = baseTimeout * docSizeMultiplier
+```
 
-  // Embeddings
-  embedding?: number[]      // 768d vector
+**Character Offset Validation:**
+```typescript
+// CRITICAL: Validate chunk offsets match content
+for (const chunk of chunks) {
+  const extracted = cleanedMarkdown.slice(chunk.start_index, chunk.end_index)
+  if (extracted !== chunk.text) {
+    throw new Error('Character offset mismatch - metadata transfer will fail')
+  }
 }
 ```
 
-### LOCAL MODE ONLY: Structural Metadata
+---
+
+## Metadata Transfer System
+
+### The Core Insight
+
+**Overlaps are EXPECTED and BENEFICIAL.** Multiple Docling chunks overlapping a Chonkie chunk is the PRIMARY MECHANISM for metadata transfer.
+
+**Why Overlaps Occur:**
+- **Docling chunks**: Structural boundaries (heading breaks, page breaks)
+- **Chonkie chunks**: Semantic boundaries (topic shifts, sentence groups)
+- Different boundaries = overlaps when both cover same content
+
+**Expected Overlap Rate**: 70-90% of Chonkie chunks have at least one Docling overlap. This is GOOD, not a bug.
+
+### Overlap Detection Algorithm
+
+**File**: `worker/lib/chonkie/metadata-transfer.ts`
+
+#### 1. Detect Overlap
+
+Two chunks overlap if:
 ```typescript
-interface LocalModeExtras {
-  // PDF-specific (from Docling)
-  page_start: number | null      // 1-based page number (NULL for EPUB)
-  page_end: number | null        // 1-based page number (NULL for EPUB)
-  bboxes: Array<{                // PDF coordinates for highlighting (NULL for EPUB)
-    page: number
-    l: number  // left
-    t: number  // top
-    r: number  // right
-    b: number  // bottom
-  }> | null
+docling.start_offset < chonkie.end_index AND
+docling.end_offset > chonkie.start_index
+```
 
-  // Both PDF and EPUB
-  heading_level: number | null   // TOC depth (1=top-level)
-  heading_path: string[] | null  // ["Chapter 1", "Section 1.1"]
-  section_marker: string | null  // EPUB: "chapter003.xhtml", PDF: null
+**Pattern**: Reuses logic from `bulletproof-matcher.ts` (lines 862-891)
 
-  // Bulletproof matching tracking
-  position_confidence: 'exact' | 'high' | 'medium' | 'synthetic'
-  position_method: 'exact_match' | 'normalized_match' | 'multi_anchor_search' |
-                   'sliding_window' | 'embeddings' | 'llm_assisted' | 'interpolation'
-  position_validated: boolean    // User can validate synthetic chunks
+#### 2. Calculate Overlap Percentage
 
-  // Validation & Correction tracking (Migration 047)
-  validation_warning: string | null           // "Position overlap corrected..."
-  validation_details: {                       // Machine-readable warning metadata
-    type: 'overlap_corrected' | 'synthetic' | 'low_similarity'
-    original_offsets?: { start: number; end: number }
-    adjusted_offsets?: { start: number; end: number }
-    reason?: string
-    confidence_downgrade?: string
-  } | null
-  overlap_corrected: boolean                  // TRUE if offsets adjusted during matching
-  position_corrected: boolean                 // TRUE if user manually corrected boundaries
-  correction_history: Array<{                 // User correction audit trail
-    timestamp: string
-    old_offsets: { start: number; end: number }
-    new_offsets: { start: number; end: number }
-    reason: string
-  }>
+```typescript
+const overlapStart = Math.max(docling.start_offset, chonkie.start_index)
+const overlapEnd = Math.min(docling.end_offset, chonkie.end_index)
+const overlapSize = Math.max(0, overlapEnd - overlapStart)
+const chonkieSize = chonkie.end_index - chonkie.start_index
+return overlapSize / chonkieSize
+```
+
+#### 3. Aggregate Metadata
+
+For each Chonkie chunk:
+1. Find all overlapping Docling chunks
+2. **Union of heading paths** (unique headings from all overlaps)
+3. **Page range** (earliest to latest page)
+4. **Bounding boxes** (concatenate all)
+5. **Section markers** (first non-null, for EPUBs)
+
+#### 4. Calculate Confidence
+
+**High Confidence** (≥0.9):
+- 3+ Docling overlaps OR
+- One strong overlap (>70% coverage)
+
+**Medium Confidence** (0.7-0.9):
+- 1-2 overlaps with decent coverage (>30%)
+
+**Low Confidence** (<0.7):
+- Weak overlaps (<30%) OR
+- No overlaps (will need interpolation)
+
+#### 5. Interpolation Fallback
+
+**Rare case** (usually <10% of chunks). When no overlaps exist:
+1. Find nearest Docling chunks before and after
+2. Use metadata from nearest neighbor
+3. Mark as `metadata_interpolated: true`
+4. Surface in ChunkQualityPanel for user validation
+
+### Metadata Transfer Workflow
+
+```typescript
+export async function transferMetadataToChonkieChunks(
+  chonkieChunks: ChonkieChunk[],
+  bulletproofMatches: MatchResult[],
+  documentId: string
+): Promise<ProcessedChunk[]> {
+
+  for each Chonkie chunk:
+    1. Find overlapping Docling chunks
+    2. If overlaps found:
+         - Aggregate metadata (heading_path, pages, bboxes)
+         - Calculate confidence (high/medium/low)
+       Else:
+         - Interpolate from nearest neighbors
+         - Mark as interpolated
+    3. Calculate word count
+    4. Create ProcessedChunk with:
+         - Chonkie content and offsets
+         - Transferred Docling metadata
+         - Confidence scores
+         - Interpolation flag
+
+  return enriched chunks
 }
 ```
 
-### Migration: 045_add_local_pipeline_columns.sql
+### Quality Tracking
+
+**Database Schema** (Migration 050):
 ```sql
-ALTER TABLE chunks ADD COLUMN page_start integer;
-ALTER TABLE chunks ADD COLUMN page_end integer;
-ALTER TABLE chunks ADD COLUMN heading_level integer;
-ALTER TABLE chunks ADD COLUMN heading_path text[];
-ALTER TABLE chunks ADD COLUMN section_marker text;
-ALTER TABLE chunks ADD COLUMN bboxes jsonb;
-ALTER TABLE chunks ADD COLUMN position_confidence text;
-ALTER TABLE chunks ADD COLUMN position_method text;
-ALTER TABLE chunks ADD COLUMN position_validated boolean DEFAULT false;
-```
-
-### Migration: 047_chunk_validation_corrections.sql
-```sql
--- Add validation metadata columns
 ALTER TABLE chunks
-  ADD COLUMN IF NOT EXISTS validation_warning TEXT,
-  ADD COLUMN IF NOT EXISTS validation_details JSONB,
-  ADD COLUMN IF NOT EXISTS overlap_corrected BOOLEAN DEFAULT FALSE,
-  ADD COLUMN IF NOT EXISTS position_corrected BOOLEAN DEFAULT FALSE,
-  ADD COLUMN IF NOT EXISTS correction_history JSONB DEFAULT '[]'::jsonb;
+ADD COLUMN chunker_type TEXT NOT NULL DEFAULT 'hybrid',
+ADD COLUMN metadata_overlap_count INTEGER DEFAULT 0,
+ADD COLUMN metadata_confidence TEXT DEFAULT 'high',
+ADD COLUMN metadata_interpolated BOOLEAN DEFAULT false;
+```
 
--- Add index for querying unvalidated chunks
-CREATE INDEX IF NOT EXISTS idx_chunks_needs_validation
-  ON chunks(document_id, position_validated)
-  WHERE position_validated = FALSE;
+**Monitoring:**
+```typescript
+const overlapCoverage = (chunksWithOverlaps / totalChunks) * 100
+const avgOverlaps = totalOverlaps / totalChunks
 
--- Add index for overlap-corrected chunks
-CREATE INDEX IF NOT EXISTS idx_chunks_overlap_corrected
-  ON chunks(document_id, overlap_corrected)
-  WHERE overlap_corrected = TRUE;
+console.log(`Overlap coverage: ${overlapCoverage.toFixed(1)}%`)
+console.log(`Average overlaps per chunk: ${avgOverlaps.toFixed(2)}`)
+console.log(`Interpolated chunks: ${interpolatedCount} (${percentage}%)`)
 
--- Column comments for documentation
-COMMENT ON COLUMN chunks.validation_warning IS 'Human-readable warning message (e.g., "Position overlap corrected")';
-COMMENT ON COLUMN chunks.validation_details IS 'Machine-readable warning details: {type, original_offsets, adjusted_offsets, reason}';
-COMMENT ON COLUMN chunks.overlap_corrected IS 'TRUE if chunk offsets were adjusted due to overlap during matching';
-COMMENT ON COLUMN chunks.position_corrected IS 'TRUE if user manually corrected chunk boundaries';
-COMMENT ON COLUMN chunks.correction_history IS 'Array of correction records: [{timestamp, old_offsets, new_offsets, reason}]';
+if (overlapCoverage < 70) {
+  console.warn('⚠️  LOW OVERLAP COVERAGE - investigate matching quality')
+}
 ```
 
 ---
 
-## 8. Key Insights & Architectural Strengths
-
-### 1. Resilience Philosophy
-Every stage has a fallback:
-- OOM → regex
-- Embeddings → Gemini → none
-- Matching → interpolation
-
-Nothing blocks processing. Graceful degradation over hard failures.
-
-### 2. Cost Control
-Review checkpoints are "think before you spend" gates:
-- `reviewDoclingExtraction`: Pause before $0.10 cleanup
-- `reviewBeforeChunking`: Pause before $0.50 chunking
-
-Local mode eliminates recurring costs entirely.
-
-### 3. Metadata Preservation
-Bulletproof matching is the crown jewel:
-- Maintains page numbers through text transformations
-- Preserves heading hierarchy for navigation
-- Keeps bboxes for PDF highlighting
-- Enables proper citations and cross-references
-
-### 4. Mode Convergence
-80% code reuse between LOCAL/CLOUD:
-- Shared stages: download, extract, regex cleanup, review checkpoints
-- Different: chunking strategy (matching vs AI semantic)
-- Convergence point: ProcessedChunk[] format
-
-Both modes produce compatible output for the reader UI.
-
-### 5. 100% Recovery Guarantee
-Layer 4 interpolation is the safety net:
-- Uses matched chunks as anchors
-- Calculates positions for unmatched chunks
-- NEVER fails (always returns a position)
-- Confidence tracking alerts user to synthetic chunks
-
-Even if all fuzzy matching fails, you still get 100% chunk recovery.
-
-### 6. Format-Specific Adaptations
-- **PDF**: page numbers, bboxes, OCR artifacts
-- **EPUB**: section markers, chapter boundaries, HTML artifacts
-- Both converge to same ProcessedChunk[] format
-- UI renders both formats identically
-
-### 7. Performance vs Quality Trade-offs
-- **LOCAL**: Slower (15 min) but zero cost, full metadata, 100% recovery
-- **CLOUD**: Faster (14 min) but $0.50/book, AI boundaries, no structural metadata
-
-Choose based on use case: deep study vs casual reading.
-
-### 8. User Validation Completes the Quality Loop
-Bulletproof matching generates confidence scores and warnings, but **user validation closes the feedback loop**:
-- Warnings persisted to database (not ephemeral logs)
-- UI surfaces synthetic and overlap-corrected chunks for review
-- Users validate correct positions or manually fix boundaries
-- Correction history tracked for audit and continuous improvement
-- System learns from user corrections to refine matching algorithms
-- Transforms processing quality from "black box" to "transparent partnership"
-
-**Why This Matters**: User validation isn't just error correction—it's a quality assurance system that builds trust and enables continuous improvement. The correction_history table becomes a training dataset for future enhancements.
-
----
-
-## 9. Cached Chunks Architecture
-
-### Overview
-
-The cached chunks system provides persistent storage for Docling extraction results, enabling zero-cost reprocessing when documents are edited. This feature is essential for LOCAL mode users who want to preserve extracted structural metadata (pages, headings, bboxes) without re-running expensive extraction.
-
-### Key Benefits
-
-1. **Zero-Cost Reprocessing**: $0.00 vs $0.50 for CLOUD mode when reprocessing edited documents
-2. **Instant Resume**: Load cached extraction results in <2 seconds instead of 9 minutes
-3. **Metadata Preservation**: Structural metadata survives markdown edits through bulletproof matching
-4. **Hash Validation**: Automatic cache invalidation when markdown changes significantly
+## Local Processing Pipeline
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    CACHED CHUNKS LIFECYCLE                          │
-└─────────────────────────────────────────────────────────────────────┘
+100% local document processing with **zero API costs** and **complete privacy**. Replaces cloud AI services with local alternatives.
 
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 1: Initial Processing (LOCAL mode)                         │
-├───────────────────────────────────────────────────────────────────┤
-│ 1. Docling extraction → DoclingChunk[] with metadata             │
-│ 2. Generate markdown hash (SHA256)                                │
-│ 3. Save to cached_chunks table:                                   │
-│    • document_id (UNIQUE constraint)                              │
-│    • extraction_mode ('pdf' | 'epub')                             │
-│    • markdown_hash (64-char hex)                                  │
-│    • chunks (JSONB array of DoclingChunks)                        │
-│    • structure (JSONB with headings[], total_pages)               │
-│    • docling_version (for compatibility tracking)                 │
-│ 4. Continue with bulletproof matching...                          │
-└───────────────────────────────────────────────────────────────────┘
-                              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 2: Resume from Review Checkpoint                           │
-├───────────────────────────────────────────────────────────────────┤
-│ User edited markdown in Obsidian → resume processing             │
-│                                                                   │
-│ 1. Generate current markdown hash                                 │
-│ 2. Load cached chunks from database                               │
-│ 3. Validate hash:                                                 │
-│    IF match   → Load cached chunks (0 API calls)                  │
-│    IF mismatch → Fall back to CLOUD mode ($0.50 cost)            │
-│ 4. Run bulletproof matching with cached chunks                    │
-│ 5. Continue with metadata enrichment...                           │
-└───────────────────────────────────────────────────────────────────┘
-                              ↓
-┌───────────────────────────────────────────────────────────────────┐
-│ Stage 3: Document Reprocessing                                   │
-├───────────────────────────────────────────────────────────────────┤
-│ User makes heavy edits (30% content change) → reprocess          │
-│                                                                   │
-│ 1. Load cached chunks by document_id                              │
-│ 2. Check markdown hash                                            │
-│ 3. IF hash matches:                                               │
-│    • Cached chunks still valid                                    │
-│    • Run bulletproof matching (5 layers)                          │
-│    • Preserve structural metadata through edit                    │
-│    • Cost: $0.00                                                  │
-│ 4. IF hash mismatch (expected after edits):                      │
-│    • Cache stale but still valuable                               │
-│    • Run bulletproof matching to remap positions                  │
-│    • Structural metadata preserved via matching                   │
-│    • Cost: $0.00 (no Gemini calls)                                │
-│ 5. IF cache missing:                                              │
-│    • Fall back to CLOUD mode                                      │
-│    • Cost: $0.50 (AI semantic chunking)                          │
-└───────────────────────────────────────────────────────────────────┘
+**Components:**
+- **Docling**: PDF/EPUB extraction with HybridChunker (768-token chunks)
+- **Ollama (Qwen 32B)**: Local LLM for cleanup and metadata extraction
+- **Transformers.js**: Local embeddings (768d vectors)
+- **5-Layer Bulletproof Matching**: 100% chunk recovery guarantee
+
+### System Requirements
+
+**Minimum:**
+- 24GB RAM (Qwen 14B)
+- Python 3.10+
+- Node.js 18+
+
+**Recommended:**
+- 64GB RAM (Qwen 32B - best quality)
+- Apple M1 Max/Ultra or equivalent
+
+### Configuration
+
+```bash
+# Enable local mode in .env.local
+PROCESSING_MODE=local                         # Set to 'cloud' for Gemini
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:32b-instruct-q4_K_M     # or 14b/7b for smaller RAM
+OLLAMA_TIMEOUT=600000
+
+# Docling Pipeline Configuration (optional, env var control)
+EXTRACT_IMAGES=true              # Default: true (figure/table extraction)
+IMAGE_SCALE=2.0                  # Default: 2.0 (144 DPI)
+EXTRACT_TABLES=true              # Default: true
+CLASSIFY_IMAGES=false            # Default: false (opt-in AI feature)
+DESCRIBE_IMAGES=false            # Default: false (opt-in AI feature)
+ENRICH_CODE=false                # Default: false (opt-in AI feature)
+ENABLE_OCR=false                 # Default: false (for scanned documents)
 ```
 
-### Database Schema
+### Processing Times
 
-**Table**: `cached_chunks`
+**Small PDFs (<50 pages):** 3-5 minutes
+**Medium PDFs (200 pages):** 15-25 minutes
+**Large PDFs (500 pages):** 60-80 minutes (with automatic page batching)
 
-```sql
-CREATE TABLE cached_chunks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  document_id UUID NOT NULL,
-  extraction_mode TEXT NOT NULL,  -- 'pdf' | 'epub'
-  markdown_hash TEXT NOT NULL,    -- SHA256 hash for validation
-  docling_version TEXT,            -- e.g., '2.55.1'
-  chunks JSONB NOT NULL,           -- DoclingChunk[] array
-  structure JSONB NOT NULL,        -- { headings, total_pages, sections }
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+### Quality Metrics
 
-  CONSTRAINT cached_chunks_document_id_key UNIQUE (document_id),
-  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-);
+- **Chunk recovery**: 100% (guaranteed, no data loss)
+- **Exact matches**: 85-90%
+- **Synthetic chunks**: <5% (flagged for review)
+- **Metadata coverage**: >80% (heading_path, page numbers, section markers)
+- **Embedding enhancement**: >70% (metadata-enriched vectors)
+- **Semantic coherence**: >90% (chunks end on sentence boundaries)
+- **API calls**: 0 (completely local)
 
--- Indexes for efficient lookups
-CREATE INDEX idx_cached_chunks_document ON cached_chunks(document_id);
-CREATE INDEX idx_cached_chunks_mode ON cached_chunks(extraction_mode);
-CREATE INDEX idx_cached_chunks_created ON cached_chunks(created_at DESC);
-```
+### Cost Savings
 
-### Usage Examples
+- **Cloud (Gemini)**: $0.42/book (500 pages)
+- **Local**: $0.00/book
+- **1,000 books**: Save $420
+- **10,000 books**: Save $4,200
+- **Bonus**: Complete privacy, no rate limits, works offline
 
-#### Query Cached Chunks
+---
 
-```sql
--- Get cache for a document
-SELECT
-  extraction_mode,
-  jsonb_array_length(chunks) as chunk_count,
-  LEFT(markdown_hash, 8) as hash_prefix,
-  docling_version,
-  created_at
-FROM cached_chunks
-WHERE document_id = '<doc-uuid>';
+## Performance & Cost
 
--- Check all caches
-SELECT
-  extraction_mode,
-  COUNT(*) as cache_count,
-  AVG(jsonb_array_length(chunks)) as avg_chunks
-FROM cached_chunks
-GROUP BY extraction_mode;
-```
+### Processing Times by Strategy
 
-#### Manual Cache Operations
+| Chunker | Small (<50p) | Medium (200p) | Large (500p) |
+|---------|--------------|---------------|--------------|
+| token | 1-2 min | 5-8 min | 2-3 min |
+| sentence | 1-2 min | 6-10 min | 3-4 min |
+| **recursive** | 1-2 min | 8-12 min | 3-5 min |
+| semantic | 3-5 min | 20-35 min | 8-15 min |
+| late | 4-8 min | 30-50 min | 10-20 min |
+| code | 2-4 min | 15-25 min | 5-10 min |
+| neural | 5-10 min | 45-75 min | 15-25 min |
+| slumber | 10-20 min | 90-150 min | 30-60 min |
+| table | 1-2 min | 8-12 min | 3-5 min |
 
+### Cost Breakdown (Local Mode)
+
+**Per 500-page book:**
+- Extraction: $0 (Docling local)
+- Cleanup: $0 (Ollama local)
+- Metadata: $0 (PydanticAI + Ollama local)
+- Embeddings: $0 (Transformers.js local)
+- Chunking: $0 (Chonkie local)
+- **Total: $0.00**
+
+**Hardware Costs:**
+- M1 Max 64GB: ~$3,000 (one-time)
+- Break-even: ~7,000 books (vs cloud at $0.42/book)
+
+---
+
+## Quality Metrics
+
+### Success Criteria
+
+#### 1. Overlap Coverage (Target: 70-90%)
+
+**Definition**: Percentage of Chonkie chunks that have at least one Docling chunk overlap.
+
+**Why 70-90%?**: Perfect 100% overlap is NOT expected or needed. Different chunking boundaries (structural vs semantic) naturally create some non-overlapping chunks. These are handled via interpolation.
+
+**Validation:**
 ```typescript
-import {
-  saveCachedChunks,
-  loadCachedChunks,
-  deleteCachedChunks,
-  hashMarkdown
-} from '../lib/cached-chunks'
-
-// Save after extraction
-await saveCachedChunks(supabase, {
-  document_id: documentId,
-  extraction_mode: 'pdf',
-  markdown_hash: hashMarkdown(markdown),
-  docling_version: '2.55.1',
-  chunks: doclingChunks,
-  structure: doclingStructure
-})
-
-// Load for resume/reprocess
-const cached = await loadCachedChunks(
-  supabase,
-  documentId,
-  hashMarkdown(currentMarkdown)
-)
-
-if (cached) {
-  console.log(`Loaded ${cached.chunks.length} cached chunks`)
-  // Use cached chunks for bulletproof matching
-} else {
-  console.warn('Cache invalid or missing - falling back to CLOUD mode')
+const withOverlaps = chunks.filter(c => c.metadata_overlap_count > 0)
+const coverage = (withOverlaps.length / chunks.length) * 100
+if (coverage < 70) {
+  console.warn('LOW OVERLAP COVERAGE - investigate matching quality')
 }
-
-// Manual cleanup
-await deleteCachedChunks(supabase, documentId)
 ```
 
-### Hash Validation Strategy
+#### 2. Metadata Recovery (Target: >90%)
 
-**When Hash Matches**:
-- Markdown unchanged since extraction
-- Cache is 100% valid
-- Zero API calls needed
-- Instant load (<2 seconds)
+**Definition**: Percentage of chunks with populated heading_path OR page_start.
 
-**When Hash Mismatches**:
-- Markdown edited (expected)
-- Cache chunks still valuable as anchors
-- Bulletproof matching remaps positions
-- Structural metadata preserved
-- Still $0.00 cost (LOCAL mode)
+**Validation:**
+```typescript
+const withMetadata = chunks.filter(c =>
+  (c.heading_path && c.heading_path.length > 0) || c.page_start
+)
+const recovery = (withMetadata.length / chunks.length) * 100
+```
 
-**When Cache Missing**:
-- Document never processed in LOCAL mode
-- Or cache manually deleted
-- Graceful fallback to CLOUD mode
-- Cost: $0.50 for AI semantic chunking
+#### 3. Character Offsets (Target: 100%)
 
-### Performance Impact
+**Definition**: All chunk offsets must match content exactly.
 
-| Scenario | Without Cache | With Cache | Savings |
-|----------|--------------|-----------|---------|
-| **Resume (no edits)** | 9 min extraction | <2 sec load | 99.6% time saved |
-| **Reprocess (30% edits)** | 9 min + $0.50 | 2 min matching | 77% time, $0.50 saved |
-| **Reprocess (minor edits)** | 9 min + $0.50 | <1 min matching | 88% time, $0.50 saved |
+**Validation:**
+```typescript
+for (const chunk of chunks) {
+  const extracted = markdown.slice(chunk.start_offset, chunk.end_offset)
+  if (extracted !== chunk.content) {
+    throw new Error('Character offset mismatch detected')
+  }
+}
+```
 
-### Integration Points
+### Monitoring in Production
 
-**Processors** (cache save):
-- `worker/processors/pdf-processor.ts:129` - Save after Docling extraction
-- `worker/processors/epub-processor.ts:121` - Save after EPUB extraction
+**ChunkQualityPanel** provides real-time visibility:
+- High confidence chunks (green badge)
+- Medium confidence chunks (yellow badge)
+- Low confidence chunks (orange badge)
+- Interpolated chunks (red badge, requires review)
 
-**Handlers** (cache load):
-- `worker/handlers/continue-processing.ts:178` - Resume from review checkpoint
-- `worker/handlers/reprocess-document.ts:116` - Reprocess edited documents
+**Statistics Display:**
+```
+High: 92% (184/200 chunks)  ✅
+Medium: 5% (10/200 chunks)  ⚠️
+Low: 2% (4/200 chunks)      ⚠️
+Interpolated: 1% (2/200)    ❌
+```
 
-**Utilities**:
-- `worker/lib/cached-chunks.ts` - Save/load/delete operations + hash generation
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Python Subprocess Hangs
+
+**Symptom**: Chonkie chunking never completes, worker stuck at Stage 6
+
+**Root Cause**: Missing `sys.stdout.flush()` in Python script
+
+**Solution**:
+```python
+print(json.dumps(output), flush=True)
+sys.stdout.flush()  # CRITICAL: prevents IPC hangs
+```
+
+**Detection**:
+- Timeout after expected duration
+- Python process still running but no output
+
+#### 2. Character Offset Mismatch
+
+**Symptom**: Error: "Character offset mismatch - metadata transfer will fail"
+
+**Root Cause**: Chonkie chunk offsets don't match markdown content
+
+**Solution**:
+- Verify Chonkie version (should be ≥0.5.0)
+- Check for markdown encoding issues (UTF-8 required)
+- Validate no middleware is modifying markdown between stages
+
+**Detection**:
+```typescript
+const extracted = markdown.slice(chunk.start_index, chunk.end_index)
+if (extracted !== chunk.text) {
+  console.error('Offset mismatch detected')
+}
+```
+
+#### 3. Low Overlap Coverage (<70%)
+
+**Symptom**: Warning: "LOW OVERLAP COVERAGE: 45%"
+
+**Root Cause**: Bulletproof matcher issues or unusual document structure
+
+**Solution**:
+- Review Docling extraction quality (Stage 2)
+- Check if document is scanned (enable OCR if needed)
+- Verify markdown cleanup didn't remove structural markers
+- Review ChunkQualityPanel for validation warnings
+
+**Detection**:
+- Automatic warning logged during metadata transfer
+- High percentage of interpolated chunks (>10%)
+- Many low-confidence chunks in database
+
+#### 4. Slow Chunking Performance
+
+**Symptom**: Semantic/neural chunkers taking 2-3x longer than expected
+
+**Root Cause**: Large document, complex content, or resource constraints
+
+**Solution**:
+- Switch to faster chunker (recursive or token)
+- Ensure sufficient RAM for chunker strategy
+- Consider batching for very large documents (>1000 pages)
+- Check system resource usage (CPU, memory)
+
+**Detection**:
+- Timeout warnings in logs
+- Stage 6 progress stuck for extended time
+- High CPU/memory usage
+
+#### 5. Metadata Not Transferring
+
+**Symptom**: Chunks missing heading_path, page numbers, or bboxes
+
+**Root Cause**: Docling extraction didn't capture metadata or overlap detection failed
+
+**Solution**:
+- Verify Docling extraction completed successfully (Stage 2)
+- Check cached_chunks table for Docling metadata
+- Review bulletproof matcher output (Stage 4)
+- Validate overlap detection logic
+
+**Detection**:
+```typescript
+const withMetadata = chunks.filter(c => c.heading_path || c.page_start)
+const recovery = (withMetadata.length / chunks.length) * 100
+if (recovery < 90) {
+  console.warn('LOW METADATA RECOVERY')
+}
+```
+
+### Debug Commands
+
+```bash
+# Check Chonkie installation
+python3 -c "from chonkie import RecursiveChunker; print('OK')"
+
+# Test Python wrapper
+echo '{"markdown":"# Test","config":{"chunker_type":"recursive"}}' | \
+  python3 worker/scripts/chonkie_chunk.py
+
+# Verify Ollama is running
+curl -s http://127.0.0.1:11434/api/version
+
+# Check database migration status
+psql postgres://postgres:postgres@localhost:54322/postgres \
+  -c "SELECT chunker_type FROM chunks LIMIT 5;"
+
+# Run integration test
+cd worker && npx tsx scripts/test-chonkie-integration.ts <document_id>
+```
+
+---
+
+## Additional Resources
+
+### Documentation
+
+- **Chonkie Docs**: https://docs.chonkie.ai/oss/chunkers/overview
+- **Chonkie GitHub**: https://github.com/chonkie-inc/chonkie
+- **Chonkie PyPI**: https://pypi.org/project/chonkie/
+
+### Codebase References
+
+**Python Wrapper**:
+- `worker/scripts/chonkie_chunk.py` - Main Python script
+
+**TypeScript Integration**:
+- `worker/lib/chonkie/chonkie-chunker.ts` - IPC wrapper
+- `worker/lib/chonkie/metadata-transfer.ts` - Overlap detection
+- `worker/lib/chonkie/types.ts` - TypeScript types
+
+**Processors**:
+- `worker/processors/pdf-processor.ts` - PDF pipeline
+- `worker/processors/epub-processor.ts` - EPUB pipeline
 
 **Database**:
-- `supabase/migrations/046_cached_chunks_table.sql` - Table schema and indexes
+- `supabase/migrations/050_add_chunker_type.sql` - Schema changes
+- `worker/types/database.ts` - TypeScript database types
 
-### Lifecycle Management
-
-**Automatic Creation**:
-- Created after every Docling extraction (LOCAL mode only)
-- Upserts on duplicate document_id
-
-**Automatic Invalidation**:
-- Hash validation fails when markdown edited
-- System logs warning and falls back gracefully
-
-**Automatic Deletion**:
-- CASCADE delete when parent document deleted
-- No orphaned caches
-
-**Manual Deletion**:
-- `DELETE FROM cached_chunks WHERE document_id = '<uuid>'`
-- Useful for forcing re-extraction
-
-### Troubleshooting
-
-**Cache Not Loading**:
-```bash
-# Check if cache exists
-psql -c "SELECT document_id, extraction_mode FROM cached_chunks WHERE document_id = '<uuid>';"
-
-# Verify hash
-psql -c "SELECT LEFT(markdown_hash, 8) FROM cached_chunks WHERE document_id = '<uuid>';"
-```
-
-**Hash Always Mismatches**:
-- Markdown was edited (expected behavior)
-- System will use bulletproof matching to remap
-- Structural metadata still preserved
-
-**Cache Missing After Processing**:
-- Check PROCESSING_MODE: cache only created in LOCAL mode
-- Verify processor saved cache (check logs for "[CachedChunks] ✓ Saved")
+**UI Components**:
+- `src/components/library/UploadZone.tsx` - Chunker selection
+- `src/components/sidebar/ChunkQualityPanel.tsx` - Quality monitoring
+- `src/components/reader/DocumentHeader.tsx` - Chunker badge display
 
 ---
 
-## 10. Next Steps & Future Enhancements
-
-### Potential Improvements
-
-1. **Image & Table Extraction**: Add Docling figure/table extraction (see `docs/todo/image-and-table-extraction.md`)
-2. **Parallel Processing**: Run Layer 1-3 in parallel (currently sequential)
-3. **Adaptive Chunking**: Adjust chunk size based on document density
-4. **Cross-Document Matching**: Use bulletproof matching for document updates
-5. **Confidence Calibration**: Learn from user validations to improve Layer 4
-6. **Smart Caching**: Cache Ollama outputs to avoid re-cleanup on re-runs
-
-### Known Limitations
-
-1. **Scanned PDFs**: Docling OCR is disabled by default (slow), enable via `ocr: true`
-2. **Non-English**: Tokenizer assumes English text (mpnet-base-v2)
-3. **RAM Requirements**: Qwen 32B needs 64GB for best results (32GB for 14B)
-4. **Python Dependency**: Requires Python 3.10+ for Docling
-
----
-
-## Appendix: File Reference
-
-### PDF Processing
-- `worker/processors/pdf-processor.ts`: Main PDF pipeline orchestrator
-- `worker/lib/docling-extractor.ts`: Python subprocess bridge for Docling
-- `worker/scripts/docling_extract.py`: Python script for PDF extraction
-- `worker/lib/local/ollama-cleanup.ts`: Local markdown cleanup (Qwen)
-- `worker/lib/local/bulletproof-matcher.ts`: 5-layer matching system
-- `worker/lib/chunking/pydantic-metadata.ts`: Metadata extraction (PydanticAI)
-- `worker/lib/local/embeddings-local.ts`: Local embeddings (Transformers.js)
-
-### EPUB Processing
-- `worker/processors/epub-processor.ts`: Main EPUB pipeline orchestrator
-- `worker/lib/local/epub-docling-extractor.ts`: EPUB extraction with Docling
-- `worker/scripts/docling_extract_epub.py`: Python script for EPUB extraction
-- `worker/lib/epub/epub-parser.ts`: Native EPUB parser (cloud mode)
-- `worker/lib/epub/epub-cleaner.ts`: EPUB-specific cleanup
-
-### Shared Components
-- `worker/processors/base.ts`: Base processor class with retry/progress
-- `worker/lib/text-cleanup.ts`: Regex-based cleanup utilities
-- `worker/lib/markdown-cleanup-ai.ts`: AI cleanup (Gemini, cloud mode)
-- `worker/lib/ai-chunking-batch.ts`: Batch chunking with AI (cloud mode)
-- `worker/lib/embeddings.ts`: Gemini embeddings (cloud fallback)
-- `worker/types/processor.ts`: Shared types (ProcessResult, ProcessedChunk)
-
-### Handlers
-- `worker/handlers/continue-processing.ts`: Resume processing after review checkpoints (dual-mode)
-- `worker/handlers/reprocess-document.ts`: Reprocess documents with cached chunks integration
-
-### Cached Chunks System
-- `worker/lib/cached-chunks.ts`: Cache save/load/delete operations + hash generation
-- `worker/types/cached-chunks.ts`: Type definitions for cached chunks table
-- `supabase/migrations/046_cached_chunks_table.sql`: Cached chunks table schema
-
-### Database
-- `supabase/migrations/045_add_local_pipeline_columns.sql`: Local metadata columns
-- `supabase/migrations/046_cached_chunks_table.sql`: Cached chunks table for zero-cost reprocessing
-- `supabase/migrations/047_chunk_validation_corrections.sql`: Validation/correction tracking columns
-
-### Chunk Validation & Correction System
-- `src/app/actions/chunks.ts`: Server actions for validation and correction
-- `src/hooks/use-unvalidated-chunks.ts`: Hook for querying chunks needing validation (replaces useSyntheticChunks)
-- `src/components/sidebar/ChunkQualityPanel.tsx`: UI for reviewing and correcting chunks
-- `src/lib/reader/offset-calculator.ts`: Text selection to markdown offset conversion
+**Document Version**: 1.0
+**Last Verified**: 2025-10-15
+**Status**: ✅ Production Ready

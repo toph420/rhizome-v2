@@ -18,23 +18,27 @@ export interface UnvalidatedChunk {
   overlap_corrected: boolean
   position_corrected: boolean
   correction_history: any[]
+  // Chonkie Integration (Migration 050)
+  metadata_confidence: string | null
+  metadata_interpolated: boolean | null
+  metadata_overlap_count: number | null
 }
 
 export interface CategorizedUnvalidatedChunks {
-  synthetic: UnvalidatedChunk[]
-  overlapCorrected: UnvalidatedChunk[]
-  lowSimilarity: UnvalidatedChunk[]
+  interpolated: UnvalidatedChunk[]
+  lowConfidence: UnvalidatedChunk[]
+  mediumConfidence: UnvalidatedChunk[]
   all: UnvalidatedChunk[]
 }
 
 /**
- * Hook to fetch all unvalidated chunks for a document, categorized by warning type.
- * Replaces useSyntheticChunks to provide comprehensive validation coverage.
+ * Hook to fetch all unvalidated chunks for a document, categorized by Chonkie metadata confidence.
  *
- * Categories:
- * - synthetic: Chunks positioned via Layer 4 interpolation (position_confidence = 'synthetic')
- * - overlapCorrected: Chunks with offsets adjusted due to overlap (overlap_corrected = true)
- * - lowSimilarity: Chunks with medium confidence (position_confidence = 'medium')
+ * **Chonkie Integration (Migration 050)**:
+ * Categories now map to Chonkie metadata transfer quality:
+ * - interpolated: No Docling overlaps (metadata_interpolated = true)
+ * - lowConfidence: Weak overlaps <30% coverage (metadata_confidence = 'low')
+ * - mediumConfidence: Decent overlaps 30-70% coverage (metadata_confidence = 'medium')
  * - all: All unvalidated chunks combined
  *
  * @param documentId - Document identifier
@@ -52,10 +56,11 @@ export function useUnvalidatedChunks(documentId: string) {
         const supabase = createClient()
 
         // Query all chunks where position_validated = false
+        // Include both old fields (backward compat) and new Chonkie fields
         const { data: chunks, error } = await supabase
           .from('chunks')
           .select(
-            'id, chunk_index, content, start_offset, end_offset, page_start, page_end, section_marker, position_method, position_confidence, position_validated, validation_warning, validation_details, overlap_corrected, position_corrected, correction_history'
+            'id, chunk_index, content, start_offset, end_offset, page_start, page_end, section_marker, position_method, position_confidence, position_validated, validation_warning, validation_details, overlap_corrected, position_corrected, correction_history, metadata_confidence, metadata_interpolated, metadata_overlap_count'
           )
           .eq('document_id', documentId)
           .eq('position_validated', false)
@@ -63,28 +68,47 @@ export function useUnvalidatedChunks(documentId: string) {
 
         if (error) throw error
 
-        // Categorize chunks by warning type
+        // Categorize chunks by Chonkie metadata confidence
         const categorized: CategorizedUnvalidatedChunks = {
-          synthetic: [],
-          overlapCorrected: [],
-          lowSimilarity: [],
+          interpolated: [],
+          lowConfidence: [],
+          mediumConfidence: [],
           all: (chunks as UnvalidatedChunk[]) || []
         }
 
         chunks?.forEach((chunk) => {
           const typedChunk = chunk as UnvalidatedChunk
 
-          // Categorize by position_confidence and overlap_corrected
-          if (typedChunk.position_confidence === 'synthetic') {
-            categorized.synthetic.push(typedChunk)
-          }
+          // Prioritize Chonkie fields if available, fallback to old fields
+          const metadataConfidence = typedChunk.metadata_confidence
+          const metadataInterpolated = typedChunk.metadata_interpolated
 
-          if (typedChunk.overlap_corrected) {
-            categorized.overlapCorrected.push(typedChunk)
-          }
+          if (metadataConfidence) {
+            // NEW: Chonkie metadata confidence system
+            if (metadataInterpolated === true) {
+              categorized.interpolated.push(typedChunk)
+            }
 
-          if (typedChunk.position_confidence === 'medium') {
-            categorized.lowSimilarity.push(typedChunk)
+            if (metadataConfidence === 'low') {
+              categorized.lowConfidence.push(typedChunk)
+            }
+
+            if (metadataConfidence === 'medium') {
+              categorized.mediumConfidence.push(typedChunk)
+            }
+          } else {
+            // OLD: Fallback to bulletproof matcher fields for backward compatibility
+            if (typedChunk.position_confidence === 'synthetic') {
+              categorized.interpolated.push(typedChunk)
+            }
+
+            if (typedChunk.overlap_corrected || typedChunk.position_confidence === 'low') {
+              categorized.lowConfidence.push(typedChunk)
+            }
+
+            if (typedChunk.position_confidence === 'medium') {
+              categorized.mediumConfidence.push(typedChunk)
+            }
           }
         })
 

@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2, Sparkles } from 'lucide-react'
 import { DocumentPreview, workflowToFlags, type ReviewWorkflow } from '@/components/upload/DocumentPreview'
 import type { DetectedMetadata } from '@/types/metadata'
+import type { ChunkerType } from '@/types/chunker'
 
 type SourceType = 'pdf' | 'epub' | 'markdown_asis' | 'markdown_clean' | 'txt' | 'youtube' | 'web_url' | 'paste'
 type TabType = 'file' | 'url' | 'paste'
@@ -85,6 +86,7 @@ export function UploadZone() {
   const [reviewWorkflow, setReviewWorkflow] = useState<ReviewWorkflow>('none')
   const [cleanMarkdown, setCleanMarkdown] = useState(true) // Default to true - cleanup enabled
   const [extractImages, setExtractImages] = useState(false)
+  const [chunkerType, setChunkerType] = useState<ChunkerType>('recursive') // Default to recursive (recommended)
 
   /**
    * Detects URL type (YouTube vs web article).
@@ -309,6 +311,7 @@ export function UploadZone() {
       formData.append('cleanMarkdown', flags.cleanMarkdown.toString())
       formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
       formData.append('extractImages', extractImages.toString())
+      formData.append('chunkerStrategy', chunkerType)
 
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
@@ -383,6 +386,7 @@ export function UploadZone() {
       formData.append('reviewBeforeChunking', flags.reviewBeforeChunking.toString())
       formData.append('cleanMarkdown', flags.cleanMarkdown.toString())
       formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
+      formData.append('chunkerStrategy', chunkerType)
 
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
@@ -602,6 +606,8 @@ export function UploadZone() {
               onCleanMarkdownChange={setCleanMarkdown}
               extractImages={extractImages}
               onExtractImagesChange={setExtractImages}
+              chunkerType={chunkerType}
+              onChunkerTypeChange={setChunkerType}
             />
           ) : uploadPhase === 'detecting' ? (
             <Card className="p-12 text-center">
@@ -678,7 +684,7 @@ export function UploadZone() {
                       </RadioGroup>
                     </div>
                   )}
-                  
+
                   {costEstimate && (
                     <div className="grid grid-cols-3 gap-4 text-sm">
                       <div className="flex items-center gap-2">

@@ -2,17 +2,22 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 export interface ChunkStats {
-  exact: number
   high: number
   medium: number
-  synthetic: number
-  overlapCorrected: number
+  low: number
+  interpolated: number
   total: number
 }
 
 /**
  * Hook to fetch chunk quality statistics for a document.
- * Groups chunks by position_confidence level.
+ * Groups chunks by Chonkie metadata_confidence level.
+ *
+ * **Chonkie Integration (Migration 050)**:
+ * - high: 3+ Docling overlaps OR >70% coverage
+ * - medium: 1-2 overlaps with >30% coverage
+ * - low: <30% overlap OR interpolated
+ * - interpolated: No Docling overlaps (metadata_interpolated = true)
  *
  * @param documentId - Document identifier
  * @returns Chunk statistics or null if loading/error
@@ -28,39 +33,37 @@ export function useChunkStats(documentId: string) {
         setIsLoading(true)
         const supabase = createClient()
 
-        // Fetch chunks with confidence levels and overlap_corrected flag
+        // Fetch chunks with Chonkie metadata confidence fields
         const { data: chunks, error } = await supabase
           .from('chunks')
-          .select('position_confidence, overlap_corrected')
+          .select('metadata_confidence, metadata_interpolated')
           .eq('document_id', documentId)
 
         if (error) throw error
 
-        // Aggregate by confidence level and overlap correction
+        // Aggregate by Chonkie confidence level
         const stats: ChunkStats = {
-          exact: 0,
           high: 0,
           medium: 0,
-          synthetic: 0,
-          overlapCorrected: 0,
+          low: 0,
+          interpolated: 0,
           total: chunks?.length || 0
         }
 
         chunks?.forEach(chunk => {
-          const confidence = chunk.position_confidence as string | null
-          const overlapCorrected = chunk.overlap_corrected as boolean | null
+          const confidence = chunk.metadata_confidence as string | null
+          const interpolated = chunk.metadata_interpolated as boolean | null
 
-          // Skip chunks without confidence (cloud mode)
+          // Skip chunks without confidence (old hybrid mode or cloud mode)
           if (!confidence) return
 
-          // Count by confidence level
-          if (confidence === 'exact') stats.exact++
-          else if (confidence === 'high') stats.high++
+          // Count by Chonkie metadata confidence level
+          if (confidence === 'high') stats.high++
           else if (confidence === 'medium') stats.medium++
-          else if (confidence === 'synthetic') stats.synthetic++
+          else if (confidence === 'low') stats.low++
 
-          // Count overlap-corrected chunks
-          if (overlapCorrected === true) stats.overlapCorrected++
+          // Count interpolated chunks (no Docling overlaps)
+          if (interpolated === true) stats.interpolated++
         })
 
         setData(stats)
