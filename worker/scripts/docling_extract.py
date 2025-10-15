@@ -4,10 +4,11 @@ Docling PDF extraction wrapper with HybridChunker integration for Node.js.
 
 Usage: python3 docling_extract.py <pdf_path> [options_json]
 
-Options:
+Chunking Options:
     - enable_chunking: bool (default: false)
-    - chunk_size: int (default: 512 tokens)
+    - chunk_size: int (default: 512) - Smaller values (256) for granular chunks
     - tokenizer: str (default: 'Xenova/all-mpnet-base-v2')
+    - inline_metadata: bool (default: false) - Embed metadata as HTML comments
     - max_pages: int (limit pages for testing)
 
 Pipeline Options (PdfPipelineOptions):
@@ -231,48 +232,93 @@ def extract_with_chunking(pdf_path: str, options: Dict[str, Any]) -> Dict[str, A
 
     emit_progress('extraction', 40, f'Extraction complete ({len(doc.pages)} pages)')
 
-    # Export markdown (always needed)
-    markdown = doc.export_to_markdown()
-
     # Extract structure (headings, hierarchy)
-    emit_progress('extraction', 50, 'Extracting document structure')
+    emit_progress('extraction', 45, 'Extracting document structure')
     structure = extract_document_structure(doc)
 
-    # Optionally run HybridChunker
-    chunks = None
-    if options.get('enable_chunking', False):
-        emit_progress('chunking', 60, 'Running HybridChunker')
+    # Check if inline metadata mode is enabled
+    use_inline_metadata = options.get('inline_metadata', False)
 
+    # Optionally run chunking
+    chunks = None
+    markdown = None
+
+    if options.get('enable_chunking', False):
         try:
+            emit_progress('chunking', 50, 'Running HybridChunker')
+
+            # Get chunk size from options
+            # Smaller chunks (256) provide better granularity for inline metadata
+            # Larger chunks (768) provide better semantic coherence
+            chunk_size = options.get('chunk_size', 512)
+
             # CRITICAL: Tokenizer must match embedding model
             # Default: 'Xenova/all-mpnet-base-v2' matches Transformers.js model
             chunker = HybridChunker(
                 tokenizer=options.get('tokenizer', 'Xenova/all-mpnet-base-v2'),
-                max_tokens=options.get('chunk_size', 512),
+                max_tokens=chunk_size,
                 merge_peers=True  # Merge small adjacent chunks
             )
 
             chunks = []
+            markdown_parts = []
+
             for idx, chunk in enumerate(chunker.chunk(doc)):
+                chunk_meta = extract_chunk_metadata(chunk, doc)
                 chunk_data = {
                     'index': idx,
                     'content': chunk.text,
-                    'meta': extract_chunk_metadata(chunk, doc)
+                    'meta': chunk_meta
                 }
                 chunks.append(chunk_data)
 
-            emit_progress('chunking', 90, f'Chunked into {len(chunks)} segments')
+                # If inline metadata mode, build markdown with HTML comment markers
+                if use_inline_metadata:
+                    # Start marker with metadata
+                    meta_attrs = [f'id="chunk-{idx}"']
+                    if chunk_meta['page_start'] is not None:
+                        meta_attrs.append(f'page_start="{chunk_meta["page_start"]}"')
+                    if chunk_meta['page_end'] is not None:
+                        meta_attrs.append(f'page_end="{chunk_meta["page_end"]}"')
+                    if chunk_meta['heading_path']:
+                        # Use last heading as primary heading
+                        heading = chunk_meta['heading_path'][-1] if chunk_meta['heading_path'] else ''
+                        heading_escaped = heading.replace('"', '&quot;')
+                        meta_attrs.append(f'heading="{heading_escaped}"')
+                        meta_attrs.append(f'heading_level="{chunk_meta["heading_level"]}"')
+
+                    meta_str = ' '.join(meta_attrs)
+                    markdown_parts.append(f'<!-- CHUNK {meta_str} -->')
+                    markdown_parts.append(chunk.text)
+                    markdown_parts.append('<!-- /CHUNK -->')
+                    markdown_parts.append('')  # Blank line
+
+            if use_inline_metadata:
+                markdown = '\n'.join(markdown_parts)
+                mode_desc = f'with inline metadata'
+                emit_progress('chunking', 90, f'Created {len(chunks)} chunks {mode_desc}')
+            else:
+                # Standard markdown export (no inline metadata)
+                markdown = doc.export_to_markdown()
+                mode_desc = f'(granular {chunk_size}-token chunks)' if chunk_size < 512 else f'({chunk_size}-token chunks)'
+                emit_progress('chunking', 90, f'HybridChunker: {len(chunks)} chunks {mode_desc}')
 
         except Exception as e:
             # If chunking fails, continue without chunks
-            print(f"Warning: HybridChunker failed: {e}", file=sys.stderr)
-            emit_progress('chunking', 90, 'Chunking failed, continuing without chunks')
+            print(f"Warning: Chunking failed: {e}", file=sys.stderr)
+            emit_progress('chunking', 90, f'Chunking failed, continuing without chunks')
             chunks = None
+            markdown = doc.export_to_markdown()  # Fallback to standard markdown
+    else:
+        # No chunking requested - standard markdown export
+        markdown = doc.export_to_markdown()
 
     return {
         'markdown': markdown,
         'structure': structure,
-        'chunks': chunks
+        'chunks': chunks,
+        'chunk_size': options.get('chunk_size', 512) if options.get('enable_chunking', False) else None,
+        'inline_metadata': use_inline_metadata
     }
 
 

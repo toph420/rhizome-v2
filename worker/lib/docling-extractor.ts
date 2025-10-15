@@ -94,6 +94,8 @@ export interface DoclingOptions {
   chunkSize?: number
   /** Tokenizer model name (default: 'Xenova/all-mpnet-base-v2') */
   tokenizer?: string
+  /** Embed metadata as HTML comments in markdown (Phase 8) */
+  inline_metadata?: boolean
   /** Enable OCR for scanned PDFs (slower) */
   ocr?: boolean
   /** Maximum number of pages to process (for testing) */
@@ -172,6 +174,8 @@ export async function extractWithDocling(
     enable_chunking: options.enableChunking || false,
     chunk_size: options.chunkSize || 512,
     tokenizer: options.tokenizer || 'Xenova/all-mpnet-base-v2',
+    // Phase 8: Inline metadata support
+    inline_metadata: options.inline_metadata || false,
     // Legacy options
     ocr: options.ocr || false,
     max_pages: options.maxPages,

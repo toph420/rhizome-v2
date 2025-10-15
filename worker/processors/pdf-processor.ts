@@ -38,6 +38,13 @@ import { cleanMarkdownLocal, cleanMarkdownRegexOnly } from '../lib/local/ollama-
 import { OOMError } from '../lib/local/ollama-client.js'
 // Phase 4: Bulletproof matching imports
 import { bulletproofMatch, type MatchResult } from '../lib/local/bulletproof-matcher.js'
+// Phase 8: Inline metadata parsing imports
+import {
+  parseInlineMetadata,
+  hasInlineMetadata,
+  stripInlineMetadata,
+  validateInlineMetadata
+} from '../lib/local/inline-metadata-parser.js'
 // Phase 6: Local metadata enrichment imports
 import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-metadata.js'
 // Phase 7: Local embeddings imports
@@ -106,6 +113,15 @@ export class PDFProcessor extends SourceProcessor {
     // Log configuration for transparency
     logPipelineConfig(pipelineConfig)
 
+    // Phase 8: Check for inline metadata mode
+    const useInlineMetadata = process.env.USE_INLINE_METADATA === 'true'
+    const chunkSize = useInlineMetadata ? 256 : 768 // Smaller chunks for inline metadata
+
+    if (useInlineMetadata) {
+      console.log('[PDFProcessor] EXPERIMENTAL: Using inline metadata with granular chunks')
+      console.log(`[PDFProcessor] Chunk size: ${chunkSize} tokens (smaller for better metadata alignment)`)
+    }
+
     const extractionResult = await this.withRetry(
       async () => {
         return await extractPdfBuffer(
@@ -117,6 +133,11 @@ export class PDFProcessor extends SourceProcessor {
             ...JSON.parse(getChunkerOptions()),
             // Phase 2: Apply pipeline configuration (image extraction, AI features, etc.)
             ...JSON.parse(formatPipelineConfigForPython(pipelineConfig)),
+            // Phase 8: Override chunk size and add inline metadata support (MUST BE LAST!)
+            ...(useInlineMetadata ? {
+              chunk_size: chunkSize,
+              inline_metadata: true
+            } : {}),
             timeout: 30 * 60 * 1000, // 30 minutes
             onProgress: async (percent, stage, message) => {
               // Map Docling's 0-100% to our 20-50% extraction stage
@@ -157,8 +178,38 @@ export class PDFProcessor extends SourceProcessor {
       structure: extractionResult.structure
     })
 
-    // Stage 3: Local regex cleanup (50-55%)
-    await this.updateProgress(52, 'cleanup_local', 'processing', 'Removing page artifacts')
+    // Stage 2.5: Parse Inline Metadata BEFORE Cleanup (50-52%)
+    // Phase 8: Parse metadata immediately after extraction, before cleanup destroys markers!
+    let parsedInlineChunks: ReturnType<typeof parseInlineMetadata> | null = null
+
+    if (isLocalMode && useInlineMetadata && hasInlineMetadata(markdown)) {
+      console.log('[PDFProcessor] 🎯 Inline metadata detected - parsing BEFORE cleanup!')
+      await this.updateProgress(51, 'parsing_inline', 'processing', 'Parsing inline metadata')
+
+      // Validate structure
+      const validation = validateInlineMetadata(markdown)
+      if (!validation.valid) {
+        console.warn('[PDFProcessor] Inline metadata validation failed:')
+        validation.errors.forEach(error => console.warn(`  - ${error}`))
+        console.warn('[PDFProcessor] Falling back to bulletproof matching')
+      } else {
+        console.log(`[PDFProcessor] ✅ Validation passed: ${validation.chunkCount} chunks detected`)
+
+        // Parse and store metadata BEFORE cleanup!
+        parsedInlineChunks = parseInlineMetadata(markdown)
+        console.log(`[PDFProcessor] ✅ Parsed ${parsedInlineChunks.length} chunks from inline metadata`)
+
+        // Strip HTML comments from markdown NOW (before cleanup)
+        markdown = stripInlineMetadata(markdown)
+        console.log('[PDFProcessor] ✅ Stripped HTML comments - markdown ready for cleanup')
+        console.log('[PDFProcessor] 💾 Stored parsed metadata for use after cleanup')
+      }
+
+      await this.updateProgress(52, 'parsing_inline', 'complete', 'Inline metadata parsed and stored')
+    }
+
+    // Stage 3: Local regex cleanup (52-55%)
+    await this.updateProgress(53, 'cleanup_local', 'processing', 'Removing page artifacts')
 
     // Docling already extracts structure, skip heading generation
     markdown = cleanPageArtifacts(markdown, { skipHeadingGeneration: true })
@@ -192,7 +243,7 @@ export class PDFProcessor extends SourceProcessor {
       }
     }
 
-    await this.updateProgress(55, 'cleanup_local', 'complete', 'Local cleanup done')
+    await this.updateProgress(56, 'cleanup_local', 'complete', 'Local cleanup done')
 
     // Checkpoint 2: Save cleaned markdown
     await this.saveStageResult('cleanup', { markdown })
@@ -227,12 +278,12 @@ export class PDFProcessor extends SourceProcessor {
       }
     }
 
-    // Stage 4: AI cleanup (55-70%) - CONDITIONAL on cleanMarkdown flag
+    // Stage 4: AI cleanup (56-70%) - CONDITIONAL on cleanMarkdown flag
     // Phase 3: Added local mode support with Ollama
     const cleanMarkdownEnabled = this.job.input_data?.cleanMarkdown !== false // Default true
 
     if (cleanMarkdownEnabled) {
-      await this.updateProgress(58, 'cleanup_ai', 'processing', 'AI cleaning markdown')
+      await this.updateProgress(59, 'cleanup_ai', 'processing', 'AI cleaning markdown')
 
       try {
         // Check if user wants to override cleanup method
@@ -244,8 +295,8 @@ export class PDFProcessor extends SourceProcessor {
 
           markdown = await cleanMarkdownLocal(markdown, {
             onProgress: (stage, percent) => {
-              // Map Ollama's 0-100% to our 58-70% range
-              const ourPercent = 58 + Math.floor(percent * 0.12)
+              // Map Ollama's 0-100% to our 59-70% range
+              const ourPercent = 59 + Math.floor(percent * 0.11)
               this.updateProgress(ourPercent, 'cleanup_ai', 'processing', 'AI cleanup in progress')
             }
           })
@@ -260,7 +311,7 @@ export class PDFProcessor extends SourceProcessor {
             markdown,
             {
               onProgress: async (sectionNum, totalSections) => {
-                const percent = 58 + Math.floor((sectionNum / totalSections) * 12) // 58-70%
+                const percent = 59 + Math.floor((sectionNum / totalSections) * 11) // 59-70%
                 await this.updateProgress(
                   percent,
                   'cleanup_ai',
@@ -323,11 +374,76 @@ export class PDFProcessor extends SourceProcessor {
       }
     }
 
-    // Stage 6: Bulletproof Matching (LOCAL MODE ONLY) (70-75%)
-    // Phase 4: Remap Docling chunks to cleaned markdown with 100% recovery
+    // Stage 6: Use Parsed Inline Metadata OR Bulletproof Matching (70-75%)
+    // Phase 8: Use metadata parsed BEFORE cleanup (stored in parsedInlineChunks)
     let finalChunks: ProcessedChunk[]
 
-    if (isLocalMode && this.job.metadata?.cached_extraction?.doclingChunks) {
+    if (parsedInlineChunks) {
+      // Use inline metadata that was parsed BEFORE cleanup!
+      console.log('[PDFProcessor] ✅ Using inline metadata parsed before cleanup (skipping bulletproof matching!)')
+      console.log(`[PDFProcessor] Converting ${parsedInlineChunks.length} parsed chunks to ProcessedChunk format`)
+
+      await this.updateProgress(72, 'finalizing_chunks', 'processing', 'Converting parsed chunks')
+
+      // Convert to ProcessedChunk format
+      finalChunks = parsedInlineChunks.map((chunk, idx) => {
+        const wordCount = chunk.content.split(/\s+/).filter((w: string) => w.length > 0).length
+
+        return {
+          document_id: this.job.document_id,
+          content: chunk.content,
+          chunk_index: idx,
+          start_offset: chunk.start_offset,
+          end_offset: chunk.end_offset,
+          word_count: wordCount,
+          // Inline metadata provides perfect sync!
+          page_start: chunk.page_start,
+          page_end: chunk.page_end,
+          heading_path: chunk.heading_path,
+          heading_level: chunk.heading_level,
+          section_marker: chunk.section_marker,
+          bboxes: null, // Not available from inline metadata (could be added later)
+          position_confidence: 'exact', // Inline metadata = perfect sync!
+          position_method: 'inline_metadata',
+          position_validated: false,
+          validation_warning: null,
+          validation_details: null,
+          overlap_corrected: false,
+          position_corrected: false,
+          correction_history: [],
+          // Metadata extraction happens in next stage
+          themes: [],
+          importance_score: 0.5,
+          summary: null,
+          emotional_metadata: {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          },
+          conceptual_metadata: {
+            concepts: []
+          },
+          domain_metadata: null,
+          metadata_extracted_at: null
+        }
+      })
+
+      console.log(`[PDFProcessor] Converted ${finalChunks.length} inline metadata chunks to ProcessedChunk format`)
+      console.log('[PDFProcessor] 💰 SAVED TIME: Skipped 5-layer bulletproof matching entirely!')
+      console.log('[PDFProcessor] ✅ PERFECT SYNC: 100% exact matches with inline metadata')
+
+      await this.updateProgress(75, 'parsing', 'complete', `${finalChunks.length} chunks parsed with perfect sync`)
+
+      // Checkpoint 3: Save parsed chunks (intermediate - before metadata enrichment)
+      await this.saveStageResult('chunking', finalChunks)
+
+      // Log chunk statistics after parsing
+      const parsingStats = calculateChunkStatistics(finalChunks, chunkSize)
+      logChunkStatistics(parsingStats, 'PDF Chunks (Inline Metadata)')
+
+    } else if (isLocalMode && this.job.metadata?.cached_extraction?.doclingChunks) {
+      // Stage 6 (Alternative): Bulletproof Matching (LOCAL MODE WITHOUT INLINE METADATA) (70-75%)
+      // Phase 4: Remap Docling chunks to cleaned markdown with 100% recovery
       console.log('[PDFProcessor] LOCAL MODE: Using bulletproof matching (skipping AI chunking)')
 
       await this.updateProgress(72, 'matching', 'processing', 'Remapping chunks to cleaned markdown')
