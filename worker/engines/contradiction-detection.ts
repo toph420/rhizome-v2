@@ -16,6 +16,7 @@ export interface ContradictionDetectionConfig {
   polarityThreshold?: number;      // Default: 0.3 (sufficient opposition)
   maxResultsPerChunk?: number;     // Default: 20
   crossDocumentOnly?: boolean;     // Default: true
+  targetDocumentIds?: string[];    // Filter to specific target documents (for Add New mode)
 }
 
 /**
@@ -33,10 +34,14 @@ export async function runContradictionDetection(
     minConceptOverlap = 0.5,
     polarityThreshold = 0.3,
     maxResultsPerChunk = 20,
-    crossDocumentOnly = true
+    crossDocumentOnly = true,
+    targetDocumentIds
   } = config;
 
   console.log(`[ContradictionDetection] Processing document ${documentId}`);
+  if (targetDocumentIds && targetDocumentIds.length > 0) {
+    console.log(`[ContradictionDetection] Filtering to ${targetDocumentIds.length} target document(s)`);
+  }
 
   const supabase = createClient(
     process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -88,7 +93,14 @@ export async function runContradictionDetection(
 
     if (!candidates) continue;
 
-    for (const candidate of candidates) {
+    // Filter by targetDocumentIds if specified
+    let filteredCandidates = candidates;
+    if (targetDocumentIds && targetDocumentIds.length > 0) {
+      const targetSet = new Set(targetDocumentIds);
+      filteredCandidates = candidates.filter(c => targetSet.has(c.document_id));
+    }
+
+    for (const candidate of filteredCandidates) {
       // Filter: Cross-document only
       if (crossDocumentOnly && candidate.document_id === chunk.document_id) {
         continue;

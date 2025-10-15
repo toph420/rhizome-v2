@@ -33,6 +33,7 @@ export interface SemanticSimilarityConfig {
   maxResultsPerChunk?: number; // Max matches per chunk (default: 50)
   importanceWeight?: number; // Weight for importance boost (default: 0.3)
   crossDocumentOnly?: boolean; // Only find cross-document connections (default: true)
+  targetDocumentIds?: string[]; // Filter to specific target documents (for Add New mode)
 }
 
 /**
@@ -50,11 +51,15 @@ export async function runSemanticSimilarity(
     threshold = 0.7,
     maxResultsPerChunk = 50,
     importanceWeight = 0.3,
-    crossDocumentOnly = true
+    crossDocumentOnly = true,
+    targetDocumentIds
   } = config;
 
   console.log(`[SemanticSimilarity] Processing document ${documentId}`);
   console.log(`[SemanticSimilarity] Config: threshold=${threshold}, maxResults=${maxResultsPerChunk}, crossDocOnly=${crossDocumentOnly}`);
+  if (targetDocumentIds && targetDocumentIds.length > 0) {
+    console.log(`[SemanticSimilarity] Filtering to ${targetDocumentIds.length} target document(s)`);
+  }
 
   // Initialize Supabase client
   const supabase = createClient(
@@ -114,10 +119,21 @@ export async function runSemanticSimilarity(
       continue;
     }
 
-    totalMatches += matches.length;
+    // Filter by targetDocumentIds if specified
+    let filteredMatches = matches;
+    if (targetDocumentIds && targetDocumentIds.length > 0) {
+      const targetSet = new Set(targetDocumentIds);
+      filteredMatches = matches.filter(m => targetSet.has(m.document_id));
+    }
+
+    if (filteredMatches.length === 0) {
+      continue;
+    }
+
+    totalMatches += filteredMatches.length;
 
     // Enrich matches with document titles (batch fetch for efficiency)
-    const matchIds = matches.map(m => m.document_id);
+    const matchIds = filteredMatches.map(m => m.document_id);
     const { data: docTitles } = await supabase
       .from('documents')
       .select('id, title')
@@ -126,7 +142,7 @@ export async function runSemanticSimilarity(
     const titleMap = new Map((docTitles || []).map(d => [d.id, d.title]));
 
     // Convert matches to connections
-    for (const match of matches) {
+    for (const match of filteredMatches) {
       // Skip self-references
       if (match.id === chunk.id) {
         continue;

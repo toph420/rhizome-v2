@@ -101,6 +101,9 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
       byEngine: {}
     };
 
+    // Track target document IDs for Add New mode
+    let targetDocumentIds: string[] | undefined;
+
     // Step 3: Handle mode-specific logic
     if (options.mode === 'all') {
       // Reprocess All: Delete all connections and regenerate
@@ -198,9 +201,6 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
 
       console.log(`[ReprocessConnections] Found ${newerDocs?.length || 0} newer documents`);
 
-      // Note: Current orchestrator doesn't support targetDocumentIds filter
-      // This is a limitation documented in the task (line 1724)
-      // For now, we'll run full reprocessing but log a warning
       if ((newerDocs?.length || 0) === 0) {
         console.log(`[ReprocessConnections] No newer documents found, skipping reprocessing`);
         await updateProgress(100, 'complete', 'No new connections to add');
@@ -220,17 +220,23 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
         return;
       }
 
-      console.log(`[ReprocessConnections] Warning: Add New mode will process all documents`);
-      console.log(`[ReprocessConnections] Orchestrator enhancement needed for targetDocumentIds`);
+      // Set target document IDs for orchestrator filtering
+      const newerDocIds = newerDocs!.map((d: any) => d.id);
+      targetDocumentIds = newerDocIds;
+      console.log(`[ReprocessConnections] Add New mode: filtering to ${newerDocIds.length} newer documents`);
     }
 
     // Step 3: Call orchestrator with selected engines
     await updateProgress(40, 'processing', 'Running connection detection engines');
 
     console.log(`[ReprocessConnections] Calling orchestrator with engines: ${options.engines.join(', ')}`);
+    if (targetDocumentIds) {
+      console.log(`[ReprocessConnections] Filtering connections to ${targetDocumentIds.length} target documents`);
+    }
 
     const orchestratorResult = await processDocument(documentId, {
       enabledEngines: options.engines,
+      targetDocumentIds,  // Pass filter for Add New mode
       onProgress: async (percent, stage, details) => {
         // Map orchestrator progress to 40-90% range
         const mappedPercent = 40 + Math.floor((percent / 100) * 50);

@@ -44,6 +44,13 @@ export interface ChunkExportData {
   end_offset?: number
   word_count?: number
 
+  // Chonkie chunking metadata
+  chunker_type: "token" | "sentence" | "recursive" | "semantic" | "late" | "code" | "neural" | "slumber" | "table"
+  heading_path?: string[] | null
+  metadata_overlap_count?: number
+  metadata_confidence?: "high" | "medium" | "low"
+  metadata_interpolated?: boolean
+
   // Docling structural metadata (LOCAL mode)
   page_start?: number | null
   page_end?: number | null

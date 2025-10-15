@@ -123,6 +123,7 @@ describe('Storage Export Integration (T-006)', () => {
           {
             content: '# Test Chunk 1',
             chunk_index: 0,
+            chunker_type: 'recursive',
             themes: ['Introduction'],
             importance_score: 0.8,
             summary: 'Test chunk summary'
@@ -130,6 +131,7 @@ describe('Storage Export Integration (T-006)', () => {
           {
             content: '# Test Chunk 2',
             chunk_index: 1,
+            chunker_type: 'recursive',
             themes: ['Main Content'],
             importance_score: 0.9,
             summary: 'Main content summary'
@@ -210,6 +212,7 @@ describe('Storage Export Integration (T-006)', () => {
           {
             content: '# Heading\n\nParagraph content',
             chunk_index: 0,
+            chunker_type: 'recursive',
             start_offset: 0,
             end_offset: 100,
             word_count: 15,
@@ -537,6 +540,7 @@ describe('Storage Export Integration (T-006)', () => {
           {
             content: 'Test content',
             chunk_index: 0,
+            chunker_type: 'recursive',
             themes: ['Test'],
             importance_score: 0.5,
             summary: null
@@ -640,6 +644,7 @@ describe('Storage Export Integration (T-006)', () => {
           {
             content: 'EPUB Chapter 1 content',
             chunk_index: 0,
+            chunker_type: 'recursive',
             section_marker: 'chapter-1',
             themes: ['Introduction'],
             importance_score: 0.85,

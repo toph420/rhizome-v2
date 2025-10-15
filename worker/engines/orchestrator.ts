@@ -14,6 +14,7 @@ import { ChunkConnection } from './semantic-similarity';
 
 export interface OrchestratorConfig {
   enabledEngines?: ('semantic_similarity' | 'contradiction_detection' | 'thematic_bridge')[];
+  targetDocumentIds?: string[];  // Filter connections to specific target documents (for Add New mode)
   semanticSimilarity?: any;
   contradictionDetection?: any;
   thematicBridge?: any;
@@ -39,11 +40,15 @@ export async function processDocument(
 ): Promise<OrchestratorResult> {
   const {
     enabledEngines = ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+    targetDocumentIds,
     onProgress
   } = config;
 
   console.log(`[Orchestrator] Processing document ${documentId}`);
   console.log(`[Orchestrator] Enabled engines: ${enabledEngines.join(', ')}`);
+  if (targetDocumentIds && targetDocumentIds.length > 0) {
+    console.log(`[Orchestrator] Filtering to ${targetDocumentIds.length} target document(s)`);
+  }
 
   const startTime = Date.now();
   const allConnections: ChunkConnection[] = [];
@@ -53,7 +58,10 @@ export async function processDocument(
   if (enabledEngines.includes('semantic_similarity')) {
     console.log('\n[Orchestrator] Running SemanticSimilarity...');
     await onProgress?.(25, 'semantic-similarity', 'Finding semantic similarities');
-    const connections = await runSemanticSimilarity(documentId, config.semanticSimilarity);
+    const connections = await runSemanticSimilarity(documentId, {
+      ...config.semanticSimilarity,
+      targetDocumentIds
+    });
     allConnections.push(...connections);
     byEngine.semantic_similarity = connections.length;
   }
@@ -61,7 +69,10 @@ export async function processDocument(
   if (enabledEngines.includes('contradiction_detection')) {
     console.log('\n[Orchestrator] Running ContradictionDetection...');
     await onProgress?.(50, 'contradiction-detection', 'Detecting contradictions');
-    const connections = await runContradictionDetection(documentId, config.contradictionDetection);
+    const connections = await runContradictionDetection(documentId, {
+      ...config.contradictionDetection,
+      targetDocumentIds
+    });
     allConnections.push(...connections);
     byEngine.contradiction_detection = connections.length;
   }
@@ -75,8 +86,14 @@ export async function processDocument(
     console.log(`[Orchestrator] ThematicBridge mode: ${useLocalMode ? 'LOCAL (Qwen)' : 'CLOUD (Gemini)'}`);
 
     const connections = useLocalMode
-      ? await runThematicBridgeQwen(documentId, config.thematicBridge, onProgress)
-      : await runThematicBridge(documentId, config.thematicBridge, onProgress);
+      ? await runThematicBridgeQwen(documentId, {
+          ...config.thematicBridge,
+          targetDocumentIds
+        }, onProgress)
+      : await runThematicBridge(documentId, {
+          ...config.thematicBridge,
+          targetDocumentIds
+        }, onProgress);
 
     allConnections.push(...connections);
     byEngine.thematic_bridge = connections.length;

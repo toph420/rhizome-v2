@@ -200,6 +200,12 @@ async function applyStrategy(
       start_offset: chunk.start_offset,
       end_offset: chunk.end_offset,
       word_count: chunk.word_count,
+      // Chonkie chunking metadata
+      chunker_type: chunk.chunker_type,
+      heading_path: chunk.heading_path,
+      metadata_overlap_count: chunk.metadata_overlap_count,
+      metadata_confidence: chunk.metadata_confidence,
+      metadata_interpolated: chunk.metadata_interpolated,
       // Docling metadata
       page_start: chunk.page_start,
       page_end: chunk.page_end,

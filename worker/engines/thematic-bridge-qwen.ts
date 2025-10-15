@@ -32,11 +32,15 @@ export async function runThematicBridgeQwen(
     minStrength = 0.6,
     maxSourceChunks = 50,
     maxCandidatesPerSource = 10,
-    batchSize = 5
+    batchSize = 5,
+    targetDocumentIds
   } = config;
 
   console.log(`[ThematicBridge:Qwen] Processing document ${documentId}`);
   console.log(`[ThematicBridge:Qwen] AI filtering: importance>${minImportance}, strength>${minStrength}`);
+  if (targetDocumentIds && targetDocumentIds.length > 0) {
+    console.log(`[ThematicBridge:Qwen] Filtering to ${targetDocumentIds.length} target document(s) (reduces AI calls)`);
+  }
 
   const supabase = createClient(
     process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -98,25 +102,34 @@ export async function runThematicBridgeQwen(
 
     if (!candidates?.length) continue;
 
+    // Filter by targetDocumentIds if specified (CRITICAL: reduces AI calls significantly!)
+    let filteredCandidates = candidates;
+    if (targetDocumentIds && targetDocumentIds.length > 0) {
+      const targetSet = new Set(targetDocumentIds);
+      filteredCandidates = candidates.filter(c => targetSet.has(c.document_id));
+    }
+
+    if (!filteredCandidates.length) continue;
+
     // Debug: Check for duplicate candidates from query
-    const candidateIds = candidates.map(c => c.id);
+    const candidateIds = filteredCandidates.map(c => c.id);
     const uniqueIds = new Set(candidateIds);
     if (candidateIds.length !== uniqueIds.size) {
       console.log(`[ThematicBridge:Qwen] ⚠️  Query returned ${candidateIds.length - uniqueIds.size} duplicate chunks for source ${chunk.id}`);
     }
 
     // Batch analyze with Qwen
-    for (let i = 0; i < candidates.length; i += batchSize) {
-      const batch = candidates.slice(i, i + batchSize);
+    for (let i = 0; i < filteredCandidates.length; i += batchSize) {
+      const batch = filteredCandidates.slice(i, i + batchSize);
       aiCallCount++;
 
       // Report progress (batch-level granularity)
       const overallPercent = Math.floor((processedSources / sourceChunks.length) * 100);
-      const batchPercent = Math.floor((i / candidates.length) * 100);
+      const batchPercent = Math.floor((i / filteredCandidates.length) * 100);
       await onProgress?.(
         overallPercent,
         'thematic_bridge',
-        `Source ${processedSources + 1}/${sourceChunks.length}, batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(candidates.length / batchSize)} (${aiCallCount} AI calls)`
+        `Source ${processedSources + 1}/${sourceChunks.length}, batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(filteredCandidates.length / batchSize)} (${aiCallCount} AI calls)`
       );
 
       const prompt = buildQwenPrompt(chunk, batch, sourceDomain, minStrength);
