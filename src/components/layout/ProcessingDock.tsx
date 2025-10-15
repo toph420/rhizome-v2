@@ -12,7 +12,7 @@ import { useState } from 'react'
 /**
  * Processing Dock Component
  *
- * Displays active background jobs in a bottom-right dock.
+ * Displays active background jobs in a bottom-left dock.
  *
  * **UX Philosophy (Hybrid Approach)**:
  * - Shows ONLY active jobs (processing/pending)
@@ -88,7 +88,7 @@ export function ProcessingDock() {
   // Mini badge when collapsed
   if (!isExpanded) {
     return (
-      <div className="fixed bottom-4 right-4 z-40">
+      <div className="fixed left-4 bottom-4 z-40">
         <Button
           variant="default"
           className="shadow-lg"
@@ -104,7 +104,7 @@ export function ProcessingDock() {
 
   // Full dock when expanded
   return (
-    <div className="fixed bottom-4 right-4 w-96 z-40 space-y-2">
+    <div className="fixed left-4 bottom-4 w-96 z-40 space-y-2">
       {/* Header */}
       <Card className="p-3 shadow-lg">
         <div className="flex items-center justify-between">
