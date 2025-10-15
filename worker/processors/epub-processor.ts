@@ -482,11 +482,15 @@ export class EPUBProcessor extends SourceProcessor {
       // Phase 5: Combine Docling EPUB metadata (sections, headings) + new offsets + confidence
       // CRITICAL: EPUBs have NO page numbers or bboxes (always null)
       finalChunks = rematchedChunks.map((result: MatchResult, idx: number) => {
-        const wordCount = result.chunk.content.split(/\s+/).filter((w: string) => w.length > 0).length
+        // CRITICAL: Extract content from AI-cleaned markdown at matched position
+        // This ensures content matches the offsets in the stored markdown (content.md)
+        // Bug fix: Previously used result.chunk.content (RAW), causing offset mismatch
+        const cleanedContent = markdown.slice(result.start_offset, result.end_offset)
+        const wordCount = cleanedContent.split(/\s+/).filter((w: string) => w.length > 0).length
 
         return {
           document_id: this.job.document_id,
-          content: result.chunk.content,
+          content: cleanedContent,
           chunk_index: idx,
           start_offset: result.start_offset,
           end_offset: result.end_offset,
