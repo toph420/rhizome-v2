@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
  */
 export interface JobStatus {
   id: string
-  type: 'import_document' | 'export_documents' | 'reprocess_connections'
+  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import'
   status: 'pending' | 'processing' | 'completed' | 'failed'
   progress: number
   details: string

@@ -66,11 +66,28 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
   try {
     await updateProgress(10, 'preparing', 'Counting existing connections');
 
-    // Step 1: Get current connection count (before)
+    // Step 1: Get chunk IDs for this document
+    const { data: chunks, error: chunksError } = await supabase
+      .from('chunks')
+      .select('id')
+      .eq('document_id', documentId);
+
+    if (chunksError) {
+      throw new Error(`Failed to query chunks: ${chunksError.message}`);
+    }
+
+    const chunkIds = chunks?.map((c: any) => c.id) || [];
+    console.log(`[ReprocessConnections] Found ${chunkIds.length} chunks for document`);
+
+    if (chunkIds.length === 0) {
+      throw new Error('No chunks found for document');
+    }
+
+    // Step 2: Get current connection count (before)
     const { count: connectionsBefore, error: countError } = await supabase
       .from('connections')
       .select('id', { count: 'exact', head: true })
-      .or(`source_chunk_id.in.(select id from chunks where document_id='${documentId}'),target_chunk_id.in.(select id from chunks where document_id='${documentId}')`);
+      .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`);
 
     if (countError) {
       throw new Error(`Failed to count connections: ${countError.message}`);
@@ -84,7 +101,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
       byEngine: {}
     };
 
-    // Step 2: Handle mode-specific logic
+    // Step 3: Handle mode-specific logic
     if (options.mode === 'all') {
       // Reprocess All: Delete all connections and regenerate
       await updateProgress(20, 'deleting', 'Deleting all connections');
@@ -92,7 +109,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
       const { error: deleteError } = await supabase
         .from('connections')
         .delete()
-        .or(`source_chunk_id.in.(select id from chunks where document_id='${documentId}'),target_chunk_id.in.(select id from chunks where document_id='${documentId}')`);
+        .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`);
 
       if (deleteError) {
         throw new Error(`Failed to delete connections: ${deleteError.message}`);
@@ -109,7 +126,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
         .from('connections')
         .select('*')
         .eq('user_validated', true)
-        .or(`source_chunk_id.in.(select id from chunks where document_id='${documentId}'),target_chunk_id.in.(select id from chunks where document_id='${documentId}')`);
+        .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`);
 
       if (validatedError) {
         throw new Error(`Failed to query validated connections: ${validatedError.message}`);
@@ -145,7 +162,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
         .from('connections')
         .delete()
         .is('user_validated', null)
-        .or(`source_chunk_id.in.(select id from chunks where document_id='${documentId}'),target_chunk_id.in.(select id from chunks where document_id='${documentId}')`);
+        .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`);
 
       if (deleteError) {
         throw new Error(`Failed to delete non-validated connections: ${deleteError.message}`);
@@ -249,7 +266,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
     const { count: connectionsAfter, error: countAfterError } = await supabase
       .from('connections')
       .select('id', { count: 'exact', head: true })
-      .or(`source_chunk_id.in.(select id from chunks where document_id='${documentId}'),target_chunk_id.in.(select id from chunks where document_id='${documentId}')`);
+      .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`);
 
     if (countAfterError) {
       throw new Error(`Failed to count final connections: ${countAfterError.message}`);

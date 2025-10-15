@@ -310,7 +310,7 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-## Phase 4: Import Workflow 🟡 IN PROGRESS (Session 2)
+## Phase 4: Import Workflow ✅ COMPLETE (Sessions 2-5)
 
 ### T-011: Import Without Conflict ✅ COMPLETE
 
@@ -350,7 +350,7 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-### T-012: Import with Conflict Resolution 🟡 PARTIAL
+### T-012: Import with Conflict Resolution ✅ COMPLETE
 
 **Goal**: Verify conflict detection and resolution strategies
 
@@ -378,33 +378,35 @@ This comprehensive manual testing checklist validates the complete Storage-First
    - [x] Dialog closes
    - [x] Shows message: "Import skipped - existing data preserved"
 
-5. **Test Replace Strategy** ⏳ PENDING
-   - [ ] Trigger import again
-   - [ ] Select "Replace All" radio button
-   - [ ] Verify warning: "Will reset all annotation positions"
-   - [ ] Click "Apply Resolution"
-   - [ ] Monitor import job progress
-   - [ ] Verify:
-     - All old chunks deleted
-     - New chunks from Storage inserted
-     - Chunk count matches Storage
+5. **Test Replace Strategy** ✅ COMPLETE (Session 5)
+   - [x] Trigger import again
+   - [x] Select "Replace All" radio button
+   - [x] Verify warning: "Will reset all annotation positions"
+   - [x] Click "Apply Resolution"
+   - [x] Monitor import job progress
+   - [x] Verify:
+     - All old chunks deleted (verified with database query)
+     - New chunks from Storage inserted with new UUIDs
+     - Chunk count matches Storage (3 chunks)
 
-6. **Test Merge Smart Strategy** ⏳ PENDING (Most Important)
-   - [ ] Create annotations on some chunks (if annotation system exists)
-   - [ ] Trigger import again
-   - [ ] Select "Merge Smart" radio button (should be default)
-   - [ ] Verify info message: "Preserves annotations by keeping chunk IDs"
-   - [ ] Click "Apply Resolution"
-   - [ ] Monitor import job
-   - [ ] Verify:
-     - Chunk IDs unchanged
+6. **Test Merge Smart Strategy** ✅ COMPLETE (Session 5)
+   - [x] Create annotations on some chunks (created 3 annotations via ECS)
+   - [x] Trigger import again (modified chunk metadata to create conflict)
+   - [x] Select "Merge Smart" radio button (default)
+   - [x] Verify info message: "Preserves annotations by keeping chunk IDs"
+   - [x] Click "Apply Resolution"
+   - [x] Monitor import job
+   - [x] Verify:
+     - Chunk IDs unchanged (f03c3ab0-2c19-4c5c-b989-ff5400c2c1ce preserved)
      - Metadata updated from Storage
-     - Chunk content unchanged
-     - Annotations still work (if applicable)
+     - Chunk content unchanged (merge smart preserves database content)
+     - Annotations still work (all 3 annotations intact)
 
 **Expected Result**: All 3 conflict resolution strategies work correctly.
 
 **Session 2 Results**: 🟡 Partial - Skip strategy working. Replace and Merge Smart pending.
+
+**Session 5 Results**: ✅ Complete - Replace and Merge Smart strategies both tested and passing.
 
 **Bugs Fixed (Session 2)**:
 - Bug #6: Dialog close doesn't clean up pending job → Fixed: Separate `onClose` from `onCancel`
@@ -428,25 +430,35 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-### T-013: Import with Embeddings Regeneration
+### T-013: Import with Embeddings Regeneration ✅ COMPLETE (Session 5)
 
 **Goal**: Verify optional embedding regeneration works
 
 1. **Import with Embeddings Option**
-   - [ ] Import tab → Select document
-   - [ ] Check "Regenerate Embeddings" option
-   - [ ] Start import
+   - [x] Import tab → Select document
+   - [x] Check "Regenerate Embeddings" option
+   - [x] Start import
 
 2. **Verify Embeddings**
-   - [ ] Monitor progress: should show "Regenerating embeddings" stage
-   - [ ] After completion, check database:
+   - [x] Monitor progress: should show "Regenerating embeddings" stage
+   - [x] After completion, check database:
      ```sql
-     SELECT id, embedding FROM chunks WHERE document_id = '<doc_id>' LIMIT 5;
+     SELECT id, embedding FROM chunks WHERE document_id = '369e6062-8447-48c9-b526-229b48edecec';
      ```
-   - [ ] Verify embedding columns are not null
-   - [ ] Embeddings should be 768-dimensional vectors
+   - [x] Verify embedding columns are not null (all 3 chunks have embeddings)
+   - [x] Embeddings should be 768-dimensional vectors (verified)
 
 **Expected Result**: Embeddings regenerated during import.
+
+**Session 5 Results**: ✅ Test passed after Bug #20 fix. All 3 chunks now have 768-dimensional embeddings from Gemini API.
+
+**Bug Fixed**:
+- **Bug #20**: Import options (regenerateEmbeddings, reprocessConnections) hard-coded to false in ConflictResolutionDialog
+  - **Problem**: Dialog wasn't receiving import option props from ImportTab, always used false values
+  - **Fix**: Added `regenerateEmbeddings` and `reprocessConnections` props to dialog interface, passed from ImportTab
+  - **Files Modified**:
+    - `src/components/admin/ConflictResolutionDialog.tsx` - Added props to interface and component
+    - `src/components/admin/tabs/ImportTab.tsx` - Pass props to dialog
 
 ---
 
@@ -932,11 +944,11 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ### Validation Results
 
-**Testing Sessions**: 4 sessions completed
-**Total Tests Executed**: 15 / 47 (32%)
-**Tests Passed**: 15 ✅
+**Testing Sessions**: 5 sessions completed
+**Total Tests Executed**: 18 / 47 (38%)
+**Tests Passed**: 18 ✅
 **Tests Failed**: 0 ❌
-**Bugs Found**: 21 (all fixed)
+**Bugs Found**: 22 (all fixed)
 
 ### Session 2 Progress (2025-10-14)
 
@@ -1086,7 +1098,71 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-**Issues Found**: 21 total (9 from Sessions 1-2, 11 from Session 3, 1 from Session 4)
+### Session 5 Progress (2025-10-15 - Import Workflow Completion)
+
+**Completed**:
+- ✅ T-012.5: Replace Strategy - Complete chunk replacement
+- ✅ T-012.6: Merge Smart Strategy - Annotation preservation
+- ✅ T-013: Embeddings Regeneration - Fixed and verified
+
+**Tests Executed**:
+
+1. **Replace Strategy (T-012.5)**
+   - Created conflict by modifying chunk in database
+   - Selected "Replace All" in conflict dialog
+   - Verified all old chunks deleted, new chunks with fresh UUIDs inserted
+   - Confirmed chunk count matches Storage (3 chunks)
+   - Result: ✅ PASSED
+
+2. **Merge Smart Strategy (T-012.6)**
+   - Created 3 annotations via ECS on chunk `f03c3ab0-2c19-4c5c-b989-ff5400c2c1ce`
+   - Created conflict by modifying chunk metadata
+   - Selected "Merge Smart" strategy
+   - Verified:
+     - Chunk IDs preserved (same UUID after import)
+     - Metadata updated from Storage
+     - All 3 annotations intact and functional
+   - Result: ✅ PASSED
+
+3. **Embeddings Regeneration (T-013)**
+   - Initially failed - embeddings not created
+   - Found Bug #20 (import options hard-coded to false)
+   - Fixed and retested
+   - Verified all 3 chunks have 768-dimensional embeddings from Gemini API
+   - Result: ✅ PASSED after fix
+
+**Bugs Fixed This Session** (1 total):
+
+**Bug #20: Import Options Not Passed to Dialog**
+- **Problem**: ConflictResolutionDialog had hard-coded `regenerateEmbeddings: false` and `reprocessConnections: false`, ignoring user selections in ImportTab
+- **Root Cause**: Dialog interface wasn't receiving import option props from parent ImportTab component
+- **Impact**: Embeddings never regenerated despite checkbox being checked
+- **Fix**:
+  1. Added `regenerateEmbeddings?: boolean` and `reprocessConnections?: boolean` to ConflictResolutionDialogProps interface
+  2. Updated component function signature to accept and default these props to false
+  3. Changed importFromStorage call to use prop values instead of hard-coded false
+  4. Updated ImportTab to pass `regenerateEmbeddings={regenerateEmbeddings}` and `reprocessConnections={reprocessConnections}` to dialog
+- **Files Modified**:
+  - `src/components/admin/ConflictResolutionDialog.tsx` - Added props to interface and component
+  - `src/components/admin/tabs/ImportTab.tsx` - Pass props to dialog
+- **Verification**:
+  - Checked background_jobs table: Job data showed `regenerateEmbeddings: true`
+  - Checked chunks table: All 3 chunks had non-null embeddings after import
+  - User confirmed embeddings created successfully
+
+**Test Document**: "Tiny Test PDF" (document_id: `369e6062-8447-48c9-b526-229b48edecec`, 3 chunks)
+
+**Key Insights**:
+- Merge Smart is the most critical strategy for production use - preserves user annotations
+- Replace strategy useful for fixing corrupted chunks or reverting bad processing
+- Embeddings regeneration adds 30-60 seconds per chunk to import time
+- Chunk ID preservation is essential for annotation system integrity
+
+**Session Summary**: Phase 4 (Import Workflow) now 100% complete. All conflict resolution strategies validated and working correctly.
+
+---
+
+**Issues Found**: 22 total (9 from Sessions 1-2, 11 from Session 3, 1 from Session 4, 1 from Session 5)
 
 ### Critical Issues (P0)
 <!-- List any blocking issues found during testing -->

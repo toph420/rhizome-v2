@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { uploadDocument, estimateProcessingCost } from '@/app/actions/documents'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -53,6 +54,9 @@ function getMetadataEndpoint(file: File): string | null {
  * @returns Upload zone component with tabbed interface.
  */
 export function UploadZone() {
+  // Background jobs store for tracking upload/processing jobs
+  const { registerJob } = useBackgroundJobsStore()
+
   const [activeTab, setActiveTab] = useState<TabType>('file')
 
   // File upload state
@@ -319,8 +323,15 @@ export function UploadZone() {
       const result = await uploadDocument(formData)
       console.log('📤 Upload result:', result)
 
-      if (result.success && result.documentId) {
+      if (result.success && result.documentId && result.jobId) {
         console.log('✅ Document uploaded with metadata, job created:', result.jobId)
+
+        // Register job in store for ProcessingDock tracking
+        registerJob(result.jobId, 'process_document', {
+          documentId: result.documentId,
+          title: editedMetadata.title
+        })
+
         // Reset state
         setSelectedFile(null)
         setCostEstimate(null)
@@ -377,8 +388,15 @@ export function UploadZone() {
       const result = await uploadDocument(formData)
       console.log('📤 Upload result:', result)
 
-      if (result.success && result.documentId) {
+      if (result.success && result.documentId && result.jobId) {
         console.log('✅ Document uploaded and job created:', result.jobId)
+
+        // Register job in store for ProcessingDock tracking
+        registerJob(result.jobId, 'process_document', {
+          documentId: result.documentId,
+          title: selectedFile.name.replace(/\.[^/.]+$/, '') // Remove file extension
+        })
+
         setSelectedFile(null)
         setCostEstimate(null)
       } else {
@@ -488,8 +506,15 @@ export function UploadZone() {
       const result = await uploadDocument(formData)
       console.log('🔗 Fetch result:', result)
 
-      if (result.success && result.documentId) {
+      if (result.success && result.documentId && result.jobId) {
         console.log('✅ Content fetched and job created:', result.jobId)
+
+        // Register job in store for ProcessingDock tracking
+        registerJob(result.jobId, 'process_document', {
+          documentId: result.documentId,
+          title: urlInput.split('/').pop() || urlInput // Use last part of URL or full URL
+        })
+
         setUrlInput('')
         setUrlType(null)
       } else {
@@ -524,8 +549,15 @@ export function UploadZone() {
       const result = await uploadDocument(formData)
       console.log('📋 Paste result:', result)
       
-      if (result.success && result.documentId) {
+      if (result.success && result.documentId && result.jobId) {
         console.log('✅ Content submitted and job created:', result.jobId)
+
+        // Register job in store for ProcessingDock tracking
+        registerJob(result.jobId, 'process_document', {
+          documentId: result.documentId,
+          title: pasteSourceUrl ? `Pasted: ${pasteSourceUrl.split('/').pop()}` : 'Pasted Content'
+        })
+
         setPastedContent('')
         setPasteSourceUrl('')
       } else {

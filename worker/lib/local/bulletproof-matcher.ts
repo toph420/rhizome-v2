@@ -855,109 +855,51 @@ function finalizeBulletproofMatch(
   // Sort by chunk index to maintain document order
   allMatched.sort((a, b) => a.chunk.index - b.chunk.index)
 
-  // Validation: Enforce sequential ordering (no overlaps/backwards jumps)
-  // CRITICAL: Prevents overlapping offsets that break binary search in block parser
+  // Validation: Detect overlaps and flag for user review
+  // Keep matched positions as-is (don't modify offsets)
+  const markdownLength = cleanedMarkdown.length
+
   for (let i = 1; i < allMatched.length; i++) {
     const prev = allMatched[i - 1]
     const curr = allMatched[i]
 
+    // Check for overlap but DON'T fix it
     if (curr.start_offset < prev.end_offset) {
       console.warn(
         `[Bulletproof Matcher] ⚠️  Chunk ${curr.chunk.index} overlaps with ${prev.chunk.index} ` +
-        `(start ${curr.start_offset} < prev end ${prev.end_offset}), enforcing sequential order`
+        `(start ${curr.start_offset} < prev end ${prev.end_offset}), flagging for validation`
       )
 
-      const originalStart = curr.start_offset
-      const originalEnd = curr.end_offset
-      const originalConfidence = curr.confidence
-
-      // Force sequential: current chunk starts where previous ended
-      curr.start_offset = prev.end_offset
-      curr.end_offset = Math.max(
-        curr.start_offset + curr.chunk.content.length,
-        prev.end_offset + 1  // Minimum 1 char gap
-      )
-
-      // Downgrade confidence if we had to fix it
-      const confidenceDowngrade = originalConfidence
-      if (curr.confidence === 'exact') {
-        curr.confidence = 'high'
-        curr.method = 'normalized_match'  // Adjusted from exact
-      } else if (curr.confidence === 'high') {
-        curr.confidence = 'medium'
-      }
-
-      // Attach validation warning and details
-      curr.validation_warning = `Overlap correction: [${originalStart}, ${originalEnd}] → [${curr.start_offset}, ${curr.end_offset}] (page ${curr.chunk.meta.page_start || 'unknown'})`
+      // Attach validation warning (offsets unchanged)
+      curr.validation_warning = `Overlap detected: This chunk starts at ${curr.start_offset} but previous chunk ends at ${prev.end_offset} (page ${curr.chunk.meta.page_start || 'unknown'})`
       curr.validation_details = {
         type: 'overlap_corrected',
-        original_offsets: { start: originalStart, end: originalEnd },
-        adjusted_offsets: { start: curr.start_offset, end: curr.end_offset },
-        confidence_downgrade: `${confidenceDowngrade} → ${curr.confidence}`,
-        reason: `Chunk ${curr.chunk.index} overlapped with previous chunk ${prev.chunk.index}. Sequential ordering enforced.`,
+        original_offsets: { start: curr.start_offset, end: curr.end_offset },
+        reason: `Chunk ${curr.chunk.index} overlaps with previous chunk ${prev.chunk.index}. Positions kept as matched - validation recommended.`,
         metadata: {
           prev_chunk_index: prev.chunk.index,
-          prev_chunk_end: prev.end_offset
+          prev_chunk_end: prev.end_offset,
+          overlap_size: prev.end_offset - curr.start_offset
         }
       }
-      curr.overlap_corrected = true
+      curr.overlap_corrected = true  // Flag for UI display
 
       warnings.push(
         `Chunk ${curr.chunk.index} (page ${curr.chunk.meta.page_start || 'unknown'}): ` +
-        `Position overlap corrected. Original: [${originalStart}-${originalEnd}], ` +
-        `Adjusted: [${curr.start_offset}-${curr.end_offset}]. Validation recommended.`
-      )
-    }
-  }
-
-  // CRITICAL FIX: Validate final offsets don't exceed markdown length
-  // This fixes cascading errors from sequential ordering using wrong content lengths
-  const markdownLength = cleanedMarkdown.length
-  const lastChunk = allMatched[allMatched.length - 1]
-
-  if (lastChunk.end_offset > markdownLength) {
-    console.warn(
-      `[Bulletproof Matcher] ⚠️  Final offsets exceed markdown length ` +
-      `(${lastChunk.end_offset} > ${markdownLength}). ` +
-      `Proportionally scaling all offsets to fit.`
-    )
-
-    // Calculate scaling factor to fit all chunks within markdown
-    const scaleFactor = markdownLength / lastChunk.end_offset
-
-    console.log(`[Bulletproof Matcher] Scaling factor: ${scaleFactor.toFixed(3)}`)
-
-    // Scale all offsets proportionally
-    for (const chunk of allMatched) {
-      const originalStart = chunk.start_offset
-      const originalEnd = chunk.end_offset
-
-      chunk.start_offset = Math.floor(chunk.start_offset * scaleFactor)
-      chunk.end_offset = Math.floor(chunk.end_offset * scaleFactor)
-
-      // Ensure end doesn't exceed markdown length
-      chunk.end_offset = Math.min(chunk.end_offset, markdownLength)
-
-      // Ensure start < end (minimum 1 char)
-      if (chunk.end_offset <= chunk.start_offset) {
-        chunk.end_offset = Math.min(chunk.start_offset + 1, markdownLength)
-      }
-
-      // Downgrade confidence since we had to scale
-      if (chunk.confidence !== 'synthetic') {
-        chunk.confidence = 'medium'
-      }
-
-      console.log(
-        `  Chunk ${chunk.chunk.index}: [${originalStart}-${originalEnd}] → ` +
-        `[${chunk.start_offset}-${chunk.end_offset}]`
+        `Overlaps with previous chunk. Positions kept as matched. Validation recommended.`
       )
     }
 
-    warnings.push(
-      `All chunk offsets were scaled by ${scaleFactor.toFixed(3)}x to fit within markdown length (${markdownLength} chars). ` +
-      `Sequential ordering used Docling content lengths which didn't match cleaned markdown.`
-    )
+    // Warn if offset exceeds markdown length
+    if (curr.end_offset > markdownLength) {
+      console.warn(
+        `[Bulletproof Matcher] ⚠️  Chunk ${curr.chunk.index} end offset (${curr.end_offset}) exceeds markdown length (${markdownLength})`
+      )
+      curr.validation_warning = `End offset ${curr.end_offset} exceeds document length ${markdownLength}. Position may be incorrect.`
+      warnings.push(
+        `Chunk ${curr.chunk.index}: End offset exceeds document length. Validation required.`
+      )
+    }
   }
 
   // CRITICAL FIX: Fill gaps between chunks to ensure binary search works
@@ -990,15 +932,15 @@ function finalizeBulletproofMatch(
             index: curr.chunk.index + 0.5,  // Fractional index to maintain order
             content: gapContent,
             meta: {
-              ...curr.chunk.meta,
-              note: 'Gap-fill chunk (Docling skipped this content)'
+              ...curr.chunk.meta
             }
           },
           start_offset: curr.end_offset,
           end_offset: next.start_offset,
           confidence: 'synthetic',
           method: 'interpolation',
-          similarity: 0
+          similarity: 0,
+          validation_warning: `Gap-fill chunk between chunks ${curr.chunk.index} and ${next.chunk.index}. Docling skipped this content.`
         }
 
         chunksWithGapsFilled.push(gapChunk)
