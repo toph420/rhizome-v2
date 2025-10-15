@@ -58,3 +58,10 @@ worker/tests/validation/reports/
 # Test files (keep out of version control)
 test-files/
 supabase/.temp/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
