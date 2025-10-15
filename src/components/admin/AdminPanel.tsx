@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { HelpCircle } from 'lucide-react'
 import {
@@ -21,6 +21,7 @@ import {
   JobsTab,
 } from './tabs'
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog'
+import { useAdminPanelStore } from '@/stores/admin/admin-panel'
 
 interface AdminPanelProps {
   isOpen: boolean
@@ -28,8 +29,19 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState('scanner')
   const [helpDialogOpen, setHelpDialogOpen] = useState(false)
+
+  // Use store for tab state and sync with store's isOpen
+  const { activeTab, setActiveTab, open: storeOpen, close: storeClose } = useAdminPanelStore()
+
+  // Sync parent isOpen prop with store
+  useEffect(() => {
+    if (isOpen) {
+      storeOpen(activeTab)
+    } else {
+      storeClose()
+    }
+  }, [isOpen, activeTab, storeOpen, storeClose])
 
   // Tab switching shortcuts (only when panel open)
   useHotkeys('1', () => setActiveTab('scanner'), { enabled: isOpen })

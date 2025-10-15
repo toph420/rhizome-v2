@@ -932,11 +932,11 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ### Validation Results
 
-**Testing Sessions**: 3 sessions completed
+**Testing Sessions**: 4 sessions completed
 **Total Tests Executed**: 15 / 47 (32%)
 **Tests Passed**: 15 ✅
 **Tests Failed**: 0 ❌
-**Bugs Found**: 20 (all fixed)
+**Bugs Found**: 21 (all fixed)
 
 ### Session 2 Progress (2025-10-14)
 
@@ -962,6 +962,48 @@ This comprehensive manual testing checklist validates the complete Storage-First
 - 🟡 Promise lifecycle and job ID replacement testing
 
 **Bugs Fixed This Session** (11 total):
+
+---
+
+### Session 4 Progress (2025-10-14 - Job Display System Refactor)
+
+**Completed**:
+- ✅ Created shared JobList component (`src/components/admin/JobList.tsx`)
+- ✅ Updated JobsTab to display ALL background jobs with 7-filter system
+- ✅ Refactored ImportTab to use shared JobList component
+- ✅ Fixed UX inconsistency: Jobs now appear in Jobs tab where expected
+
+**Features Added**:
+1. **Shared JobList Component** (~200 lines)
+   - 7 filter tabs: All, Import, Export, Connections, Active, Completed, Failed
+   - Job cards with status icons, progress bars, error messages
+   - Type-based and status-based filtering
+   - Responsive design with sorting (newest first)
+
+2. **JobsTab Enhancement**
+   - Now displays comprehensive job history (was empty before)
+   - Shows all job types: import_document, export_documents, reprocess_connections
+   - Maintains existing job control buttons (Clear, Stop, Nuclear Reset)
+   - Filter counts in badges
+
+3. **ImportTab Refactor**
+   - Removed ~30 lines of duplicate job display code
+   - Uses shared JobList with filter=false (focused import-only view)
+   - Cleaner code, less duplication
+
+**UX Improvements**:
+- Jobs tab now matches user expectations ("show me all jobs")
+- Import tab maintains focused workflow (no filter clutter)
+- Processing Dock continues showing active jobs (no conflict)
+- No confusion about where jobs are displayed
+
+**Code Quality**:
+- DRY principle: Single job display component shared across tabs
+- Type-safe: Full TypeScript support
+- Maintainable: Fix bugs once, applies everywhere
+- Extensible: Easy to add new job types or filters
+
+**Bugs Fixed This Session** (1 total):
 
 1. **Bug #10: Job ID Replacement Issue**
    - **Problem**: `updateJob()` changed internal `id` field but kept Map key as temp ID, causing polling to skip the job
@@ -1031,7 +1073,20 @@ This comprehensive manual testing checklist validates the complete Storage-First
 - ✅ Replace/Merge strategies → Job appears, updates smoothly, no flashing
 - ✅ No page refreshes, no unnecessary scans, no UI flickering
 
-**Issues Found**: 20 total (9 from Sessions 1-2, 11 from Session 3)
+**Bugs Fixed This Session (Session 4)** (1 total):
+
+1. **Bug #19: Jobs Tab Missing Job List**
+   - **Problem**: Jobs tab only showed control buttons, no actual jobs displayed
+   - **Root Cause**: JobsTab component never subscribed to background-jobs store or rendered job list
+   - **Impact**: Users confused about where import/export jobs were displayed
+   - **Fix**: Created shared JobList component, updated JobsTab to show all jobs with filtering
+   - **Files**:
+     - Created: `src/components/admin/JobList.tsx`
+     - Updated: `src/components/admin/tabs/JobsTab.tsx`, `src/components/admin/tabs/ImportTab.tsx`
+
+---
+
+**Issues Found**: 21 total (9 from Sessions 1-2, 11 from Session 3, 1 from Session 4)
 
 ### Critical Issues (P0)
 <!-- List any blocking issues found during testing -->

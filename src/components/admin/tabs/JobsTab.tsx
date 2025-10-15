@@ -10,10 +10,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
+import { JobList } from '@/components/admin/JobList'
 
 export function JobsTab() {
   const [loading, setLoading] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+
+  // Get all jobs from store
+  const { jobs } = useBackgroundJobsStore()
+  const allJobs = Array.from(jobs.values())
 
   const handleAction = async (action: () => Promise<any>, loadingKey: string, successMsg: string) => {
     setLoading(loadingKey)
@@ -35,11 +41,32 @@ export function JobsTab() {
 
   return (
     <TooltipProvider>
-      <div className="space-y-4">
+      <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Job Controls</h3>
+        <h3 className="text-lg font-semibold">Background Jobs</h3>
         <p className="text-sm text-muted-foreground">
-          Manage background processing jobs
+          Monitor and manage all background processing jobs
+        </p>
+      </div>
+
+      {/* Job List */}
+      {allJobs.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium mb-3">Job History</h4>
+          <JobList
+            jobs={allJobs}
+            showFilters={true}
+            emptyMessage="No jobs found"
+          />
+        </div>
+      )}
+
+      {/* Job Controls Section */}
+      <div className="space-y-4 pt-4 border-t">
+      <div>
+        <h4 className="text-sm font-medium">Job Controls</h4>
+        <p className="text-xs text-muted-foreground">
+          Administrative actions for managing jobs
         </p>
       </div>
 
@@ -184,6 +211,7 @@ export function JobsTab() {
             or "Clear Completed/Failed" to clean up the job queue.
           </p>
         </div>
+      </div>
       </div>
       </div>
     </TooltipProvider>

@@ -320,6 +320,111 @@ docs/tasks/MANUAL_TESTING_CHECKLIST_T024.md
 - Task breakdown: `docs/tasks/storage-first-portability.md`
 - Implementation summary: `docs/tasks/T024_COMPLETION_SUMMARY.md`
 
+### 7. Unified Job Display System ✅ COMPLETE (Session 4)
+
+**Philosophy**: Single polling source, context-aware displays, no redundancy
+
+#### Job Display Architecture
+
+**Background Jobs Store** (`src/stores/admin/background-jobs.ts`):
+- Single Zustand store for ALL background jobs
+- One 2-second polling interval (shared across UI)
+- Auto-start/stop polling based on active jobs
+- Job lifecycle management (register, update, replace, remove)
+- Computed selectors: `activeJobs()`, `completedJobs()`, `failedJobs()`
+
+**Admin Panel Store** (`src/stores/admin/admin-panel.ts`):
+- Tracks Admin Panel open/close state
+- Coordinates with ProcessingDock to hide redundancy
+- Tab state management
+
+#### Display Components
+
+**1. ProcessingDock** (Bottom-Right Dock)
+- **Shows**: Active jobs only (processing/pending)
+- **Hides**: When Admin Panel is open
+- **Features**: Collapse to mini badge, "View All Jobs →" link
+- **Position**: Fixed bottom-right, 384px width
+- **Uses**: background-jobs store (no separate polling)
+
+**Before** (Original Dock):
+- Full-width bottom sheet
+- Showed completed/failed jobs
+- Separate 5-second polling + real-time subscriptions
+- "Clear Completed" button
+- Always visible
+
+**After** (Hybrid Approach):
+- Bottom-right floating dock
+- Active jobs only
+- Shares background-jobs store polling
+- Hides on Admin Panel
+- Collapse/expand toggle
+
+**2. Jobs Tab** (Admin Panel)
+- **Shows**: ALL jobs with 7-filter system
+- **Features**: Type filters (Import, Export, Connections), Status filters (Active, Completed, Failed)
+- **Purpose**: Comprehensive job history and management
+- **Uses**: Shared JobList component
+
+**3. Import Tab** (Admin Panel)
+- **Shows**: Import jobs only
+- **Features**: Focused import workflow, no filter clutter
+- **Uses**: Shared JobList component with `showFilters={false}`
+
+#### Shared JobList Component
+
+**Location**: `src/components/admin/JobList.tsx`
+
+**Features**:
+- Reusable across Jobs tab and Import tab
+- 7 filter tabs: All, Import, Export, Connections, Active, Completed, Failed
+- Job cards with status icons, progress bars, error messages
+- Sort by creation time (newest first)
+- Badge counts for each filter
+
+**Benefits**:
+- DRY: ~200 lines of shared code
+- Maintainable: Fix bugs once, applies everywhere
+- Extensible: Easy to add new job types
+- Type-safe: Full TypeScript support
+
+#### Key Improvements
+
+**1. Eliminated Redundancy**:
+- Before: Jobs polled in 2 places (ProcessingDock + Admin Panel stores)
+- After: Single background-jobs store with one polling interval
+
+**2. Context-Aware**:
+- ProcessingDock hides when Admin Panel is open
+- No duplicate job displays
+
+**3. Clear Mental Model**:
+- ProcessingDock = "Quick glance at active work"
+- Jobs Tab = "Comprehensive history and management"
+- Import Tab = "Focused import workflow"
+
+**4. Reduced Screen Clutter**:
+- Mini badge when collapsed (e.g., "⚙️ 2 active jobs")
+- Auto-hide when no active jobs
+- Bottom-right position (not full-width bar)
+
+#### Usage Examples
+
+```typescript
+// ProcessingDock auto-hides on Admin Panel
+const { isOpen } = useAdminPanelStore()
+if (isOpen) return null
+
+// Uses shared job store
+const { activeJobs } = useBackgroundJobsStore()
+const jobs = activeJobs() // Only processing/pending
+
+// "View All Jobs" opens Admin Panel
+const { open } = useAdminPanelStore()
+<Button onClick={() => open('jobs')}>View All →</Button>
+```
+
 ## Tech Stack
 
 ```json

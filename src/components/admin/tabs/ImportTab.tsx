@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { Progress } from '@/components/ui/progress'
 import {
   Table,
   TableBody,
@@ -18,23 +17,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Loader2, Download, CheckCircle2, XCircle, AlertCircle, Info } from 'lucide-react'
+import { Loader2, Download, Info } from 'lucide-react'
 import { ConflictResolutionDialog } from '@/components/admin/ConflictResolutionDialog'
 import type { ImportConflict } from '@/types/storage'
-import { createClient } from '@/lib/supabase/client'
-import { serializeSupabaseError } from '@/lib/supabase/error-helpers'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
-import { useBackgroundJobsStore, type JobStatus } from '@/stores/admin/background-jobs'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
+import { JobList } from '@/components/admin/JobList'
 
 export function ImportTab() {
   // Use Zustand stores
-  const { scanResults, scanning, error: scanError, scan, invalidate } = useStorageScanStore()
-  const { jobs, registerJob, updateJob, replaceJob, removeJob, activeJobs, completedJobs, failedJobs } = useBackgroundJobsStore()
+  const { scanResults, scanning, error: scanError, scan } = useStorageScanStore()
+  const { jobs, registerJob, updateJob, replaceJob, removeJob } = useBackgroundJobsStore()
 
   // Selection state
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set())
@@ -226,19 +224,6 @@ export function ImportTab() {
 
   // Get import jobs from store
   const importJobsList = Array.from(jobs.values()).filter(j => j.type === 'import_document')
-
-  const getStatusIcon = (status: JobStatus['status']) => {
-    switch (status) {
-      case 'pending':
-        return <AlertCircle className="size-4 text-yellow-600" />
-      case 'processing':
-        return <Loader2 className="size-4 animate-spin text-blue-600" />
-      case 'completed':
-        return <CheckCircle2 className="size-4 text-green-600" />
-      case 'failed':
-        return <XCircle className="size-4 text-red-600" />
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -462,36 +447,13 @@ export function ImportTab() {
 
       {/* Import Progress */}
       {importJobsList.length > 0 && (
-        <div className="space-y-4">
-          <h4 className="text-sm font-medium">Import Progress</h4>
-          <div className="space-y-3">
-            {importJobsList.map((job) => (
-              <div key={job.id} className="border rounded-lg p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(job.status)}
-                    <span className="font-medium text-sm">{job.metadata?.title || 'Import Job'}</span>
-                  </div>
-                  <Badge
-                    variant={
-                      job.status === 'completed'
-                        ? 'default'
-                        : job.status === 'failed'
-                          ? 'destructive'
-                          : 'secondary'
-                    }
-                  >
-                    {job.status}
-                  </Badge>
-                </div>
-                {job.status === 'processing' && (
-                  <Progress value={job.progress} className="h-2" />
-                )}
-                <p className="text-xs text-muted-foreground">{job.details}</p>
-                {job.error && <p className="text-xs text-red-600">{job.error}</p>}
-              </div>
-            ))}
-          </div>
+        <div>
+          <h4 className="text-sm font-medium mb-3">Import Progress</h4>
+          <JobList
+            jobs={importJobsList}
+            showFilters={false}
+            emptyMessage="No import jobs in progress"
+          />
         </div>
       )}
 
@@ -522,6 +484,8 @@ export function ImportTab() {
           conflict={currentConflict.conflict}
           documentId={currentConflict.documentId}
           onResolved={handleConflictResolved}
+          regenerateEmbeddings={regenerateEmbeddings}
+          reprocessConnections={reprocessConnections}
         />
       )}
     </div>
