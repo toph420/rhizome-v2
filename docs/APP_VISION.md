@@ -26,11 +26,18 @@ This is my personal thinking environment. Every feature is built for how I actua
 
 ### Document Processing Pipeline
 
+**Two Processing Modes:**
+- **CLOUD**: Gemini 2.0 Flash (batched extraction/metadata) - ~$0.50/book
+- **LOCAL**: Docling + Ollama + Transformers.js (zero cost, complete privacy)
+
+**Unified Pipeline** (10 stages):
 ```
-Upload → Extract (batched) → Stitch → Chunk + Metadata (batched) → Embed → Detect → Surface
+Upload → Extract → Cleanup → Bulletproof Match → Chonkie Chunk → Metadata Transfer → Enrich → Embed → Detect → Surface
 ```
 
-#### For Large Books (500+ pages)
+**Chonkie Integration**: 9 user-selectable chunking strategies (token, sentence, recursive, semantic, late, code, neural, slumber, table). Default is **recursive** for structural chunking.
+
+#### For Large Books (500+ pages) - CLOUD Mode
 
 **Stage 1: Batched Extraction**
 - Extract 100 pages at a time with 10-page overlap
@@ -199,34 +206,35 @@ Acceptable for a personal tool that actually delivers on the vision.
 
 ## What's Built
 
-1. ✅ Multi-format upload (PDFs, YouTube, text, paste)
-2. ✅ Batched extraction for large documents
-3. ✅ Intelligent stitching with overlap detection
-4. ✅ Batched metadata extraction (concepts, emotional_tone, themes)
-5. ✅ Embedding generation (batched)
-6. ✅ 3-engine collision detection (Semantic, Contradiction, ThematicBridge)
-7. 🚧 Document reader with connection surfacing (in progress)
-8. 🚧 Obsidian bidirectional sync (planned)
+1. ✅ Multi-format upload (PDF, EPUB, YouTube, Web, Markdown, Text, Paste) - 7 input methods
+2. ✅ Chonkie Integration - 9 chunking strategies with metadata transfer
+3. ✅ LOCAL Processing Pipeline - Docling + Ollama + Transformers.js (zero cost)
+4. ✅ CLOUD Processing Pipeline - Batched extraction/metadata with Gemini
+5. ✅ 3-engine collision detection (Semantic, Contradiction, ThematicBridge)
+6. ✅ Document reader (90% complete) - VirtualizedReader, ConnectionHeatmap, 6-tab RightPanel
+7. ✅ Annotations System - Text selection → ECS persistence with fuzzy matching recovery
+8. ✅ Connection Display - 6 tabs (Connections, Sparks, Flashcards, Tune, Annotations, Quality)
+9. ✅ Storage-First Portability - Admin Panel (Cmd+Shift+A) with import/export/ZIP bundles
+10. ✅ Obsidian & Readwise Integration - IntegrationsTab in Admin Panel
+11. ✅ ProcessingDock - Bottom-right dock with active jobs tracking
+12. 🚧 Study System - FlashcardsTab placeholder, FSRS not implemented
 
 ## Development Approach
 
 ### What Works
-- Batched processing scales to any book size
+- Chonkie unified pipeline with 9 strategies (replaced 3 parallel paths)
+- LOCAL mode processing (zero cost, complete privacy)
+- Storage-First Portability (DB reset + restore in 6 min vs 25 min reprocessing)
+- 90% complete reader with ConnectionHeatmap and 6-tab RightPanel
 - Rich metadata from AI (concepts with importance, emotional polarity)
-- Cost-effective through aggressive filtering
-- Clean 3-engine architecture
+- Cost-effective through aggressive filtering (~$0.50/book)
+- Clean 3-engine architecture with user-configurable weights
 
 ### Current Focus
-- Build document reader with hybrid display
-- Test ThematicBridge on 10 real books
-- Tune weights based on connection quality
-- Add manual reprocessing for existing documents
-
-### Immediate Next Steps
-1. Implement reader UI with viewport tracking
-2. Test connection quality on personal library
-3. Tune importance thresholds if needed
-4. Build Obsidian sync
+- Study System implementation (FSRS algorithm, flashcard creation)
+- Connection quality tuning based on personal library usage
+- Performance optimization for large libraries (>1000 documents)
+- Export enhancements (Markdown with inline annotations)
 
 ### Explicitly Ignore
 - Performance optimization (until it personally annoys me)

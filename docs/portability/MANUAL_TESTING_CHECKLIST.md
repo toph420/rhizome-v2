@@ -223,27 +223,29 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-### T-008: Tab Navigation
+### T-008: Tab Navigation ✅ COMPLETE
 
 **Goal**: Verify all tabs render and are clickable
 
 1. **Navigate Through Tabs**
-   - [ ] Click each tab trigger: Scanner, Import, Export, Connections, Integrations, Jobs
-   - [ ] Each tab content should render
-   - [ ] No console errors
-   - [ ] URL should NOT change (client-side only)
+   - [x] Click each tab trigger: Scanner, Import, Export, Connections, Integrations, Jobs
+   - [x] Each tab content should render
+   - [x] No console errors
+   - [x] URL should NOT change (client-side only)
 
 2. **Jobs Tab Compatibility**
-   - [ ] Navigate to Jobs tab
-   - [ ] Verify existing job controls are present:
+   - [x] Navigate to Jobs tab
+   - [x] Verify existing job controls are present:
      - Clear Completed Jobs
      - Clear Failed Jobs
      - Stop All Processing
      - Clear All Jobs
      - Nuclear Reset
-   - [ ] Click "Clear Completed Jobs" → Verify functionality works
+   - [x] Click "Clear Completed Jobs" → Verify functionality works
 
 **Expected Result**: All 6 tabs render without errors, Jobs tab functionality unchanged.
+
+**Session 8 Results**: ✅ Test confirmed complete by user. All tabs navigate correctly.
 
 ---
 
@@ -575,14 +577,27 @@ This comprehensive manual testing checklist validates the complete Storage-First
 
 ---
 
-### T-018: Test Add New Mode
+### T-018: Test Add New Mode ⚠️ KNOWN LIMITATION (Session 8)
 
 **Goal**: Verify "Add New" mode only processes newer documents
 
+**Status**: ⚠️ **Cannot be fully tested** due to orchestrator limitation
+
+**Known Limitation**:
+- Code location: `worker/handlers/reprocess-connections.ts:201-203, 227-228`
+- Issue: Orchestrator does not support `targetDocumentIds` filter
+- Current behavior: Processes connections to ALL documents (not just newer ones)
+- Preserves existing connections but does not limit to newer documents
+- Enhancement tracked for future implementation
+
+**Test Environment Available**:
+- Document A (older): "Deleuze, Freud and the Three Syntheses" (2025-10-15 19:49:17, 13 chunks, 0 connections)
+- Document B (newer): "Gilles Deleuze - An Introduction" (2025-10-15 20:28:02, 20 chunks, 40 connections)
+
+**Partial Test** (if desired):
 1. **Prepare Test**
-   - [ ] Process Document A on Day 1
-   - [ ] Process Document B on Day 2 (newer)
-   - [ ] Document A should have connections to Document B
+   - [x] Document A exists (older, 0 connections)
+   - [x] Document B exists (newer, has connections)
 
 2. **Select Add New Mode**
    - [ ] ConnectionsTab → Select Document A
@@ -592,13 +607,16 @@ This comprehensive manual testing checklist validates the complete Storage-First
 3. **Start Reprocessing**
    - [ ] Click "Start Reprocessing"
    - [ ] Monitor progress
+   - [ ] Verify warning logged about limitation
 
-4. **Verify Results**
-   - [ ] Existing connections preserved
-   - [ ] New connections to Document B added
+4. **Verify Results** (partial validation)
+   - [ ] Existing connections preserved (if any)
    - [ ] Connection count increased (not replaced)
+   - [ ] ⚠️ Cannot verify "only newer documents" due to limitation
 
-**Expected Result**: Add New mode only adds connections to newer documents.
+**Expected Result**: Add New mode preserves existing and adds new connections (but processes all documents, not just newer ones).
+
+**Session 8 Results**: ⚠️ Test deferred - orchestrator enhancement required for full validation.
 
 ---
 
