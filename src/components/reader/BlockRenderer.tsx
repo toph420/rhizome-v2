@@ -119,8 +119,6 @@ export const BlockRenderer = memo(function BlockRenderer({
     <div
       data-block-id={block.id}
       data-chunk-id={block.chunkId}
-      data-start-offset={block.startOffset}
-      data-end-offset={block.endOffset}
       className={`${proseClass} py-2 min-h-[1rem] relative group`}
       onClick={handleClick}
     >
@@ -164,7 +162,11 @@ export const BlockRenderer = memo(function BlockRenderer({
       )}
 
       {/* Rendered content with injected annotations */}
-      <div dangerouslySetInnerHTML={{ __html: cleanHtml }} />
+      <div
+        data-start-offset={block.startOffset}
+        data-end-offset={block.endOffset}
+        dangerouslySetInnerHTML={{ __html: cleanHtml }}
+      />
     </div>
   )
 })

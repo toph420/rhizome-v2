@@ -31,6 +31,8 @@ interface ConflictResolutionDialogProps {
   conflict: ImportConflict
   documentId: string
   onResolved: (jobId: string) => void
+  regenerateEmbeddings?: boolean
+  reprocessConnections?: boolean
 }
 
 /**
@@ -44,6 +46,8 @@ export function ConflictResolutionDialog({
   conflict,
   documentId,
   onResolved,
+  regenerateEmbeddings = false,
+  reprocessConnections = false,
 }: ConflictResolutionDialogProps) {
   const [selectedStrategy, setSelectedStrategy] =
     useState<ConflictStrategy>('merge_smart')
@@ -54,8 +58,8 @@ export function ConflictResolutionDialog({
     try {
       const result = await importFromStorage(documentId, {
         strategy: selectedStrategy,
-        regenerateEmbeddings: false,
-        reprocessConnections: false,
+        regenerateEmbeddings,
+        reprocessConnections,
       })
 
       // Handle "skip" strategy (no-op, success but no jobId)
