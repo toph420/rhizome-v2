@@ -27,11 +27,13 @@ export interface ThematicBridgeConfig {
  *
  * @param documentId - Document to process
  * @param config - Configuration options
+ * @param onProgress - Optional progress callback
  * @returns Array of chunk connections ready to save
  */
 export async function runThematicBridge(
   documentId: string,
-  config: ThematicBridgeConfig = {}
+  config: ThematicBridgeConfig = {},
+  onProgress?: (percent: number, stage: string, details?: string) => Promise<void>
 ): Promise<ChunkConnection[]> {
   const {
     minImportance = 0.6,
@@ -77,6 +79,7 @@ export async function runThematicBridge(
 
   const connections: ChunkConnection[] = [];
   let aiCallCount = 0;
+  let processedSources = 0;
 
   for (const chunk of sourceChunks) {
     const sourceDomain = chunk.domain_metadata?.primaryDomain;
@@ -115,6 +118,14 @@ export async function runThematicBridge(
     for (let i = 0; i < candidates.length; i += batchSize) {
       const batch = candidates.slice(i, i + batchSize);
       aiCallCount++;
+
+      // Report progress (batch-level granularity)
+      const overallPercent = Math.floor((processedSources / sourceChunks.length) * 100);
+      await onProgress?.(
+        overallPercent,
+        'thematic_bridge',
+        `Source ${processedSources + 1}/${sourceChunks.length}, batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(candidates.length / batchSize)} (${aiCallCount} AI calls)`
+      );
 
       const prompt = `Analyze thematic bridges between these chunk pairs. Return JSON array with:
 {
@@ -219,6 +230,9 @@ Remember: Reference chunks by their summary/title in explanations.`;
         continue;
       }
     }
+
+    // Increment processed sources counter
+    processedSources++;
   }
 
   console.log(`[ThematicBridge] Found ${connections.length} bridges using ${aiCallCount} AI calls`);

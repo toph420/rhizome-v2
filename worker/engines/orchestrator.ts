@@ -75,8 +75,8 @@ export async function processDocument(
     console.log(`[Orchestrator] ThematicBridge mode: ${useLocalMode ? 'LOCAL (Qwen)' : 'CLOUD (Gemini)'}`);
 
     const connections = useLocalMode
-      ? await runThematicBridgeQwen(documentId, config.thematicBridge)
-      : await runThematicBridge(documentId, config.thematicBridge);
+      ? await runThematicBridgeQwen(documentId, config.thematicBridge, onProgress)
+      : await runThematicBridge(documentId, config.thematicBridge, onProgress);
 
     allConnections.push(...connections);
     byEngine.thematic_bridge = connections.length;

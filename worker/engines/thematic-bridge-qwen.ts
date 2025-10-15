@@ -19,11 +19,13 @@ import type { ThematicBridgeConfig } from './thematic-bridge.js';
  *
  * @param documentId - Document to process
  * @param config - Configuration options
+ * @param onProgress - Optional progress callback
  * @returns Array of chunk connections ready to save
  */
 export async function runThematicBridgeQwen(
   documentId: string,
-  config: ThematicBridgeConfig = {}
+  config: ThematicBridgeConfig = {},
+  onProgress?: (percent: number, stage: string, details?: string) => Promise<void>
 ): Promise<ChunkConnection[]> {
   const {
     minImportance = 0.6,
@@ -69,6 +71,7 @@ export async function runThematicBridgeQwen(
   const connections: ChunkConnection[] = [];
   let aiCallCount = 0;
   let oomFallbackCount = 0;
+  let processedSources = 0;
 
   for (const chunk of sourceChunks) {
     const sourceDomain = chunk.domain_metadata?.primaryDomain;
@@ -106,6 +109,15 @@ export async function runThematicBridgeQwen(
     for (let i = 0; i < candidates.length; i += batchSize) {
       const batch = candidates.slice(i, i + batchSize);
       aiCallCount++;
+
+      // Report progress (batch-level granularity)
+      const overallPercent = Math.floor((processedSources / sourceChunks.length) * 100);
+      const batchPercent = Math.floor((i / candidates.length) * 100);
+      await onProgress?.(
+        overallPercent,
+        'thematic_bridge',
+        `Source ${processedSources + 1}/${sourceChunks.length}, batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(candidates.length / batchSize)} (${aiCallCount} AI calls)`
+      );
 
       const prompt = buildQwenPrompt(chunk, batch, sourceDomain, minStrength);
 
@@ -155,6 +167,9 @@ export async function runThematicBridgeQwen(
         continue;
       }
     }
+
+    // Increment processed sources counter
+    processedSources++;
   }
 
   console.log(`[ThematicBridge:Qwen] Found ${connections.length} bridges using ${aiCallCount} AI calls`);
