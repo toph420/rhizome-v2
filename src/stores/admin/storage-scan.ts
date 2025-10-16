@@ -16,6 +16,7 @@ interface StorageScanStore {
   scan: () => Promise<void>
   invalidate: () => void
   getCachedResults: () => DocumentScanResult[] | null
+  removeDocument: (documentId: string) => void
 }
 
 /**
@@ -110,6 +111,16 @@ export const useStorageScanStore = create<StorageScanStore>()(
         }
 
         return null
+      },
+
+      removeDocument: (documentId: string) => {
+        const { scanResults } = get()
+        if (!scanResults) return
+
+        console.log(`[StorageScan] Removing document ${documentId} from scan results`)
+        set({
+          scanResults: scanResults.filter(doc => doc.documentId !== documentId)
+        })
       },
     }),
     {

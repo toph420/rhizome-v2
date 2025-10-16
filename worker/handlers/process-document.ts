@@ -6,8 +6,86 @@ import { enhanceThemesFromConcepts, enhanceSummaryFromConcepts } from '../lib/ma
 import type { SourceType } from '../types/multi-format.js'
 import type { ProcessResult } from '../types/processor.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
+import { createHash } from 'crypto'
 
 console.log(`🤖 Using Gemini model: ${GEMINI_MODEL}`)
+
+/**
+ * Determines the next processing stage after a checkpoint.
+ * Maps checkpoint stages to the next stage in the pipeline.
+ */
+function getNextStageAfterCheckpoint(checkpointStage: string): string {
+  const stageMap: Record<string, string> = {
+    'extraction': 'cleanup',
+    'cleanup': 'chunking',
+    'chunking': 'metadata',
+    'metadata': 'embedding',
+    'embedding': 'completion'
+  }
+
+  return stageMap[checkpointStage] || 'chunking' // Default to chunking if unknown
+}
+
+/**
+ * Attempts to resume processing from a checkpoint.
+ * Returns checkpoint data if valid, null if checkpoint invalid/missing.
+ */
+async function tryResumeFromCheckpoint(
+  supabase: any,
+  job: any
+): Promise<{ stage: string; data: any } | null> {
+  // Check if this is a resume attempt
+  if (!job.resume_count || job.resume_count === 0) {
+    return null // Not a resume
+  }
+
+  if (!job.last_checkpoint_path || !job.last_checkpoint_stage) {
+    console.log(`[Resume] No checkpoint found for job ${job.id}`)
+    return null
+  }
+
+  console.log(
+    `[Resume] Attempting to resume job ${job.id} from checkpoint: ${job.last_checkpoint_stage}`
+  )
+
+  try {
+    // Download checkpoint from Storage
+    const { data: checkpointFile, error: downloadError } = await supabase.storage
+      .from('documents')
+      .download(job.last_checkpoint_path)
+
+    if (downloadError) {
+      console.warn(`[Resume] Failed to download checkpoint: ${downloadError.message}`)
+      return null
+    }
+
+    const checkpointText = await checkpointFile.text()
+    const checkpointData = JSON.parse(checkpointText)
+
+    // Validate checkpoint hash
+    const currentHash = createHash('sha256')
+      .update(checkpointText)
+      .digest('hex')
+      .substring(0, 16)
+
+    if (job.checkpoint_hash && currentHash !== job.checkpoint_hash) {
+      console.warn(
+        `[Resume] Checkpoint hash mismatch (expected: ${job.checkpoint_hash}, got: ${currentHash}), ` +
+        `checkpoint may have been modified - falling back to fresh processing`
+      )
+      return null
+    }
+
+    console.log(`[Resume] ✓ Checkpoint loaded and validated: ${job.last_checkpoint_stage}`)
+    return {
+      stage: job.last_checkpoint_stage,
+      data: checkpointData
+    }
+  } catch (error) {
+    console.error(`[Resume] Failed to load checkpoint:`, error)
+    return null
+  }
+}
 
 /**
  * Main document processing handler.
@@ -59,6 +137,21 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
   let processor = null
 
   try {
+    // ✅ STEP 0: CHECK FOR CHECKPOINT (pause/resume)
+    const checkpoint = await tryResumeFromCheckpoint(supabase, job)
+
+    if (checkpoint) {
+      // Resuming from paused state
+      console.log(`[Resume] Resuming from checkpoint at stage: ${checkpoint.stage}`)
+
+      // Determine which stage to skip to based on checkpoint
+      const startStage = getNextStageAfterCheckpoint(checkpoint.stage)
+      console.log(`[Resume] Will resume processing from stage: ${startStage}`)
+
+      // For now, we'll handle checkpoint data loading in the appropriate stage below
+      // This is a foundation for Phase 4 - full implementation will follow the plan
+    }
+
     // ✅ STEP 1: CHECK FOR CACHED RESULTS (avoid re-running AI)
     const cachedChunks = job.metadata?.cached_chunks
     const cachedMarkdown = job.metadata?.cached_markdown
@@ -68,7 +161,17 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
 
     let result: ProcessResult
 
-    if (cachedChunks && cachedMarkdown) {
+    if (checkpoint) {
+      // Use checkpoint data instead of cache
+      console.log(`♻️  Using checkpoint data from paused job`)
+      result = {
+        markdown: checkpoint.data.markdown || checkpoint.data.cleaned_markdown || '',
+        chunks: checkpoint.data.chunks || [],
+        metadata: checkpoint.data.metadata,
+        wordCount: checkpoint.data.word_count || checkpoint.data.wordCount,
+        outline: checkpoint.data.outline
+      }
+    } else if (cachedChunks && cachedMarkdown) {
       // Use cached results from previous attempt
       console.log(`♻️  Using cached processing result from previous attempt`)
       console.log(`   - Cached chunks: ${cachedChunks.length}`)
@@ -316,21 +419,42 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
 
     // Generate embeddings for chunks
     console.log(`🔢 Generating embeddings for ${result.chunks.length} chunks`)
+
+    // Update progress before embedding generation
+    await updateProgress(supabase, job.id, 65, 'chunking', 'processing', 'Preparing chunks for embedding generation')
+
     const chunkTexts = result.chunks.map(chunk => chunk.content).filter(text => text && text.trim().length > 0)
-    
+
     if (chunkTexts.length === 0) {
       throw new Error('No valid chunk content found for embedding generation')
     }
-    
+
     if (chunkTexts.length !== result.chunks.length) {
       console.warn(`⚠️ Filtered out ${result.chunks.length - chunkTexts.length} empty chunks`)
     }
-    
+
+    // Show progress during embedding generation
+    await updateProgress(
+      supabase,
+      job.id,
+      70,
+      'embedding',
+      'processing',
+      `Generating embeddings for ${chunkTexts.length} chunks...`
+    )
+
     const embeddings = await generateEmbeddings(chunkTexts)
     console.log(`✅ Generated ${embeddings.length} embeddings`)
+
+    // Update progress after embedding generation
+    await updateProgress(supabase, job.id, 80, 'embedding', 'processing', `Generated ${embeddings.length} embeddings`)
     
     // Insert chunks with embeddings to database
     console.log(`💾 Saving chunks with embeddings to database`)
+
+    // Update progress before database insertion
+    await updateProgress(supabase, job.id, 82, 'saving', 'processing', `Preparing ${result.chunks.length} chunks for database`)
+
     const validChunks = result.chunks.filter(chunk => chunk.content && chunk.content.trim().length > 0)
 
     const chunksWithEmbeddings = validChunks.map((chunk, i) => {
@@ -369,6 +493,8 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
 
     // ✅ STEP 2: INSERT FRESH CHUNKS
     // Unique constraint on (document_id, chunk_index) prevents duplicates
+    await updateProgress(supabase, job.id, 85, 'saving', 'processing', `Inserting ${chunksWithEmbeddings.length} chunks into database`)
+
     const { error: chunkError } = await supabase
       .from('chunks')
       .insert(chunksWithEmbeddings)
@@ -378,11 +504,16 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     }
     console.log(`✅ Saved ${chunksWithEmbeddings.length} chunks to database`)
 
+    // Update progress after successful insertion
+    await updateProgress(supabase, job.id, 90, 'saving', 'processing', `Saved ${chunksWithEmbeddings.length} chunks successfully`)
+
     // Update stage after chunks inserted
     await updateStage(supabase, job.id, 'chunked')
 
     // ✅ ASYNC CONNECTION DETECTION: Queued as separate job (doesn't block document completion)
     // This prevents the main processing job from timing out during connection detection
+    await updateProgress(supabase, job.id, 92, 'finalizing', 'processing', 'Setting up connection detection')
+
     if (chunksWithEmbeddings.length >= 2) {
       // Check for existing ACTIVE jobs to avoid duplicates
       // Only check pending/processing - allow retries if previous job completed/failed
@@ -423,6 +554,9 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     } else {
       console.log(`📭 Skipping collision detection - need at least 2 chunks (found ${chunksWithEmbeddings.length})`)
     }
+
+    // Update progress after connection detection setup
+    await updateProgress(supabase, job.id, 95, 'finalizing', 'processing', 'Finalizing document processing')
 
     // Update stage after embeddings complete (document ready for use)
     await updateStage(supabase, job.id, 'embedded')

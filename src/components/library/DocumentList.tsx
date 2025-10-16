@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { FileText, Eye, Loader2, Trash2, Pause, Play, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
-import { deleteDocument } from '@/app/actions/admin'
+import { deleteDocument } from '@/app/actions/delete-document'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -151,10 +151,14 @@ export function DocumentList() {
     const result = await deleteDocument(documentId)
 
     if (result.success) {
+      // Optimistically remove from UI immediately
+      setDocuments(prev => prev.filter(doc => doc.id !== documentId))
+
       toast.success('Document deleted', {
         description: `"${title}" and all associated data removed`
       })
-      // Refresh the list
+
+      // Refresh the list to ensure accuracy (especially for storage-only docs)
       if (userId) {
         const supabase = createClient()
         loadDocuments(supabase, userId)

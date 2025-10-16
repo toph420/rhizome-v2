@@ -18,7 +18,7 @@ Rhizome V2 is an **AI-first document processing system** with **3-engine collisi
 
 ## Quick Reference
 
-**Latest Migration**: `050_add_chunker_type.sql`
+**Latest Migration**: `052_job_pause_resume.sql`
 **Input Formats**: 7 (PDF, EPUB, YouTube, Web, Markdown, Text, Paste)
 **Chunking Strategies**: 9 (Default: recursive, 3-5 min)
 **Connection Engines**: 3 (Semantic 25%, Contradiction 40%, Thematic 35%)
@@ -102,6 +102,15 @@ Rhizome V2 is an **AI-first document processing system** with **3-engine collisi
 - Auto-hides when Admin Panel open
 - Collapses to mini badge
 - Shares `background-jobs` store
+
+#### Background Job System (Enhanced v2.0)
+- **7 Job Types**: Document processing, imports, exports, connection detection, integrations
+- **Real-time Progress**: Updates every 5-10 seconds with detailed status ("Chunk 234 of 500")
+- **Visual Feedback**: Heartbeat indicator (green pulse), progress bars, status badges
+- **Pause & Resume**: Checkpoint-based pause/resume with SHA-256 validation
+- **Automatic Retry**: Intelligent error classification (4 types) with exponential backoff
+- **Job Control**: Pause/Resume/Retry/Delete buttons in UI
+- **Details**: See `docs/JOB_SYSTEM.md` for complete reference
 
 ### 📋 NOT STARTED
 
@@ -501,12 +510,13 @@ Production metrics (p95 latency, cache hit rates) don't matter for one user.
 ### Module Documentation
 - **Worker Module**: `worker/README.md` - Document processing system
 - **Gemini Processing**: `docs/GEMINI_PROCESSING.md` - AI processing patterns
+- **Background Jobs**: `docs/JOB_SYSTEM.md` - Complete job system reference (pause/resume, retry, progress tracking)
 
 ---
 
 ## Miscellaneous Rules
 
-- **Latest Migration**: `050_add_chunker_type.sql` (see `supabase/migrations/`)
+- **Latest Migration**: `052_job_pause_resume.sql` (see `supabase/migrations/`)
 - **Migration Format**: `NNN_descriptive_name.sql` where NNN is zero-padded number
 - **EPUB Support**: Supported as source type alongside PDF - handle both when implementing
 - **Cached Chunks**: `cached_chunks` table stores original Docling chunks for zero-cost LOCAL reprocessing (migration 046)

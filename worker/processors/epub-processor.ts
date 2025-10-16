@@ -504,13 +504,14 @@ export class EPUBProcessor extends SourceProcessor {
     // Stage 6: Chonkie Chunking (72-75%)
     // User-selected chunking strategy (default: recursive)
     const chunkerStrategy: ChonkieStrategy = (this.job.input_data?.chunkerStrategy as ChonkieStrategy) || 'recursive'
+    const chunkSize = this.job.input_data?.chunkSize as number | undefined
     console.log(`[EPUBProcessor] Stage 6: Chunking with Chonkie strategy: ${chunkerStrategy}`)
 
     await this.updateProgress(72, 'chunking', 'processing', `Chunking with ${chunkerStrategy} strategy`)
 
     const chonkieChunks = await chunkWithChonkie(markdown, {
       chunker_type: chunkerStrategy,
-      chunk_size: 512,  // or 768 for alignment with embeddings
+      ...(chunkSize ? { chunk_size: chunkSize } : {}),  // Let wrapper apply strategy-specific defaults
       timeout: 300000   // 5 minutes base timeout (scales with document size)
     })
 

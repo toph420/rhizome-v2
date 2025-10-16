@@ -12,6 +12,7 @@ import { reprocessConnectionsHandler } from './handlers/reprocess-connections.js
 import { exportDocumentHandler } from './handlers/export-document.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
+import { retryLoop, classifyError, recordJobFailure } from './lib/retry-manager.js'
 
 // ES modules compatibility: get __dirname equivalent
 const __filename = fileURLToPath(import.meta.url)
@@ -178,45 +179,8 @@ async function processNextJob() {
 }
 
 async function handleJobError(supabase: any, job: any, error: Error) {
-  const isTransient = isTransientError(error)
-  const canRetry = job.retry_count < job.max_retries
-  const friendlyError = getUserFriendlyError(error)
-  const errorMessage = error instanceof Error ? error.message : String(error)
-
-  if (isTransient && canRetry) {
-    const delayMs = 5000 * Math.pow(5, job.retry_count)
-    const nextRetry = new Date(Date.now() + delayMs)
-
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'failed',
-        retry_count: job.retry_count + 1,
-        next_retry_at: nextRetry.toISOString(),
-        last_error: friendlyError,
-        error_message: errorMessage  // Add detailed error message for debugging
-      })
-      .eq('id', job.id)
-
-    console.log(`Job ${job.id} scheduled for retry at ${nextRetry}`)
-  } else {
-    await markJobFailed(supabase, job.id, friendlyError, errorMessage)
-  }
-}
-
-function isTransientError(error: Error): boolean {
-  const transientPatterns = [
-    'rate limit',
-    'timeout',
-    'unavailable',
-    'ECONNRESET',
-    '429',
-    '503',
-    '504'
-  ]
-  return transientPatterns.some(pattern => 
-    error.message.toLowerCase().includes(pattern.toLowerCase())
-  )
+  // Use new retry manager for better error classification
+  await recordJobFailure(supabase, job.id, error)
 }
 
 async function markJobFailed(supabase: any, jobId: string, error: string, errorMessage?: string) {
@@ -248,11 +212,31 @@ async function main() {
   startAnnotationExportCron()
   console.log('✅ Annotation export cron started (runs hourly)')
 
+  // Initialize retry loop counter (runs every 30s = 6 iterations * 5s)
+  let retryLoopCounter = 0
+
+  // Create Supabase client for retry loop
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
   while (!isShuttingDown) {
     try {
       await processNextJob()
     } catch (error) {
       console.error('Worker error:', error)
+    }
+
+    // Check for retry-eligible jobs every 30 seconds
+    retryLoopCounter++
+    if (retryLoopCounter >= 6) {
+      try {
+        await retryLoop(supabase)
+      } catch (error) {
+        console.error('[RetryLoop] Error in retry loop:', error)
+      }
+      retryLoopCounter = 0
     }
 
     await new Promise(resolve => setTimeout(resolve, 5000))

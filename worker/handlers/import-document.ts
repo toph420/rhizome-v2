@@ -17,6 +17,30 @@
 import { readFromStorage } from '../lib/storage-helpers.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
 import type { ChunksExport, ConflictStrategy } from '../types/storage.js'
+import { createHash } from 'crypto'
+
+/**
+ * Check if resuming from a paused import.
+ * Import jobs are typically quick (<1 min) so pause/resume is less critical,
+ * but we support it for consistency.
+ */
+async function checkResumeState(job: any): Promise<{ resuming: boolean; lastStage?: string }> {
+  if (!job.resume_count || job.resume_count === 0) {
+    return { resuming: false }
+  }
+
+  console.log(`[Resume] Import job resumed (attempt #${job.resume_count})`)
+
+  // For import jobs, we track completed stages in metadata
+  const lastStage = job.metadata?.last_completed_stage
+
+  if (lastStage) {
+    console.log(`[Resume] Last completed stage: ${lastStage}`)
+    return { resuming: true, lastStage }
+  }
+
+  return { resuming: false }
+}
 
 /**
  * Import document chunks from Storage to Database.
@@ -32,6 +56,9 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
   console.log(`   - Storage path: ${storage_path}`)
   console.log(`   - Regenerate embeddings: ${regenerateEmbeddings || false}`)
   console.log(`   - Reprocess connections: ${reprocessConnections || false}`)
+
+  // Check if resuming from pause
+  const resumeState = await checkResumeState(job)
 
   try {
     // ✅ STEP 1: READ CHUNKS FROM STORAGE (10%)
@@ -78,10 +105,29 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
 
       // Generate embeddings
       const chunkTexts = chunksWithoutEmbeddings.map((c: any) => c.content)
+
+      await updateProgress(
+        supabase,
+        job.id,
+        65,
+        'embeddings',
+        'processing',
+        `Generating embeddings for ${chunkTexts.length} chunks...`
+      )
+
       const embeddings = await generateEmbeddings(chunkTexts)
       console.log(`✓ Generated ${embeddings.length} embeddings`)
 
-      // Update chunks with embeddings
+      await updateProgress(
+        supabase,
+        job.id,
+        75,
+        'embeddings',
+        'processing',
+        `Updating ${chunksWithoutEmbeddings.length} chunks with embeddings`
+      )
+
+      // Update chunks with embeddings (batch progress updates every 10 chunks)
       for (let i = 0; i < chunksWithoutEmbeddings.length; i++) {
         const { error: updateError } = await supabase
           .from('chunks')
@@ -90,6 +136,19 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
 
         if (updateError) {
           console.warn(`⚠️ Failed to update embedding for chunk ${i}: ${updateError.message}`)
+        }
+
+        // Update progress every 10 chunks
+        if ((i + 1) % 10 === 0 || i === chunksWithoutEmbeddings.length - 1) {
+          const percent = 75 + Math.floor((i + 1) / chunksWithoutEmbeddings.length * 15) // 75-90%
+          await updateProgress(
+            supabase,
+            job.id,
+            percent,
+            'embeddings',
+            'processing',
+            `Updated ${i + 1} of ${chunksWithoutEmbeddings.length} chunk embeddings`
+          )
         }
       }
 
@@ -248,7 +307,8 @@ async function applyStrategy(
 
     let updatedCount = 0
 
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
       const { error: updateError } = await supabase
         .from('chunks')
         .update({
@@ -268,6 +328,19 @@ async function applyStrategy(
         console.warn(`⚠️ Failed to update chunk ${chunk.chunk_index}: ${updateError.message}`)
       } else {
         updatedCount++
+      }
+
+      // Update progress every 10 chunks
+      if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
+        const percent = 40 + Math.floor((i + 1) / chunks.length * 20) // 40-60%
+        await updateProgress(
+          supabase,
+          jobId,
+          percent,
+          'merge_smart',
+          'processing',
+          `Updated ${i + 1} of ${chunks.length} chunk metadata`
+        )
       }
     }
 

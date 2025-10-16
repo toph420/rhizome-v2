@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { devtools, persist } from 'zustand/middleware'
 import { createClient } from '@/lib/supabase/client'
 
 /**
@@ -7,8 +7,8 @@ import { createClient } from '@/lib/supabase/client'
  */
 export interface JobStatus {
   id: string
-  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import'
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'detect_connections' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import'
+  status: 'pending' | 'processing' | 'paused' | 'completed' | 'failed' | 'cancelled'
   progress: number
   details: string
   metadata?: {
@@ -16,9 +16,22 @@ export interface JobStatus {
     documentIds?: string[]
     title?: string
   }
+  input_data?: {
+    mode?: string
+    regenerateEmbeddings?: boolean
+    reprocessConnections?: boolean
+    includeConnections?: boolean
+    includeAnnotations?: boolean
+    [key: string]: any
+  }
   result?: any
   error?: string
   createdAt: number
+  updatedAt?: number
+  // Phase 4 fields
+  pauseReason?: string
+  checkpointStage?: string
+  canResume?: boolean
 }
 
 /**
@@ -46,6 +59,47 @@ interface BackgroundJobsStore {
 }
 
 let pollIntervalId: NodeJS.Timeout | null = null
+let lastJobCompletedAt: number | null = null
+const GRACE_PERIOD_MS = 30000 // 30 seconds grace period after last job completes
+
+/**
+ * Format raw stage names into human-readable labels
+ */
+function formatStageName(stage: string): string {
+  const stageNames: Record<string, string> = {
+    // PDF Processing
+    download: 'Downloading',
+    extract: 'Extracting',
+    cleanup_local: 'Cleaning text',
+    cleanup_ai: 'AI cleanup',
+    bulletproof_mapping: 'Mapping metadata',
+    chunking: 'Chunking',
+    metadata_transfer: 'Transferring metadata',
+    metadata: 'Enriching metadata',
+    embeddings: 'Generating embeddings',
+    finalize: 'Finalizing',
+
+    // Import
+    reading: 'Reading from storage',
+    validating: 'Validating',
+    strategy: 'Applying import strategy',
+
+    // Export
+    creating: 'Creating export',
+    zipping: 'Creating ZIP',
+    saving: 'Saving to storage',
+
+    // Connections
+    preparing: 'Preparing',
+    detecting: 'Detecting connections',
+
+    // Common
+    processing: 'Processing',
+    complete: 'Complete',
+  }
+
+  return stageNames[stage] || stage
+}
 
 /**
  * Zustand store for unified background job management.
@@ -74,16 +128,17 @@ let pollIntervalId: NodeJS.Timeout | null = null
  */
 export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
   devtools(
-    (set, get) => ({
-      jobs: new Map(),
-      polling: false,
-      pollInterval: 2000, // 2 seconds
+    persist(
+      (set, get) => ({
+        jobs: new Map(),
+        polling: false,
+        pollInterval: 2000, // 2 seconds
 
       // Computed selectors
       activeJobs: () => {
         const { jobs } = get()
         return Array.from(jobs.values()).filter(
-          (j) => j.status === 'pending' || j.status === 'processing'
+          (j) => j.status === 'pending' || j.status === 'processing' || j.status === 'paused'
         )
       },
 
@@ -233,16 +288,87 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
         set({ polling: true })
 
         const poll = async () => {
-          const { activeJobs, updateJob } = get()
+          const { activeJobs, updateJob, registerJob, jobs } = get()
+          const supabase = createClient()
+
+          // Auto-discovery FIRST: Check for new jobs in database that we don't know about yet
+          // This catches worker-created jobs like detect-connections
+          // CRITICAL: Run this BEFORE checking if active.length === 0
+          try {
+            const { data: allActiveJobs, error: discoveryError } = await supabase
+              .from('background_jobs')
+              .select('id, job_type, input_data, document_id, created_at')
+              .in('status', ['pending', 'processing', 'paused'])
+              .order('created_at', { ascending: false })
+              .limit(50) // Last 50 active jobs
+
+            if (!discoveryError && allActiveJobs) {
+              for (const dbJob of allActiveJobs) {
+                // Check if we already know about this job
+                if (!jobs.has(dbJob.id)) {
+                  console.log(`[BackgroundJobs] Auto-discovered new job: ${dbJob.id} (${dbJob.job_type})`)
+
+                  // Get document title for better display
+                  let title = 'Unknown'
+                  if (dbJob.document_id) {
+                    const { data: doc } = await supabase
+                      .from('documents')
+                      .select('title')
+                      .eq('id', dbJob.document_id)
+                      .single()
+
+                    if (doc) {
+                      title = doc.title
+                    }
+                  }
+
+                  // Register the newly discovered job
+                  registerJob(dbJob.id, dbJob.job_type as any, {
+                    title,
+                    documentId: dbJob.document_id,
+                  })
+                }
+              }
+            }
+          } catch (discoveryErr) {
+            console.error('[BackgroundJobs] Auto-discovery error:', discoveryErr)
+            // Don't block polling if discovery fails
+          }
+
+          // Now get the updated active jobs list (after auto-discovery)
           const active = activeJobs()
 
+          // Stop polling only if:
+          // 1. No active jobs after auto-discovery, AND
+          // 2. Grace period has elapsed (to allow worker to create follow-up jobs like detect-connections)
           if (active.length === 0) {
+            const now = Date.now()
+
+            // If this is the first poll with no jobs, record the time
+            if (!lastJobCompletedAt) {
+              lastJobCompletedAt = now
+              console.log('[BackgroundJobs] No active jobs, starting 30s grace period for follow-up jobs')
+              return // Keep polling during grace period
+            }
+
+            // Check if grace period has elapsed
+            const timeSinceLastJob = now - lastJobCompletedAt
+            if (timeSinceLastJob < GRACE_PERIOD_MS) {
+              console.log(`[BackgroundJobs] Grace period active (${Math.round(timeSinceLastJob / 1000)}s / 30s), continuing to poll`)
+              return // Keep polling during grace period
+            }
+
+            // Grace period elapsed, safe to stop
+            console.log('[BackgroundJobs] Grace period elapsed, no new jobs found, stopping polling')
+            lastJobCompletedAt = null // Reset for next session
             get().stopPolling()
             return
           }
 
-          const supabase = createClient()
+          // Reset grace period timer if we have active jobs
+          lastJobCompletedAt = null
 
+          // Poll existing jobs
           for (const job of active) {
             try {
               // Skip polling temp jobs (IDs like "import-{uuid}", "export-{uuid}")
@@ -258,12 +384,13 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
 
               const { data: jobData, error } = await supabase
                 .from('background_jobs')
-                .select('status, progress, output_data, error_message')
+                .select('status, progress, output_data, error_message, updated_at, pause_reason, last_checkpoint_stage')
                 .eq('id', job.id)
                 .single()
 
               if (error) {
-                console.error(`[BackgroundJobs] Error polling job ${job.id}:`, error)
+                console.error(`[BackgroundJobs] Error polling job ${job.id}:`, error.message || error)
+                // Don't block other jobs if one fails
                 continue
               }
 
@@ -272,8 +399,21 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                 const progressData = jobData.progress as any
                 const progressPercent = typeof progressData === 'number'
                   ? progressData
-                  : (progressData?.percentage || progressData?.progress || 0)
-                const progressMessage = progressData?.message || progressData?.stage || ''
+                  : (progressData?.percent || progressData?.percentage || progressData?.progress || 0)
+
+                // Format stage names for better UX
+                const rawStage = progressData?.stage || ''
+                const details = progressData?.details || progressData?.message || ''
+                const formattedStage = formatStageName(rawStage)
+                const progressMessage = details || formattedStage || ''
+
+                // Extract checkpoint info from progress JSONB
+                const checkpointData = progressData?.checkpoint
+                const canResume = checkpointData?.can_resume || false
+                const checkpointStage = jobData.last_checkpoint_stage || checkpointData?.stage
+
+                // Parse updated_at for heartbeat tracking
+                const updatedAt = jobData.updated_at ? new Date(jobData.updated_at).getTime() : undefined
 
                 if (jobData.status === 'completed') {
                   console.log(`[BackgroundJobs] Job completed: ${job.id}`)
@@ -282,6 +422,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     progress: 100,
                     details: progressMessage || 'Completed successfully',
                     result: jobData.output_data,
+                    updatedAt,
                   })
                 } else if (jobData.status === 'failed') {
                   console.error(`[BackgroundJobs] Job failed: ${job.id}`, jobData.output_data)
@@ -290,12 +431,40 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     progress: 0,
                     details: jobData.error_message || progressMessage || 'Job failed',
                     error: jobData.output_data?.error || jobData.error_message || 'Unknown error',
+                    updatedAt,
+                  })
+                } else if (jobData.status === 'paused') {
+                  updateJob(job.id, {
+                    status: 'paused',
+                    progress: progressPercent,
+                    details: progressMessage || 'Paused',
+                    pauseReason: jobData.pause_reason,
+                    checkpointStage,
+                    canResume: true,
+                    updatedAt,
+                  })
+                } else if (jobData.status === 'cancelled') {
+                  updateJob(job.id, {
+                    status: 'cancelled',
+                    progress: progressPercent,
+                    details: 'Cancelled by user',
+                    updatedAt,
                   })
                 } else if (jobData.status === 'processing') {
                   updateJob(job.id, {
                     status: 'processing',
                     progress: progressPercent,
                     details: progressMessage || 'Processing...',
+                    canResume,
+                    checkpointStage,
+                    updatedAt,
+                  })
+                } else if (jobData.status === 'pending') {
+                  updateJob(job.id, {
+                    status: 'pending',
+                    progress: progressPercent,
+                    details: progressMessage || 'Waiting to start...',
+                    updatedAt,
                   })
                 }
               }
@@ -317,10 +486,55 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
           console.log('[BackgroundJobs] Stopping polling')
           clearInterval(pollIntervalId)
           pollIntervalId = null
+          lastJobCompletedAt = null // Reset grace period on manual stop
         }
         set({ polling: false })
       },
     }),
+      {
+        name: 'background-jobs-storage',
+        // Custom storage to handle Map serialization
+        storage: {
+          getItem: (name) => {
+            const str = localStorage.getItem(name)
+            if (!str) return null
+            const parsed = JSON.parse(str)
+            // Convert jobs array back to Map
+            if (parsed.state?.jobs) {
+              parsed.state.jobs = new Map(parsed.state.jobs)
+            }
+            return parsed
+          },
+          setItem: (name, value) => {
+            // Convert jobs Map to array for serialization
+            const toSerialize = {
+              ...value,
+              state: {
+                ...value.state,
+                jobs: Array.from(value.state.jobs.entries()),
+              },
+            }
+            localStorage.setItem(name, JSON.stringify(toSerialize))
+          },
+          removeItem: (name) => localStorage.removeItem(name),
+        },
+        // Only persist jobs, not polling state
+        partialize: (state) => ({
+          jobs: state.jobs,
+        } as Partial<BackgroundJobsStore>),
+        // Auto-restart polling on hydration if there are active jobs
+        onRehydrateStorage: () => (state) => {
+          if (state) {
+            console.log('[BackgroundJobs] Rehydrated from storage')
+            const activeJobs = state.activeJobs()
+            if (activeJobs.length > 0) {
+              console.log(`[BackgroundJobs] Found ${activeJobs.length} active jobs, restarting polling`)
+              state.startPolling()
+            }
+          }
+        },
+      }
+    ),
     {
       name: 'BackgroundJobs',
       enabled: process.env.NODE_ENV === 'development',

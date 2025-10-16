@@ -72,10 +72,10 @@ export interface ChonkieConfig {
   // Semantic/Late-specific options
   // ========================================
 
-  /** Embedding model for semantic similarity (default: "all-MiniLM-L6-v2") */
+  /** Embedding model for semantic similarity (default: "all-mpnet-base-v2" - matches final embeddings) */
   embedding_model?: string
 
-  /** Similarity threshold for semantic chunker (default: "auto") */
+  /** Similarity threshold for semantic chunker (default: 0.65, LOWER = larger chunks, HIGHER = smaller chunks) */
   threshold?: number | 'auto'
 
   /** Chunking mode for late chunker: "sentence" | "paragraph" */

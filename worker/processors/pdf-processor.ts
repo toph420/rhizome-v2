@@ -73,18 +73,22 @@ export class PDFProcessor extends SourceProcessor {
    * @throws Error if PDF processing fails
    */
   async process(): Promise<ProcessResult> {
-    const storagePath = this.getStoragePath()
+    // Start heartbeat - updates job.updated_at every 5 seconds for UI pulse indicator
+    this.startHeartbeat()
 
-    // Phase 2: Check processing mode
-    const isLocalMode = process.env.PROCESSING_MODE === 'local'
-    console.log(`[PDFProcessor] Processing mode: ${isLocalMode ? 'LOCAL' : 'CLOUD'}`)
+    try {
+      const storagePath = this.getStoragePath()
 
-    if (isLocalMode) {
-      console.log('[PDFProcessor] Local mode: Will extract chunks with Docling HybridChunker')
-    }
+      // Phase 2: Check processing mode
+      const isLocalMode = process.env.PROCESSING_MODE === 'local'
+      console.log(`[PDFProcessor] Processing mode: ${isLocalMode ? 'LOCAL' : 'CLOUD'}`)
 
-    // Stage 1: Download PDF from storage (10%)
-    await this.updateProgress(10, 'download', 'fetching', 'Downloading PDF file')
+      if (isLocalMode) {
+        console.log('[PDFProcessor] Local mode: Will extract chunks with Docling HybridChunker')
+      }
+
+      // Stage 1: Download PDF from storage (10%)
+      await this.updateProgress(10, 'download', 'fetching', 'Downloading PDF file')
 
     const { data: signedUrlData } = await this.supabase.storage
       .from('documents')
@@ -355,6 +359,14 @@ export class PDFProcessor extends SourceProcessor {
       {
         onProgress: async (layerNum, matched, remaining) => {
           console.log(`[PDFProcessor] Bulletproof Layer ${layerNum}: ${matched} mapped, ${remaining} remaining`)
+          // Update progress: Layer 1-5 maps to 70-72% (0.4% per layer update)
+          const progress = 70 + (layerNum * 0.4)
+          await this.updateProgress(
+            progress,
+            'bulletproof_mapping',
+            'processing',
+            `Matching layer ${layerNum}/5: ${matched} mapped`
+          )
         }
       }
     )
@@ -375,13 +387,14 @@ export class PDFProcessor extends SourceProcessor {
     // Stage 6: Chonkie Chunking (72-75%)
     // User-selected chunking strategy (default: recursive)
     const chunkerStrategy: ChonkieStrategy = (this.job.input_data?.chunkerStrategy as ChonkieStrategy) || 'recursive'
+    const chunkSize = this.job.input_data?.chunkSize as number | undefined
     console.log(`[PDFProcessor] Stage 6: Chunking with Chonkie strategy: ${chunkerStrategy}`)
 
     await this.updateProgress(72, 'chunking', 'processing', `Chunking with ${chunkerStrategy} strategy`)
 
     const chonkieChunks = await chunkWithChonkie(markdown, {
       chunker_type: chunkerStrategy,
-      chunk_size: 512,  // or 768 for alignment with embeddings
+      ...(chunkSize ? { chunk_size: chunkSize } : {}),  // Let wrapper apply strategy-specific defaults
       timeout: 300000   // 5 minutes base timeout (scales with document size)
     })
 
@@ -638,7 +651,11 @@ export class PDFProcessor extends SourceProcessor {
       },
       wordCount: markdown.split(/\s+/).length
     }
+  } finally {
+    // Always stop heartbeat when processing ends (success or error)
+    this.stopHeartbeat()
   }
+}
 
   /**
    * Mark document for user review

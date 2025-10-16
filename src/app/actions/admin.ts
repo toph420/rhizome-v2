@@ -2,166 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-
-/**
- * Delete a document and all associated data.
- * This comprehensively removes:
- * - Document record
- * - All chunks
- * - All ECS entities (annotations, flashcards, etc.)
- * - All chunk connections
- * - All background jobs
- * - All storage files (source, markdown, cover)
- */
-export async function deleteDocument(documentId: string) {
-  const supabase = await createClient()
-
-  try {
-    console.log(`[deleteDocument] Starting deletion for document ${documentId}`)
-
-    // Get document info for storage path
-    const { data: doc, error: docError } = await supabase
-      .from('documents')
-      .select('user_id, storage_path')
-      .eq('id', documentId)
-      .single()
-
-    if (docError) throw docError
-    if (!doc) throw new Error('Document not found')
-
-    // 1. Get all chunk IDs for this document (needed for ECS cleanup)
-    const { data: chunks, error: chunksError } = await supabase
-      .from('chunks')
-      .select('id')
-      .eq('document_id', documentId)
-
-    if (chunksError) throw chunksError
-
-    const chunkIds = chunks?.map(c => c.id) || []
-    console.log(`[deleteDocument] Found ${chunkIds.length} chunks to delete`)
-
-    // 2. Delete ECS entities related to chunks (annotations, flashcards, etc.)
-    if (chunkIds.length > 0) {
-      // Get entity IDs from components that reference these chunks
-      // Query components where data JSONB contains chunk_id matching our list
-      const { data: components, error: componentsError } = await supabase
-        .from('components')
-        .select('entity_id, data')
-        .eq('component_type', 'source')
-
-      if (componentsError) throw componentsError
-
-      // Filter in JavaScript since PostgREST JSONB filtering is complex
-      const relevantComponents = components?.filter(c => {
-        const chunkId = c.data?.chunk_id
-        return chunkId && chunkIds.includes(chunkId)
-      }) || []
-
-      const entityIds = [...new Set(relevantComponents.map(c => c.entity_id))]
-
-      if (entityIds.length > 0) {
-        console.log(`[deleteDocument] Deleting ${entityIds.length} ECS entities`)
-
-        // Delete all components for these entities
-        const { error: deleteComponentsError } = await supabase
-          .from('components')
-          .delete()
-          .in('entity_id', entityIds)
-
-        if (deleteComponentsError) throw deleteComponentsError
-
-        // Delete entities
-        const { error: deleteEntitiesError } = await supabase
-          .from('entities')
-          .delete()
-          .in('id', entityIds)
-
-        if (deleteEntitiesError) throw deleteEntitiesError
-      }
-
-      // 3. Delete connections (delete in two passes to avoid complex OR query)
-      // First delete where these chunks are the source
-      const { error: connectionsError1 } = await supabase
-        .from('connections')
-        .delete()
-        .in('source_chunk_id', chunkIds)
-
-      if (connectionsError1) console.warn('[deleteDocument] Error deleting source connections:', connectionsError1)
-
-      // Then delete where these chunks are the target
-      const { error: connectionsError2 } = await supabase
-        .from('connections')
-        .delete()
-        .in('target_chunk_id', chunkIds)
-
-      if (connectionsError2) console.warn('[deleteDocument] Error deleting target connections:', connectionsError2)
-
-      // 4. Delete chunks
-      const { error: deleteChunksError } = await supabase
-        .from('chunks')
-        .delete()
-        .eq('document_id', documentId)
-
-      if (deleteChunksError) throw deleteChunksError
-    }
-
-    // 5. Delete background jobs (use entity_id, not document_id)
-    const { error: jobsError } = await supabase
-      .from('background_jobs')
-      .delete()
-      .eq('entity_id', documentId)
-
-    if (jobsError) console.warn('[deleteDocument] Error deleting jobs:', jobsError)
-
-    // 6. Delete import_pending records
-    const { error: importError } = await supabase
-      .from('import_pending')
-      .delete()
-      .eq('document_id', documentId)
-
-    if (importError) console.warn('[deleteDocument] Error deleting import records:', importError)
-
-    // 7. Delete storage files if storage_path exists
-    if (doc.storage_path) {
-      console.log(`[deleteDocument] Deleting storage files at ${doc.storage_path}`)
-
-      // List all files in the document's storage folder
-      const { data: files, error: listError } = await supabase.storage
-        .from('documents')
-        .list(doc.storage_path)
-
-      if (listError) {
-        console.warn('[deleteDocument] Error listing storage files:', listError)
-      } else if (files && files.length > 0) {
-        // Delete all files
-        const filePaths = files.map(f => `${doc.storage_path}/${f.name}`)
-        const { error: deleteFilesError } = await supabase.storage
-          .from('documents')
-          .remove(filePaths)
-
-        if (deleteFilesError) {
-          console.warn('[deleteDocument] Error deleting storage files:', deleteFilesError)
-        }
-      }
-    }
-
-    // 8. Finally, delete the document record
-    const { error: deleteDocError } = await supabase
-      .from('documents')
-      .delete()
-      .eq('id', documentId)
-
-    if (deleteDocError) throw deleteDocError
-
-    console.log(`[deleteDocument] Successfully deleted document ${documentId}`)
-    revalidatePath('/')
-    return { success: true }
-  } catch (error) {
-    console.error('[deleteDocument] Error:', error)
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return { success: false, error: message }
-  }
-}
+import { deleteDocument } from './delete-document'
 
 /**
  * Retry processing for a failed document.
@@ -548,6 +389,170 @@ export async function fixOrphanedDocuments() {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[fixOrphanedDocuments] Error:', error)
     return { success: false, error: errorMessage, fixed: 0 }
+  }
+}
+
+/**
+ * Pause a currently processing job.
+ * Job must be in 'processing' status.
+ * Marks job as 'paused' with timestamp and reason.
+ */
+export async function pauseJob(jobId: string) {
+  const supabase = await createClient()
+
+  try {
+    // Get job details
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single()
+
+    if (jobError) throw jobError
+    if (!job) throw new Error('Job not found')
+
+    if (job.status !== 'processing') {
+      return { success: false, error: 'Can only pause processing jobs' }
+    }
+
+    // Update job to paused status
+    const { error: updateError } = await supabase
+      .from('background_jobs')
+      .update({
+        status: 'paused',
+        paused_at: new Date().toISOString(),
+        pause_reason: 'User requested pause'
+      })
+      .eq('id', jobId)
+
+    if (updateError) throw updateError
+
+    revalidatePath('/')
+    revalidatePath('/admin')
+    return { success: true }
+  } catch (error) {
+    console.error('[pauseJob] Error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Resume a paused job.
+ * Job must be in 'paused' status.
+ * Validates checkpoint exists before resuming.
+ */
+export async function resumeJob(jobId: string) {
+  const supabase = await createClient()
+
+  try {
+    // Get job details
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single()
+
+    if (jobError) throw jobError
+    if (!job) throw new Error('Job not found')
+
+    if (job.status !== 'paused') {
+      return { success: false, error: 'Can only resume paused jobs' }
+    }
+
+    // Validate checkpoint if exists
+    if (job.last_checkpoint_path) {
+      // Check if checkpoint file exists in storage
+      const pathParts = job.last_checkpoint_path.split('/')
+      const fileName = pathParts.pop()
+      const folderPath = pathParts.join('/')
+
+      const { data: files, error: listError } = await supabase.storage
+        .from('documents')
+        .list(folderPath)
+
+      if (listError) {
+        console.warn('[resumeJob] Could not verify checkpoint:', listError)
+        // Continue anyway - handler will handle missing checkpoint gracefully
+      } else {
+        const checkpointExists = files?.some(f => f.name === fileName)
+        if (!checkpointExists) {
+          console.warn('[resumeJob] Checkpoint file not found, will restart from beginning')
+        }
+      }
+    }
+
+    // Update job to pending (will be picked up by worker)
+    const { error: updateError } = await supabase
+      .from('background_jobs')
+      .update({
+        status: 'pending',
+        resumed_at: new Date().toISOString(),
+        resume_count: (job.resume_count || 0) + 1
+      })
+      .eq('id', jobId)
+
+    if (updateError) throw updateError
+
+    revalidatePath('/')
+    revalidatePath('/admin')
+    return { success: true }
+  } catch (error) {
+    console.error('[resumeJob] Error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Retry a failed job.
+ * Resets job to pending status and increments retry count.
+ */
+export async function retryJob(jobId: string) {
+  const supabase = await createClient()
+
+  try {
+    // Get job details
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single()
+
+    if (jobError) throw jobError
+    if (!job) throw new Error('Job not found')
+
+    // Can retry failed or cancelled jobs
+    if (!['failed', 'cancelled'].includes(job.status)) {
+      return { success: false, error: 'Can only retry failed or cancelled jobs' }
+    }
+
+    // Check retry limit
+    if (job.retry_count >= (job.max_retries || 3)) {
+      return { success: false, error: 'Max retries exceeded. Use "Restart" instead.' }
+    }
+
+    // Update job to pending for retry
+    const { error: updateError } = await supabase
+      .from('background_jobs')
+      .update({
+        status: 'pending',
+        retry_count: (job.retry_count || 0) + 1,
+        next_retry_at: null,
+        resumed_at: new Date().toISOString(),
+        last_error: null // Clear previous error
+      })
+      .eq('id', jobId)
+
+    if (updateError) throw updateError
+
+    revalidatePath('/')
+    revalidatePath('/admin')
+    return { success: true }
+  } catch (error) {
+    console.error('[retryJob] Error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
   }
 }
 

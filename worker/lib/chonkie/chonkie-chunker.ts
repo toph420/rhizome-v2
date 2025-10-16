@@ -78,12 +78,12 @@ const BASE_TIMEOUT_MS: Record<ChonkieStrategy, number> = {
  * })
  *
  * @example
- * // With semantic chunker (slower, higher quality)
+ * // With semantic chunker (matches final embedding model)
  * const chunks = await chunkWithChonkie(markdown, {
  *   chunker_type: 'semantic',
- *   chunk_size: 512,
- *   embedding_model: 'all-MiniLM-L6-v2',
- *   threshold: 0.7
+ *   chunk_size: 512
+ *   // embedding_model defaults to 'all-mpnet-base-v2' (matches final embeddings)
+ *   // threshold defaults to 0.7 (balanced sensitivity)
  * })
  */
 export async function chunkWithChonkie(
@@ -101,24 +101,39 @@ export async function chunkWithChonkie(
     throw new Error('config.chunker_type is required')
   }
 
+  // Apply strategy-specific defaults
+  const enhancedConfig = { ...config }
+
+  // Semantic and Late chunkers: Use same embedding model as final embeddings for consistency
+  if (config.chunker_type === 'semantic' || config.chunker_type === 'late') {
+    enhancedConfig.embedding_model = config.embedding_model || 'all-mpnet-base-v2'
+
+    // Semantic chunker: Increase chunk_size to allow larger chunks
+    // Per official example: https://docs.chonkie.ai/oss/chunkers/semantic-chunker
+    if (config.chunker_type === 'semantic') {
+      enhancedConfig.chunk_size = config.chunk_size ?? 1024  // Double the default
+      enhancedConfig.threshold = config.threshold ?? 0.6    // Match official example
+    }
+  }
+
   // Calculate dynamic timeout
   const baseTimeout = BASE_TIMEOUT_MS[config.chunker_type] || 300000
   const docSizeMultiplier = Math.max(1, Math.ceil(cleanedMarkdown.length / 100000))
-  const timeout = config.timeout || (baseTimeout * docSizeMultiplier)
+  const timeout = enhancedConfig.timeout || (baseTimeout * docSizeMultiplier)
 
   // Script path (relative to this file)
   const scriptPath = path.join(__dirname, '../../scripts/chonkie_chunk.py')
 
   console.log('[Chonkie] Starting chunking...')
-  console.log(`  Strategy: ${config.chunker_type}`)
+  console.log(`  Strategy: ${enhancedConfig.chunker_type}`)
   console.log(`  Document size: ${Math.round(cleanedMarkdown.length / 1024)}KB`)
   console.log(`  Timeout: ${Math.round(timeout / 1000)}s`)
-  console.log(`  Config: ${JSON.stringify({ ...config, timeout })}`)
+  console.log(`  Config: ${JSON.stringify({ ...enhancedConfig, timeout })}`)
 
   return runChonkieScript(
     scriptPath,
     cleanedMarkdown,
-    config,
+    enhancedConfig,
     timeout,
     startTime
   )

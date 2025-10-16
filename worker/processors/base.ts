@@ -15,6 +15,7 @@ import { classifyError, getUserFriendlyError } from '../lib/errors.js'
 import { batchInsertChunks, calculateOptimalBatchSize } from '../lib/batch-operations.js'
 import type { ChunkMetadata, PartialChunkMetadata } from '../types/metadata.js'
 import { saveToStorage } from '../lib/storage-helpers.js'
+import { createHash } from 'crypto'
 
 /**
  * Background job interface from database.
@@ -55,6 +56,8 @@ export abstract class SourceProcessor {
   protected readonly job: BackgroundJob
   /** Processing configuration options */
   protected readonly options: ProcessingOptions
+  /** Heartbeat timer for keeping job alive indicator */
+  private heartbeatTimer?: NodeJS.Timeout
 
   /**
    * Creates a new source processor instance.
@@ -121,9 +124,50 @@ export abstract class SourceProcessor {
   abstract process(): Promise<ProcessResult>
 
   /**
+   * Starts heartbeat mechanism that updates job.updated_at every 5 seconds.
+   * This provides visual "alive" indication in the UI (green pulse).
+   *
+   * Call this at the beginning of long-running operations.
+   * Automatically stopped by stopHeartbeat() in finally blocks.
+   */
+  protected startHeartbeat(): void {
+    // Clear any existing heartbeat
+    this.stopHeartbeat()
+
+    // Update every 5 seconds
+    this.heartbeatTimer = setInterval(async () => {
+      try {
+        await this.supabase
+          .from('background_jobs')
+          .update({
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', this.job.id)
+      } catch (error) {
+        // Non-critical - just log the error
+        console.warn(`[Heartbeat] Failed to update for job ${this.job.id}:`, error)
+      }
+    }, 5000)
+
+    console.log(`[Heartbeat] Started for job ${this.job.id}`)
+  }
+
+  /**
+   * Stops the heartbeat timer.
+   * Should be called in finally blocks to ensure cleanup.
+   */
+  protected stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = undefined
+      console.log(`[Heartbeat] Stopped for job ${this.job.id}`)
+    }
+  }
+
+  /**
    * Updates job progress in the database.
    * Provides real-time status tracking for UI display.
-   * 
+   *
    * @param percent - Percentage complete (0-100)
    * @param stage - Current processing stage
    * @param substage - Optional sub-stage within current stage
@@ -148,6 +192,7 @@ export abstract class SourceProcessor {
             stage: stage,
             substage: substage,
             details: details,
+            updated_at: new Date().toISOString(), // Add timestamp to progress
             ...additionalData
           }
         })
@@ -308,11 +353,16 @@ export abstract class SourceProcessor {
    * Error handling: Non-fatal (logs warning, doesn't throw). Storage failures won't
    * interrupt processing - data is still saved to database.
    *
+   * Checkpoint tracking: When pauseSafe=true, updates job metadata with checkpoint info
+   * for pause/resume functionality.
+   *
    * @param stage - Stage name (e.g., "extraction", "chunking", "metadata", "manifest")
    * @param data - Stage data to save (must be JSON-serializable)
    * @param options - Optional configuration
    * @param options.final - If true, saves to final filename (e.g., chunks.json).
    *                        If false, saves to stage-{name}.json for checkpointing.
+   * @param options.pauseSafe - If true, marks this stage as a safe pause point and
+   *                            tracks checkpoint in job metadata for resumption.
    *
    * @example
    * ```typescript
@@ -321,8 +371,9 @@ export abstract class SourceProcessor {
    *   markdown: extractedMarkdown,
    *   doclingChunks: rawChunks,
    *   structure: doclingStructure
-   * }, { final: false })
+   * }, { final: false, pauseSafe: true })
    * // → Saves to: documents/{userId}/{docId}/stage-extraction.json
+   * // → Updates job with checkpoint info for pause/resume
    *
    * // Save final result (permanent export)
    * await this.saveStageResult('chunks', enrichedChunks, { final: true })
@@ -336,7 +387,7 @@ export abstract class SourceProcessor {
   protected async saveStageResult(
     stage: string,
     data: any,
-    options?: { final?: boolean }
+    options?: { final?: boolean; pauseSafe?: boolean }
   ): Promise<void> {
     try {
       // Determine filename based on final flag
@@ -374,6 +425,56 @@ export abstract class SourceProcessor {
       console.log(
         `[BaseProcessor] ✓ Saved ${options?.final ? 'final' : 'stage'} result: ${fullPath}`
       )
+
+      // NEW: Track checkpoint in job metadata if pause-safe
+      if (options?.pauseSafe && this.job.id) {
+        try {
+          // Generate hash of checkpoint data for validation
+          const checkpointHash = createHash('sha256')
+            .update(JSON.stringify(enrichedData))
+            .digest('hex')
+            .substring(0, 16) // Use first 16 chars for brevity
+
+          // Get current progress to preserve existing data
+          const { data: currentJob } = await this.supabase
+            .from('background_jobs')
+            .select('progress')
+            .eq('id', this.job.id)
+            .single()
+
+          const currentProgress = currentJob?.progress || {}
+
+          // Update job with checkpoint info
+          await this.supabase
+            .from('background_jobs')
+            .update({
+              last_checkpoint_path: fullPath,
+              last_checkpoint_stage: stage,
+              checkpoint_hash: checkpointHash,
+              progress: {
+                ...currentProgress,
+                checkpoint: {
+                  stage,
+                  path: fullPath,
+                  timestamp: new Date().toISOString(),
+                  can_resume: true,
+                  hash: checkpointHash
+                }
+              }
+            })
+            .eq('id', this.job.id)
+
+          console.log(
+            `[BaseProcessor] ✓ Checkpoint tracked for job ${this.job.id} at stage: ${stage}`
+          )
+        } catch (checkpointError) {
+          // Non-critical - just log the error
+          console.warn(
+            `[BaseProcessor] Failed to track checkpoint for ${stage}:`,
+            checkpointError instanceof Error ? checkpointError.message : checkpointError
+          )
+        }
+      }
 
     } catch (error) {
       // Non-fatal: log warning but continue processing

@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -12,8 +13,18 @@ import {
   FileText,
   Database,
   Network,
+  GitBranch,
+  Zap,
+  BookOpen,
+  RefreshCw,
+  Pause,
+  Play,
+  RotateCw,
+  Trash2,
+  PauseCircle,
 } from 'lucide-react'
 import { type JobStatus } from '@/stores/admin/background-jobs'
+import { pauseJob, resumeJob, retryJob, deleteJob } from '@/app/actions/admin'
 
 interface JobListProps {
   jobs: JobStatus[]
@@ -25,15 +36,25 @@ interface JobListProps {
 type JobFilter = 'all' | 'import' | 'export' | 'connections' | 'active' | 'completed' | 'failed'
 
 const jobTypeLabels: Record<JobStatus['type'], string> = {
+  process_document: 'Processing',
   import_document: 'Import',
   export_documents: 'Export',
   reprocess_connections: 'Connections',
+  detect_connections: 'Detecting',
+  obsidian_export: 'Obsidian Export',
+  obsidian_sync: 'Obsidian Sync',
+  readwise_import: 'Readwise Import',
 }
 
 const jobTypeIcons: Record<JobStatus['type'], React.ReactNode> = {
-  import_document: <Database className="size-4" />,
-  export_documents: <FileText className="size-4" />,
-  reprocess_connections: <Network className="size-4" />,
+  process_document: <Zap className="size-4 text-primary" />,
+  import_document: <Database className="size-4 text-blue-600" />,
+  export_documents: <FileText className="size-4 text-purple-600" />,
+  reprocess_connections: <Network className="size-4 text-orange-600" />,
+  detect_connections: <GitBranch className="size-4 text-pink-600" />,
+  obsidian_export: <RefreshCw className="size-4 text-indigo-600" />,
+  obsidian_sync: <RefreshCw className="size-4 text-indigo-600" />,
+  readwise_import: <BookOpen className="size-4 text-green-600" />,
 }
 
 const getStatusIcon = (status: JobStatus['status']) => {
@@ -42,32 +63,38 @@ const getStatusIcon = (status: JobStatus['status']) => {
       return <AlertCircle className="size-4 text-yellow-600" />
     case 'processing':
       return <Loader2 className="size-4 animate-spin text-blue-600" />
+    case 'paused':
+      return <PauseCircle className="size-4 text-orange-600" />
     case 'completed':
       return <CheckCircle2 className="size-4 text-green-600" />
     case 'failed':
       return <XCircle className="size-4 text-red-600" />
+    case 'cancelled':
+      return <XCircle className="size-4 text-gray-600" />
   }
 }
 
 const getStatusBadge = (status: JobStatus['status']) => {
-  const variants = {
-    pending: 'secondary' as const,
-    processing: 'default' as const,
-    completed: 'default' as const,
-    failed: 'destructive' as const,
+  const variants: Record<JobStatus['status'], 'default' | 'secondary' | 'destructive' | 'outline'> = {
+    pending: 'secondary',
+    processing: 'default',
+    paused: 'outline',
+    completed: 'default',
+    failed: 'destructive',
+    cancelled: 'secondary',
+  }
+
+  const customColors: Record<JobStatus['status'], string> = {
+    pending: '',
+    processing: 'bg-blue-600 hover:bg-blue-700',
+    paused: 'border-orange-600 text-orange-600',
+    completed: 'bg-green-600 hover:bg-green-700',
+    failed: '',
+    cancelled: '',
   }
 
   return (
-    <Badge
-      variant={variants[status]}
-      className={
-        status === 'completed'
-          ? 'bg-green-600 hover:bg-green-700'
-          : status === 'processing'
-            ? 'bg-blue-600 hover:bg-blue-700'
-            : ''
-      }
-    >
+    <Badge variant={variants[status]} className={customColors[status]}>
       {status}
     </Badge>
   )
@@ -203,46 +230,244 @@ export function JobList({
 }
 
 /**
- * Individual job card component
+ * Get intelligent display name for job based on type, metadata, and options
+ */
+function getJobDisplayName(job: JobStatus): string {
+  const title = job.metadata?.title
+  const mode = job.input_data?.mode
+  const count = job.metadata?.documentIds?.length
+  const jobTypeLabel = jobTypeLabels[job.type] || job.type
+
+  // Format mode for display
+  const formatMode = (m: string): string => {
+    const modes: Record<string, string> = {
+      smart: 'Smart Mode',
+      all: 'Reprocess All',
+      add_new: 'Add New',
+    }
+    return modes[m] || m
+  }
+
+  switch (job.type) {
+    case 'process_document':
+      return title ? `Processing: ${title}` : 'Processing document'
+
+    case 'import_document': {
+      const base = title ? `Import: ${title}` : 'Importing document'
+      const options = []
+      if (job.input_data?.regenerateEmbeddings) options.push('with embeddings')
+      if (job.input_data?.reprocessConnections) options.push('with connections')
+      return options.length > 0 ? `${base} (${options.join(', ')})` : base
+    }
+
+    case 'export_documents':
+      if (count && count > 1) {
+        const options = []
+        if (job.input_data?.includeConnections) options.push('with connections')
+        if (job.input_data?.includeAnnotations) options.push('with annotations')
+        const optionsText = options.length > 0 ? ` (${options.join(', ')})` : ''
+        return `Export: ${count} documents${optionsText}`
+      }
+      return title ? `Export: ${title}` : 'Exporting document'
+
+    case 'reprocess_connections': {
+      const base = title ? `Connections: ${title}` : 'Reprocessing connections'
+      return mode ? `${base} (${formatMode(mode)})` : base
+    }
+
+    case 'detect_connections':
+      return title ? `Detecting: ${title}` : 'Detecting connections'
+
+    case 'obsidian_export':
+      return 'Obsidian Export'
+
+    case 'obsidian_sync':
+      return 'Obsidian Sync'
+
+    case 'readwise_import':
+      return 'Readwise Import'
+
+    default:
+      return title || `${jobTypeLabel} Job`
+  }
+}
+
+/**
+ * Individual job card component with control buttons
  */
 function JobCard({ job }: { job: JobStatus }) {
-  const jobTypeLabel = jobTypeLabels[job.type] || job.type
   const jobTypeIcon = jobTypeIcons[job.type]
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Check if job is "alive" (updated within last 10 seconds)
+  const isAlive = job.updatedAt && Date.now() - new Date(job.updatedAt).getTime() < 10000
+
+  // Determine which buttons to show based on job status
+  const canPause = job.status === 'processing' && job.canResume
+  const canResume = job.status === 'paused'
+  const canRetry = job.status === 'failed' || job.status === 'cancelled'
+  const canDelete = job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
+
+  const handlePause = async () => {
+    setIsLoading(true)
+    try {
+      const result = await pauseJob(job.id)
+      if (!result.success) {
+        console.error('Failed to pause job:', result.error)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleResume = async () => {
+    setIsLoading(true)
+    try {
+      const result = await resumeJob(job.id)
+      if (!result.success) {
+        console.error('Failed to resume job:', result.error)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleRetry = async () => {
+    setIsLoading(true)
+    try {
+      const result = await retryJob(job.id)
+      if (!result.success) {
+        console.error('Failed to retry job:', result.error)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setIsLoading(true)
+    try {
+      const result = await deleteJob(job.id)
+      if (!result.success) {
+        console.error('Failed to delete job:', result.error)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
-    <div className="border rounded-lg p-4 space-y-2">
-      {/* Header: Icon, Title, Status */}
+    <div className="border rounded-lg p-4 space-y-3">
+      {/* Header: Icon, Title, Status, Buttons */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           {getStatusIcon(job.status)}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             {jobTypeIcon}
-            <span className="font-medium text-sm">
-              {job.metadata?.title || `${jobTypeLabel} Job`}
-            </span>
+            <span className="font-medium text-sm truncate">{getJobDisplayName(job)}</span>
+            {/* Heartbeat indicator - pulses when job is actively updating */}
+            {isAlive && job.status === 'processing' && (
+              <div
+                className="size-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"
+                title="Active"
+              />
+            )}
           </div>
         </div>
-        {getStatusBadge(job.status)}
+
+        <div className="flex items-center gap-2">
+          {getStatusBadge(job.status)}
+
+          {/* Control Buttons */}
+          <div className="flex gap-1">
+            {canPause && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handlePause}
+                disabled={isLoading || !job.canResume}
+                title={job.canResume ? 'Pause job at next checkpoint' : 'Pause not available yet'}
+                className="h-7 px-2"
+              >
+                <Pause className="size-3" />
+              </Button>
+            )}
+
+            {canResume && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleResume}
+                disabled={isLoading}
+                title="Resume from checkpoint"
+                className="h-7 px-2"
+              >
+                <Play className="size-3" />
+              </Button>
+            )}
+
+            {canRetry && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleRetry}
+                disabled={isLoading}
+                title="Retry job"
+                className="h-7 px-2"
+              >
+                <RotateCw className="size-3" />
+              </Button>
+            )}
+
+            {canDelete && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleDelete}
+                disabled={isLoading}
+                title="Delete job"
+                className="h-7 px-2 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="size-3" />
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Progress Bar (only for processing jobs) */}
-      {job.status === 'processing' && <Progress value={job.progress} className="h-2" />}
+      {/* Progress Bar (only for processing/paused jobs) */}
+      {(job.status === 'processing' || job.status === 'paused') && (
+        <div className="space-y-1">
+          <Progress value={job.progress} className="h-2" />
+          {job.progress !== undefined && (
+            <div className="flex justify-between items-center">
+              <p className="text-xs text-muted-foreground flex-1">{job.details}</p>
+              <span className="text-xs text-muted-foreground ml-2">{job.progress}%</span>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Details */}
-      <p className="text-xs text-muted-foreground">{job.details}</p>
+      {/* Checkpoint info for paused jobs */}
+      {job.status === 'paused' && job.checkpointStage && (
+        <div className="bg-orange-50 border border-orange-200 rounded p-2">
+          <p className="text-xs text-orange-800">
+            Paused at: {job.checkpointStage}
+            {job.pauseReason && ` • ${job.pauseReason}`}
+          </p>
+        </div>
+      )}
+
+      {/* Details for non-processing/paused jobs */}
+      {job.status !== 'processing' && job.status !== 'paused' && job.details && (
+        <p className="text-xs text-muted-foreground">{job.details}</p>
+      )}
 
       {/* Error Message */}
       {job.error && (
         <div className="bg-red-50 border border-red-200 rounded p-2">
           <p className="text-xs text-red-600">{job.error}</p>
         </div>
-      )}
-
-      {/* Metadata (document IDs for batch exports, etc.) */}
-      {job.metadata?.documentIds && job.metadata.documentIds.length > 1 && (
-        <p className="text-xs text-muted-foreground">
-          {job.metadata.documentIds.length} documents
-        </p>
       )}
     </div>
   )

@@ -1,15 +1,19 @@
 /**
- * YouTube transcript processor with AI-powered cleaning and fuzzy positioning.
- * Handles 7-stage processing pipeline for extracting and enhancing YouTube content.
- * 
- * Pipeline stages:
- * 1. Transcript fetching (10-15%)
- * 2. Original backup (15-20%) 
- * 3. AI cleaning (20-25%)
- * 4. Semantic rechunking (25-80%)
- * 5. Fuzzy positioning (80-90%)
- * 6. Embeddings generation (90-95%)
- * 7. Storage (95-100%)
+ * YouTube Processor with Chonkie Unified Chunking Pipeline
+ *
+ * CHONKIE INTEGRATION: Specialized 9-stage processing flow
+ * 1. Transcript Fetching (10-20%) - YouTube API extraction
+ * 2. AI Cleaning (20-30%) - Transcript formatting
+ * 3. Chonkie Chunking (30-40%) - User-selected strategy (9 options)
+ * 4. Fuzzy Positioning (40-50%) - Map chunks to original transcript for timestamps
+ * 5. Metadata Enrichment (50-75%) - PydanticAI + Ollama
+ * 6. Local Embeddings (75-90%) - Transformers.js
+ * 7. Finalize (90-100%) - Storage + manifest
+ *
+ * Special Features:
+ * - Preserves YouTube timestamps via fuzzy matching
+ * - Graceful degradation if AI cleaning fails
+ * - Document-level timestamp storage for clickable links
  */
 
 import { SourceProcessor } from './base.js'
@@ -17,9 +21,19 @@ import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
 import { fuzzyMatchChunkToSource } from '../lib/fuzzy-matching.js'
-import { batchChunkAndExtractMetadata } from '../lib/ai-chunking-batch.js'
-import type { MetadataExtractionProgress } from '../types/ai-metadata.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
+// Chonkie Integration
+import { chunkWithChonkie } from '../lib/chonkie/chonkie-chunker.js'
+import type { ChonkieStrategy } from '../lib/chonkie/types.js'
+// Local metadata enrichment
+import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-metadata.js'
+// Local embeddings
+import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
+import { generateEmbeddings } from '../lib/embeddings.js'
+// Storage
+import { hashMarkdown } from '../lib/cached-chunks.js'
+// Statistics
+import { calculateChunkStatistics, logChunkStatistics } from '../lib/chunking/chunk-statistics.js'
 
 /**
  * Processes YouTube videos by fetching transcripts, cleaning with AI,
@@ -29,114 +43,123 @@ import { GEMINI_MODEL } from '../lib/model-config.js'
  */
 export class YouTubeProcessor extends SourceProcessor {
   /**
-   * Process YouTube video through 7-stage pipeline.
+   * Process YouTube video through Chonkie pipeline with fuzzy positioning.
    * @returns Processed markdown, chunks, and source_metadata with timestamps
    */
   async process(): Promise<ProcessResult> {
+    // Start heartbeat for UI pulse indicator
+    this.startHeartbeat()
+
     try {
       const sourceUrl = this.job.input_data.source_url as string | undefined
       if (!sourceUrl) {
         throw this.createError('Source URL required for YouTube processing', 'YOUTUBE_MISSING_URL')
       }
 
-      // Stage 1: Transcript fetching (10-15%)
+      // Stage 1: Transcript fetching (10-20%)
       await this.updateProgress(10, 'download', 'fetching', 'Fetching YouTube transcript')
-      
+
       const videoId = extractVideoId(sourceUrl)
       if (!videoId) {
         throw this.createError('Invalid YouTube URL format', 'YOUTUBE_INVALID_ID')
       }
-      
+
       // Fetch transcript with retry logic
       const transcript = await this.withRetry(
         () => fetchTranscriptWithRetry(videoId),
         'fetch_transcript'
       )
-      
+
       const rawMarkdown = formatTranscriptToMarkdown(transcript, sourceUrl)
-      
-      // Stage 2: Prepare for AI cleaning (15-20%)
+
+      console.log(`[YouTubeProcessor] Fetched transcript: ${rawMarkdown.length} characters`)
       await this.updateProgress(20, 'download', 'complete', 'Transcript fetched successfully')
-      
-      // Stage 3: AI cleaning (20-25%)
-      await this.updateProgress(20, 'extract', 'cleaning', 'Cleaning transcript with AI')
-      console.log('🧹 DEBUG: Calling cleanYoutubeTranscript, markdown length:', rawMarkdown.length)
-      
+
+      // Stage 2: AI cleaning (20-30%)
+      await this.updateProgress(23, 'extract', 'cleaning', 'Cleaning transcript with AI')
+      console.log('[YouTubeProcessor] Calling cleanYoutubeTranscript, markdown length:', rawMarkdown.length)
+
       const cleaningResult = await cleanYoutubeTranscript(this.ai, rawMarkdown)
-      console.log('✨ DEBUG: Cleaning result:', { 
-        success: cleaningResult.success, 
-        cleanedLength: cleaningResult.cleaned.length, 
-        error: cleaningResult.error 
+      console.log('[YouTubeProcessor] Cleaning result:', {
+        success: cleaningResult.success,
+        cleanedLength: cleaningResult.cleaned.length,
+        error: cleaningResult.error
       })
-      
+
       let markdown: string
       if (cleaningResult.success) {
         markdown = cleaningResult.cleaned
-        await this.updateProgress(25, 'extract', 'cleaned', 'Transcript cleaned successfully')
+        await this.updateProgress(30, 'extract', 'cleaned', 'Transcript cleaned successfully')
       } else {
         // Graceful degradation: use original markdown
         markdown = rawMarkdown
-        console.warn(`AI cleaning failed for ${videoId}, using original transcript:`, cleaningResult.error)
-        await this.updateProgress(25, 'extract', 'warning', 
+        console.warn(`[YouTubeProcessor] AI cleaning failed for ${videoId}, using original transcript:`, cleaningResult.error)
+        await this.updateProgress(30, 'extract', 'warning',
           `Cleaning failed: ${cleaningResult.error}. Using original transcript.`)
       }
-      
-      // Stage 4: AI metadata extraction with chunking (25-90%)
-      await this.updateProgress(30, 'extract', 'ai-metadata', 'Processing with AI metadata extraction')
 
-      console.log(`[YouTubeProcessor] Using AI metadata extraction for ${markdown.length} character transcript`)
+      // Checkpoint 1: Save cleaned markdown
+      await this.saveStageResult('cleanup', { markdown, raw_markdown: rawMarkdown })
 
-      const aiChunks = await batchChunkAndExtractMetadata(
-        markdown,
-        {
-          apiKey: process.env.GOOGLE_AI_API_KEY,
-          modelName: GEMINI_MODEL,
-          enableProgress: true
-        },
-        async (progress: MetadataExtractionProgress) => {
-          // Map AI extraction progress to overall progress (30-85%)
-          const aiProgressPercent = (progress.batchesProcessed + 1) / progress.totalBatches
-          const overallPercent = 30 + Math.floor(aiProgressPercent * 55)
+      // Stage 3: Chonkie Chunking (30-40%)
+      const chunkerStrategy: ChonkieStrategy = (this.job.input_data?.chunkerStrategy as ChonkieStrategy) || 'recursive'
+      const chunkSize = this.job.input_data?.chunkSize as number | undefined
+      console.log(`[YouTubeProcessor] Stage 3: Chunking with Chonkie strategy: ${chunkerStrategy}`)
 
-          await this.updateProgress(
-            overallPercent,
-            'extract',
-            progress.phase,
-            `AI extraction: batch ${progress.batchesProcessed + 1}/${progress.totalBatches} (${progress.chunksIdentified} chunks identified)`
-          )
-        }
-      )
+      await this.updateProgress(33, 'chunking', 'processing', `Chunking with ${chunkerStrategy} strategy`)
 
-      await this.updateProgress(85, 'extract', 'chunked', `Created ${aiChunks.length} semantic chunks with AI metadata`)
+      const chonkieChunks = await chunkWithChonkie(markdown, {
+        chunker_type: chunkerStrategy,
+        ...(chunkSize ? { chunk_size: chunkSize } : {}),  // Let wrapper apply strategy-specific defaults
+        timeout: 300000
+      })
 
-      // Stage 5: Fuzzy positioning (85-90%)
-      // Match chunks back to original source for accurate character offsets
-      await this.updateProgress(87, 'extract', 'positioning', 'Applying fuzzy position matching')
+      console.log(`[YouTubeProcessor] Chonkie created ${chonkieChunks.length} chunks using ${chunkerStrategy} strategy`)
+      await this.updateProgress(40, 'chunking', 'complete', `${chonkieChunks.length} chunks created`)
+
+      // Stage 4: Fuzzy Positioning (40-50%)
+      // CRITICAL: Map chunks back to original transcript for accurate character offsets and timestamps
+      await this.updateProgress(43, 'positioning', 'processing', 'Applying fuzzy position matching')
 
       let highConfidenceCount = 0
       let exactMatchCount = 0
       let approximateCount = 0
 
-      // Convert AI chunks to ProcessedChunk format with fuzzy-matched offsets
-      const enhancedChunks = aiChunks.map((aiChunk, i) => {
-        // Match chunk to source for position data
-        const matchResult = fuzzyMatchChunkToSource(aiChunk.content, rawMarkdown, i, aiChunks.length)
+      // Convert Chonkie chunks with fuzzy-matched offsets
+      let finalChunks: ProcessedChunk[] = chonkieChunks.map((chunk, index) => {
+        // Match chunk to source for position data (uses raw markdown for timestamp accuracy)
+        const matchResult = fuzzyMatchChunkToSource(chunk.text, rawMarkdown, index, chonkieChunks.length)
 
         // Track match quality metrics
         if (matchResult.method === 'exact') exactMatchCount++
         if (matchResult.confidence >= 0.7) highConfidenceCount++
         if (matchResult.method === 'approximate') approximateCount++
 
-        // Build enhanced chunk with AI metadata + fuzzy-matched offsets
-        // NOTE: Timestamps are NOT stored at chunk level - they're in document.source_metadata
-        // NOTE: document_id is added by process-document handler, not here
-        return this.mapAIChunkToDatabase({
-          ...aiChunk,
-          chunk_index: i,
-          // Override with fuzzy-matched offsets (more accurate for YouTube)
-          start_offset: matchResult.startOffset,
-          end_offset: matchResult.endOffset
-        }) as ProcessedChunk
+        return {
+          document_id: this.job.document_id,
+          chunk_index: index,
+          content: chunk.text,
+          start_offset: matchResult.startOffset,  // Fuzzy-matched offsets for timestamps
+          end_offset: matchResult.endOffset,
+          token_count: chunk.token_count || 0,
+          word_count: chunk.text.split(/\s+/).length,
+          heading_path: null,
+          heading_level: null,
+          page_start: null,
+          page_end: null,
+          section_marker: null,
+          bboxes: null,
+          metadata_overlap_count: 0,
+          metadata_confidence: 'none',
+          metadata_interpolated: false,
+          themes: [],
+          importance_score: 0.5,
+          summary: null,
+          emotional_metadata: null,
+          conceptual_metadata: null,
+          domain_metadata: null,
+          metadata_extracted_at: null
+        }
       })
 
       // Report positioning quality
@@ -144,15 +167,148 @@ export class YouTubeProcessor extends SourceProcessor {
         exact: exactMatchCount,
         highConfidence: highConfidenceCount,
         approximate: approximateCount,
-        total: aiChunks.length
+        total: chonkieChunks.length
       }
 
-      console.log('📍 Positioning quality:', positioningQuality)
-      await this.updateProgress(90, 'extract', 'positioned',
-        `Positioned ${highConfidenceCount}/${aiChunks.length} chunks with high confidence`)
-      
-      // Note: Stages 7 (embeddings) and 8 (storage) are handled by the main handler
-      // This processor returns the prepared data for those final stages
+      console.log('[YouTubeProcessor] Positioning quality:', positioningQuality)
+      await this.updateProgress(50, 'positioning', 'complete',
+        `Positioned ${highConfidenceCount}/${chonkieChunks.length} chunks with high confidence`)
+
+      // Checkpoint 2: Save chunks with positions
+      await this.saveStageResult('positioning', finalChunks)
+
+      // Log chunk statistics
+      const chunkingStats = calculateChunkStatistics(finalChunks, 512)
+      logChunkStatistics(chunkingStats, 'YouTube Transcript Chunks (After Chonkie + Fuzzy Positioning)')
+
+      // Stage 5: Metadata Enrichment (50-75%)
+      console.log('[YouTubeProcessor] Stage 5: Starting local metadata enrichment (PydanticAI + Ollama)')
+      await this.updateProgress(53, 'metadata', 'processing', 'Extracting structured metadata')
+
+      try {
+        const BATCH_SIZE = 10
+        const enrichedChunks: ProcessedChunk[] = []
+
+        for (let i = 0; i < finalChunks.length; i += BATCH_SIZE) {
+          const batch = finalChunks.slice(i, i + BATCH_SIZE)
+
+          const batchInput: ChunkInput[] = batch.map(chunk => ({
+            id: `${this.job.document_id}-${chunk.chunk_index}`,
+            content: chunk.content
+          }))
+
+          console.log(`[YouTubeProcessor] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(finalChunks.length / BATCH_SIZE)}`)
+
+          const metadataMap = await extractMetadataBatch(batchInput, {
+            onProgress: (processed, _total) => {
+              const overallProgress = 53 + Math.floor(((i + processed) / finalChunks.length) * 22)
+              this.updateProgress(overallProgress, 'metadata', 'processing', `Enriching chunk ${i + processed}/${finalChunks.length}`)
+            }
+          })
+
+          for (const chunk of batch) {
+            const chunkId = `${this.job.document_id}-${chunk.chunk_index}`
+            const metadata = metadataMap.get(chunkId)
+
+            if (metadata) {
+              enrichedChunks.push({
+                ...chunk,
+                themes: metadata.themes,
+                importance_score: metadata.importance,
+                summary: metadata.summary,
+                emotional_metadata: {
+                  polarity: metadata.emotional.polarity,
+                  primaryEmotion: metadata.emotional.primaryEmotion as any,
+                  intensity: metadata.emotional.intensity
+                },
+                conceptual_metadata: {
+                  concepts: metadata.concepts as any
+                },
+                domain_metadata: {
+                  primaryDomain: metadata.domain as any,
+                  confidence: 0.8
+                },
+                metadata_extracted_at: new Date().toISOString()
+              })
+            } else {
+              console.warn(`[YouTubeProcessor] Metadata extraction failed for chunk ${chunk.chunk_index} - using defaults`)
+              enrichedChunks.push(chunk)
+            }
+          }
+
+          const progress = 53 + Math.floor(((i + batch.length) / finalChunks.length) * 22)
+          await this.updateProgress(progress, 'metadata', 'processing', `Batch ${Math.floor(i / BATCH_SIZE) + 1} complete`)
+        }
+
+        finalChunks = enrichedChunks
+
+        console.log(`[YouTubeProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
+        await this.updateProgress(75, 'metadata', 'complete', 'Metadata enrichment done')
+
+        // Checkpoint 3: Save enriched chunks
+        await this.saveStageResult('metadata', finalChunks, { final: true })
+
+      } catch (error: any) {
+        console.error(`[YouTubeProcessor] Metadata enrichment failed: ${error.message}`)
+        console.warn('[YouTubeProcessor] Continuing with default metadata')
+        await this.updateProgress(75, 'metadata', 'fallback', 'Using default metadata')
+      }
+
+      // Stage 6: Local Embeddings (75-90%)
+      console.log('[YouTubeProcessor] Stage 6: Starting local embeddings generation (Transformers.js)')
+      await this.updateProgress(78, 'embeddings', 'processing', 'Generating local embeddings')
+
+      try {
+        const chunkTexts = finalChunks.map(chunk => chunk.content)
+
+        console.log(`[YouTubeProcessor] Generating embeddings for ${chunkTexts.length} chunks (Xenova/all-mpnet-base-v2)`)
+
+        const startTime = Date.now()
+        const embeddings = await generateEmbeddingsLocal(chunkTexts)
+        const embeddingTime = Date.now() - startTime
+
+        console.log(`[YouTubeProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)
+
+        if (embeddings.length !== finalChunks.length) {
+          throw new Error(`Embedding count mismatch: expected ${finalChunks.length}, got ${embeddings.length}`)
+        }
+
+        finalChunks = finalChunks.map((chunk, idx) => ({
+          ...chunk,
+          embedding: embeddings[idx]
+        }))
+
+        console.log('[YouTubeProcessor] Embeddings attached to all chunks')
+        await this.updateProgress(90, 'embeddings', 'complete', 'Local embeddings generated')
+
+      } catch (error: any) {
+        console.error(`[YouTubeProcessor] Local embeddings failed: ${error.message}`)
+        console.warn('[YouTubeProcessor] Falling back to Gemini embeddings')
+
+        try {
+          const chunkContents = finalChunks.map(chunk => chunk.content)
+          const embeddings = await generateEmbeddings(chunkContents)
+
+          finalChunks = finalChunks.map((chunk, idx) => ({
+            ...chunk,
+            embedding: embeddings[idx]
+          }))
+
+          console.log('[YouTubeProcessor] Gemini embeddings fallback successful')
+          await this.updateProgress(90, 'embeddings', 'fallback', 'Using Gemini embeddings')
+
+        } catch (fallbackError: any) {
+          console.error(`[YouTubeProcessor] Gemini embeddings also failed: ${fallbackError.message}`)
+          await this.updateProgress(90, 'embeddings', 'failed', 'Embeddings generation failed')
+        }
+      }
+
+      // Stage 7: Finalize (90-100%)
+      console.log('[YouTubeProcessor] Stage 7: Finalizing document processing')
+      await this.updateProgress(95, 'finalize', 'formatting', 'Finalizing')
+
+      // Checkpoint 4: Save final chunks
+      await this.saveStageResult('chunks', finalChunks, { final: true })
 
       // Build YouTube source metadata for document-level storage
       // This includes original transcript segments with timestamps
@@ -168,11 +324,33 @@ export class YouTubeProcessor extends SourceProcessor {
         }))
       }
 
+      // Checkpoint 5: Save manifest
+      const manifestData = {
+        document_id: this.job.document_id,
+        processing_mode: 'local',
+        source_type: 'youtube',
+        source_url: sourceUrl,
+        files: {
+          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+          'metadata.json': { size: markdown.length, type: 'final' },
+          'manifest.json': { size: 0, type: 'final' }
+        },
+        chunk_count: finalChunks.length,
+        word_count: markdown.split(/\s+/).filter(word => word.length > 0).length,
+        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+        markdown_hash: hashMarkdown(markdown),
+        chunker_strategy: chunkerStrategy,
+        positioning_quality: positioningQuality
+      }
+      await this.saveStageResult('manifest', manifestData, { final: true })
+
+      await this.updateProgress(100, 'finalize', 'complete', 'YouTube transcript processed successfully')
+
       // Prepare result with complete metadata
       return {
         markdown,
-        chunks: enhancedChunks,
-        outline: undefined, // TODO: Convert to OutlineSection[] format
+        chunks: finalChunks,
+        outline: undefined,
         wordCount: markdown.split(/\s+/).filter(word => word.length > 0).length,
         metadata: {
           source_metadata,
@@ -183,11 +361,11 @@ export class YouTubeProcessor extends SourceProcessor {
             cleaning_applied: cleaningResult.success,
             positioning_quality: positioningQuality,
             timestamp_count: transcript.length,
-            usedAIMetadata: true
+            chunker_strategy: chunkerStrategy
           }
         }
       }
-      
+
     } catch (error: any) {
       // Handle YouTube-specific errors with user-friendly messages
       if (error.message?.includes('YOUTUBE_TRANSCRIPT_DISABLED')) {
@@ -208,13 +386,16 @@ export class YouTubeProcessor extends SourceProcessor {
           'YOUTUBE_RATE_LIMIT'
         )
       }
-      
+
       // Re-throw with context
       throw this.createError(
         `YouTube processing failed: ${error.message}`,
         'YOUTUBE_PROCESSING_ERROR',
         error
       )
+    } finally {
+      // Always stop heartbeat
+      this.stopHeartbeat()
     }
   }
 

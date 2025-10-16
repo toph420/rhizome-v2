@@ -17,18 +17,20 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info, Trash2 } from 'lucide-react'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
+import { deleteDocument } from '@/app/actions/delete-document'
 
 type FilterType = 'all' | 'missing_db' | 'out_sync' | 'healthy'
 
 export function ScannerTab() {
   // Use Zustand store for scan state
-  const { scanResults, scanning, error, scan, invalidate } = useStorageScanStore()
+  const { scanResults, scanning, error, scan, invalidate, removeDocument } = useStorageScanStore()
 
   // Local UI state only
   const [filter, setFilter] = useState<FilterType>('all')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [deletingDocs, setDeletingDocs] = useState<Set<string>>(new Set())
 
   // Auto-scan on mount
   useEffect(() => {
@@ -43,6 +45,45 @@ export function ScannerTab() {
       newExpanded.add(documentId)
     }
     setExpandedRows(newExpanded)
+  }
+
+  const handleDelete = async (documentId: string, title: string) => {
+    // Confirm deletion
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${title}"?\n\n` +
+      'This will permanently remove:\n' +
+      '• Document record\n' +
+      '• All chunks and embeddings\n' +
+      '• All connections\n' +
+      '• All annotations and flashcards\n' +
+      '• All storage files\n\n' +
+      'This action cannot be undone.'
+    )
+
+    if (!confirmed) return
+
+    // Track deletion state
+    setDeletingDocs(prev => new Set([...prev, documentId]))
+
+    try {
+      const result = await deleteDocument(documentId)
+
+      if (result.success) {
+        // Remove from scan results without rescanning
+        removeDocument(documentId)
+      } else {
+        alert(`Failed to delete document: ${result.error}`)
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error)
+      alert('An unexpected error occurred while deleting the document')
+    } finally {
+      setDeletingDocs(prev => {
+        const next = new Set(prev)
+        next.delete(documentId)
+        return next
+      })
+    }
   }
 
   // Filter documents based on selected filter
@@ -325,6 +366,28 @@ export function ScannerTab() {
                             </TooltipTrigger>
                             <TooltipContent>
                               <p>Download ZIP bundle with all document files</p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDelete(doc.documentId, doc.title)
+                                }}
+                                disabled={deletingDocs.has(doc.documentId)}
+                              >
+                                {deletingDocs.has(doc.documentId) ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Delete document and all related data</p>
                             </TooltipContent>
                           </Tooltip>
                         </div>

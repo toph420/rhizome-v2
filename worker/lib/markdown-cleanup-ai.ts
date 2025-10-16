@@ -349,6 +349,11 @@ export async function cleanPdfMarkdown(
   if (markdown.length < 100000) {
     console.log('[markdown-cleanup-ai] Small PDF (<100K chars), using single-pass cleanup')
 
+    // Call progress callback for single-pass mode (section 1 of 1)
+    if (config.onProgress) {
+      await config.onProgress(1, 1)
+    }
+
     return await cleanMarkdownSinglePass(ai, markdown, {
       enableProgress: true,
       modelName: GEMINI_MODEL,

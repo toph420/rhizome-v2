@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { clearAllJobs, clearCompletedJobs, clearFailedJobs, forceFailAllProcessing, clearAllJobsAndProcessingDocuments } from '@/app/actions/admin'
 import { Button } from '@/components/ui/button'
 import { Loader2, Trash2, AlertTriangle, Bomb } from 'lucide-react'
@@ -16,10 +16,16 @@ import { JobList } from '@/components/admin/JobList'
 export function JobsTab() {
   const [loading, setLoading] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  // Prevent hydration mismatch
+  useEffect(() => {
+    setIsHydrated(true)
+  }, [])
 
   // Get all jobs from store
   const { jobs } = useBackgroundJobsStore()
-  const allJobs = Array.from(jobs.values())
+  const allJobs = isHydrated ? Array.from(jobs.values()) : []
 
   const handleAction = async (action: () => Promise<any>, loadingKey: string, successMsg: string) => {
     setLoading(loadingKey)

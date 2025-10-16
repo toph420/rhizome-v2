@@ -56,8 +56,18 @@ export async function POST(req: NextRequest) {
     // Strategy 2: Fallback to AI extraction
     console.log('[extract-text-metadata] No frontmatter found, using AI extraction')
 
+    // Check for API key
+    const apiKey = process.env.GOOGLE_AI_API_KEY
+    if (!apiKey) {
+      console.error('[extract-text-metadata] GOOGLE_AI_API_KEY not found in environment')
+      throw new Error('Google AI API key not configured')
+    }
+
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
+    console.log('[extract-text-metadata] Using model:', modelName)
+
     const { object } = await generateObject({
-      model: google(process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'),
+      model: google(modelName, { apiKey }),
       schema: metadataSchema,
       prompt: `Extract metadata from this document.
 
@@ -82,8 +92,13 @@ ${content.slice(0, 5000)}`
     return Response.json(result)
   } catch (error) {
     console.error('[extract-text-metadata] Error:', error)
+
+    // Provide more detailed error message
+    const errorMessage = error instanceof Error ? error.message : 'Failed to extract metadata'
+    console.error('[extract-text-metadata] Detailed error:', errorMessage)
+
     return Response.json(
-      { error: 'Failed to extract metadata' },
+      { error: errorMessage },
       { status: 500 }
     )
   }

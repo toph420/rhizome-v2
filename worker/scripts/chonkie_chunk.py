@@ -105,11 +105,12 @@ def initialize_chunker(chunker_type: str, config: Dict[str, Any]) -> Any:
 
     elif chunker_type == 'semantic':
         # SemanticChunker: Topic-based boundaries using embeddings
+        # Note: Lower threshold = larger chunks, higher threshold = smaller chunks
         chunker_config["embedding_model"] = config.get(
             "embedding_model",
-            "all-MiniLM-L6-v2"
+            "all-mpnet-base-v2"
         )
-        chunker_config["similarity_threshold"] = config.get("threshold", "auto")
+        chunker_config["similarity_threshold"] = config.get("threshold", 0.65)
 
     elif chunker_type == 'late':
         # LateChunker: Contextual embeddings for high retrieval quality

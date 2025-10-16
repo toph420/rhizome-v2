@@ -1,6 +1,6 @@
 'use client'
 
-import { memo } from 'react'
+import { memo, useRef, useEffect, useState, useMemo } from 'react'
 import DOMPurify from 'dompurify'
 import { injectAnnotations } from '@/lib/annotations/inject'
 import { ChunkMetadataIcon } from './ChunkMetadataIcon'
@@ -47,6 +47,8 @@ export const BlockRenderer = memo(function BlockRenderer({
 }: BlockRendererProps) {
   const showChunkBoundaries = useUIStore(state => state.showChunkBoundaries)
   const chunks = useReaderStore(state => state.chunks)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [chunkPositions, setChunkPositions] = useState<Map<string, number>>(new Map())
 
   // Find annotations that overlap this block
   const overlappingAnnotations = annotations.filter(
@@ -57,9 +59,61 @@ export const BlockRenderer = memo(function BlockRenderer({
 
   // BANDAID: Find all chunks that START within this block's offset range
   // This catches chunks 3, 4, 8, 9 that are split mid-paragraph by Docling
-  const chunksStartingInBlock = chunks.filter(
-    c => c.start_offset >= block.startOffset && c.start_offset < block.endOffset
+  // Memoized to prevent infinite re-renders in useEffect
+  const chunksStartingInBlock = useMemo(
+    () => chunks.filter(
+      c => c.start_offset >= block.startOffset && c.start_offset < block.endOffset
+    ),
+    [chunks, block.startOffset, block.endOffset]
   )
+
+  // Calculate accurate Y positions for chunks that start mid-block
+  useEffect(() => {
+    if (!contentRef.current || chunksStartingInBlock.length === 0) return
+
+    const positions = new Map<string, number>()
+    const contentEl = contentRef.current
+    const blockTop = contentEl.getBoundingClientRect().top
+
+    chunksStartingInBlock.forEach((chunkInBlock) => {
+      const relativeOffset = chunkInBlock.start_offset - block.startOffset
+
+      // Walk through text nodes to find position at offset
+      let currentOffset = 0
+      const walker = document.createTreeWalker(
+        contentEl,
+        NodeFilter.SHOW_TEXT,
+        null
+      )
+
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        const textLength = node.textContent?.length || 0
+
+        if (currentOffset + textLength >= relativeOffset) {
+          // Found the text node containing our offset
+          const range = document.createRange()
+          const offsetInNode = Math.max(0, relativeOffset - currentOffset)
+
+          try {
+            range.setStart(node, Math.min(offsetInNode, textLength))
+            range.setEnd(node, Math.min(offsetInNode + 1, textLength))
+            const rect = range.getBoundingClientRect()
+            const yPosition = rect.top - blockTop
+            positions.set(chunkInBlock.id, yPosition)
+          } catch (e) {
+            // If range creation fails, fallback to default positioning
+            console.warn('Failed to calculate chunk position:', e)
+          }
+          break
+        }
+
+        currentOffset += textLength
+      }
+    })
+
+    setChunkPositions(positions)
+  }, [chunksStartingInBlock, block.startOffset])
 
   // Inject annotations into HTML
   const annotatedHtml = injectAnnotations(
@@ -99,22 +153,6 @@ export const BlockRenderer = memo(function BlockRenderer({
   // Only show metadata icon for first paragraph block of each chunk (avoid duplication)
   const showMetadataIcon = block.type === 'paragraph' && chunk && block.chunkPosition >= 0
 
-  // Show chunk boundary indicator on first block of each chunk
-  const isChunkStart = chunk && block.chunkPosition === 0
-
-  // Generate color for chunk boundary (cycle through colors)
-  const getChunkColor = (chunkIndex: number) => {
-    const colors = [
-      'rgb(59, 130, 246)',   // blue
-      'rgb(168, 85, 247)',   // purple
-      'rgb(236, 72, 153)',   // pink
-      'rgb(34, 197, 94)',    // green
-      'rgb(251, 146, 60)',   // orange
-      'rgb(14, 165, 233)',   // sky
-    ]
-    return colors[chunkIndex % colors.length]
-  }
-
   return (
     <div
       data-block-id={block.id}
@@ -132,37 +170,26 @@ export const BlockRenderer = memo(function BlockRenderer({
       )}
 
       {/* BANDAID: Show icons for chunks that START in this block (mid-paragraph splits) */}
-      {chunksStartingInBlock.map((chunkInBlock, idx) => (
-        <ChunkMetadataIcon
-          key={chunkInBlock.id}
-          chunk={chunkInBlock}
-          chunkIndex={chunkInBlock.chunk_index}
-          alwaysVisible={showChunkBoundaries}
-          style={{
-            // Stack multiple icons vertically if multiple chunks start in same block
-            top: `${2 + idx * 2.5}rem`
-          }}
-        />
-      ))}
-
-      {/* Chunk boundary label - shows when boundaries are enabled */}
-      {showChunkBoundaries && isChunkStart && chunk && (
-        <div className="absolute -left-2 -top-6 flex items-center gap-2">
-          <div
-            className="px-2 py-0.5 text-[10px] font-mono font-medium rounded-sm shadow-sm border"
-            style={{
-              backgroundColor: `${getChunkColor(chunk.chunk_index)}15`,
-              borderColor: getChunkColor(chunk.chunk_index),
-              color: getChunkColor(chunk.chunk_index)
-            }}
-          >
-            Chunk {chunk.chunk_index}
-          </div>
-        </div>
-      )}
+      {chunksStartingInBlock.map((chunkInBlock) => {
+        const calculatedPosition = chunkPositions.get(chunkInBlock.id)
+        return (
+          <ChunkMetadataIcon
+            key={chunkInBlock.id}
+            chunk={chunkInBlock}
+            chunkIndex={chunkInBlock.chunk_index}
+            alwaysVisible={showChunkBoundaries}
+            style={
+              calculatedPosition !== undefined
+                ? { top: `${calculatedPosition}px` }
+                : undefined // Fallback to default em-based positioning
+            }
+          />
+        )
+      })}
 
       {/* Rendered content with injected annotations */}
       <div
+        ref={contentRef}
         data-start-offset={block.startOffset}
         data-end-offset={block.endOffset}
         dangerouslySetInnerHTML={{ __html: cleanHtml }}

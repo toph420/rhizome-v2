@@ -11,6 +11,8 @@ interface ChunkMetadataIconProps {
   chunkIndex: number
   alwaysVisible?: boolean
   style?: React.CSSProperties
+  /** For accurate positioning based on text content */
+  textOffset?: number
 }
 
 /**
@@ -24,7 +26,7 @@ interface ChunkMetadataIconProps {
  * @param props.style - Optional inline styles for positioning
  * @returns Hover card with chunk metadata
  */
-export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, style }: ChunkMetadataIconProps) {
+export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, style, textOffset }: ChunkMetadataIconProps) {
   // Helper function to determine polarity category
   const getPolarity = (polarity?: number): 'positive' | 'negative' | 'neutral' | null => {
     if (polarity === undefined || polarity === null) return null
@@ -60,14 +62,18 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, st
     sectionMarker: chunk.section_marker
   }
 
+  // Use em-based positioning for better text alignment (scales with font size)
+  // Default: top-[0.375em] aligns roughly with first line of text
+  const defaultStyle = { top: '0.375em', ...style }
+
   return (
     <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
         <motion.button
-          className={`absolute left-0 -ml-12 top-2 w-6 h-6 rounded-full bg-muted/50 hover:bg-primary/20 transition-colors flex items-center justify-center ${
+          className={`absolute left-0 -ml-12 w-6 h-6 rounded-full bg-muted/50 hover:bg-primary/20 transition-colors flex items-center justify-center ${
             alwaysVisible ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
-          style={style}
+          style={defaultStyle}
           whileHover={{ scale: 1.2 }}
           whileTap={{ scale: 0.95 }}
           transition={{ type: 'spring', stiffness: 400, damping: 25 }}
@@ -107,7 +113,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, st
                   {metadata.positionConfidence}
                 </Badge>
                 {metadata.positionValidated && (
-                  <CheckCircle className="h-3 w-3 text-green-500" title="User validated" />
+                  <CheckCircle className="h-3 w-3 text-green-500" />
                 )}
               </div>
             </div>
