@@ -58,6 +58,49 @@ import { calculateChunkStatistics, logChunkStatistics } from '../lib/chunking/ch
 
 export class EPUBProcessor extends SourceProcessor {
   /**
+   * Load chapter cleanup checkpoint if resuming from interruption
+   */
+  private async loadChapterCheckpoint(): Promise<{
+    completedChapters: string[]
+    startFromChapter: number
+  } | null> {
+    // Check if job is being resumed
+    if (!this.job.resume_count || this.job.resume_count === 0) {
+      return null
+    }
+
+    if (!this.job.last_checkpoint_stage || this.job.last_checkpoint_stage !== 'cleanup_ai_chapters') {
+      return null
+    }
+
+    try {
+      console.log('[EPUBProcessor] Resuming from chapter cleanup checkpoint')
+
+      // Download checkpoint from Storage
+      const { data, error } = await this.supabase.storage
+        .from('documents')
+        .download(this.job.last_checkpoint_path!)
+
+      if (error) {
+        console.warn('[EPUBProcessor] Checkpoint not found, starting fresh:', error)
+        return null
+      }
+
+      const checkpoint = JSON.parse(await data.text())
+
+      console.log(`[EPUBProcessor] Checkpoint loaded: ${checkpoint.data.completedChapters.length}/${checkpoint.data.totalChapters} chapters already complete`)
+
+      return {
+        completedChapters: checkpoint.data.completedChapters,
+        startFromChapter: checkpoint.data.lastCompletedIndex + 1
+      }
+    } catch (error) {
+      console.error('[EPUBProcessor] Failed to load checkpoint:', error)
+      return null
+    }
+  }
+
+  /**
    * Process EPUB document with simplified pipeline.
    *
    * Phase 5: Added local mode with Docling + Ollama integration.
@@ -69,6 +112,9 @@ export class EPUBProcessor extends SourceProcessor {
    */
   async process(): Promise<ProcessResult> {
     const storagePath = this.getStoragePath()
+
+    // Load chapter checkpoint if resuming
+    const chapterCheckpoint = await this.loadChapterCheckpoint()
 
     // Phase 5: Check processing mode
     const isLocalMode = process.env.PROCESSING_MODE === 'local'
@@ -257,21 +303,45 @@ export class EPUBProcessor extends SourceProcessor {
             console.log('[EPUBProcessor] Local AI cleanup complete')
           } else {
             // Use Gemini cleanup with individual chapters
-            console.log(`[EPUBProcessor] Using Gemini cleanup (${extractedChapters.length} chapters)`)
+            const resumeFrom = chapterCheckpoint?.startFromChapter || 0
+            const alreadyCompleted = chapterCheckpoint?.completedChapters || []
+
+            if (resumeFrom > 0) {
+              console.log(`[EPUBProcessor] Resuming Gemini cleanup from chapter ${resumeFrom + 1}/${extractedChapters.length}`)
+            } else {
+              console.log(`[EPUBProcessor] Using Gemini cleanup (${extractedChapters.length} chapters)`)
+            }
 
             markdown = await cleanEpubChaptersWithAI(
               this.ai,
               extractedChapters,  // Use individual chapters, not combined markdown!
               {
                 enableProgress: true,
+                startFromChapter: resumeFrom,
+                completedChapters: alreadyCompleted,
                 onProgress: async (chapterNum, totalChapters) => {
                   const percent = 58 + Math.floor((chapterNum / totalChapters) * 12) // 58-70%
                   await this.updateProgress(
                     percent,
                     'cleanup_ai',
                     'processing',
-                    `AI cleaning chapter ${chapterNum}/${totalChapters}`
+                    `AI cleaning chapter ${chapterNum}/${totalChapters}`,
+                    {
+                      checkpoint: {
+                        can_resume: true,  // Enable pause button during chapter cleanup
+                        stage: 'cleanup_ai_chapters'
+                      }
+                    }
                   )
+                },
+                onCheckpoint: async (chapterIndex, completedChapters) => {
+                  // Save chapter-level checkpoint for pause/resume
+                  await this.saveStageResult('cleanup_ai_chapters', {
+                    completedChapters,
+                    lastCompletedIndex: chapterIndex,
+                    totalChapters: extractedChapters.length,
+                    timestamp: new Date().toISOString()
+                  }, { pauseSafe: true })
                 }
               }
             )
@@ -371,19 +441,44 @@ export class EPUBProcessor extends SourceProcessor {
         console.log('[EPUBProcessor] Starting Gemini AI cleanup (per-chapter, no stitching)')
 
         try {
+          // Check for resumption checkpoint (CLOUD mode)
+          const resumeFrom = chapterCheckpoint?.startFromChapter || 0
+          const alreadyCompleted = chapterCheckpoint?.completedChapters || []
+
+          if (resumeFrom > 0) {
+            console.log(`[EPUBProcessor] Resuming Gemini cleanup from chapter ${resumeFrom + 1}/${cleanedChapters.length}`)
+          }
+
           markdown = await cleanEpubChaptersWithAI(
             this.ai,
             cleanedChapters,
             {
               enableProgress: true,
+              startFromChapter: resumeFrom,
+              completedChapters: alreadyCompleted,
               onProgress: async (chapterNum, totalChapters) => {
                 const percent = 40 + Math.floor((chapterNum / totalChapters) * 10) // 40-50%
                 await this.updateProgress(
                   percent,
                   'cleanup_ai',
                   'processing',
-                  `AI cleaning chapter ${chapterNum}/${totalChapters}`
+                  `AI cleaning chapter ${chapterNum}/${totalChapters}`,
+                  {
+                    checkpoint: {
+                      can_resume: true,  // Enable pause button during chapter cleanup
+                      stage: 'cleanup_ai_chapters'
+                    }
+                  }
                 )
+              },
+              onCheckpoint: async (chapterIndex, completedChapters) => {
+                // Save chapter-level checkpoint for pause/resume (CLOUD mode)
+                await this.saveStageResult('cleanup_ai_chapters', {
+                  completedChapters,
+                  lastCompletedIndex: chapterIndex,
+                  totalChapters: cleanedChapters.length,
+                  timestamp: new Date().toISOString()
+                }, { pauseSafe: true })
               }
             }
           )

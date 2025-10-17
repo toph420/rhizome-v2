@@ -19,6 +19,7 @@ import { createHash } from 'crypto'
 
 /**
  * Background job interface from database.
+ * Simplified version with only fields needed by processors.
  */
 export interface BackgroundJob {
   id: string
@@ -34,6 +35,13 @@ export interface BackgroundJob {
     pasted_content?: string
     [key: string]: any
   }
+
+  // Pause/Resume fields (added in migration 052)
+  resume_count?: number
+  last_checkpoint_path?: string
+  last_checkpoint_stage?: string
+  checkpoint_hash?: string
+  created_at?: string
 }
 
 /**

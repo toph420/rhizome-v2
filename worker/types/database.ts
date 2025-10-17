@@ -485,6 +485,15 @@ export interface BackgroundJob {
   retry_count: number | null
   max_retries: number | null
   next_retry_at: string | null
+
+  // Pause/Resume fields (added in migration 052)
+  paused_at: string | null
+  resumed_at: string | null
+  pause_reason: string | null
+  resume_count: number | null
+  last_checkpoint_path: string | null
+  last_checkpoint_stage: string | null
+  checkpoint_hash: string | null
 }
 
 // ============================================================================

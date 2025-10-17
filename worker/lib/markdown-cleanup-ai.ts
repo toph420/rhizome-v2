@@ -50,6 +50,23 @@ export interface MarkdownCleanupConfig {
    * Progress callback for batched processing
    */
   onProgress?: (batchNumber: number, totalBatches: number) => void | Promise<void>
+
+  /**
+   * Checkpoint callback - called after each chapter is cleaned
+   * Used for pause/resume support in EPUB processing
+   */
+  onCheckpoint?: (chapterIndex: number, completedChapters: string[]) => Promise<void>
+
+  /**
+   * Resume from specific chapter index (for interrupted processing)
+   * @default 0
+   */
+  startFromChapter?: number
+
+  /**
+   * Pre-completed chapters (from previous checkpoint)
+   */
+  completedChapters?: string[]
 }
 
 /**
@@ -168,18 +185,27 @@ export async function cleanEpubChaptersWithAI(
     modelName = GEMINI_MODEL,
     maxOutputTokens = MAX_OUTPUT_TOKENS,
     temperature = 0.1,
-    onProgress
+    onProgress,
+    onCheckpoint,
+    startFromChapter = 0,
+    completedChapters: initialCompleted = []
   } = config
 
   if (enableProgress) {
-    console.log(`[markdown-cleanup-ai] Cleaning ${chapters.length} chapters individually`)
+    if (startFromChapter > 0) {
+      console.log(`[markdown-cleanup-ai] Resuming from chapter ${startFromChapter + 1}/${chapters.length}`)
+      console.log(`[markdown-cleanup-ai] ${initialCompleted.length} chapters already completed`)
+    } else {
+      console.log(`[markdown-cleanup-ai] Cleaning ${chapters.length} chapters individually`)
+    }
   }
 
   const startTime = Date.now()
-  const cleanedChapters: string[] = []
+  const cleanedChapters: string[] = [...initialCompleted]
 
   // Clean each chapter independently (no batching, no overlap)
-  for (let i = 0; i < chapters.length; i++) {
+  // Start from startFromChapter index (for resumption)
+  for (let i = startFromChapter; i < chapters.length; i++) {
     const chapter = chapters[i]
 
     if (onProgress) {
@@ -252,6 +278,19 @@ export async function cleanEpubChaptersWithAI(
 
       // Use regex-cleaned chapter instead of throwing
       cleanedChapters.push(chapterText)
+    }
+
+    // Checkpoint after each chapter (for pause/resume support)
+    if (onCheckpoint) {
+      try {
+        await onCheckpoint(i, [...cleanedChapters])
+        if (enableProgress) {
+          console.log(`[markdown-cleanup-ai] ✓ Checkpoint saved after chapter ${i + 1}/${chapters.length}`)
+        }
+      } catch (checkpointError: any) {
+        console.warn(`[markdown-cleanup-ai] Checkpoint save failed (non-fatal): ${checkpointError.message}`)
+        // Continue processing even if checkpoint fails
+      }
     }
   }
 
