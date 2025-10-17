@@ -38,17 +38,49 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[extract-youtube-metadata] Error:', error)
 
-    // Check for quota errors (403 Forbidden)
-    if (error instanceof Error &&
-        (error.message.includes('quota') || error.message.includes('403'))) {
-      return Response.json({
-        error: 'YouTube API quota exceeded',
-        fallback: true
-      }, { status: 429 })
+    if (error instanceof Error) {
+      // Handle specific YouTube API errors
+      switch (error.message) {
+        case 'QUOTA_EXCEEDED':
+          return Response.json({
+            error: 'YouTube API quota exceeded',
+            errorType: 'QUOTA_EXCEEDED',
+            message: error.cause || 'Daily quota limit reached. Please paste the transcript instead.',
+            fallback: true
+          }, { status: 429 })
+
+        case 'API_NOT_ENABLED':
+          return Response.json({
+            error: 'YouTube Data API not enabled',
+            errorType: 'API_NOT_ENABLED',
+            message: error.cause || 'YouTube Data API v3 needs to be enabled in Google Cloud Console.',
+            helpUrl: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
+          }, { status: 403 })
+
+        case 'INVALID_API_KEY':
+          return Response.json({
+            error: 'Invalid API key',
+            errorType: 'INVALID_API_KEY',
+            message: error.cause || 'Check YOUTUBE_API_KEY in .env.local'
+          }, { status: 403 })
+
+        case 'API_FORBIDDEN':
+          return Response.json({
+            error: 'Access forbidden',
+            errorType: 'API_FORBIDDEN',
+            message: error.cause || 'Check API key restrictions in Google Cloud Console'
+          }, { status: 403 })
+
+        default:
+          return Response.json({
+            error: error.message,
+            errorType: 'UNKNOWN'
+          }, { status: 500 })
+      }
     }
 
     return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch YouTube metadata' },
+      { error: 'Failed to fetch YouTube metadata' },
       { status: 500 }
     )
   }
@@ -102,12 +134,37 @@ async function fetchYouTubeMetadata(videoId: string) {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
+    const errorMessage = errorData.error?.message || ''
+    const errorReason = errorData.error?.errors?.[0]?.reason || ''
 
+    // Distinguish between different 403 error types
     if (response.status === 403) {
-      throw new Error('YouTube API quota exceeded')
+      // Check specific error reasons from YouTube API
+      if (errorReason === 'quotaExceeded' || errorMessage.toLowerCase().includes('quota')) {
+        const error = new Error('QUOTA_EXCEEDED')
+        error.cause = 'YouTube API daily quota exceeded. Consider pasting the transcript instead.'
+        throw error
+      }
+
+      if (errorReason === 'accessNotConfigured' || errorMessage.includes('not enabled')) {
+        const error = new Error('API_NOT_ENABLED')
+        error.cause = 'YouTube Data API v3 is not enabled in your Google Cloud Console.'
+        throw error
+      }
+
+      if (errorReason === 'keyInvalid' || errorMessage.includes('API key')) {
+        const error = new Error('INVALID_API_KEY')
+        error.cause = 'YouTube API key is invalid or restricted.'
+        throw error
+      }
+
+      // Generic 403 fallback
+      const error = new Error('API_FORBIDDEN')
+      error.cause = errorMessage || 'Access forbidden. Check API key restrictions.'
+      throw error
     }
 
-    throw new Error(`YouTube API error: ${errorData.error?.message || response.statusText}`)
+    throw new Error(`YouTube API error: ${errorMessage || response.statusText}`)
   }
 
   const data = await response.json()

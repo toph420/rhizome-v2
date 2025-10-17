@@ -8,6 +8,16 @@ const nextConfig: NextConfig = {
   },
   // Silence workspace root warning (we use npm, not bun)
   outputFileTracingRoot: undefined,
+  // Allow external images (YouTube thumbnails)
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'i.ytimg.com',
+        pathname: '/**',
+      },
+    ],
+  },
 };
 
 export default nextConfig;

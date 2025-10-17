@@ -66,6 +66,7 @@ export function UploadZone() {
   const [markdownProcessing, setMarkdownProcessing] = useState<'asis' | 'clean'>('asis')
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
   const [detectedMetadata, setDetectedMetadata] = useState<DetectedMetadata | null>(null)
+  const [uploadSource, setUploadSource] = useState<'file' | 'url' | null>(null) // Track which tab initiated upload
 
   // URL fetch state
   const [urlInput, setUrlInput] = useState('')
@@ -115,6 +116,7 @@ export function UploadZone() {
   const handleFileSelect = useCallback(async (file: File) => {
     setSelectedFile(file)
     setError(null)
+    setUploadSource('file') // Track that this is a file upload
 
     const estimate = await estimateProcessingCost(file.size)
     setCostEstimate(estimate)
@@ -342,6 +344,7 @@ export function UploadZone() {
         setUrlInput('')
         setUrlType(null)
         setUploadPhase('idle')
+        setUploadSource(null)
       } else {
         setError(result.error || 'Upload failed')
         setUploadPhase('preview') // Return to preview on error
@@ -353,7 +356,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, registerJob])
 
   /**
    * Handles metadata preview cancellation.
@@ -363,6 +366,7 @@ export function UploadZone() {
     setCostEstimate(null)
     setDetectedMetadata(null)
     setUploadPhase('idle')
+    setUploadSource(null)
     setError(null)
   }, [])
 
@@ -412,13 +416,14 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, getSourceTypeForFile, markdownProcessing])
+  }, [selectedFile, getSourceTypeForFile, markdownProcessing, cleanMarkdown, chunkerType, registerJob])
 
   /**
    * Handle YouTube URL metadata extraction.
    */
   const handleYouTubeUrl = useCallback(async (url: string) => {
     setError(null)
+    setUploadSource('url') // Track that this is a URL upload
     setUploadPhase('detecting')
 
     try {
@@ -443,18 +448,37 @@ export function UploadZone() {
           }
         }
 
-        if (response.status === 429 && errorData?.fallback) {
-          // Quota exceeded - show manual entry
-          console.warn('YouTube API quota exceeded, using fallback')
-          setDetectedMetadata({
-            title: 'YouTube Video',
-            author: 'Unknown Channel',
-            type: 'article',
-            description: 'YouTube API quota exceeded. Please edit manually.'
-          })
-        } else {
-          const errorMessage = errorData?.error || `Server error (${response.status}): ${response.statusText}`
-          throw new Error(errorMessage)
+        // Handle different error types with specific user guidance
+        const errorType = errorData?.errorType
+        const errorMessage = errorData?.message || errorData?.error
+
+        switch (errorType) {
+          case 'QUOTA_EXCEEDED':
+            console.warn('YouTube API quota exceeded')
+            setError('YouTube API quota exceeded. Please switch to the "Paste Content" tab and paste the video transcript manually.')
+            setUploadPhase('idle')
+            return
+
+          case 'API_NOT_ENABLED':
+            console.warn('YouTube Data API not enabled')
+            setError(`YouTube Data API v3 is not enabled. Enable it at: ${errorData?.helpUrl || 'Google Cloud Console'}`)
+            setUploadPhase('idle')
+            return
+
+          case 'INVALID_API_KEY':
+            console.warn('Invalid YouTube API key')
+            setError('YouTube API key is invalid or restricted. Check YOUTUBE_API_KEY in .env.local')
+            setUploadPhase('idle')
+            return
+
+          case 'API_FORBIDDEN':
+            console.warn('YouTube API access forbidden')
+            setError(errorMessage || 'Access forbidden. Check API key restrictions in Google Cloud Console.')
+            setUploadPhase('idle')
+            return
+
+          default:
+            throw new Error(errorMessage || `Server error (${response.status}): ${response.statusText}`)
         }
       } else {
         // Check if success response is JSON
@@ -474,15 +498,11 @@ export function UploadZone() {
     } catch (error) {
       console.error('YouTube metadata error:', error)
 
-      // Fallback: Show preview with placeholder
-      setDetectedMetadata({
-        title: 'YouTube Video',
-        author: 'Unknown',
-        type: 'article',
-        description: 'Failed to fetch metadata. Please edit manually.'
-      })
-      setUrlInput(url)
-      setUploadPhase('preview')
+      // Show error message instead of fallback
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch YouTube metadata'
+      setError(`YouTube metadata extraction failed: ${errorMessage}. Please switch to the "Paste Content" tab and paste the transcript manually.`)
+      setUploadPhase('idle')
+      setUploadSource(null)
     }
   }, [])
 
@@ -530,7 +550,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [urlInput, urlType, handleYouTubeUrl])
+  }, [urlInput, urlType, handleYouTubeUrl, registerJob])
 
   /**
    * Submits pasted content.
@@ -573,7 +593,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [pastedContent, pasteSourceUrl])
+  }, [pastedContent, pasteSourceUrl, registerJob])
 
   return (
     <div className="space-y-4">
@@ -594,8 +614,8 @@ export function UploadZone() {
         </TabsList>
 
         <TabsContent value="file">
-          {/* Show metadata preview for PDFs */}
-          {uploadPhase === 'preview' && detectedMetadata ? (
+          {/* Show metadata preview for file uploads */}
+          {uploadPhase === 'preview' && detectedMetadata && uploadSource === 'file' ? (
             <DocumentPreview
               metadata={detectedMetadata}
               onConfirm={handlePreviewConfirm}
@@ -609,7 +629,7 @@ export function UploadZone() {
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
             />
-          ) : uploadPhase === 'detecting' ? (
+          ) : uploadPhase === 'detecting' && uploadSource === 'file' ? (
             <Card className="p-12 text-center">
               <div className="flex flex-col items-center gap-4">
                 <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
@@ -734,47 +754,74 @@ export function UploadZone() {
         </TabsContent>
 
         <TabsContent value="url">
-          <Card className="p-6">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="url-input">URL</Label>
-                <Input
-                  id="url-input"
-                  placeholder="https://youtube.com/watch?v=... or https://example.com/article"
-                  value={urlInput}
-                  onChange={(e) => {
-                    setUrlInput(e.target.value)
-                    detectUrlType(e.target.value)
-                  }}
-                  disabled={isUploading}
-                />
-              </div>
-
-              {urlType && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  {urlType === 'youtube' ? (
-                    <>
-                      <Video className="h-4 w-4" />
-                      <span>YouTube video detected - will fetch transcript</span>
-                    </>
-                  ) : (
-                    <>
-                      <Globe className="h-4 w-4" />
-                      <span>Web article detected - will extract content</span>
-                    </>
-                  )}
+          {/* Show metadata preview for URL uploads (YouTube) */}
+          {uploadPhase === 'preview' && detectedMetadata && uploadSource === 'url' ? (
+            <DocumentPreview
+              metadata={detectedMetadata}
+              onConfirm={handlePreviewConfirm}
+              onCancel={handlePreviewCancel}
+              reviewWorkflow={reviewWorkflow}
+              onReviewWorkflowChange={setReviewWorkflow}
+              cleanMarkdown={cleanMarkdown}
+              onCleanMarkdownChange={setCleanMarkdown}
+              extractImages={extractImages}
+              onExtractImagesChange={setExtractImages}
+              chunkerType={chunkerType}
+              onChunkerTypeChange={setChunkerType}
+            />
+          ) : uploadPhase === 'detecting' && uploadSource === 'url' ? (
+            <Card className="p-12 text-center">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
+                <div>
+                  <p className="text-lg font-medium">Fetching YouTube metadata...</p>
+                  <p className="text-sm text-muted-foreground">Retrieving video details</p>
                 </div>
-              )}
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="url-input">URL</Label>
+                  <Input
+                    id="url-input"
+                    placeholder="https://youtube.com/watch?v=... or https://example.com/article"
+                    value={urlInput}
+                    onChange={(e) => {
+                      setUrlInput(e.target.value)
+                      detectUrlType(e.target.value)
+                    }}
+                    disabled={isUploading}
+                  />
+                </div>
 
-              <Button
-                onClick={handleUrlFetch}
-                disabled={!urlInput || !urlType || isUploading}
-                className="w-full"
-              >
-                {isUploading ? 'Fetching...' : 'Fetch Content'}
-              </Button>
-            </div>
-          </Card>
+                {urlType && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    {urlType === 'youtube' ? (
+                      <>
+                        <Video className="h-4 w-4" />
+                        <span>YouTube video detected - will fetch transcript</span>
+                      </>
+                    ) : (
+                      <>
+                        <Globe className="h-4 w-4" />
+                        <span>Web article detected - will extract content</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <Button
+                  onClick={handleUrlFetch}
+                  disabled={!urlInput || !urlType || isUploading}
+                  className="w-full"
+                >
+                  {isUploading ? 'Fetching...' : 'Fetch Content'}
+                </Button>
+              </div>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="paste">
