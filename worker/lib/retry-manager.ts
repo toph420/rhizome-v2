@@ -141,25 +141,28 @@ export async function retryLoop(supabase: SupabaseClient) {
       return // No jobs to retry
     }
 
-    console.log(`[RetryManager] Found ${failedJobs.length} job(s) eligible for retry`)
-
-    for (const job of failedJobs) {
-      // Skip if already at max retries
+    // Filter for actually retry-eligible jobs (transient errors, not at max retries)
+    const retryableJobs = failedJobs.filter(job => {
       if (job.retry_count >= job.max_retries) {
-        console.log(`[RetryManager] Skipping job ${job.id}: max retries reached (${job.retry_count}/${job.max_retries})`)
-        continue
+        return false
       }
 
-      // Only retry transient errors (others need manual intervention)
       const errorType = job.error_message?.toLowerCase() || ''
       const isTransient = errorType.includes('temporary') ||
                          errorType.includes('timeout') ||
                          errorType.includes('network')
 
-      if (!isTransient) {
-        console.log(`[RetryManager] Skipping job ${job.id}: non-transient error`)
-        continue
-      }
+      return isTransient
+    })
+
+    // Only log if there are actual jobs to retry
+    if (retryableJobs.length === 0) {
+      return // No jobs need retry
+    }
+
+    console.log(`[RetryManager] Retrying ${retryableJobs.length} job(s) with transient errors`)
+
+    for (const job of retryableJobs) {
 
       // Calculate next retry time with exponential backoff
       const nextRetryCount = job.retry_count + 1

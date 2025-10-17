@@ -223,15 +223,19 @@ export function ReaderLayout({
       const chunkElements = document.querySelectorAll(`[data-chunk-id="${chunkId}"]`)
 
       if (chunkElements.length > 0) {
-        // Highlight all blocks of this chunk temporarily
+        // Highlight all blocks of this chunk with a left border indicator
+        const indicators: HTMLElement[] = []
+
         chunkElements.forEach((element) => {
-          element.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+          const indicator = document.createElement('div')
+          indicator.className = 'absolute left-[-20px] top-0 bottom-0 w-[5px] bg-primary rounded-full transition-opacity duration-300'
+          indicator.setAttribute('data-chunk-indicator', 'true')
+          element.appendChild(indicator)
+          indicators.push(indicator)
         })
 
         setTimeout(() => {
-          chunkElements.forEach((element) => {
-            element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
-          })
+          indicators.forEach(indicator => indicator.remove())
         }, 2000)
 
         // Enter correction mode or show success toast
@@ -283,10 +287,10 @@ export function ReaderLayout({
         block: 'center',
       })
 
-      // Highlight temporarily
-      annotationElement.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+      // Highlight temporarily with background
+      annotationElement.classList.add('bg-primary/20', 'transition-colors', 'duration-300')
       setTimeout(() => {
-        annotationElement.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
+        annotationElement.classList.remove('bg-primary/20', 'transition-colors', 'duration-300')
       }, 2000)
 
       toast.success('Scrolled to annotation', {
@@ -338,10 +342,10 @@ export function ReaderLayout({
           block: 'center',
         })
 
-        // Highlight temporarily
-        annotationElement.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+        // Highlight temporarily with background
+        annotationElement.classList.add('bg-primary/20', 'transition-colors', 'duration-300')
         setTimeout(() => {
-          annotationElement.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
+          annotationElement.classList.remove('bg-primary/20', 'transition-colors', 'duration-300')
         }, 2000)
 
         toast.success('Scrolled to annotation', {
@@ -356,9 +360,9 @@ export function ReaderLayout({
               behavior: 'smooth',
               block: 'center',
             })
-            annotationElement.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+            annotationElement.classList.add('bg-primary/20', 'transition-colors', 'duration-300')
             setTimeout(() => {
-              annotationElement.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
+              annotationElement.classList.remove('bg-primary/20', 'transition-colors', 'duration-300')
             }, 2000)
             toast.success('Scrolled to annotation')
           } else {

@@ -59,12 +59,15 @@ export const BlockRenderer = memo(function BlockRenderer({
 
   // BANDAID: Find all chunks that START within this block's offset range
   // This catches chunks 3, 4, 8, 9 that are split mid-paragraph by Docling
+  // Exclude the block's own chunk (already shown above) to prevent duplicates
   // Memoized to prevent infinite re-renders in useEffect
   const chunksStartingInBlock = useMemo(
     () => chunks.filter(
-      c => c.start_offset >= block.startOffset && c.start_offset < block.endOffset
+      c => c.start_offset >= block.startOffset &&
+           c.start_offset < block.endOffset &&
+           c.id !== chunk?.id // Exclude block's own chunk
     ),
-    [chunks, block.startOffset, block.endOffset]
+    [chunks, block.startOffset, block.endOffset, chunk?.id]
   )
 
   // Calculate accurate Y positions for chunks that start mid-block
@@ -150,8 +153,8 @@ export const BlockRenderer = memo(function BlockRenderer({
     }
   }
 
-  // Only show metadata icon for first paragraph block of each chunk (avoid duplication)
-  const showMetadataIcon = block.type === 'paragraph' && chunk && block.chunkPosition >= 0
+  // Only show metadata icon for first block of each chunk (regardless of type)
+  const showMetadataIcon = chunk && block.chunkPosition === 0
 
   return (
     <div
@@ -161,7 +164,7 @@ export const BlockRenderer = memo(function BlockRenderer({
       onClick={handleClick}
     >
       {/* Chunk metadata icon in left margin - only show on first block of chunk */}
-      {showMetadataIcon && block.chunkPosition === 0 && (
+      {showMetadataIcon && (
         <ChunkMetadataIcon
           chunk={chunk}
           chunkIndex={chunk.chunk_index}

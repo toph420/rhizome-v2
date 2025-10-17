@@ -102,10 +102,14 @@ export function ConnectionHeatmap({ documentId, chunks, className = '' }: Connec
     if (chunkElement) {
       chunkElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
 
-      // Highlight temporarily
-      chunkElement.classList.add('ring-2', 'ring-primary', 'ring-offset-2')
+      // Highlight temporarily with left border indicator
+      const indicator = document.createElement('div')
+      indicator.className = 'absolute left-[-20px] top-0 bottom-0 w-[5px] bg-primary rounded-full transition-opacity duration-300'
+      indicator.setAttribute('data-chunk-indicator', 'true')
+      chunkElement.appendChild(indicator)
+
       setTimeout(() => {
-        chunkElement.classList.remove('ring-2', 'ring-primary', 'ring-offset-2')
+        indicator.remove()
       }, 2000)
     }
   }

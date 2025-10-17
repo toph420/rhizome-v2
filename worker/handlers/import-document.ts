@@ -260,7 +260,7 @@ async function applyStrategy(
       end_offset: chunk.end_offset,
       word_count: chunk.word_count,
       // Chonkie chunking metadata
-      chunker_type: chunk.chunker_type,
+      chunker_type: chunk.chunker_type || 'hybrid', // Fallback for legacy exports (pre-Session 8)
       heading_path: chunk.heading_path,
       metadata_overlap_count: chunk.metadata_overlap_count,
       metadata_confidence: chunk.metadata_confidence,
