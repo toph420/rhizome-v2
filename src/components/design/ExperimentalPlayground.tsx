@@ -29,8 +29,9 @@ import {
 } from './BrutalistComponents'
 import { Badge } from '@/components/ui/badge'
 import { motion } from 'framer-motion'
-import { Palette, Sparkles, Wand2, Terminal, Square, Navigation } from 'lucide-react'
+import { Palette, Sparkles, Wand2, Terminal, Square, Navigation, Layers } from 'lucide-react'
 import { EdgeNavigationDemo } from './EdgeNavigationDemo'
+import { PremiumEdgeNavigation } from './PremiumEdgeNavigation'
 
 export function ExperimentalPlayground() {
   const [cardVariant, setCardVariant] = useState<'earth' | 'mars' | 'neutral'>('earth')
@@ -87,6 +88,95 @@ export function ExperimentalPlayground() {
             </Badge>
             <Badge variant="outline">Framer Motion</Badge>
             <Badge variant="outline">CSS Textures</Badge>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Premium Edge Navigation - NEW! */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Layers className="h-5 w-5 text-primary" />
+            <CardTitle>Premium Edge Navigation ✨ (Product Card Aesthetics)</CardTitle>
+          </div>
+          <CardDescription>
+            Beautiful edge-based navigation with glassmorphic panels, smooth animations, and product card elegance.
+            Features Anti-Oedipus document with real highlights, floating annotation capture, and AI-discovered connections.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2 mb-6">
+            <Badge variant="secondary">
+              <Sparkles className="h-3 w-3 mr-1" />
+              Glassmorphism
+            </Badge>
+            <Badge variant="secondary">Product Card Style</Badge>
+            <Badge variant="secondary">Backdrop Blur</Badge>
+            <Badge variant="outline">Smooth Animations</Badge>
+            <Badge variant="outline">Gradient Accents</Badge>
+            <Badge variant="outline">Floating Panels</Badge>
+            <Badge variant="outline">Document Highlights</Badge>
+            <Badge variant="outline">Quick Capture</Badge>
+          </div>
+
+          <PremiumEdgeNavigation />
+
+          <div className="mt-6 p-4 bg-gradient-to-br from-slate-50 to-white rounded-2xl border border-slate-200">
+            <h4 className="font-semibold mb-3 text-sm flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-yellow-500" />
+              Premium Design Features
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-muted-foreground">
+              <div className="space-y-2">
+                <h5 className="font-semibold text-slate-900 text-xs uppercase tracking-wide">Navigation</h5>
+                <ul className="space-y-1">
+                  <li>• <strong>Glassmorphic Edge Panels:</strong> Backdrop blur with smooth slide animations</li>
+                  <li>• <strong>Ambient Background:</strong> Animated gradient orbs for depth</li>
+                  <li>• <strong>Table of Contents:</strong> Progress tracking with gradient bars</li>
+                  <li>• <strong>View Mode Switcher:</strong> Explore, Focus, Study modes</li>
+                </ul>
+              </div>
+              <div className="space-y-2">
+                <h5 className="font-semibold text-slate-900 text-xs uppercase tracking-wide">Content</h5>
+                <ul className="space-y-1">
+                  <li>• <strong>Real Document:</strong> Anti-Oedipus with authentic text</li>
+                  <li>• <strong>Multi-Color Highlights:</strong> Yellow, pink, blue, green indicators</li>
+                  <li>• <strong>AI Connections:</strong> 3 engines with gradient cards and scores</li>
+                  <li>• <strong>Floating Annotation Panel:</strong> Quick capture with backdrop blur</li>
+                </ul>
+              </div>
+              <div className="space-y-2">
+                <h5 className="font-semibold text-slate-900 text-xs uppercase tracking-wide">Interactions</h5>
+                <ul className="space-y-1">
+                  <li>• <strong>Hover Effects:</strong> Scale transforms and glow overlays</li>
+                  <li>• <strong>Spring Animations:</strong> Natural physics-based motion</li>
+                  <li>• <strong>Staggered Reveals:</strong> Sequential element animations</li>
+                  <li>• <strong>Tab System:</strong> 6 categories with active indicators</li>
+                </ul>
+              </div>
+              <div className="space-y-2">
+                <h5 className="font-semibold text-slate-900 text-xs uppercase tracking-wide">Visual Design</h5>
+                <ul className="space-y-1">
+                  <li>• <strong>Gradient Accents:</strong> Blue-to-purple, yellow-to-orange</li>
+                  <li>• <strong>Rounded Corners:</strong> 1.5rem (24px) for premium feel</li>
+                  <li>• <strong>Shadow System:</strong> Layered shadows for depth</li>
+                  <li>• <strong>Typography Scale:</strong> Responsive with proper hierarchy</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-2xl">
+            <p className="text-sm text-yellow-900">
+              <strong className="flex items-center gap-2 mb-2">
+                <Sparkles className="h-4 w-4" />
+                Design Philosophy
+              </strong>
+              This design combines the clean elegance of the Product Card section with advanced edge-based navigation.
+              It demonstrates glassmorphic UI, smooth spring animations, real document content with highlights,
+              and a floating annotation system. The result is a premium, Apple-like reading experience that's both
+              beautiful and functional.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -501,7 +591,7 @@ export function MyComponent() {
                 <AgentProfile
                   agentId="009X3312"
                   codeName="WHISSPERTA"
-                  age={null}
+                  age={undefined}
                   activeUntil="19/02/2040"
                 />
               </div>
