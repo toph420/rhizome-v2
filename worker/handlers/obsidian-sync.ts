@@ -347,7 +347,7 @@ export function getObsidianUri(vaultName: string, filepath: string): string {
 
 /**
  * Export annotations alongside markdown
- * Creates a .annotations.json file for portable backup
+ * Creates an annotations.json file for portable backup
  */
 async function exportAnnotations(documentId: string, vaultFilePath: string): Promise<void> {
   try {
@@ -395,8 +395,8 @@ async function exportAnnotations(documentId: string, vaultFilePath: string): Pro
       } : undefined
     }))
 
-    // Write to .annotations.json alongside markdown
-    const annotationsPath = vaultFilePath.replace(/\.md$/, '.annotations.json')
+    // Write to annotations.json alongside markdown
+    const annotationsPath = vaultFilePath.replace(/\.md$/, 'annotations.json')
     await fs.writeFile(
       annotationsPath,
       JSON.stringify(portableAnnotations, null, 2),

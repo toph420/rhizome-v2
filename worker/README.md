@@ -380,7 +380,7 @@ Periodic export of all annotations to portable JSON format.
 2. For each document:
    - Get Position components
    - Transform to portable format
-   - Upload as `.annotations.json` to storage
+   - Upload as `annotations.json` to storage
 
 **Portable Format:**
 ```typescript

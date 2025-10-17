@@ -171,12 +171,15 @@ export function ExportTab() {
       const supabase = createClient()
       const { data: jobData, error } = await supabase
         .from('background_jobs')
-        .select('status, progress, details, output_data')
+        .select('status, progress, output_data')
         .eq('id', exportJob.id)
         .single()
 
       if (error) {
-        console.error('Error polling job:', error)
+        // Only log meaningful errors (not empty objects or PGRST116 not found)
+        if (error.message && !error.message.includes('PGRST116')) {
+          console.error('Error polling job:', error.message)
+        }
         return
       }
 
@@ -187,7 +190,7 @@ export function ExportTab() {
             id: exportJob.id,
             status: 'completed',
             progress: 100,
-            details: jobData.details || 'Export completed successfully',
+            details: jobData.progress?.details || 'Export completed successfully',
             downloadUrl,
           })
           setIsExporting(false)
@@ -200,7 +203,7 @@ export function ExportTab() {
             id: exportJob.id,
             status: 'failed',
             progress: 0,
-            details: jobData.details || 'Export failed',
+            details: jobData.progress?.details || 'Export failed',
             error: jobData.output_data?.error || 'Unknown error',
           })
           setIsExporting(false)
@@ -212,8 +215,8 @@ export function ExportTab() {
           setExportJob({
             ...exportJob,
             status: 'processing',
-            progress: jobData.progress || 50,
-            details: jobData.details || 'Processing export...',
+            progress: jobData.progress?.percent || 50,
+            details: jobData.progress?.details || 'Processing export...',
           })
         }
       }

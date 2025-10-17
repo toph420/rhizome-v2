@@ -245,8 +245,8 @@ async function exportDocumentAnnotations(
 
   // Generate annotations file path (robust - handles any .md filename)
   // If markdown is at documents/doc-123/content.md or documents/doc-123/my-book.md
-  // Then annotations go to documents/doc-123/.annotations.json
-  const annotationsPath = markdownPath.replace(/\/[^/]+\.md$/, '/.annotations.json')
+  // Then annotations go to documents/doc-123/annotations.json
+  const annotationsPath = markdownPath.replace(/\/[^/]+\.md$/, '/annotations.json')
 
   // Upload to storage
   const { error: uploadError } = await supabase.storage

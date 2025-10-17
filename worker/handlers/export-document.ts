@@ -32,6 +32,7 @@
 
 import JSZip from 'jszip'
 import { readFromStorage, listStorageFiles } from '../lib/storage-helpers.js'
+import { ExportJobOutputSchema } from '../types/job-schemas.js'
 
 /**
  * Export documents to ZIP bundle.
@@ -122,6 +123,7 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
       }
 
       // Read and add each file to ZIP
+      // This includes annotations.json created by the hourly cron job
       for (const file of storageFiles) {
         try {
           const filePath = `${storagePath}/${file.name}`
@@ -184,12 +186,11 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
         }
       }
 
-      // ✅ OPTIONAL: ADD CONNECTIONS.JSON
+      // ✅ OPTIONAL: ADD CONNECTIONS.JSON (queried from Database)
       if (includeConnections) {
         console.log(`  - Querying connections for ${doc.id}`)
 
         try {
-          // First, get all chunk IDs for this document
           const { data: chunks, error: chunksError } = await supabase
             .from('chunks')
             .select('id')
@@ -197,12 +198,10 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
 
           if (chunksError) {
             console.warn(`  ⚠️ Failed to fetch chunks:`, chunksError.message)
-          } else if (!chunks || chunks.length === 0) {
-            console.log(`  - No chunks found for document`)
-          } else {
+          } else if (chunks && chunks.length > 0) {
             const chunkIds = chunks.map((c: any) => c.id)
 
-            // Now query connections using chunk IDs directly
+            // Query connections using chunk IDs directly
             const { data: connections, error: connError } = await supabase
               .from('connections')
               .select(`
@@ -211,9 +210,10 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
                 target_chunk_id,
                 connection_type,
                 strength,
-                explanation,
+                metadata,
                 user_validated,
-                created_at
+                auto_detected,
+                discovered_at
               `)
               .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`)
 
@@ -239,23 +239,9 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
         }
       }
 
-      // ✅ OPTIONAL: ADD ANNOTATIONS.JSON
-      if (includeAnnotations) {
-        console.log(`  - Checking for annotations.json`)
-
-        try {
-          const annotationsPath = `${storagePath}/annotations.json`
-          const annotations = await readFromStorage(supabase, annotationsPath)
-
-          if (annotations) {
-            docFolder.file('annotations.json', JSON.stringify(annotations, null, 2))
-            console.log(`  ✓ Added: annotations.json`)
-          }
-        } catch (error) {
-          // Annotations file doesn't exist - this is not an error
-          console.log(`  - No annotations.json found (this is normal)`)
-        }
-      }
+      // Note: Annotations are automatically included via annotations.json file
+      // created by the hourly cron job (worker/jobs/export-annotations.ts)
+      // The file loop above reads it from Storage and adds it to the ZIP
 
       // Add document to top-level manifest
       topLevelManifest.documents.push({
@@ -315,21 +301,27 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     // ✅ STEP 8: MARK JOB COMPLETE (100%)
     await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Export completed successfully')
 
+    // Prepare output data with camelCase (matches frontend expectations)
+    const outputData = {
+      success: true,
+      documentCount: documents.length,
+      zipFilename: zipFilename,
+      zipSizeMb: (zipBlob.size / 1024 / 1024).toFixed(2),
+      downloadUrl: signedUrlData.signedUrl,
+      expiresAt: new Date(Date.now() + 86400 * 1000).toISOString(),
+      storagePath: zipPath,
+      includedConnections: includeConnections || false,
+      includedAnnotations: includeAnnotations || false,
+    }
+
+    // Validate schema before saving (catches typos at runtime)
+    ExportJobOutputSchema.parse(outputData)
+
     await supabase
       .from('background_jobs')
       .update({
         status: 'completed',
-        output_data: {
-          success: true,
-          document_count: documents.length,
-          zip_filename: zipFilename,
-          zip_size_mb: (zipBlob.size / 1024 / 1024).toFixed(2),
-          downloadUrl: signedUrlData.signedUrl, // Frontend expects camelCase
-          expires_at: new Date(Date.now() + 86400 * 1000).toISOString(), // 24 hours
-          storage_path: zipPath,
-          included_connections: includeConnections || false,
-          included_annotations: includeAnnotations || false
-        },
+        output_data: outputData,
         completed_at: new Date().toISOString()
       })
       .eq('id', job.id)

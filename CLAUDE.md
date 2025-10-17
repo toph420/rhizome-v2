@@ -514,6 +514,71 @@ Production metrics (p95 latency, cache hit rates) don't matter for one user.
 
 ---
 
+## Naming Conventions (CRITICAL)
+
+**Problem**: Fullstack apps have conflicting conventions (Database: `snake_case`, JavaScript: `camelCase`)
+
+**Solution**: Use camelCase in `output_data` JSONB fields to match frontend, validate with Zod schemas.
+
+### Convention Rules
+
+**Database Layer (PostgreSQL/Supabase)**
+- Tables: `snake_case` (e.g., `background_jobs`, `connections`)
+- Columns: `snake_case` (e.g., `created_at`, `output_data`)
+- JSONB fields (`output_data`): **camelCase** (e.g., `downloadUrl`, `zipFilename`)
+
+**TypeScript/Frontend Layer**
+- Variables: `camelCase` (e.g., `downloadUrl`, `createdAt`)
+- Types/Interfaces: `PascalCase` (e.g., `ExportJobOutput`)
+- Files: `kebab-case` (e.g., `export-document.ts`)
+
+### Why camelCase in output_data?
+
+**JSONB is schemaless** - PostgreSQL doesn't enforce types or naming anyway.
+**Simpler** - No transformation layer, frontend and backend share same structure.
+**Less error-prone** - Fewer places for naming bugs like `download_url` vs `downloadUrl`.
+
+### Enforcement with Zod
+
+```typescript
+// worker/types/job-schemas.ts
+import { z } from 'zod'
+
+export const ExportJobOutputSchema = z.object({
+  success: z.boolean(),
+  documentCount: z.number(),      // ✅ camelCase
+  downloadUrl: z.string().url(),  // ✅ camelCase
+  // ...
+})
+
+// In handler
+const outputData = {
+  success: true,
+  documentCount: documents.length,
+  downloadUrl: signedUrl, // ✅ camelCase
+}
+
+// Validate before saving (catches typos!)
+ExportJobOutputSchema.parse(outputData)
+```
+
+### Required Files
+
+- **Schema definitions**: `worker/types/job-schemas.ts` (Zod validation)
+- **Import in handlers**: All job handlers must import and validate
+- **Never skip validation**: Catches bugs at runtime before they reach UI
+
+### Common Mistakes to Avoid
+
+❌ `download_url` in output_data (snake_case breaks frontend)
+❌ Skipping schema validation (typos reach production)
+❌ Using wrong table names (e.g., `chunk_connections` instead of `connections`)
+✅ Always validate with Zod before saving to database
+✅ Check schema file when adding new output fields
+✅ Verify table names with `\dt` in psql before querying
+
+---
+
 ## Miscellaneous Rules
 
 - **Latest Migration**: `052_job_pause_resume.sql` (see `supabase/migrations/`)
