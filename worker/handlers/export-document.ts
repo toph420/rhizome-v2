@@ -30,7 +30,7 @@
  * Pattern reference: worker/handlers/import-document.ts
  */
 
-import * as JSZip from 'jszip'
+import JSZip from 'jszip'
 import { readFromStorage, listStorageFiles } from '../lib/storage-helpers.js'
 
 /**
@@ -127,36 +127,54 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
           const filePath = `${storagePath}/${file.name}`
           console.log(`  - Reading: ${file.name}`)
 
-          // For binary files (PDF, EPUB, images), we need to read as blob
+          // Create signed URL for all file types
+          const { data: signedUrlData, error: urlError } = await supabase.storage
+            .from('documents')
+            .createSignedUrl(filePath, 3600)
+
+          if (urlError || !signedUrlData?.signedUrl) {
+            console.warn(`  ⚠️ Failed to create signed URL for ${file.name}`)
+            continue
+          }
+
+          // Handle different file types
           if (
             file.name.endsWith('.pdf') ||
             file.name.endsWith('.epub') ||
             file.name.endsWith('.jpg') ||
             file.name.endsWith('.png')
           ) {
-            // Create signed URL and fetch as blob
-            const { data: signedUrlData, error: urlError } = await supabase.storage
-              .from('documents')
-              .createSignedUrl(filePath, 3600)
-
-            if (urlError || !signedUrlData?.signedUrl) {
-              console.warn(`  ⚠️ Failed to create signed URL for ${file.name}`)
-              continue
-            }
-
+            // Binary files: fetch as ArrayBuffer for JSZip
             const response = await fetch(signedUrlData.signedUrl)
             if (!response.ok) {
               console.warn(`  ⚠️ Failed to fetch ${file.name}: ${response.statusText}`)
               continue
             }
 
-            const blob = await response.blob()
-            docFolder.file(file.name, blob)
-            console.log(`  ✓ Added: ${file.name} (${blob.size} bytes)`)
+            const arrayBuffer = await response.arrayBuffer()
+            docFolder.file(file.name, arrayBuffer)
+            console.log(`  ✓ Added: ${file.name} (${arrayBuffer.byteLength} bytes)`)
+          } else if (file.name.endsWith('.md')) {
+            // Markdown files: fetch as plain text
+            const response = await fetch(signedUrlData.signedUrl)
+            if (!response.ok) {
+              console.warn(`  ⚠️ Failed to fetch ${file.name}: ${response.statusText}`)
+              continue
+            }
+
+            const text = await response.text()
+            docFolder.file(file.name, text)
+            console.log(`  ✓ Added: ${file.name}`)
           } else {
-            // For text files (JSON, markdown), read as text
-            const content = await readFromStorage(supabase, filePath)
-            const jsonString = typeof content === 'string' ? content : JSON.stringify(content, null, 2)
+            // JSON files: fetch and parse as JSON
+            const response = await fetch(signedUrlData.signedUrl)
+            if (!response.ok) {
+              console.warn(`  ⚠️ Failed to fetch ${file.name}: ${response.statusText}`)
+              continue
+            }
+
+            const jsonData = await response.json()
+            const jsonString = JSON.stringify(jsonData, null, 2)
             docFolder.file(file.name, jsonString)
             console.log(`  ✓ Added: ${file.name}`)
           }
@@ -171,35 +189,50 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
         console.log(`  - Querying connections for ${doc.id}`)
 
         try {
-          const { data: connections, error: connError } = await supabase
-            .from('chunk_connections')
-            .select(`
-              id,
-              source_chunk_id,
-              target_chunk_id,
-              connection_type,
-              strength,
-              explanation,
-              user_validated,
-              created_at
-            `)
-            .or(`source_chunk.document_id.eq.${doc.id},target_chunk.document_id.eq.${doc.id}`)
+          // First, get all chunk IDs for this document
+          const { data: chunks, error: chunksError } = await supabase
+            .from('chunks')
+            .select('id')
+            .eq('document_id', doc.id)
 
-          if (connError) {
-            console.warn(`  ⚠️ Failed to fetch connections:`, connError.message)
-          } else if (connections && connections.length > 0) {
-            const connectionsData = {
-              version: '1.0',
-              document_id: doc.id,
-              connection_count: connections.length,
-              connections: connections,
-              exported_at: new Date().toISOString()
-            }
-
-            docFolder.file('connections.json', JSON.stringify(connectionsData, null, 2))
-            console.log(`  ✓ Added: connections.json (${connections.length} connections)`)
+          if (chunksError) {
+            console.warn(`  ⚠️ Failed to fetch chunks:`, chunksError.message)
+          } else if (!chunks || chunks.length === 0) {
+            console.log(`  - No chunks found for document`)
           } else {
-            console.log(`  - No connections found`)
+            const chunkIds = chunks.map((c: any) => c.id)
+
+            // Now query connections using chunk IDs directly
+            const { data: connections, error: connError } = await supabase
+              .from('connections')
+              .select(`
+                id,
+                source_chunk_id,
+                target_chunk_id,
+                connection_type,
+                strength,
+                explanation,
+                user_validated,
+                created_at
+              `)
+              .or(`source_chunk_id.in.(${chunkIds.join(',')}),target_chunk_id.in.(${chunkIds.join(',')})`)
+
+            if (connError) {
+              console.warn(`  ⚠️ Failed to fetch connections:`, connError.message)
+            } else if (connections && connections.length > 0) {
+              const connectionsData = {
+                version: '1.0',
+                document_id: doc.id,
+                connection_count: connections.length,
+                connections: connections,
+                exported_at: new Date().toISOString()
+              }
+
+              docFolder.file('connections.json', JSON.stringify(connectionsData, null, 2))
+              console.log(`  ✓ Added: connections.json (${connections.length} connections)`)
+            } else {
+              console.log(`  - No connections found`)
+            }
           }
         } catch (error) {
           console.warn(`  ⚠️ Error fetching connections:`, error)
@@ -291,7 +324,7 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
           document_count: documents.length,
           zip_filename: zipFilename,
           zip_size_mb: (zipBlob.size / 1024 / 1024).toFixed(2),
-          download_url: signedUrlData.signedUrl,
+          downloadUrl: signedUrlData.signedUrl, // Frontend expects camelCase
           expires_at: new Date(Date.now() + 86400 * 1000).toISOString(), // 24 hours
           storage_path: zipPath,
           included_connections: includeConnections || false,
