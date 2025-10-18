@@ -212,6 +212,60 @@ export function IntegrationsTab() {
   // READWISE OPERATIONS
   // ============================================================================
 
+  /**
+   * Auto-search and import from Readwise API
+   * Searches Readwise library for matching book and imports highlights automatically
+   */
+  const handleReadwiseAutoImport = async () => {
+    if (!selectedDoc) {
+      setMessage({ type: 'error', text: 'Please select a document first' })
+      return
+    }
+
+    setIsOperating(true)
+    setMessage(null)
+
+    try {
+      const response = await fetch('/api/readwise/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: selectedDoc })
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Import failed')
+      }
+
+      const { imported, needsReview, failed, bookTitle, bookAuthor } = result
+
+      // Show success message with stats
+      const total = imported + needsReview + failed
+      const stats = `${imported} imported | ${needsReview} need review | ${failed} failed`
+
+      setMessage({
+        type: 'success',
+        text: `Readwise import complete: ${bookTitle} by ${bookAuthor}\n${stats}`,
+      })
+
+      // Reload history to show new job
+      setTimeout(() => loadOperationHistory(), 1000)
+
+    } catch (error) {
+      console.error('[IntegrationsTab] Readwise auto-import failed:', error)
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to import from Readwise API',
+      })
+    } finally {
+      setIsOperating(false)
+    }
+  }
+
+  /**
+   * Manual import from Readwise export JSON file
+   */
   const handleReadwiseFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
@@ -219,7 +273,7 @@ export function IntegrationsTab() {
     }
   }
 
-  const handleReadwiseImport = async () => {
+  const handleReadwiseManualImport = async () => {
     if (!selectedDoc) {
       setMessage({ type: 'error', text: 'Please select a document first' })
       return
@@ -509,10 +563,72 @@ export function IntegrationsTab() {
               <h4 className="text-md font-semibold">Readwise</h4>
             </div>
             <p className="text-sm text-muted-foreground">
-              Import highlights from Readwise export JSON (from readwise.io/export)
+              Import highlights from Readwise using API search or manual file upload
             </p>
 
+            {/* Quick Import (API Search) */}
             <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Quick Import (Recommended)</Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="size-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>Automatically searches your Readwise library for this book and imports all highlights</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleReadwiseAutoImport}
+                    disabled={!selectedDoc || isOperating}
+                    variant="default"
+                    className="w-full"
+                  >
+                    {isOperating ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Searching Readwise...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="mr-2 size-4" />
+                        Import from Readwise API
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Searches Readwise library and imports highlights automatically</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>• Searches your Readwise library automatically</p>
+                <p>• No file export needed</p>
+                <p>• Requires Readwise API token in settings</p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Manual Import (File Upload) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Manual Import (Alternative)</Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="size-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>Upload a Readwise export JSON file for offline imports</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+
               <div>
                 <Label htmlFor="readwise-file-input" className="text-sm">
                   Readwise Export File
@@ -535,9 +651,10 @@ export function IntegrationsTab() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={handleReadwiseImport}
+                    onClick={handleReadwiseManualImport}
                     disabled={!selectedDoc || !readwiseFile || isOperating}
-                    variant="default"
+                    variant="outline"
+                    className="w-full"
                   >
                     {isOperating ? (
                       <>
@@ -547,19 +664,25 @@ export function IntegrationsTab() {
                     ) : (
                       <>
                         <Upload className="mr-2 size-4" />
-                        Import Highlights
+                        Import from File
                       </>
                     )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Import highlights from Readwise export JSON with intelligent matching</p>
+                  <p>Import highlights from Readwise export JSON file</p>
                 </TooltipContent>
               </Tooltip>
+
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>• Export highlights from <strong>readwise.io/export</strong></p>
+                <p>• Useful for offline imports</p>
+                <p>• No API token needed</p>
+              </div>
             </div>
 
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p>• Export highlights from <strong>readwise.io/export</strong></p>
+            <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+              <strong>How it works:</strong>
               <p>• Exact matches → immediate annotations</p>
               <p>• Fuzzy matches → review queue (import_pending table)</p>
             </div>

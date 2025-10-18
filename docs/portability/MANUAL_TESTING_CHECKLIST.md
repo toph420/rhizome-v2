@@ -870,20 +870,54 @@ Export System Bugs (10 total - ALL FIXED ✅):
 
 **Goal**: Verify Obsidian and Readwise operations work from Admin Panel
 
+**Status**: 🟡 **READY FOR TESTING** - Testing deferred to next session (2025-10-18)
+
+**New Feature Added (Session 10)**:
+- ✅ Added "Quick Import" (Auto-search Readwise API) alongside existing manual file upload
+- ✅ IntegrationsTab now has feature parity with DocumentHeader
+- ✅ Two import methods:
+  1. **Quick Import (Recommended)**: One-click API search, auto-imports highlights
+  2. **Manual Import (Alternative)**: File upload for offline imports
+
+**Testing Notes**:
+- Requires Obsidian vault configuration for Obsidian tests
+- Requires Readwise API token for Quick Import testing
+- Manual Import can be tested with exported JSON file
+- Operation history should track all integration jobs (obsidian_export, obsidian_sync, readwise_import)
+
 1. **Obsidian Operations**
    - [ ] Admin Panel → Integrations tab
-   - [ ] Verify Obsidian section exists
-   - [ ] Click "Export to Obsidian" (if vault configured)
-   - [ ] Verify operation starts
-   - [ ] Check operation history: should show recent export
+   - [ ] Verify Obsidian section exists with 2 buttons:
+     - [ ] "Export to Obsidian"
+     - [ ] "Sync from Obsidian"
+   - [ ] Select a document from dropdown
+   - [ ] Click "Export to Obsidian"
+   - [ ] Verify operation starts and appears in operation history
+   - [ ] Verify success message shows vault path
+   - [ ] Click "Sync from Obsidian"
+   - [ ] Verify sync operation starts and appears in history
 
-2. **Readwise Operations**
+2. **Readwise Operations - Quick Import (NEW)**
    - [ ] Verify Readwise section exists
-   - [ ] Click "Import Highlights" (if Readwise data available)
-   - [ ] Verify import starts
-   - [ ] Check operation history
+   - [ ] Verify "Quick Import (Recommended)" section with "Import from Readwise API" button
+   - [ ] Select a document from dropdown
+   - [ ] Click "Import from Readwise API"
+   - [ ] Verify operation searches Readwise library
+   - [ ] Verify success message shows:
+     - Book title and author
+     - Import stats (imported, needs review, failed counts)
+   - [ ] Check operation history: shows readwise_import job
 
-3. **Operation History**
+3. **Readwise Operations - Manual Import (Existing)**
+   - [ ] Verify "Manual Import (Alternative)" section exists
+   - [ ] Upload a Readwise export JSON file
+   - [ ] Verify file name and size display
+   - [ ] Click "Import from File"
+   - [ ] Verify import starts
+   - [ ] Verify success message shows highlight count
+   - [ ] Check operation history: shows readwise_import job
+
+4. **Operation History**
    - [ ] Verify history table shows:
      - Operation type (Export to Obsidian, Import Readwise, etc.)
      - Status (Completed, Failed)
@@ -1285,12 +1319,12 @@ Export System Bugs (10 total - ALL FIXED ✅):
 
 ### Validation Results
 
-**Testing Sessions**: 9 sessions completed
-**Total Tests Executed**: 23 / 49 (47%)
-**Tests Passed**: 23 ✅
+**Testing Sessions**: 10 sessions completed
+**Total Tests Executed**: 25 / 49 (51%)
+**Tests Passed**: 25 ✅
 **Tests Failed**: 0 ❌
-**Tests Pending**: 0 (core portability features complete)
-**Bugs Found**: 24 (23 fixed, 1 documented for future fix)
+**Tests Pending**: 3 (T-021: Integrations Tab, T-022: Keyboard Shortcuts, T-023: Tooltips/UX)
+**Bugs Found**: 32 total (31 fixed, 1 documented for future fix)
 
 ### Session 8 Progress (2025-10-15 - Chonkie Storage & Add New Mode Implementation)
 
@@ -1365,6 +1399,69 @@ Export System Bugs (10 total - ALL FIXED ✅):
   - Priority: P2 (Medium)
 
 **Session Summary**: Both T-018 and T-024 complete and passing. Add New mode ready for production. Chonkie metadata portability validated with excellent legacy document handling.
+
+---
+
+### Session 10 Progress (2025-10-17 - Export System Complete)
+
+**Completed**:
+- ✅ T-019: Export Single Document - Complete with all 10 bugs fixed
+- ✅ T-020: Batch Export - Multi-document export working perfectly
+- ✅ Enhancement: Added auto-search Readwise import to IntegrationsTab
+
+**Export System Tests**:
+
+1. **Single Document Export (T-019)**
+   - Selected document with connections and annotations enabled
+   - Export job completed successfully
+   - ZIP downloaded (0.59 MB)
+   - Verified all files included with correct naming:
+     - source.pdf ✅
+     - content.md ✅
+     - chunks.json ✅
+     - metadata.json ✅
+     - manifest.json ✅
+     - connections.json ✅
+     - annotations.json ✅ (consistent naming - no dot prefix)
+   - Result: ✅ **PASSED**
+
+2. **Batch Export (T-020)**
+   - Selected 5 documents
+   - Export progress tracked correctly ("Processing document X of Y")
+   - ZIP downloaded with multiple document folders
+   - Top-level manifest.json accurate
+   - Each document folder has complete file set
+   - Result: ✅ **PASSED**
+
+**Bugs Fixed This Session** (10 total):
+- Bug #22: JSZip import syntax (default vs namespace)
+- Bug #23: Markdown JSON parse error
+- Bug #24: PDF blob format (ArrayBuffer)
+- Bug #25: PostgREST subquery syntax
+- Bug #26: Wrong table name (chunk_connections → connections)
+- Bug #27: camelCase mismatch (download_url → downloadUrl)
+- Bug #28: Wrong connection columns (explanation → metadata)
+- Bug #29: Annotations not exported from ECS system
+- Bug #30: Duplicate annotation query with non-existent chunk_id column
+- Bug #31: .annotations.json → annotations.json (consistent naming)
+- Bug #32: ExportTab polling query error (details column)
+
+**IntegrationsTab Enhancement**:
+- Added "Quick Import" auto-search feature for Readwise
+- Now has feature parity with DocumentHeader
+- Two import methods:
+  1. Quick Import (API): One-click search and import
+  2. Manual Import (File): Offline JSON file upload
+- Full-width buttons, clear visual hierarchy, info tooltips
+- Files Modified: `src/components/admin/tabs/IntegrationsTab.tsx`
+
+**Key Achievements**:
+- **Export system 100% functional** - Single and batch exports working
+- **Consistent file naming** - All files use standard naming (no hidden files)
+- **Annotations included** - Hourly cron exports annotations.json to Storage
+- **IntegrationsTab enhanced** - Feature parity with reader header
+
+**Next Session**: T-021 Integrations Tab testing (deferred to 2025-10-18)
 
 ---
 
