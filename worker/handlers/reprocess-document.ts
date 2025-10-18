@@ -480,7 +480,9 @@ export async function reprocessDocument(
       console.log('[ReprocessDocument] Running 3-engine collision detection...')
       await updateProgress(75, 'Running collision detection...')
       const { processDocument } = await import('../engines/orchestrator.js')
-      await processDocument(documentId)
+      await processDocument(documentId, {
+        reprocessingBatch: reprocessingBatch  // ✅ Pass batch ID to query correct chunks
+      })
       console.log('[ReprocessDocument] ✅ Collision detection complete')
       await updateProgress(77, 'Collision detection complete')
     } catch (error) {
@@ -519,6 +521,8 @@ export async function reprocessDocument(
     let connectionResults
     try {
       console.log('[ReprocessDocument] Starting connection remapping...')
+      console.log(`[ReprocessDocument] Passing ${newChunks.length} chunks to remapConnections`)
+      console.log(`[ReprocessDocument] Chunks with embeddings: ${newChunks.filter((c: any) => c.embedding).length}`)
       await updateProgress(88, 'Remapping connections...')
       connectionResults = await remapConnections(
         documentId,

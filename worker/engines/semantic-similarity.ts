@@ -68,11 +68,21 @@ export async function runSemanticSimilarity(
   );
 
   // Get all chunks from this document with embeddings
-  const { data: sourceChunks, error: fetchError } = await supabase
+  // During reprocessing: query by reprocessing_batch (chunks not yet marked is_current: true)
+  // During normal processing: query by is_current: true
+  let query = supabase
     .from('chunks')
     .select('id, document_id, embedding, importance_score')
     .eq('document_id', documentId)
     .not('embedding', 'is', null);
+
+  if (config.reprocessingBatch) {
+    query = query.eq('reprocessing_batch', config.reprocessingBatch);
+  } else {
+    query = query.eq('is_current', true);
+  }
+
+  const { data: sourceChunks, error: fetchError } = await query;
 
   if (fetchError) {
     console.error('[SemanticSimilarity] Failed to fetch chunks:', fetchError);

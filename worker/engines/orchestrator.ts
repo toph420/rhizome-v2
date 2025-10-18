@@ -15,6 +15,7 @@ import { ChunkConnection } from './semantic-similarity';
 export interface OrchestratorConfig {
   enabledEngines?: ('semantic_similarity' | 'contradiction_detection' | 'thematic_bridge')[];
   targetDocumentIds?: string[];  // Filter connections to specific target documents (for Add New mode)
+  reprocessingBatch?: string;  // Reprocessing batch ID to query correct chunks during reprocessing
   semanticSimilarity?: any;
   contradictionDetection?: any;
   thematicBridge?: any;
@@ -41,6 +42,7 @@ export async function processDocument(
   const {
     enabledEngines = ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
     targetDocumentIds,
+    reprocessingBatch,
     onProgress
   } = config;
 
@@ -60,7 +62,8 @@ export async function processDocument(
     await onProgress?.(25, 'semantic-similarity', 'Finding semantic similarities');
     const connections = await runSemanticSimilarity(documentId, {
       ...config.semanticSimilarity,
-      targetDocumentIds
+      targetDocumentIds,
+      reprocessingBatch
     });
     allConnections.push(...connections);
     byEngine.semantic_similarity = connections.length;
@@ -71,7 +74,8 @@ export async function processDocument(
     await onProgress?.(50, 'contradiction-detection', 'Detecting contradictions');
     const connections = await runContradictionDetection(documentId, {
       ...config.contradictionDetection,
-      targetDocumentIds
+      targetDocumentIds,
+      reprocessingBatch
     });
     allConnections.push(...connections);
     byEngine.contradiction_detection = connections.length;
@@ -88,11 +92,13 @@ export async function processDocument(
     const connections = useLocalMode
       ? await runThematicBridgeQwen(documentId, {
           ...config.thematicBridge,
-          targetDocumentIds
+          targetDocumentIds,
+          reprocessingBatch
         }, onProgress)
       : await runThematicBridge(documentId, {
           ...config.thematicBridge,
-          targetDocumentIds
+          targetDocumentIds,
+          reprocessingBatch
         }, onProgress);
 
     allConnections.push(...connections);

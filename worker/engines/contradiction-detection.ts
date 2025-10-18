@@ -49,12 +49,22 @@ export async function runContradictionDetection(
   );
 
   // Get chunks with conceptual and emotional metadata
-  const { data: sourceChunks, error } = await supabase
+  // During reprocessing: query by reprocessing_batch (chunks not yet marked is_current: true)
+  // During normal processing: query by is_current: true
+  let sourceQuery = supabase
     .from('chunks')
     .select('id, document_id, conceptual_metadata, emotional_metadata, importance_score, content, summary')
     .eq('document_id', documentId)
     .not('conceptual_metadata', 'is', null)
     .not('emotional_metadata', 'is', null);
+
+  if (config.reprocessingBatch) {
+    sourceQuery = sourceQuery.eq('reprocessing_batch', config.reprocessingBatch);
+  } else {
+    sourceQuery = sourceQuery.eq('is_current', true);
+  }
+
+  const { data: sourceChunks, error } = await sourceQuery;
 
   if (error || !sourceChunks?.length) {
     console.log('[ContradictionDetection] No chunks with required metadata');
@@ -87,6 +97,7 @@ export async function runContradictionDetection(
         summary,
         documents!inner(title)
       `)
+      .eq('is_current', true)  // ✅ Only search current chunks from other documents
       .not('conceptual_metadata', 'is', null)
       .not('emotional_metadata', 'is', null)
       .neq('id', chunk.id);

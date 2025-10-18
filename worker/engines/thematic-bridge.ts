@@ -57,7 +57,9 @@ export async function runThematicBridge(
   );
 
   // Get high-importance chunks from source document
-  const { data: sourceChunks, error } = await supabase
+  // During reprocessing: query by reprocessing_batch
+  // During normal processing: query by is_current: true
+  let sourceQuery = supabase
     .from('chunks')
     .select(`
       id,
@@ -72,6 +74,14 @@ export async function runThematicBridge(
     .not('domain_metadata', 'is', null)
     .order('importance_score', { ascending: false })
     .limit(maxSourceChunks);
+
+  if (config.reprocessingBatch) {
+    sourceQuery = sourceQuery.eq('reprocessing_batch', config.reprocessingBatch);
+  } else {
+    sourceQuery = sourceQuery.eq('is_current', true);
+  }
+
+  const { data: sourceChunks, error } = await sourceQuery;
 
   if (error || !sourceChunks?.length) {
     console.log('[ThematicBridge] No high-importance chunks with domain metadata');
@@ -102,6 +112,7 @@ export async function runThematicBridge(
         importance_score,
         documents!inner(title)
       `)
+      .eq('is_current', true)  // ✅ Only search current chunks from other documents
       .neq('document_id', chunk.document_id)
       .gte('importance_score', minImportance)
       .not('domain_metadata', 'is', null)
