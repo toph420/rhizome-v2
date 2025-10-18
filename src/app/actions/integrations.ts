@@ -87,11 +87,12 @@ export async function exportToObsidian(
       .from('background_jobs')
       .insert({
         user_id: user.id,
-        job_type: 'obsidian_export',
+        job_type: 'obsidian-export',
         entity_type: 'document',
         entity_id: documentId,
         input_data: {
-          document_id: documentId
+          documentId: documentId,
+          userId: user.id
         }
       })
       .select()
@@ -177,11 +178,12 @@ export async function syncFromObsidian(
       .from('background_jobs')
       .insert({
         user_id: user.id,
-        job_type: 'obsidian_sync',
+        job_type: 'obsidian-sync',
         entity_type: 'document',
         entity_id: documentId,
         input_data: {
-          document_id: documentId
+          documentId: documentId,
+          userId: user.id
         }
       })
       .select()
@@ -295,12 +297,12 @@ export async function importReadwiseHighlights(
       .from('background_jobs')
       .insert({
         user_id: user.id,
-        job_type: 'readwise_import',
+        job_type: 'readwise-import',
         entity_type: 'document',
         entity_id: documentId,
         input_data: {
-          document_id: documentId,
-          readwise_json: readwiseJson
+          documentId: documentId,
+          readwiseData: readwiseJson
         }
       })
       .select()

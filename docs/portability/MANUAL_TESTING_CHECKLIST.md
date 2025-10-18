@@ -928,6 +928,264 @@ Export System Bugs (10 total - ALL FIXED ✅):
 
 ---
 
+## Session 11 Progress (2025-10-18 - Integrations Tab Testing & Critical Bug Discovery)
+
+**Status**: 🟡 **IN PROGRESS** - Paused due to critical reprocessing bug discovery
+
+### **Completed This Session**:
+
+#### Bugs Fixed (6 total):
+1. ✅ **Bug #33**: JSONB annotation query syntax error (`data->documentId` → `data->>documentId`)
+   - File: `worker/handlers/obsidian-sync.ts:368`
+   - Impact: Annotations now export correctly to Obsidian vault
+
+2. ✅ **Bug #34**: IntegrationsTab querying old job type names
+   - File: `src/components/admin/tabs/IntegrationsTab.tsx:123`
+   - Fix: Changed query from `['obsidian_export', ...]` → `['obsidian-export', ...]`
+   - Impact: Jobs now appear in Operation History
+
+3. ✅ **Bug #35**: Job type label mapping using old names
+   - File: `src/components/admin/tabs/IntegrationsTab.tsx:351-356`
+   - Fix: Updated switch cases to use hyphens instead of underscores
+   - Impact: Correct labels displayed in UI
+
+4. ✅ **Bug #36**: IntegrationsTab missing auto-refresh
+   - File: `src/components/admin/tabs/IntegrationsTab.tsx:88-94`
+   - Fix: Added 5-second polling interval for job status updates
+   - Impact: Operation History updates automatically without manual refresh
+
+5. ✅ **Worker not recognizing integration job types**
+   - Files: `src/app/actions/integrations.ts`, `worker/index.ts`
+   - Fix: Changed all job types from underscores to hyphens, updated input_data to camelCase
+   - Impact: All integration jobs now process correctly
+
+6. ✅ **Missing readwise-import handler**
+   - File: `worker/index.ts`
+   - Fix: Added readwise-import handler registration
+   - Impact: Readwise import jobs will now process
+
+#### Features Added:
+- ✅ **Auto-open Obsidian after export**
+  - File: `src/components/admin/tabs/IntegrationsTab.tsx:144-194`
+  - Feature: Polls job completion and automatically opens exported document in Obsidian using `obsidian://advanced-uri`
+  - Impact: Better UX - documents open immediately after export
+
+### **🚨 CRITICAL BUG DISCOVERED: Reprocessing Pipeline Inconsistency**
+
+**Bug #37**: Reprocessing does not use Chonkie chunking strategy
+
+**Problem**:
+The reprocessing pipeline (used by Obsidian sync and manual reprocessing) does NOT follow the same chunking workflow as initial document processing:
+
+**Initial Processing** (✅ Correct):
+```
+1. Docling extraction → Structural chunks (metadata anchors)
+2. Chonkie chunking → User's chosen strategy (recursive, semantic, etc.)
+3. Bulletproof matching → Transfer metadata: Docling chunks → Chonkie chunks
+4. Embeddings → Generated for Chonkie chunks
+5. Database → Store Chonkie chunks with metadata
+```
+
+**Current Reprocessing** (❌ Broken):
+```
+LOCAL mode:  Cached Docling chunks → USE DIRECTLY (skips Chonkie!)
+CLOUD mode:  AI semantic chunking → Skip Chonkie entirely
+```
+
+**Should Be** (🔧 Fix Required):
+```
+1. Load cached Docling chunks (metadata anchors)
+2. Run Chonkie on edited markdown (SAME strategy as initial processing)
+3. Bulletproof matching → Transfer metadata: Docling chunks → Chonkie chunks
+4. Embeddings → Generated for Chonkie chunks
+5. Database → Store Chonkie chunks with metadata
+```
+
+**Impact**:
+- 🔴 **Inconsistent chunk boundaries** between initial processing and reprocessing
+- 🔴 **Ignores user's chunking strategy** (e.g., user chose "recursive" but gets Docling HybridChunker)
+- 🔴 **Different chunk counts** before and after Obsidian sync
+- 🔴 **Potential annotation recovery issues** due to chunk mismatch
+
+**Files Affected**:
+- `worker/handlers/reprocess-document.ts` (lines 116-343)
+
+**Fix Required**:
+1. Import Chonkie chunking functionality (same as initial processing)
+2. In LOCAL mode: Use cached Docling chunks for bulletproof matching metadata transfer, but run Chonkie for actual chunks
+3. In CLOUD mode: Continue using AI chunking as fallback when no cached chunks exist
+4. Ensure metadata transfer from Docling → Chonkie works correctly
+5. Preserve user's chosen chunking strategy throughout reprocessing
+
+**Priority**: 🔴 **P0 (Critical)** - Blocks proper Obsidian sync testing and affects data integrity
+
+**Testing Blocked**:
+- Cannot properly test T-021.2 (Obsidian Sync with LOCAL mode) until fixed
+- Need to verify annotation recovery works with correct chunking
+
+**Next Session Plan**:
+1. Fix reprocessing pipeline to use Chonkie
+2. Test Obsidian sync with "Deleuze, Freud and the Three Syntheses" (has 12 cached chunks)
+3. Verify annotation recovery works correctly
+4. Complete T-021 Integrations Tab testing
+
+---
+
+## Session 12 Progress (2025-10-18 - Reprocessing Pipeline Chonkie Fix)
+
+**Status**: ✅ **IMPLEMENTATION COMPLETE** - Needs clean file rewrite next session
+
+### **Bug #37 Fix: Unified Chonkie Reprocessing**
+
+**Problem Identified**: Reprocessing pipeline had two separate paths:
+1. LOCAL mode: Used cached Docling chunks directly (skipped Chonkie)
+2. CLOUD mode: Used unreliable AI semantic chunking (skipped Chonkie)
+
+Both paths ignored the user's original chunking strategy and created inconsistent chunk boundaries.
+
+**Solution Implemented**:
+- ✅ Removed unreliable CLOUD mode AI chunking fallback
+- ✅ Always use Chonkie for reprocessing (matches initial processing)
+- ✅ Query original `chunker_type` from existing chunks
+- ✅ Conditional metadata transfer (only if cached Docling chunks exist)
+- ✅ Support markdown sources without Docling extraction
+
+**New Unified Pipeline**:
+```
+1. Query original chunker_type from database
+2. Check for cached Docling chunks (optional)
+3. Run Chonkie on edited markdown (ALWAYS - using original strategy)
+4. IF cached chunks exist → Transfer Docling metadata via overlap
+   ELSE → Use Chonkie chunks directly (markdown sources)
+5. Metadata enrichment (PydanticAI + Ollama)
+6. Local embeddings (Transformers.js)
+7. Save Chonkie chunks with metadata
+```
+
+**Key Insight**:
+- **PDF/EPUB sources**: Chonkie + Docling metadata transfer
+- **Markdown sources**: Chonkie only (no metadata transfer needed)
+- **Both use same chunking strategy** → Consistent chunk boundaries
+
+**Files Modified**:
+- `worker/handlers/reprocess-document.ts` - Added Chonkie integration (needs clean rewrite)
+
+**Implementation Status**:
+- ✅ Concept complete and correct
+- 🟡 File has duplicate code sections from edits
+- 🔧 Needs clean rewrite in Session 13
+
+**Test Documents Available**:
+1. **"Renewable Energy"** (`7f30550d-e33b-4193-a37e-70ca331c587d`) - markdown_asis, 3 chunks, hybrid
+2. **"Quantum Computing"** (`b807918e-2679-4508-95e0-abaf9e41c8ac`) - markdown_asis, 2 chunks, hybrid
+3. **"AI & ML"** (`6bfabe68-7145-477e-83f3-43e633a505b0`) - markdown_asis, 2 chunks, hybrid
+
+All three are `markdown_asis` sources (no cached Docling chunks) - perfect for testing Chonkie-only reprocessing!
+
+---
+
+## Session 13 Plan - Clean Implementation & Testing
+
+### **Priority 1: Clean Up reprocess-document.ts**
+
+**Goal**: Remove duplicate code sections and create clean implementation
+
+**Steps**:
+1. Review current file state
+2. Make single clean replacement of processing section (lines 104-425)
+3. Verify TypeScript compilation
+4. Test with TypeScript type checking
+
+**Expected Outcome**: Clean file with no duplicates, compiles without errors
+
+---
+
+### **Priority 2: Test Reprocessing Pipeline**
+
+**Test Document**: Use "Renewable Energy" (markdown_asis source)
+
+**Test Scenario**:
+1. Export "Renewable Energy" to Obsidian
+2. Make minor edits in Obsidian vault
+3. Sync from Obsidian via IntegrationsTab
+4. Verify reprocessing uses Chonkie (not CLOUD mode)
+
+**Success Criteria**:
+```bash
+# Worker logs should show:
+[ReprocessDocument] Querying original chunker strategy...
+[ReprocessDocument] Original chunker strategy: hybrid
+[ReprocessDocument] No cached chunks found (markdown source) - will use Chonkie
+[ReprocessDocument] Running Chonkie chunking with hybrid strategy...
+[ReprocessDocument] Chonkie created X chunks using hybrid strategy
+[ReprocessDocument] No metadata transfer needed (markdown source)
+```
+
+**Database Verification**:
+```sql
+-- Check chunks created with correct strategy
+SELECT DISTINCT chunker_type, COUNT(*)
+FROM chunks
+WHERE document_id = '7f30550d-e33b-4193-a37e-70ca331c587d'
+AND is_current = true
+GROUP BY chunker_type;
+-- Expected: chunker_type = 'hybrid', count matches original
+
+-- Verify Chonkie metadata fields populated
+SELECT
+  COUNT(*) as total,
+  COUNT(chunker_type) as has_chunker_type,
+  AVG(metadata_overlap_count) as avg_overlap
+FROM chunks
+WHERE document_id = '7f30550d-e33b-4193-a37e-70ca331c587d'
+AND is_current = true;
+-- Expected: All have chunker_type, metadata fields present
+```
+
+---
+
+### **Priority 3: Complete T-021 Integrations Tab Testing**
+
+**Remaining Tests**:
+1. **Readwise Quick Import**
+   - Select document with Readwise highlights
+   - Click "Import from Readwise API"
+   - Verify API search and import
+   - Check Operation History shows job
+
+2. **Readwise Manual Import**
+   - Upload Readwise export JSON file
+   - Verify file parsing and import
+   - Check highlight conversion to annotations
+
+3. **Operation History Verification**
+   - All job types display correctly
+   - Auto-refresh works (5-second polling)
+   - Job status updates in real-time
+
+---
+
+### **Priority 4: Documentation Updates**
+
+**Files to Update**:
+1. `thoughts/sessions/2025-10-18_reprocessing-chonkie-fix.md` - Add final implementation notes
+2. `docs/PROCESSING_PIPELINE.md` - Update reprocessing section
+3. This checklist - Mark Bug #37 as ✅ FIXED
+
+---
+
+### **Session 13 Success Criteria**
+
+- ✅ `reprocess-document.ts` cleaned up and compiling
+- ✅ Reprocessing uses Chonkie for markdown sources
+- ✅ No CLOUD mode fallback (removed entirely)
+- ✅ Worker logs confirm Chonkie pipeline
+- ✅ Database shows correct chunker_type preservation
+- ✅ T-021 Integrations Tab tests complete
+- ✅ Bug #37 marked as FIXED
+
+---
+
 ### T-022: Keyboard Shortcuts
 
 **Goal**: Verify all keyboard shortcuts work

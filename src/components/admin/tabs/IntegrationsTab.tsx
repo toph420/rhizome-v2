@@ -84,6 +84,15 @@ export function IntegrationsTab() {
     }
   }, [isOperating])
 
+  // Poll for job status updates every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadOperationHistory()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
   const loadDocuments = async () => {
     setLoading(true)
     setError(null)
@@ -120,7 +129,7 @@ export function IntegrationsTab() {
       const { data, error } = await supabase
         .from('background_jobs')
         .select('id, job_type, status, error_message, created_at, output_data')
-        .in('job_type', ['obsidian_export', 'obsidian_sync', 'readwise_import'])
+        .in('job_type', ['obsidian-export', 'obsidian-sync', 'readwise-import'])
         .order('created_at', { ascending: false })
         .limit(10)
 
@@ -132,6 +141,65 @@ export function IntegrationsTab() {
     } finally {
       setLoadingHistory(false)
     }
+  }
+
+  // ============================================================================
+  // JOB POLLING & OBSIDIAN URI HANDLING
+  // ============================================================================
+
+  /**
+   * Poll job status and open Obsidian URI when export completes
+   */
+  const pollJobCompletion = async (jobId: string, jobType: string) => {
+    const supabase = createClient()
+    const maxAttempts = 30 // 30 seconds max
+    let attempts = 0
+
+    const checkJob = async (): Promise<void> => {
+      if (attempts >= maxAttempts) {
+        console.log(`[IntegrationsTab] Job ${jobId} polling timeout`)
+        return
+      }
+
+      const { data: job, error } = await supabase
+        .from('background_jobs')
+        .select('status, output_data')
+        .eq('id', jobId)
+        .single()
+
+      if (error) {
+        console.error('[IntegrationsTab] Error polling job:', error)
+        return
+      }
+
+      if (job.status === 'completed' && jobType === 'obsidian-export') {
+        // Open Obsidian with the exported document
+        const uri = job.output_data?.uri
+        if (uri) {
+          console.log(`[IntegrationsTab] Opening Obsidian: ${uri}`)
+          window.location.href = uri
+          setMessage({
+            type: 'success',
+            text: `Document exported and opened in Obsidian!`,
+          })
+        }
+        return
+      }
+
+      if (job.status === 'failed') {
+        setMessage({
+          type: 'error',
+          text: `Export failed. Check operation history for details.`,
+        })
+        return
+      }
+
+      // Still processing, check again
+      attempts++
+      setTimeout(() => checkJob(), 1000)
+    }
+
+    checkJob()
   }
 
   // ============================================================================
@@ -157,6 +225,9 @@ export function IntegrationsTab() {
         })
         // Reload history to show new job
         setTimeout(() => loadOperationHistory(), 1000)
+
+        // Poll for completion and open in Obsidian
+        pollJobCompletion(result.jobId!, 'obsidian-export')
       } else {
         setMessage({
           type: 'error',
@@ -348,11 +419,11 @@ export function IntegrationsTab() {
 
   const getJobTypeLabel = (jobType: string): string => {
     switch (jobType) {
-      case 'obsidian_export':
+      case 'obsidian-export':
         return 'Export to Obsidian'
-      case 'obsidian_sync':
+      case 'obsidian-sync':
         return 'Sync from Obsidian'
-      case 'readwise_import':
+      case 'readwise-import':
         return 'Import Readwise'
       default:
         return jobType

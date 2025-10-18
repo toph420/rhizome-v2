@@ -365,7 +365,7 @@ async function exportAnnotations(documentId: string, vaultFilePath: string): Pro
         entities!inner(id)
       `)
       .eq('component_type', 'Position')
-      .eq('data->documentId', documentId)
+      .eq('data->>documentId', documentId)
 
     if (error) {
       console.warn('[Obsidian Export] Failed to fetch annotations:', error.message)
