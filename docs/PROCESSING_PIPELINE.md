@@ -200,6 +200,8 @@ Rhizome V2 uses a **unified 10-stage processing pipeline** powered by Chonkie fo
 
 Chonkie is a Python library offering 9 distinct chunking strategies, each optimized for different document types. It guarantees character offset accuracy, which is **critical** for our metadata transfer system.
 
+Chonkie Reference Doc: `docs/processing-pipeline/CHONKIE_CHUNKERS.md`
+
 ### Installation
 
 ```bash
