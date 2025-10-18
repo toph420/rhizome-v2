@@ -1,14 +1,12 @@
-Here's the updated `architecture.md` that reflects the actual 3-engine system with batched processing:
-
-```markdown
 # Rhizome Architecture - Personal Knowledge Synthesis Engine
 
 **What this is:** My external cognitive system. Every architectural decision optimizes for how I actually think, not how others might. No compromises.
 
 **Current Status:**
-- ✅ **IMPLEMENTED**: Upload pipeline, Node.js processing worker, batched extraction, stitching, metadata extraction
-- 🚧 **IN PROGRESS**: 3-engine collision detection, document reader
-- 📋 **PLANNED**: Sparks, threads, Obsidian sync, study system
+- ✅ **IMPLEMENTED**: 10-stage pipeline, 3-engine detection, Storage-First portability, Job v2.0, 7 processors
+- 🚧 **90% COMPLETE**: Document reader (missing connection visualization)
+- 🚧 **PARTIAL**: Sparks/Cards tabs (UI only, no backend)
+- 📋 **PLANNED**: Study system (FSRS), Threads
 
 ## Core Philosophy
 
@@ -117,14 +115,14 @@ CREATE TABLE documents (
 CREATE TABLE chunks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   document_id UUID REFERENCES documents ON DELETE CASCADE,
-  
+
   -- Content and position
   content TEXT NOT NULL,
   chunk_index INTEGER NOT NULL,
   start_offset INTEGER,  -- Position in content.md
   end_offset INTEGER,
   word_count INTEGER,
-  
+
   -- Rich metadata (extracted in batches via AI)
   embedding vector(768),
   themes TEXT[] NOT NULL,
@@ -132,10 +130,17 @@ CREATE TABLE chunks (
   emotional_tone JSONB,         -- {polarity: -1 to 1, primaryEmotion: string}
   importance_score FLOAT,       -- 0-1 for filtering
   summary TEXT,
-  
+
+  -- Extended metadata (Migration 047)
+  heading_path TEXT[],          -- Hierarchical headings
+  heading_level INTEGER,        -- Depth in tree
+  section_marker TEXT,          -- EPUB sections
+  chunker_type TEXT,            -- Which Chonkie strategy
+  confidence TEXT,              -- high/medium/low/interpolated
+
   -- Full metadata structure
   metadata JSONB,
-  
+
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -163,6 +168,18 @@ CREATE TABLE connections (
   discovered_at TIMESTAMPTZ DEFAULT NOW(),
   
   CONSTRAINT no_self_connections CHECK (source_chunk_id != target_chunk_id)
+);
+
+-- Import pending for review workflow (Migration 040)
+CREATE TABLE import_pending (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID,
+  source_type TEXT,
+  title TEXT,
+  author TEXT,
+  raw_highlights JSONB,
+  processed_data JSONB,
+  import_status TEXT
 );
 
 -- Indexes for performance
@@ -310,248 +327,251 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
 - Optional AI metadata or regex fallback
 - Cost: ~$0.02-0.10
 
-## 3-Engine Collision Detection System [🚧 IN PROGRESS]
+## 3-Engine Collision Detection System [✅ IMPLEMENTED]
 
-**The Core Innovation:** Run 3 distinct engines that each find different connection types. Aggressive filtering keeps costs reasonable (~$0.20 per document).
+**The Core Innovation:** 3 distinct engines find different connection types. Sequential execution with configurable weights.
 
-### Engine Definitions
+### Orchestrator Architecture
 
 ```typescript
-// worker/engines/types.ts
-
-export enum EngineType {
-  SEMANTIC_SIMILARITY = 'semantic_similarity',      // Weight: 0.25
-  CONTRADICTION_DETECTION = 'contradiction_detection', // Weight: 0.40
-  THEMATIC_BRIDGE = 'thematic_bridge'              // Weight: 0.35
-}
-
-export const DEFAULT_WEIGHTS = {
-  weights: {
-    [EngineType.SEMANTIC_SIMILARITY]: 0.25,
-    [EngineType.CONTRADICTION_DETECTION]: 0.40,  // Highest priority
-    [EngineType.THEMATIC_BRIDGE]: 0.35,
+// worker/engines/orchestrator.ts
+const orchestrator = new CollisionOrchestrator({
+  engines: {
+    semantic: new SemanticSimilarityEngine(),      // 25% weight
+    contradiction: new ContradictionDetectionEngine(), // 40% weight
+    thematic: process.env.PROCESSING_MODE === 'local'
+      ? new ThematicBridgeQwenEngine()  // Local: Qwen
+      : new ThematicBridgeEngine()      // Cloud: Gemini
   },
-  normalizationMethod: 'linear',
-  combineMethod: 'sum',
-};
+  weights: {
+    semantic: 0.25,
+    contradiction: 0.40,
+    thematic: 0.35
+  }
+})
 ```
 
-### 1. Semantic Similarity Engine (Fast Baseline)
+### Engine Implementations
+
+#### 1. Semantic Similarity (25% weight)
+- **Method**: pgvector cosine similarity
+- **Threshold**: 0.7 (configurable)
+- **Cost**: $0 (vector math only)
+- **Finds**: "These say the same thing"
+
+#### 2. Contradiction Detection (40% weight)
+- **Method**: Metadata-based concept + polarity analysis
+- **No AI calls**: Uses pre-extracted metadata
+- **Strategies**: Shared concepts with opposite polarity
+- **Finds**: "These disagree about the same thing"
+
+#### 3. Thematic Bridge (35% weight)
+- **Method**: AI-powered cross-domain matching
+- **Filtering**: Importance >0.6, top 15 candidates per chunk
+- **Local Mode**: Qwen 32B via Ollama
+- **Cloud Mode**: Gemini 2.0 Flash
+- **Cost**: ~$0.20 per document (after filtering)
+- **Finds**: "These connect different domains"
+
+### Connection Storage
+
+All engines write to single `connections` table with:
+- `type`: Engine identifier
+- `strength`: 0-1 score
+- `metadata`: Engine-specific data
+- `auto_detected`: true (until user validates)
+- `user_validated`: Preserved during reprocessing
+
+## Storage-First Portability System [✅ IMPLEMENTED]
+
+**Philosophy:** Storage is source of truth, Database is queryable cache.
+
+### Admin Panel Architecture (Cmd+Shift+A)
 
 ```typescript
-// worker/engines/semantic-similarity.ts
-
-export class SemanticSimilarityEngine extends BaseEngine {
-  async detect(input: CollisionDetectionInput): Promise<CollisionResult[]> {
-    const { sourceChunk } = input;
-    
-    // Use pgvector for efficient similarity search
-    const matches = await supabase.rpc('match_chunks', {
-      query_embedding: sourceChunk.embedding,
-      threshold: 0.7,
-      exclude_document: sourceChunk.document_id,
-      limit: 50
-    });
-    
-    return matches.map(m => ({
-      sourceChunkId: sourceChunk.id,
-      targetChunkId: m.id,
-      engineType: 'semantic_similarity',
-      score: m.similarity,
-      confidence: m.similarity > 0.85 ? 'high' : 'medium',
-      explanation: `Semantic similarity: ${(m.similarity * 100).toFixed(1)}%`
-    }));
-  }
+// 6 Operational Tabs
+interface AdminPanel {
+  scanner: CompareStorageVsDatabase,      // Find discrepancies
+  import: RestoreFromStorage,             // 3 conflict strategies
+  export: GenerateZipBundles,            // Complete portability
+  connections: ReprocessConnections,       // Smart mode preserves validated
+  integrations: ObsidianReadwise,         // External tool sync
+  jobs: BackgroundJobHistory              // Complete job management
 }
 ```
 
-**No AI calls. Just vector math. Finds: "These say the same thing"**
+### Storage Structure
 
-### 2. Contradiction Detection Engine (Enhanced with Metadata)
+```
+SUPABASE STORAGE
+└── userId/documentId/
+    ├── source.pdf              # Original upload
+    ├── content.md              # Processed markdown
+    ├── chunks.json             # Complete chunk data
+    ├── metadata.json           # Document metadata
+    ├── manifest.json           # Export manifest
+    └── annotations.json        # Annotation backup
+
+Benefits:
+- Zero-cost restore ($0 vs $0.20-0.60 reprocessing)
+- 6 minute restore vs 25 minute reprocessing
+- Complete portability via ZIP export
+- Disaster recovery capability
+```
+
+### Conflict Resolution Strategies
 
 ```typescript
-// worker/engines/contradiction-detection.ts
-
-export class ContradictionDetectionEngine extends BaseEngine {
-  async detect(input: CollisionDetectionInput): Promise<CollisionResult[]> {
-    const results = [];
-    
-    for (const targetChunk of input.targetChunks) {
-      // Strategy 1: Use metadata (concepts + emotional polarity)
-      const sharedConcepts = this.getSharedConcepts(
-        input.sourceChunk.metadata?.concepts,
-        targetChunk.metadata?.concepts
-      );
-      
-      if (sharedConcepts.length > 0) {
-        const oppositePolarity = this.hasOppositePolarity(
-          input.sourceChunk.metadata?.emotional_tone?.polarity,
-          targetChunk.metadata?.emotional_tone?.polarity
-        );
-        
-        if (oppositePolarity) {
-          results.push({
-            sourceChunkId: input.sourceChunk.id,
-            targetChunkId: targetChunk.id,
-            engineType: 'contradiction_detection',
-            score: 0.8,
-            confidence: 'high',
-            explanation: `Discussing ${sharedConcepts.join(', ')} with opposing stances`,
-            metadata: { sharedConcepts, contradictionType: 'conceptual_tension' }
-          });
-        }
-      }
-      
-      // Strategy 2: Fallback to syntax detection
-      // ... negation detection, antonyms, etc.
-    }
-    
-    return results;
-  }
+enum ConflictStrategy {
+  SKIP = 'skip',           // Keep existing
+  REPLACE = 'replace',     // Overwrite with imported
+  MERGE_SMART = 'merge'    // Intelligent merge by timestamp
 }
 ```
 
-**No AI calls. Uses extracted metadata. Finds: "These disagree about the same thing"**
+### Export System
 
-### 3. Thematic Bridge Engine (AI-Powered, Filtered)
+1. **Automatic**: After every processing completion
+2. **Manual**: Via Admin Panel Export tab
+3. **Format**: ZIP bundle with signed URLs (24hr expiry)
+4. **Contents**: All documents or selected subset
+
+## Background Job System v2.0 [✅ IMPLEMENTED]
+
+**Enhancement:** Checkpoint-based pause/resume with SHA-256 validation.
+
+### Job Architecture
+
+```sql
+-- Migration 052: Pause/Resume Support
+ALTER TABLE background_jobs ADD COLUMN
+  paused_at TIMESTAMPTZ,
+  resumed_at TIMESTAMPTZ,
+  pause_reason TEXT,
+  resume_count INTEGER DEFAULT 0,
+  last_checkpoint_path TEXT,
+  last_checkpoint_stage TEXT,
+  checkpoint_hash TEXT;
+```
+
+### Features
+
+#### Pause & Resume
+- **Checkpoint Creation**: At safe stages (review, post-chunk)
+- **SHA-256 Validation**: Prevents corrupted resume
+- **Graceful Fallback**: Start fresh if checkpoint invalid
+- **UI Controls**: Pause/Resume buttons with validation
+
+#### Retry System
+- **Error Classification**: transient, permanent, paywall, invalid
+- **Exponential Backoff**: 1min → 2min → 4min → 8min → 16min → 30min
+- **Max Attempts**: 5 (configurable)
+- **Auto-retry Loop**: 30-second polling
+
+#### Progress Tracking
+- **Real-time Updates**: Every 5-10 seconds
+- **Detailed Status**: "Processing chunk 234 of 500"
+- **Heartbeat**: Visual pulse indicator
+- **Stage Progress**: 10 stages with percentages
+
+### ProcessingDock
 
 ```typescript
-// worker/engines/thematic-bridge.ts
-
-export class ThematicBridgeEngine extends BaseEngine {
-  async detect(input: CollisionDetectionInput): Promise<CollisionResult[]> {
-    // FILTER 1: Source importance > 0.6
-    if (input.sourceChunk.importance_score < 0.6) return [];
-    
-    // FILTER 2: Get promising candidates
-    const candidates = this.filterCandidates(input.sourceChunk, input.targetChunks);
-    // Returns ~5-15 candidates per source chunk
-    
-    if (candidates.length === 0) return [];
-    
-    // ANALYZE: Use AI for each candidate (batched)
-    const analyses = await this.batchAnalyzeBridges(
-      input.sourceChunk,
-      candidates
-    );
-    
-    return analyses
-      .filter(a => a.connected && a.strength >= 0.6)
-      .map(a => ({
-        sourceChunkId: input.sourceChunk.id,
-        targetChunkId: a.targetChunkId,
-        engineType: 'thematic_bridge',
-        score: a.strength,
-        confidence: a.strength > 0.8 ? 'high' : 'medium',
-        explanation: a.explanation,
-        metadata: { bridgeType: a.bridgeType, sharedConcept: a.sharedConcept }
-      }));
-  }
-  
-  private filterCandidates(source, targets): ChunkWithMetadata[] {
-    return targets.filter(t => 
-      t.importance_score > 0.6 &&              // Important chunks only
-      t.document_id !== source.document_id &&   // Cross-document
-      this.inferDomain(t) !== this.inferDomain(source) &&  // Different domains
-      this.conceptOverlap(source, t) > 0.2 &&  // Some overlap
-      this.conceptOverlap(source, t) < 0.7     // Not too much
-    ).slice(0, 15);  // Top 15 candidates
-  }
+// Bottom-right floating dock
+interface ProcessingDock {
+  visibility: 'auto-hide when admin open',
+  display: 'active jobs only',
+  collapse: 'mini badge mode',
+  store: 'shared with admin panel'
 }
 ```
 
-**Cost: ~$0.20 per document (200 AI calls after aggressive filtering). Finds: "These connect different domains through shared concepts"**
+## Cached Chunks System [✅ IMPLEMENTED]
 
-### Orchestrator
+**Purpose:** Zero-cost document reprocessing by caching Docling extraction.
+
+### Architecture
+
+```sql
+-- Migration 046: Cached Chunks Table
+CREATE TABLE cached_chunks (
+  id UUID PRIMARY KEY,
+  document_id UUID REFERENCES documents,
+  extraction_mode TEXT, -- 'pdf' or 'epub'
+  markdown_hash TEXT,   -- Invalidation detection
+  chunks JSONB,         -- Full DoclingChunk array
+  structure_metadata JSONB,
+  created_at TIMESTAMPTZ
+);
+```
+
+### Benefits
+
+| Operation | With Cache | Without Cache |
+|-----------|------------|---------------|
+| Reprocess | 6 minutes | 25 minutes |
+| Cost | $0.00 | $0.20-0.60 |
+| API Calls | 0 | 50-200 |
+
+### Usage
 
 ```typescript
-// worker/handlers/detect-connections.ts
+// During initial processing (Stage 2)
+await saveCachedChunks(documentId, doclingChunks)
 
-function initializeOrchestrator(): CollisionOrchestrator {
-  const orchestrator = new CollisionOrchestrator({
-    parallel: true,
-    maxConcurrency: 3,
-    globalTimeout: 10000,  // AI takes longer
-    weights: DEFAULT_WEIGHTS,
-  });
-  
-  const apiKey = process.env.GOOGLE_AI_API_KEY!;
-  const engines = [
-    new SemanticSimilarityEngine(),
-    new ContradictionDetectionEngine(),
-    new ThematicBridgeEngine(apiKey),
-  ];
-  
-  orchestrator.registerEngines(engines);
-  return orchestrator;
+// During reprocessing
+const cached = await getCachedChunks(documentId)
+if (cached && cached.markdown_hash === currentHash) {
+  return cached.chunks // Skip extraction!
 }
 ```
 
-## The Hybrid Reader Architecture [🚧 IN PROGRESS]
+## Document Reader Architecture [90% COMPLETE]
 
-**The Problem:** Reading needs continuous flow, connections need precision.
+**Current Implementation:** Virtualized scrolling with annotation support.
 
-**The Solution:**
-
-```
-     Full Document              Chunk Tracking
-     (content.md)               (database)
-          │                          │
-          ▼                          ▼
-    Display Layer    ←─────→   Connection Layer
-          │                          │
-          └── Viewport Tracking ─────┘
-```
-
-### Implementation
+### VirtualizedReader Component
 
 ```typescript
-function DocumentReader({ documentId }) {
-  const [markdown, setMarkdown] = useState('');
-  const [visibleChunks, setVisibleChunks] = useState<string[]>([]);
-  const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
-  
-  // Load full markdown for reading
-  useEffect(() => {
-    async function loadDocument() {
-      const { data } = await supabase.storage
-        .from('documents')
-        .download(`${userId}/${documentId}/content.md`);
-      
-      setMarkdown(await data.text());
-    }
-    loadDocument();
-  }, [documentId]);
-  
-  // Track visible chunks
-  const handleScroll = useCallback((e) => {
-    const visible = calculateVisibleChunks(
-      e.target.scrollTop,
-      e.target.clientHeight
-    );
-    setVisibleChunks(visible);
-  }, []);
-  
-  // Load connections for visible chunks
-  const { data: connections } = useQuery({
-    queryKey: ['connections', visibleChunks, weights],
-    queryFn: () => getConnectionsForChunks(visibleChunks, weights),
-    enabled: visibleChunks.length > 0
-  });
-  
-  return (
-    <div className="grid grid-cols-[1fr_400px]">
-      <div onScroll={handleScroll}>
-        <MarkdownRenderer content={markdown} />
-      </div>
-      
-      <ConnectionsSidebar
-        connections={connections}
-        weights={weights}
-        onWeightChange={setWeights}
-      />
-    </div>
-  );
+// react-virtuoso for performance
+interface ReaderState {
+  markdown: string,              // Full document
+  chunks: Chunk[],               // For tracking
+  visibleChunks: string[],       // Viewport detection
+  annotations: Annotation[],      // Injected inline
+  scrollToChunk?: string,        // Navigation trigger
+  correctionMode: boolean        // Chunk fixing
+}
+```
+
+### Features Implemented
+
+✅ **Virtual Scrolling**: react-virtuoso for 1000+ page documents
+✅ **Markdown Rendering**: react-markdown + remark + KaTeX
+✅ **Annotation System**: Selection → ECS persistence → Display
+✅ **Text Selection**: useTextSelection hook with snapshot
+✅ **Viewport Tracking**: Visible chunk detection for connections
+✅ **Programmatic Navigation**: Scroll to chunk from RightPanel
+✅ **Correction Mode**: Fix chunk quality issues
+
+### Features Planned
+
+📋 **Connection Visualization**:
+- Heatmap in left margin (density)
+- Inline highlights for active connections
+- Connection strength gradients
+
+### RightPanel (7 Tabs)
+
+```typescript
+interface Tabs {
+  connections: 'Active connections for visible chunks',    // ✅
+  annotations: 'All document annotations',                 // ✅
+  quality: 'Chunk confidence metrics',                     // ✅
+  sparks: 'Quick captures (placeholder)',                  // ⚠️
+  cards: 'Flashcards (placeholder)',                       // ⚠️
+  review: 'Annotation recovery workflow',                  // ✅
+  tune: 'Engine weight configuration'                      // ✅
 }
 ```
 
@@ -1043,4 +1063,4 @@ Acceptable for a personal tool that actually delivers on the vision.
 - Am I reading full documents while connections surface underneath?
 
 This isn't a product. It's my external cognitive system. Build accordingly.
-```
+
