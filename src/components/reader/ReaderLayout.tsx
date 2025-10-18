@@ -5,7 +5,7 @@ import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
 import { RightPanel } from '../sidebar/RightPanel'
 import { ConnectionHeatmap } from './ConnectionHeatmap'
-import { QuickSparkModal } from './QuickSparkModal'
+import { QuickSparkCapture } from './QuickSparkCapture'
 import { CorrectionModePanel } from './CorrectionModePanel'
 import { CorrectionConfirmDialog } from './CorrectionConfirmDialog'
 import { toast } from 'sonner'
@@ -480,17 +480,15 @@ export function ReaderLayout({
         />
       )}
 
-      {/* Quick Spark modal (⌘K) */}
-      {showQuickSpark && (
-        <QuickSparkModal
-          documentId={documentId}
-          documentTitle={documentTitle}
-          visibleChunks={visibleChunks}
-          activeConnections={filteredConnections.length}
-          scrollPosition={scrollPosition}
-          onClose={closeQuickCapture}
-        />
-      )}
+      {/* Quick Spark Capture (⌘K) - handles own visibility */}
+      <QuickSparkCapture
+        documentId={documentId}
+        documentTitle={documentTitle}
+        currentChunkId={visibleChunks[0]?.id || ''}
+        visibleChunks={visibleChunks.map(c => c.id)}
+        connections={filteredConnections}
+        engineWeights={{ semantic: 0.25, contradiction: 0.40, bridge: 0.35 }}
+      />
 
       {/* Correction mode panel */}
       {correctionMode && (

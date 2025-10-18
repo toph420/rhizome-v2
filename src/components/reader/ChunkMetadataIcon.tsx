@@ -84,17 +84,26 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, st
 
       <HoverCardContent side="left" className="w-80">
         <div className="space-y-3">
-          {/* Chunk Index */}
-          <div className="flex items-center justify-between">
-            <Badge variant="outline" className="font-mono text-xs">
-              Chunk {chunkIndex}
-            </Badge>
-            {metadata.importanceScore > 0 && (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <TrendingUp className="h-3 w-3" />
-                <span>Importance: {Math.round(metadata.importanceScore * 100)}%</span>
-              </div>
-            )}
+          {/* Chunk Index & ID */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Badge variant="outline" className="font-mono text-xs">
+                Chunk {chunkIndex}
+              </Badge>
+              {metadata.importanceScore > 0 && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <TrendingUp className="h-3 w-3" />
+                  <span>Importance: {Math.round(metadata.importanceScore * 100)}%</span>
+                </div>
+              )}
+            </div>
+            {/* Chunk ID for spark references */}
+            <div className="text-xs">
+              <span className="text-muted-foreground">ID:</span>{' '}
+              <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
+                /chunk_{chunk.id.replace('chunk_', '')}
+              </code>
+            </div>
           </div>
 
           {/* Position Confidence (from local pipeline) */}
