@@ -112,14 +112,21 @@ Rhizome V2 is an **AI-first document processing system** with **3-engine collisi
 - **Job Control**: Pause/Resume/Retry/Delete buttons in UI
 - **Details**: See `docs/JOB_SYSTEM.md` for complete reference
 
-### 📋 NOT STARTED
+### 📋 NOT STARTED (Priority Order)
 
-#### Study System
-- Flashcard creation from selections
+#### 1. Spark System (UP NEXT!)
+- Convert QuickSparkModal (⌘K) to use ECS "spark" component
+- Sparks are lightweight annotations without text selection
+- Simplified structure: idea, tags, color, source
+- Currently saves as annotations with `tags: ['spark']` workaround
+- **Note**: SparksTab UI exists in RightPanel, backend TODO
+
+#### 2. Study System
+- Flashcard creation from selections (ECS backend)
 - FSRS spaced repetition algorithm
 - Study mode interface
 - Progress tracking
-- **Note**: FlashcardsTab exists as placeholder
+- **Note**: FlashcardsTab exists as UI placeholder only
 
 ---
 
@@ -193,20 +200,48 @@ Dropped from 7 engines to 3 focused engines:
 
 Everything is an entity with flexible components.
 
-**Location**: `src/lib/ecs/ecs.ts` (singleton pattern)
+**Location**: `src/lib/ecs/` (factory pattern via `createECS()`)
 
-**Components**: flashcard, annotation, study, source
+**Implemented Components**: annotation, position, source
+**Planned Components**: spark (UP NEXT), flashcard, study, embedding, themes, connections
 
 **Example**:
 ```typescript
-import { ecs } from '@/lib/ecs'
+import { createECS } from '@/lib/ecs'
+import { getCurrentUser } from '@/lib/auth'
 
-const entityId = await ecs.createEntity(userId, {
-  flashcard: { question: "What is ECS?", answer: "Entity-Component-System" },
-  study: { due: new Date(), ease: 2.5 },
-  source: { chunk_id: chunkId, document_id: docId }
+const user = await getCurrentUser()
+if (!user) throw new Error('Not authenticated')
+
+const ecs = createECS() // Create instance per request
+
+// Create annotation (3-component pattern)
+const entityId = await ecs.createEntity(user.id, {
+  annotation: {
+    text: "Important insight",
+    note: "My thoughts...",
+    color: "yellow",
+    tags: ["architecture"],
+    range: { startOffset: 100, endOffset: 250, chunkIds: [chunkId] },
+    textContext: { before: "...", content: "text", after: "..." }
+  },
+  position: {
+    chunkIds: [chunkId],
+    startOffset: 100,
+    endOffset: 250,
+    confidence: 1.0,
+    method: 'exact',
+    textContext: { before: "...", after: "..." }
+  },
+  source: {
+    chunk_id: chunkId,
+    chunk_ids: [chunkId],
+    document_id: documentId
+  }
 })
 ```
+
+**See**: `docs/ECS_IMPLEMENTATION.md` for complete guide
 
 ### 6. Hybrid Storage Strategy ✅
 

@@ -1,5 +1,13 @@
 # ECS Implementation Guide
 
+**Last Updated**: 2025-10-18
+
+**Implementation Status**:
+- ✅ **Core ECS System**: Fully implemented with factory pattern
+- ✅ **Annotations**: Complete 3-component pattern (annotation + position + source)
+- 🚧 **Sparks**: UI exists (QuickSparkModal), backend TODO (UP NEXT!)
+- 📋 **Flashcards/Study**: UI placeholder only, backend not implemented
+
 ## Overview
 
 The Entity Component System (ECS) is the core data architecture for Rhizome V2. It provides maximum flexibility for evolving features without database migrations.
@@ -111,43 +119,148 @@ export type { Entity, Component, ComponentData } from './ecs'
 ### Server Actions (Recommended Pattern)
 
 ```typescript
-// app/actions/flashcards.ts
+// app/actions/annotations.ts (REAL EXAMPLE - see full implementation)
 'use server'
 
 import { createECS } from '@/lib/ecs'
+import { getCurrentUser } from '@/lib/auth'
+import { z } from 'zod'
 
-export async function createFlashcard(formData: FormData) {
-  const ecs = createECS() // Create instance per request
-  const userId = 'dev-user-123' // MVP hardcode
-  
-  const question = formData.get('question') as string
-  const answer = formData.get('answer') as string
-  const chunkId = formData.get('chunkId') as string
-  const documentId = formData.get('documentId') as string
-  
-  const entityId = await ecs.createEntity(userId, {
-    flashcard: { question, answer },
-    study: { 
-      due: new Date(), 
-      ease: 2.5,
-      interval: 0,
-      reviews: 0
-    },
-    source: { 
-      chunk_id: chunkId, 
-      document_id: documentId 
+const CreateAnnotationSchema = z.object({
+  text: z.string().min(1).max(5000),
+  chunkIds: z.array(z.string().uuid()),
+  documentId: z.string().uuid(),
+  startOffset: z.number().int().min(0),
+  endOffset: z.number().int().min(0),
+  color: z.enum(['yellow', 'green', 'blue', 'red', 'purple', 'orange', 'pink']),
+  note: z.string().max(10000).optional(),
+  tags: z.array(z.string()).optional(),
+  textContext: z.object({
+    before: z.string(),
+    content: z.string(),
+    after: z.string(),
+  }),
+})
+
+export async function createAnnotation(
+  data: z.infer<typeof CreateAnnotationSchema>
+) {
+  try {
+    // Validate input
+    const validated = CreateAnnotationSchema.parse(data)
+
+    // Get authenticated user (NOT hardcoded!)
+    const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
     }
-  })
-  
-  revalidatePath(`/read/${documentId}`)
-  return { success: true, id: entityId }
+
+    // Create ECS instance per request
+    const ecs = createECS()
+
+    const primaryChunkId = validated.chunkIds[0] || null
+
+    // Create entity with 3 components
+    const entityId = await ecs.createEntity(user.id, {
+      annotation: {
+        text: validated.text,
+        note: validated.note,
+        tags: validated.tags || [],
+        color: validated.color,
+        range: {
+          startOffset: validated.startOffset,
+          endOffset: validated.endOffset,
+          chunkIds: validated.chunkIds,
+        },
+        textContext: validated.textContext,
+      },
+      position: {
+        chunkIds: validated.chunkIds,
+        startOffset: validated.startOffset,
+        endOffset: validated.endOffset,
+        confidence: 1.0,
+        method: 'exact',
+        textContext: {
+          before: validated.textContext.before,
+          after: validated.textContext.after,
+        },
+      },
+      source: {
+        chunk_id: primaryChunkId,
+        chunk_ids: validated.chunkIds,
+        document_id: validated.documentId,
+      },
+    })
+
+    return { success: true, id: entityId }
+  } catch (error) {
+    console.error('Failed to create annotation:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
 }
 ```
 
 ### Creating Different Entity Types
 
 ```typescript
-// 1. FLASHCARD with Study Component
+// 1. ANNOTATION (✅ IMPLEMENTED - 3-component pattern)
+// See src/app/actions/annotations.ts for full implementation
+const annotationId = await ecs.createEntity(userId, {
+  annotation: {
+    text: "Important insight about system design",
+    note: "This relates to my architecture decisions",
+    color: "yellow", // yellow|green|blue|red|purple|orange|pink
+    tags: ["architecture", "patterns"],
+    range: {
+      startOffset: 100,
+      endOffset: 250,
+      chunkIds: [chunkId] // Array for multi-chunk annotations
+    },
+    textContext: {
+      before: "...context before selected text...",
+      content: "selected text content",
+      after: "...context after selected text..."
+    }
+  },
+  position: {
+    chunkIds: [chunkId],
+    startOffset: 100,
+    endOffset: 250,
+    confidence: 1.0, // 1.0 on creation, <1.0 after fuzzy recovery
+    method: 'exact', // exact|context|chunk_bounded|trigram
+    textContext: {
+      before: "...context before...",
+      after: "...context after..."
+    }
+  },
+  source: {
+    chunk_id: chunkId, // Primary chunk for ECS filtering
+    chunk_ids: [chunkId], // All chunks for multi-chunk support
+    document_id: documentId
+  }
+})
+
+// 2. SPARK (UP NEXT - UI exists, backend not implemented)
+// QuickSparkModal (⌘K) currently saves as annotations
+// TODO: Implement spark component with simplified structure
+const sparkId = await ecs.createEntity(userId, {
+  spark: {
+    idea: "Connection between ECS and functional programming",
+    tags: ["architecture", "patterns"],
+    color: "blue"
+  },
+  source: {
+    parent_entity_id: annotationId, // Optional link to parent annotation
+    chunk_id: chunkId,
+    document_id: documentId
+  }
+})
+
+// 3. FLASHCARD (NOT YET IMPLEMENTED - UI placeholder only)
+// FlashcardsTab exists in RightPanel but backend is TODO
 const flashcardId = await ecs.createEntity(userId, {
   flashcard: {
     question: "What is the ECS pattern?",
@@ -165,54 +278,34 @@ const flashcardId = await ecs.createEntity(userId, {
     document_id: documentId
   }
 })
-
-// 2. ANNOTATION (Not yet implemented in UI)
-const annotationId = await ecs.createEntity(userId, {
-  annotation: {
-    text: "Important insight about system design",
-    note: "This relates to my architecture decisions",
-    color: "#ffeb3b",
-    range: {
-      start: 100,
-      end: 250
-    }
-  },
-  source: {
-    chunk_id: chunkId,
-    document_id: documentId
-  }
-})
-
-// 3. SPARK (Idea/Connection - Not yet implemented)
-const sparkId = await ecs.createEntity(userId, {
-  spark: {
-    idea: "Connection between ECS and functional programming",
-    tags: ["architecture", "patterns"]
-  },
-  source: {
-    parent_entity_id: annotationId,
-    chunk_id: chunkId,
-    document_id: documentId
-  }
-})
 ```
 
 ### Querying Entities
 
 ```typescript
+const user = await getCurrentUser()
+if (!user) throw new Error('Not authenticated')
+
 const ecs = createECS()
 
-// Get all flashcards for a document
-const flashcards = await ecs.query(
-  ['flashcard'],
-  userId,
+// Get all annotations for a document (REAL EXAMPLE from annotations.ts:237-243)
+const annotations = await ecs.query(
+  ['annotation', 'position', 'source'], // Must have ALL THREE
+  user.id,
   { document_id: documentId }
 )
 
-// Get all studyable items (anything with study component)
+// Get all sparks (PLANNED - not yet implemented)
+const sparks = await ecs.query(
+  ['spark', 'source'],
+  user.id,
+  { document_id: documentId }
+)
+
+// Get all studyable items (PLANNED - flashcards not implemented)
 const dueCards = await ecs.query(
   ['flashcard', 'study'], // Must have BOTH
-  userId
+  user.id
 )
 
 // Filter and process results
@@ -220,7 +313,7 @@ const todaysDue = dueCards.filter(entity => {
   const studyComponent = entity.components?.find(
     c => c.component_type === 'study'
   )
-  return studyComponent && 
+  return studyComponent &&
          new Date(studyComponent.data.due) <= new Date()
 })
 ```
@@ -228,32 +321,78 @@ const todaysDue = dueCards.filter(entity => {
 ### Updating Components
 
 ```typescript
-// Update after study session
+// REAL EXAMPLE: Update annotation (see annotations.ts:146-190)
+export async function updateAnnotation(
+  entityId: string,
+  updates: { note?: string; color?: string; tags?: string[] }
+) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const ecs = createECS()
+
+    // Get entity to find annotation component
+    const entity = await ecs.getEntity(entityId, user.id)
+    if (!entity) {
+      return { success: false, error: 'Annotation not found' }
+    }
+
+    const annotationComponent = entity.components?.find(
+      (c) => c.component_type === 'annotation'
+    )
+
+    if (!annotationComponent) {
+      return { success: false, error: 'Annotation component not found' }
+    }
+
+    // Merge updates with existing data
+    const updatedData = {
+      ...annotationComponent.data,
+      ...updates,
+    }
+
+    await ecs.updateComponent(annotationComponent.id, updatedData, user.id)
+
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to update annotation:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+// PLANNED: Update study progress (flashcards not yet implemented)
 export async function updateStudyProgress(
   entityId: string,
-  componentId: string,
   rating: number // 1-5 user rating
 ) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Not authenticated')
+
   const ecs = createECS()
-  const userId = 'dev-user-123'
-  
+
   // Get current study data
-  const entity = await ecs.getEntity(entityId, userId)
+  const entity = await ecs.getEntity(entityId, user.id)
   const studyComponent = entity?.components?.find(
     c => c.component_type === 'study'
   )
-  
+
   if (!studyComponent) {
     throw new Error('No study component found')
   }
-  
+
   // Calculate new FSRS values (simplified)
   const newInterval = calculateInterval(
     studyComponent.data.interval,
     studyComponent.data.ease,
     rating
   )
-  
+
   const newData = {
     ...studyComponent.data,
     interval: newInterval,
@@ -262,8 +401,8 @@ export async function updateStudyProgress(
     due: new Date(Date.now() + newInterval * 24 * 60 * 60 * 1000),
     last_review: new Date()
   }
-  
-  await ecs.updateComponent(componentId, newData, userId)
+
+  await ecs.updateComponent(studyComponent.id, newData, user.id)
 }
 ```
 
@@ -340,99 +479,151 @@ CREATE INDEX idx_entities_user ON entities(user_id);
 
 ## Component Types (Current & Planned)
 
-### Implemented Components
-- **flashcard**: Question/answer pairs (used in UI)
-- **study**: FSRS spaced repetition data (partially used)
-- **source**: Links to chunks/documents (used)
+### ✅ Implemented Components
+- **annotation**: Text highlights with notes, tags, color (see `src/app/actions/annotations.ts:76-107`)
+- **position**: Location tracking with fuzzy recovery for annotation remapping (see `src/app/actions/annotations.ts:90-101`)
+- **source**: Links to chunks/documents (used across all entity types)
 
-### Planned Components
-- **annotation**: Text highlights with notes
-- **spark**: Ideas and connections
-- **embedding**: Vector embeddings for similarity
-- **themes**: Extracted themes and concepts
-- **position**: Location in document
-- **connections**: Links between entities
+### 🚧 Partially Implemented (UI Only, Backend TODO)
+- **flashcard**: Question/answer pairs (UI placeholder exists, backend not implemented)
+- **study**: FSRS spaced repetition data (UI placeholder exists, backend not implemented)
+
+### 📋 Planned Components (Priority Order)
+1. **spark**: Quick annotations/ideas (UP NEXT - UI exists via QuickSparkModal, needs ECS backend)
+2. **embedding**: Vector embeddings for similarity search
+3. **themes**: Extracted themes and concepts from connections
+4. **connections**: Links between entities (connection graph)
 
 ## Client-Side Usage (React)
 
 ### With React Query
-```typescript
-// hooks/use-flashcards.ts
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createFlashcard, getFlashcards } from '@/app/actions/flashcards'
 
-export function useFlashcards(documentId: string) {
+**Note**: Rhizome V2 currently uses **optimistic updates** instead of React Query for annotations. The client updates state immediately, and the server action persists changes. No revalidation needed for instant UI feedback.
+
+```typescript
+// REAL PATTERN: Optimistic updates (see QuickCapturePanel implementation)
+// annotations.ts Server Actions do NOT call revalidatePath()
+// Client components handle state updates immediately
+
+// EXAMPLE: If you were to use React Query (not currently implemented)
+// hooks/use-annotations.ts
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { createAnnotation, getAnnotations } from '@/app/actions/annotations'
+
+export function useAnnotations(documentId: string) {
   return useQuery({
-    queryKey: ['flashcards', documentId],
-    queryFn: () => getFlashcards(documentId),
+    queryKey: ['annotations', documentId],
+    queryFn: () => getAnnotations(documentId),
     staleTime: 5 * 60 * 1000 // 5 minutes
   })
 }
 
-export function useCreateFlashcard() {
+export function useCreateAnnotation() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
-    mutationFn: createFlashcard,
+    mutationFn: createAnnotation,
     onSuccess: (data, variables) => {
       // Invalidate queries for the document
-      const documentId = variables.get('documentId')
-      queryClient.invalidateQueries({ 
-        queryKey: ['flashcards', documentId] 
+      queryClient.invalidateQueries({
+        queryKey: ['annotations', variables.documentId]
       })
     }
+  })
+}
+
+// PLANNED: Flashcards with React Query (not yet implemented)
+export function useFlashcards(documentId: string) {
+  return useQuery({
+    queryKey: ['flashcards', documentId],
+    queryFn: () => getFlashcards(documentId),
+    staleTime: 5 * 60 * 1000
   })
 }
 ```
 
 ### Component Example
+
 ```typescript
-// components/flashcard-creator.tsx
+// REAL EXAMPLE: QuickSparkModal (⌘K quick capture)
+// Currently saves as annotations, will become "spark" component
 'use client'
 
-import { useCreateFlashcard } from '@/hooks/use-flashcards'
+import { useState } from 'react'
+import { createAnnotation } from '@/app/actions/annotations'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 
-export function FlashcardCreator({ 
-  chunkId, 
-  documentId 
-}: { 
-  chunkId: string
-  documentId: string 
+export function QuickSparkModal({
+  documentId,
+  onClose,
+}: {
+  documentId: string
+  onClose: () => void
 }) {
-  const createMutation = useCreateFlashcard()
-  
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  const [text, setText] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    formData.append('chunkId', chunkId)
-    formData.append('documentId', documentId)
-    
-    await createMutation.mutateAsync(formData)
-    e.currentTarget.reset()
+    setIsSubmitting(true)
+
+    try {
+      // Create annotation with minimal data
+      // TODO: Convert to "spark" component when implemented
+      const result = await createAnnotation({
+        text,
+        chunkIds: [], // No chunk association for quick sparks
+        documentId,
+        startOffset: 0,
+        endOffset: 0,
+        color: 'blue',
+        note: '',
+        tags: ['spark'],
+        textContext: {
+          before: '',
+          content: text,
+          after: '',
+        },
+      })
+
+      if (result.success) {
+        setText('')
+        onClose()
+      }
+    } catch (error) {
+      console.error('Failed to create spark:', error)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
-  
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <Textarea
-        name="question"
-        placeholder="Enter your question..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Quick thought or idea..."
         required
+        autoFocus
       />
-      <Textarea
-        name="answer"
-        placeholder="Enter the answer..."
-        required
-      />
-      <Button 
-        type="submit" 
-        disabled={createMutation.isPending}
-      >
-        {createMutation.isPending ? 'Creating...' : 'Create Flashcard'}
+      <Button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Saving...' : 'Save Spark'}
       </Button>
     </form>
   )
+}
+
+// PLANNED: Flashcard creator (not yet implemented)
+export function FlashcardCreator({
+  chunkId,
+  documentId
+}: {
+  chunkId: string
+  documentId: string
+}) {
+  // TODO: Implement flashcard creation with ECS backend
+  return <div>Flashcard creation coming soon...</div>
 }
 ```
 
@@ -583,11 +774,17 @@ describe('ECS', () => {
 
 **Issue**: "Failed to create entity"
 ```typescript
-// Check user authentication
-const userId = 'dev-user-123' // Must exist in database
+// Check user authentication - must be authenticated
+const user = await getCurrentUser()
+if (!user) {
+  return { success: false, error: 'Not authenticated' }
+}
+
+// Verify user exists in database
+-- Run in Supabase SQL editor
+SELECT * FROM auth.users;
 
 // Verify RLS is disabled (for MVP)
--- Run in Supabase SQL editor
 ALTER TABLE entities DISABLE ROW LEVEL SECURITY;
 ALTER TABLE components DISABLE ROW LEVEL SECURITY;
 ```
@@ -602,14 +799,18 @@ const entity = await ecs.getEntity(entityId, userId)
 **Issue**: Query not finding entities
 ```typescript
 // Check component type spelling
-await ecs.query(['flashcard'], userId) // Exact match required
+await ecs.query(['annotation'], user.id) // Exact match required
 
-// Verify filters
+// Verify filters - entity must have ALL specified components
 await ecs.query(
-  ['flashcard', 'study'], // Must have BOTH
-  userId,
+  ['annotation', 'position', 'source'], // Must have ALL THREE
+  user.id,
   { document_id: docId } // Must match exactly
 )
+
+// Common mistake: missing required components
+await ecs.query(['annotation'], user.id) // May return partial entities
+await ecs.query(['annotation', 'position', 'source'], user.id) // ✅ Better - ensures complete data
 ```
 
 ## Migration Notes
