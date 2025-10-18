@@ -73,17 +73,22 @@ def initialize_chunker(chunker_type: str, config: Dict[str, Any]) -> Any:
             f"Valid types: {', '.join(CHUNKERS.keys())}"
         )
 
-    # Build common config (most chunkers support these)
-    # Note: Some chunkers have different APIs:
-    #   - NeuralChunker: does NOT use tokenizer or chunk_size
-    #   - SemanticChunker: does NOT use tokenizer (uses embedding_model)
-    #   - LateChunker: does NOT use tokenizer (uses embedding_model)
-    if chunker_type == 'neural':
-        # NeuralChunker has different API: model, device_map, min_characters_per_chunk
+    # Build common config based on chunker type
+    # Different chunkers have different parameter requirements:
+    #   - Token/Sentence/Recursive/Code/Table/Slumber: tokenizer + chunk_size
+    #   - Semantic/Late: chunk_size only (use embedding_model, not tokenizer)
+    #   - Neural: custom params only (model, device_map, min_characters_per_chunk)
+
+    if chunker_type in ['neural']:
+        # NeuralChunker: completely different API
         chunker_config = {}
+    elif chunker_type in ['semantic', 'late']:
+        # Embedding-based chunkers: use chunk_size but not tokenizer
+        chunker_config = {
+            "chunk_size": config.get("chunk_size", 512)
+        }
     else:
-        # Most chunkers accept tokenizer and chunk_size
-        # (SemanticChunker and LateChunker will ignore tokenizer via **kwargs)
+        # Standard chunkers: use both tokenizer and chunk_size
         chunker_config = {
             "tokenizer": config.get("tokenizer", "gpt2"),
             "chunk_size": config.get("chunk_size", 512)
@@ -115,43 +120,39 @@ def initialize_chunker(chunker_type: str, config: Dict[str, Any]) -> Any:
 
     elif chunker_type == 'semantic':
         # SemanticChunker: Topic-based boundaries using embeddings
-        # Note: Lower threshold = larger chunks, higher threshold = smaller chunks
-        # Note: SemanticChunker does NOT use tokenizer (uses embedding model instead)
+        # Lower threshold = larger chunks, higher threshold = smaller chunks
         chunker_config["embedding_model"] = config.get(
             "embedding_model",
-            "minishlab/potion-base-32M"  # Default from Chonkie
+            "minishlab/potion-base-32M"
         )
-        chunker_config["threshold"] = config.get("threshold", 0.8)  # Fixed: was "similarity_threshold"
+        chunker_config["threshold"] = config.get("threshold", 0.8)
 
     elif chunker_type == 'late':
         # LateChunker: Contextual embeddings for high retrieval quality
-        # Note: LateChunker does NOT use tokenizer or mode parameters
         chunker_config["embedding_model"] = config.get(
             "embedding_model",
-            "sentence-transformers/all-MiniLM-L6-v2"  # Full model name from Chonkie
+            "sentence-transformers/all-MiniLM-L6-v2"
         )
-        # Optional: Add rules configuration if needed
-        # chunker_config["rules"] = RecursiveRules() if config.get("rules") else None
 
     elif chunker_type == 'neural':
         # NeuralChunker: BERT-based semantic shift detection
-        # Note: NeuralChunker does NOT use tokenizer or chunk_size
         chunker_config["model"] = config.get("model", "mirth/chonky_modernbert_base_1")
         chunker_config["device_map"] = config.get("device_map", "cpu")
         chunker_config["min_characters_per_chunk"] = config.get("min_characters_per_chunk", 10)
 
     elif chunker_type == 'slumber':
-        # SlumberChunker: Agentic LLM-powered (requires API key)
-        # Note: genie parameter should be a BaseGenie instance or None
-        # If None, SlumberChunker will try to load default Genie configuration
-        genie_type = config.get("genie", None)
-        if genie_type:
-            # If user specifies genie type, they need to set up the Genie instance
-            # For now, we'll pass None and let SlumberChunker use defaults
-            # TODO: Implement proper GeminiGenie/OpenAIGenie instantiation
-            pass
-        # SlumberChunker accepts: genie, tokenizer, chunk_size, rules, candidate_size, min_characters_per_chunk, verbose
-        chunker_config["genie"] = None  # Let SlumberChunker use default config
+        # SlumberChunker: Agentic LLM-powered (requires GEMINI_API_KEY)
+        try:
+            from chonkie.genie import GeminiGenie
+        except ImportError:
+            raise ImportError(
+                "SlumberChunker requires chonkie.genie. "
+                "Install with: pip install chonkie[genie]"
+            )
+
+        # Create GeminiGenie (uses GEMINI_API_KEY from environment)
+        genie_model = config.get("genie_model", "gemini-2.5-flash-lite")
+        chunker_config["genie"] = GeminiGenie(model=genie_model)
         chunker_config["candidate_size"] = config.get("candidate_size", 128)
         chunker_config["verbose"] = config.get("verbose", True)
 
