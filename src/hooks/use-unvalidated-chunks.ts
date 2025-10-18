@@ -55,6 +55,25 @@ export function useUnvalidatedChunks(documentId: string) {
         setIsLoading(true)
         const supabase = createClient()
 
+        // Check document source_type - validation only applies to PDF/EPUB (sources with Docling extraction)
+        const { data: document } = await supabase
+          .from('documents')
+          .select('source_type')
+          .eq('id', documentId)
+          .single()
+
+        // Skip validation workflow for markdown sources (no Docling metadata to transfer)
+        if (document?.source_type === 'markdown_asis' || document?.source_type === 'markdown_clean') {
+          setData({
+            interpolated: [],
+            lowConfidence: [],
+            mediumConfidence: [],
+            all: []
+          })
+          setIsLoading(false)
+          return
+        }
+
         // Query all chunks where position_validated = false
         // Include both old fields (backward compat) and new Chonkie fields
         const { data: chunks, error } = await supabase

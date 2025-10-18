@@ -139,13 +139,22 @@ export function ConnectionCard({ connection, documentId, isActive, onClick, onNa
   // Keyboard validation handler (only active when card is focused)
   useEffect(() => {
     if (!isActive) return
-    
+
     /**
      * Handles keyboard shortcuts for validation feedback.
+     * Only triggers when user is NOT typing in input fields.
      * @param e - Keyboard event.
      * @returns Void.
      */
     function handleKeyPress(e: KeyboardEvent) {
+      // Don't capture shortcuts if user is typing in input/textarea
+      const activeElement = document.activeElement
+      const isTyping =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement
+
+      if (isTyping) return
+
       if (e.key === 'v') {
         e.preventDefault()
         handleValidate()
@@ -157,7 +166,7 @@ export function ConnectionCard({ connection, documentId, isActive, onClick, onNa
         handleStar()
       }
     }
-    
+
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
   }, [isActive, handleValidate, handleReject, handleStar])

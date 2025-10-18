@@ -140,6 +140,8 @@ export async function remapConnections(
   }
 
   console.log(`[RemapConnections] Remapping ${connections.length} verified connections...`)
+  console.log(`[RemapConnections] New chunks available: ${newChunks.length}`)
+  console.log(`[RemapConnections] New chunks with embeddings: ${newChunks.filter(c => c.embedding).length}`)
 
   const success: Connection[] = []
   const needsReview: Array<{
