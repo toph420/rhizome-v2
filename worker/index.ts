@@ -2,6 +2,7 @@ import { config } from 'dotenv'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createClient } from '@supabase/supabase-js'
+import { appendFileSync } from 'fs'
 import { processDocumentHandler } from './handlers/process-document.js'
 import { detectConnectionsHandler } from './handlers/detect-connections.js'
 import { syncFromObsidian, exportToObsidian } from './handlers/obsidian-sync.js'
@@ -21,6 +22,20 @@ const __dirname = dirname(__filename)
 
 // Load environment variables from parent .env.local
 config({ path: resolve(__dirname, '../.env.local') })
+
+// File logging setup
+const LOG_FILE = resolve(__dirname, 'worker.log')
+const originalConsoleLog = console.log
+console.log = function(...args: any[]) {
+  const timestamp = new Date().toISOString()
+  const message = `[${timestamp}] ${args.join(' ')}\n`
+  try {
+    appendFileSync(LOG_FILE, message)
+  } catch (e) {
+    // Ignore file write errors
+  }
+  originalConsoleLog.apply(console, args)
+}
 
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,

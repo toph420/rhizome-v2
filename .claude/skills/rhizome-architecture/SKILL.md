@@ -1,6 +1,6 @@
 ---
 name: Rhizome Architecture
-description: Enforces core architectural patterns for Rhizome V2 - Server Components by default, Server Actions for all mutations, and dual-module separation between Next.js app and Node.js worker. Use when creating pages, components, Server Actions, or reviewing architecture compliance.
+description: Enforces core architectural patterns for Rhizome V2 - Server Components by default, Server Actions for all mutations, and dual-module separation between Next.js app and Node.js worker. Use when creating pages, components, Server Actions, or reviewing architecture compliance. Trigger keywords: Server Component, Client Component, use client, Server Action, use server, src/app/actions, worker module, background_jobs, dual-module, Next.js, React 19.
 ---
 
 # Rhizome Architecture
@@ -86,6 +86,13 @@ await supabase.from('background_jobs').insert({
 import { PDFProcessor } from '@/worker/processors/pdf-processor'
 ```
 
+## When NOT to Use This Skill
+
+- **Static HTML generation**: Use Next.js Static Site Generation docs instead
+- **External webhooks**: API routes are allowed for third-party webhook handlers
+- **Client-side only interactions**: Refer to React hooks documentation
+- **Purely presentational components**: Simple UI components without data fetching
+
 ## Examples
 
 ### ❌ Anti-Patterns
@@ -100,6 +107,16 @@ export function StaticList({ docs }: Props) {
 // API route for mutation
 export async function POST(request: Request) {
   await supabase.from('annotations').insert(data)
+}
+
+// Direct cross-import from worker
+import { PDFProcessor } from '@/worker/processors/pdf-processor'
+const processor = new PDFProcessor()
+
+// Server Action without Zod validation
+'use server'
+export async function saveData(data: any) {  // No validation!
+  await supabase.from('table').insert(data)
 }
 ```
 

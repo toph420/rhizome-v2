@@ -21,6 +21,7 @@ import type { ReprocessResults, Chunk } from '../types/recovery.js'
 // Chonkie Integration: Match initial processing pipeline
 import { chunkWithChonkie } from '../lib/chonkie/chonkie-chunker.js'
 import { transferMetadataToChonkieChunks } from '../lib/chonkie/metadata-transfer.js'
+import { bulletproofMatch } from '../lib/local/bulletproof-matcher.js'
 import type { ChonkieStrategy } from '../lib/chonkie/types.js'
 
 /**
@@ -128,22 +129,32 @@ export async function reprocessDocument(
       .limit(1)
       .single()
 
-    const chunkerStrategy = (existingChunk?.chunker_type || 'recursive') as ChonkieStrategy
-    console.log(`[ReprocessDocument] Original chunker strategy: ${chunkerStrategy}`)
+    // Map legacy "hybrid" to "recursive" (HybridChunker is deprecated)
+    let chunkerStrategy: ChonkieStrategy
+    const dbChunkerType = existingChunk?.chunker_type || 'recursive'
+
+    if (dbChunkerType === 'hybrid') {
+      chunkerStrategy = 'recursive'
+      console.log(`[ReprocessDocument] Legacy chunker type 'hybrid' detected, using 'recursive' fallback`)
+    } else {
+      chunkerStrategy = dbChunkerType as ChonkieStrategy
+    }
+
+    console.log(`[ReprocessDocument] Original chunker strategy: ${dbChunkerType} → Using: ${chunkerStrategy}`)
     await updateProgress(22, `Using ${chunkerStrategy} chunking strategy`)
 
     // Step 2: Check for cached Docling chunks (optional - for metadata transfer)
-    // Markdown sources won't have these, and that's fine!
-    console.log('[ReprocessDocument] Checking for cached Docling chunks (optional)...')
+    // PDF/EPUB sources have these, markdown sources don't
+    console.log('[ReprocessDocument] Checking for cached Docling chunks...')
     const cacheResult = await loadCachedChunksRaw(supabase, documentId)
     const hasCachedChunks = !!cacheResult
 
     if (hasCachedChunks) {
-      console.log(`[ReprocessDocument] ✓ Found ${cacheResult.chunks.length} cached Docling chunks for metadata transfer`)
+      console.log(`[ReprocessDocument] ✓ Found ${cacheResult.chunks.length} cached Docling chunks (will run bulletproof matching)`)
     } else {
-      console.log('[ReprocessDocument] No cached chunks found (markdown source) - will use Chonkie without metadata transfer')
+      console.log('[ReprocessDocument] No cached chunks (markdown source) - will use Chonkie only')
     }
-    await updateProgress(25, hasCachedChunks ? 'Cached chunks loaded' : 'No cached chunks (markdown source)')
+    await updateProgress(25, hasCachedChunks ? 'Cached chunks found' : 'No cached chunks')
 
     // Step 3: Import dependencies
     const { extractMetadataBatch } = await import('../lib/chunking/pydantic-metadata.js')
@@ -166,32 +177,31 @@ export async function reprocessDocument(
     let enrichedChunksWithMetadata
 
     if (hasCachedChunks) {
-      console.log('[ReprocessDocument] Transferring Docling metadata to Chonkie chunks...')
-      await updateProgress(35, 'Transferring metadata via overlap detection...')
+      console.log('[ReprocessDocument] Running bulletproof matcher to find cached chunks in edited markdown...')
+      await updateProgress(35, 'Finding chunk positions in edited markdown...')
 
       const cachedDoclingChunks = cacheResult!.chunks
 
-      // Convert cached Docling chunks to bulletproof match format
-      const bulletproofMatches = cachedDoclingChunks.map(chunk => ({
-        chunk: {
-          content: chunk.content,
-          meta: {
-            page_start: chunk.meta.page_start,
-            page_end: chunk.meta.page_end,
-            heading_level: chunk.meta.heading_level,
-            section_marker: chunk.meta.section_marker,
-            bboxes: chunk.meta.bboxes
-          }
-        },
-        start_offset: chunk.start_char,
-        end_offset: chunk.end_char,
-        confidence: 'exact' as const,
-        method: 'cached' as const
-      }))
+      // Run bulletproof matcher to find where cached chunks appear in edited markdown
+      const matchResult = await bulletproofMatch(newMarkdown, cachedDoclingChunks, {
+        enabledLayers: {
+          layer1: true,  // Enhanced fuzzy matching
+          layer2: true,  // Embeddings
+          layer3: true,  // LLM assisted
+          layer4: true   // Interpolation (100% recovery)
+        }
+      })
 
+      const matchedChunks = matchResult.chunks
+      console.log(`[ReprocessDocument] Bulletproof matcher: ${matchedChunks.length}/${cachedDoclingChunks.length} chunks matched`)
+      console.log(`[ReprocessDocument] Stats: exact=${matchResult.stats.exact}, high=${matchResult.stats.high}, medium=${matchResult.stats.medium}, synthetic=${matchResult.stats.synthetic}`)
+      await updateProgress(37, `Found ${matchedChunks.length} chunk positions`)
+
+      // Now transfer metadata from matched Docling chunks to Chonkie chunks
+      console.log('[ReprocessDocument] Transferring metadata to Chonkie chunks...')
       enrichedChunksWithMetadata = await transferMetadataToChonkieChunks(
         chonkieChunks,
-        bulletproofMatches,
+        matchedChunks,
         documentId
       )
 
@@ -204,52 +214,82 @@ export async function reprocessDocument(
       await updateProgress(40, 'Using Chonkie chunks (no metadata transfer)')
     }
 
-    // Step 6: Metadata enrichment (40-55%)
-    console.log('[ReprocessDocument] Starting local metadata enrichment (PydanticAI + Ollama)')
-    await updateProgress(42, 'Extracting structured metadata...')
+    // Step 6: Convert to enrichment format (40-45%)
+    console.log('[ReprocessDocument] Preparing chunks for AI enrichment')
+    await updateProgress(42, 'Preparing chunks for enrichment...')
 
-    // enrichedChunksWithMetadata already has Chonkie metadata fields from transferMetadataToChonkieChunks
-    // Now we just need to prepare for AI enrichment by adding default metadata
-    let enrichedChunks = enrichedChunksWithMetadata.map((chunk, idx) => {
-      const wordCount = chunk.content.split(/\s+/).filter((w: string) => w.length > 0).length
-      return {
-        document_id: documentId,
-        content: chunk.content,
-        chunk_index: idx,
-        start_offset: chunk.start_offset,
-        end_offset: chunk.end_offset,
-        word_count: wordCount,
-        // Chonkie metadata fields (from transferMetadataToChonkieChunks)
-        chunker_type: chunk.chunker_type || chunkerStrategy,
-        heading_path: chunk.heading_path || null,
-        metadata_overlap_count: chunk.metadata_overlap_count || 0,
-        metadata_confidence: chunk.metadata_confidence || 'low',
-        metadata_interpolated: chunk.metadata_interpolated || false,
-        // Docling structural metadata (transferred via overlap)
-        page_start: chunk.page_start || null,
-        page_end: chunk.page_end || null,
-        heading_level: chunk.heading_level || null,
-        section_marker: chunk.section_marker || null,
-        bboxes: chunk.bboxes || null,
-        position_confidence: chunk.position_confidence || null,
-        position_method: chunk.position_method || null,
-        position_validated: false,
-        // Default AI metadata (will be enriched)
-        themes: [],
-        importance_score: 0.5,
-        summary: null,
-        emotional_metadata: {
-          polarity: 0,
-          primaryEmotion: 'neutral',
-          intensity: 0
-        },
-        conceptual_metadata: {
-          concepts: []
-        },
-        domain_metadata: null,
-        metadata_extracted_at: null
+    // If we have metadata transfer, enrichedChunksWithMetadata is ProcessedChunk[]
+    // If not, it's ChonkieChunk[] - need to convert
+    let enrichedChunks = enrichedChunksWithMetadata.map((chunk: any, idx) => {
+      // Check if already ProcessedChunk (from metadata transfer) or ChonkieChunk (no transfer)
+      const isProcessedChunk = 'content' in chunk
+
+      if (isProcessedChunk) {
+        // Already ProcessedChunk with metadata - just add AI defaults
+        return {
+          ...chunk,
+          // Default AI metadata (will be enriched)
+          themes: [],
+          importance_score: 0.5,
+          summary: null,
+          emotional_metadata: {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          },
+          conceptual_metadata: {
+            concepts: []
+          },
+          domain_metadata: null,
+          metadata_extracted_at: null
+        }
+      } else {
+        // ChonkieChunk - convert to ProcessedChunk format
+        const wordCount = chunk.text.split(/\s+/).filter((w: string) => w.length > 0).length
+        return {
+          document_id: documentId,
+          content: chunk.text,
+          chunk_index: idx,
+          start_offset: chunk.start_index,
+          end_offset: chunk.end_index,
+          word_count: wordCount,
+          token_count: chunk.token_count,
+          // Chonkie metadata fields
+          chunker_type: chunk.chunker_type || chunkerStrategy,
+          heading_path: null,
+          metadata_overlap_count: 0,
+          metadata_confidence: 'low' as const,
+          metadata_interpolated: false,
+          // No Docling structural metadata
+          page_start: null,
+          page_end: null,
+          heading_level: null,
+          section_marker: null,
+          bboxes: null,
+          position_confidence: null,
+          position_method: null,
+          position_validated: false,
+          // Default AI metadata (will be enriched)
+          themes: [],
+          importance_score: 0.5,
+          summary: null,
+          emotional_metadata: {
+            polarity: 0,
+            primaryEmotion: 'neutral',
+            intensity: 0
+          },
+          conceptual_metadata: {
+            concepts: []
+          },
+          domain_metadata: null,
+          metadata_extracted_at: null
+        }
       }
     })
+
+    // Step 7: Metadata enrichment (45-55%)
+    console.log('[ReprocessDocument] Starting local metadata enrichment (PydanticAI + Ollama)')
+    await updateProgress(45, 'Extracting structured metadata...')
 
     try {
       const BATCH_SIZE = 10
@@ -312,7 +352,7 @@ export async function reprocessDocument(
       await updateProgress(55, 'Using default metadata (enrichment failed)')
     }
 
-    // Step 7: Local embeddings (55-65%)
+    // Step 8: Local embeddings (55-65%)
     console.log('[ReprocessDocument] Starting local embeddings (Transformers.js)')
     await updateProgress(57, 'Generating local embeddings...')
 
@@ -338,7 +378,7 @@ export async function reprocessDocument(
       }
     }
 
-    // Step 8: Map to aiChunks format (compatible with existing code below)
+    // Step 9: Map to aiChunks format (compatible with existing code below)
     aiChunks = enrichedChunks.map((chunk) => ({
       content: chunk.content,
       start_offset: chunk.start_offset,

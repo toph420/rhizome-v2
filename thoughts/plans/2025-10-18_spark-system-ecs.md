@@ -366,6 +366,50 @@ export async function verifySparksIntegrity(userId: string): Promise<{
     matched: storageCount === entityCount
   }
 }
+
+/**
+ * Verify cache freshness (detects stale or missing sparks)
+ * Used for health checks and automatic cache repairs
+ */
+export async function verifyCacheFreshness(userId: string): Promise<{
+  stale: string[]
+  missing: string[]
+}> {
+  const supabase = createClient()
+
+  // Get all sparks from Storage
+  const storageIds = await listUserSparks(userId)
+
+  // Get all cached sparks
+  const { data: cached } = await supabase
+    .from('sparks_cache')
+    .select('entity_id, cached_at, storage_path')
+    .eq('user_id', userId)
+
+  const cachedIds = new Set(cached?.map(c => c.entity_id) || [])
+
+  // Detect missing sparks (in Storage but not cached)
+  const missing = storageIds.filter(id => !cachedIds.has(id))
+
+  // Detect stale sparks (cached but updated in Storage)
+  const stale: string[] = []
+  for (const cache of cached || []) {
+    try {
+      const sparkData = await downloadSparkFromStorage(userId, cache.entity_id)
+      const storageUpdated = new Date(sparkData.data.updated_at || sparkData.data.created_at)
+      const cacheUpdated = new Date(cache.cached_at)
+
+      if (storageUpdated > cacheUpdated) {
+        stale.push(cache.entity_id)
+      }
+    } catch (error) {
+      // Storage file missing but cache exists - mark as stale
+      stale.push(cache.entity_id)
+    }
+  }
+
+  return { stale, missing }
+}
 ```
 
 ### Success Criteria
@@ -481,7 +525,14 @@ CREATE POLICY "Users delete own sparks cache"
 
 -- Comments
 COMMENT ON TABLE sparks_cache IS
-  'CACHE ONLY. Source of truth: Storage JSON at {userId}/sparks/{sparkId}/content.json. Rebuild from Storage on data loss.';
+  'CACHE ONLY - NOT SOURCE OF TRUTH.
+
+  Source: {userId}/sparks/{sparkId}/content.json in Storage
+  Purpose: Fast timeline/search queries only
+  Rebuild: DELETE + re-insert from Storage JSON
+  Data loss: Zero (fully rebuildable)
+
+  This table can be dropped and rebuilt at any time.';
 
 COMMENT ON COLUMN sparks_cache.entity_id IS
   'References entities table. Spark data in components table with component_type=spark.';
@@ -513,7 +564,9 @@ import { google } from '@ai-sdk/google'
 export async function rebuildSparksCache(userId: string): Promise<{
   rebuilt: number
   errors: string[]
+  duration: number
 }> {
+  const startTime = Date.now()
   const supabase = createClient()
   const errors: string[] = []
   let rebuilt = 0
@@ -534,44 +587,50 @@ export async function rebuildSparksCache(userId: string): Promise<{
   const sparkIds = await listUserSparks(userId)
   console.log(`[Sparks] Found ${sparkIds.length} sparks in Storage`)
 
-  // 3. Download and cache each spark
-  for (const sparkId of sparkIds) {
-    try {
-      const sparkData = await downloadSparkFromStorage(userId, sparkId)
+  // 3. Download and cache each spark (batch in groups of 10 for rate limiting)
+  const batchSize = 10
+  for (let i = 0; i < sparkIds.length; i += batchSize) {
+    const batch = sparkIds.slice(i, i + batchSize)
 
-      // Generate embedding for search
-      const { embedding } = await embed({
-        model: google.textEmbeddingModel('text-embedding-004', {
-          outputDimensionality: 768
-        }),
-        value: sparkData.data.content
-      })
+    await Promise.all(batch.map(async (sparkId) => {
+      try {
+        const sparkData = await downloadSparkFromStorage(userId, sparkId)
 
-      // Insert cache row
-      await supabase.from('sparks_cache').insert({
-        entity_id: sparkData.entity_id,
-        user_id: userId,
-        content: sparkData.data.content,
-        created_at: sparkData.data.created_at,
-        updated_at: sparkData.data.updated_at,
-        origin_chunk_id: sparkData.source.chunk_id,
-        document_id: sparkData.source.document_id,
-        tags: sparkData.data.tags,
-        embedding,
-        storage_path: `${userId}/sparks/${sparkId}/content.json`
-      })
+        // Generate embedding for search
+        const { embedding } = await embed({
+          model: google.textEmbeddingModel('text-embedding-004', {
+            outputDimensionality: 768
+          }),
+          value: sparkData.data.content
+        })
 
-      rebuilt++
-    } catch (error) {
-      const errorMsg = `Failed to cache spark ${sparkId}: ${error}`
-      console.error(`[Sparks] ${errorMsg}`)
-      errors.push(errorMsg)
-    }
+        // Insert cache row
+        await supabase.from('sparks_cache').insert({
+          entity_id: sparkData.entity_id,
+          user_id: userId,
+          content: sparkData.data.content,
+          created_at: sparkData.data.created_at,
+          updated_at: sparkData.data.updated_at,
+          origin_chunk_id: sparkData.source.chunk_id,
+          document_id: sparkData.source.document_id,
+          tags: sparkData.data.tags,
+          embedding,
+          storage_path: `${userId}/sparks/${sparkId}/content.json`
+        })
+
+        rebuilt++
+      } catch (error) {
+        const errorMsg = `Failed to cache spark ${sparkId}: ${error}`
+        console.error(`[Sparks] ${errorMsg}`)
+        errors.push(errorMsg)
+      }
+    }))
   }
 
-  console.log(`[Sparks] Cache rebuild complete: ${rebuilt} sparks, ${errors.length} errors`)
+  const duration = Date.now() - startTime
+  console.log(`[Sparks] Cache rebuild complete: ${rebuilt} sparks, ${errors.length} errors, ${duration}ms`)
 
-  return { rebuilt, errors }
+  return { rebuilt, errors, duration }
 }
 
 /**
@@ -728,12 +787,16 @@ export async function buildSparkConnections(
   const connections: SparkConnection[] = []
 
   // 1. Origin connection (highest strength)
-  connections.push({
-    chunkId: originChunkId,
-    type: 'origin',
-    strength: 1.0,
-    metadata: { relationship: 'origin' }
-  })
+  if (originChunkId) {
+    connections.push({
+      chunkId: originChunkId,
+      type: 'origin',
+      strength: 1.0,
+      metadata: { relationship: 'origin' }
+    })
+  } else {
+    console.warn('[Sparks] No origin chunk provided - spark will be orphaned')
+  }
 
   // 2. Explicit mentions in content
   const mentions = extractChunkIds(content)
@@ -746,9 +809,11 @@ export async function buildSparkConnections(
     })
   }
 
-  // 3. Inherited from origin chunk
-  const inherited = await getInheritedConnections(originChunkId, userId)
-  connections.push(...inherited)
+  // 3. Inherited from origin chunk (only if origin exists)
+  if (originChunkId) {
+    const inherited = await getInheritedConnections(originChunkId, userId)
+    connections.push(...inherited)
+  }
 
   // Remove duplicates (keep highest strength)
   const uniqueConnections = new Map<string, SparkConnection>()
@@ -1204,6 +1269,7 @@ interface Spark {
 export function SparksTab() {
   const [sparks, setSparks] = useState<Spark[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     loadSparks()
@@ -1211,18 +1277,36 @@ export function SparksTab() {
 
   const loadSparks = async () => {
     setLoading(true)
+    setError(null)
     try {
       const data = await getRecentSparks(50, 0)
       setSparks(data)
     } catch (error) {
       console.error('[Sparks] Failed to load:', error)
+      setError('Failed to load sparks. Try refreshing.')
     } finally {
       setLoading(false)
     }
   }
 
   if (loading) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading sparks...</div>
+    return (
+      <div className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Loading sparks...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="p-4">
+        <div className="text-sm text-destructive mb-2">{error}</div>
+        <Button size="sm" variant="outline" onClick={loadSparks}>
+          Retry
+        </Button>
+      </div>
+    )
   }
 
   if (sparks.length === 0) {
@@ -1364,11 +1448,12 @@ async function exportSparks(
 
   if (error) {
     console.error(`[Obsidian] Failed to get sparks for ${documentId}:`, error)
-    return
+    return // Non-fatal, continue export
   }
 
   if (!sparks || sparks.length === 0) {
     console.log(`[Obsidian] No sparks to export for ${documentId}`)
+    // Don't create empty .sparks.md file
     return
   }
 
@@ -1651,6 +1736,26 @@ import { rebuildSparksCache } from '../lib/sparks/rebuild-cache'
 
 const userId = process.argv[2]
 await rebuildSparksCache(userId)
+```
+
+### Cache Health Monitoring
+
+Run periodically (e.g., daily cron) to detect and auto-fix cache issues:
+
+```typescript
+// Periodic health check
+const integrity = await verifySparksIntegrity(userId)
+if (!integrity.matched) {
+  console.warn(`[Sparks] Integrity check failed: Storage=${integrity.storageCount}, Cache=${integrity.entityCount}`)
+  await rebuildSparksCache(userId)
+}
+
+// Freshness check with auto-repair
+const { stale, missing } = await verifyCacheFreshness(userId)
+if (stale.length > 0 || missing.length > 0) {
+  console.warn(`[Sparks] Cache stale: ${stale.length}, missing: ${missing.length}`)
+  await rebuildSparksCache(userId) // Auto-fix
+}
 ```
 
 ### If ECS Lost (entities/components tables)
