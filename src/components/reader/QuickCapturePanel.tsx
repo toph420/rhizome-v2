@@ -297,7 +297,8 @@ export function QuickCapturePanel({
       )
       if (colorOption) {
         e.preventDefault()
-        void saveAnnotation(colorOption.color, false)
+        setSelectedColor(colorOption.color)
+        void saveAnnotation(colorOption.color, true)
       }
     }
 
@@ -319,25 +320,22 @@ export function QuickCapturePanel({
     COLOR_OPTIONS.map((option) => (
       <button
         key={option.color}
-        onClick={() => void saveAnnotation(option.color, false)}
+        onClick={() => setSelectedColor(option.color)}
         disabled={saving}
         title={`${option.label} (${option.key})`}
         className={cn(
-          'w-8 h-8 rounded-md transition-all flex items-center justify-center border border-border',
+          'w-8 h-8 rounded-md transition-all flex items-center justify-center border-2',
           option.bgClass,
+          selectedColor === option.color ? 'ring-2 ring-primary ring-offset-2 scale-110' : 'border-border',
           saving && 'opacity-50 cursor-not-allowed'
         )}
       >
-        {saving && savingColor === option.color ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <span className="text-xs font-semibold">
-            {option.key.toUpperCase()}
-          </span>
-        )}
+        <span className="text-xs font-semibold">
+          {option.key.toUpperCase()}
+        </span>
       </button>
     ))
-  ), [saving, savingColor, saveAnnotation])
+  ), [saving, selectedColor])
 
   const panelContent = (
     <div
@@ -436,7 +434,7 @@ export function QuickCapturePanel({
         {/* Actions */}
         <div className="flex justify-between items-center pt-2">
           <p className="text-xs text-muted-foreground">
-            Press a letter key to save with that color
+            Click color to select • Press letter key to save & close
           </p>
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
@@ -453,7 +451,7 @@ export function QuickCapturePanel({
                   Saving...
                 </>
               ) : (
-                'Save with Note'
+                'Save Note'
               )}
             </Button>
           </div>
