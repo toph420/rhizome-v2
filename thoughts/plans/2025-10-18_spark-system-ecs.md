@@ -415,9 +415,9 @@ export async function verifyCacheFreshness(userId: string): Promise<{
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run type-check`
-- [ ] No import errors: `npm run build`
-- [ ] Storage helpers export correctly
+- [x] Types compile: `npm run type-check`
+- [x] No import errors: `npm run build`
+- [x] Storage helpers export correctly
 
 #### Manual Verification:
 - [ ] Can import types in other files
@@ -672,10 +672,10 @@ export async function updateSparkCache(
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Migration applies: `npx supabase db reset`
-- [ ] Indexes created successfully: Check with `\d+ sparks_cache` in psql
-- [ ] RLS policies in place: Check with `\dp sparks_cache` in psql
-- [ ] Types compile: `npm run type-check`
+- [x] Migration applies: `npx supabase db reset`
+- [x] Indexes created successfully: Check with `\d+ sparks_cache` in psql
+- [x] RLS policies in place: Check with `\dp sparks_cache` in psql
+- [x] Types compile: `npm run type-check`
 
 #### Manual Verification:
 - [ ] Can rebuild cache from Storage (empty table → full rebuild)
@@ -831,8 +831,8 @@ export async function buildSparkConnections(
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run type-check`
-- [ ] Helpers export correctly: `npm run build`
+- [x] Types compile: `npm run type-check`
+- [x] Helpers export correctly: `npm run build`
 
 #### Manual Verification:
 - [ ] Chunk ID extraction works (`/chunk_abc` → `chunk_abc`)
@@ -1042,13 +1042,13 @@ export async function searchSparks(query: string, limit = 20) {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Server actions compile: `npm run build`
-- [ ] Type checking passes: `npm run type-check`
+- [x] Server actions compile: `npm run build`
+- [x] Type checking passes: `npm run type-check`
 
 #### Manual Verification:
 - [ ] Spark creates in ECS (check `entities` and `components` tables)
 - [ ] Storage JSON uploaded correctly (check `documents` bucket)
-- [ ] Cache updated (check `sparks_cache` table)
+- [ ] Cache updated (check `sparks_cache` table) - TODO: implement via background job
 - [ ] Connections inherited with 0.7x multiplier
 - [ ] Tags extracted correctly
 
@@ -1066,13 +1066,14 @@ export async function searchSparks(query: string, limit = 20) {
 
 ### Overview
 
-Wire up existing QuickSparkModal and implement SparksTab timeline. Follow annotation UI patterns.
+**ACTUAL IMPLEMENTATION**: Created bottom slide-in panel (QuickSparkCapture) instead of modal based on UX feedback.
+Non-blocking design that keeps document visible while capturing sparks.
 
 ### Changes Required
 
-#### 1. Update QuickSparkModal
-**File**: `src/components/reader/QuickSparkModal.tsx`
-**Changes**: Connect to createSpark server action
+#### 1. Create QuickSparkCapture (Bottom Slide-In Panel)
+**File**: `src/components/reader/QuickSparkCapture.tsx`
+**Changes**: NEW component - bottom slide-in panel with Framer Motion animations
 
 ```typescript
 'use client'
@@ -1356,47 +1357,48 @@ export function SparksTab() {
 }
 ```
 
-#### 3. Update Reader Page
-**File**: `src/app/read/[id]/page.tsx`
-**Changes**: Pass reader context to QuickSparkModal
+#### 3. Update ReaderLayout
+**File**: `src/components/reader/ReaderLayout.tsx`
+**Changes**: Replace QuickSparkModal with QuickSparkCapture
 
 ```typescript
-// Add to component (find existing reader context)
-// Around line 150, after building reader state
+// Changed import (line 8)
+import { QuickSparkCapture } from './QuickSparkCapture'
 
-const readerContext = {
-  documentId: document.id,
-  documentTitle: document.title,
-  currentChunkId: visibleChunks[0] || '',
-  visibleChunks: visibleChunks,
-  connections: activeConnections,
-  engineWeights: userWeights
-}
-
-// Update QuickSparkModal props (replace existing)
-<QuickSparkModal
-  documentId={readerContext.documentId}
-  documentTitle={readerContext.documentTitle}
-  currentChunkId={readerContext.currentChunkId}
-  visibleChunks={readerContext.visibleChunks}
-  connections={readerContext.connections}
-  engineWeights={readerContext.engineWeights}
+// Replaced conditional modal render with always-mounted panel (lines 483-491)
+// Component handles own visibility with Cmd+K
+<QuickSparkCapture
+  documentId={documentId}
+  documentTitle={documentTitle}
+  currentChunkId={visibleChunks[0]?.id || ''}
+  visibleChunks={visibleChunks.map(c => c.id)}
+  connections={filteredConnections}
+  engineWeights={{ semantic: 0.25, contradiction: 0.40, bridge: 0.35 }}
 />
+
+// Removed: showQuickSpark state, closeQuickCapture handler (no longer needed)
 ```
 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Components compile: `npm run build`
-- [ ] No TypeScript errors: `npm run type-check`
+- [x] Components compile: `npm run build`
+- [x] No TypeScript errors: `npm run type-check`
 
 #### Manual Verification:
-- [ ] Cmd+K opens modal in reader
-- [ ] Auto-quotes selection if text selected
-- [ ] Spark saves successfully (<1 second)
-- [ ] Timeline displays sparks in SparksTab
-- [ ] Tags and connections show correctly
-- [ ] Cmd+Enter submits form
+- [x] Cmd+K opens slide-in panel in reader
+- [x] Auto-quotes selection if text selected
+- [x] Spark saves successfully (<1 second)
+- [x] Timeline displays sparks in SparksTab (with 5s auto-refresh)
+- [x] Tags and connections show correctly (live preview in panel)
+- [x] Cmd+Enter submits form
+- [x] Panel slides up from bottom (non-blocking)
+
+#### Enhancements Added (Post-Implementation)
+- [x] Live tag/chunk ID preview in capture panel
+- [x] Chunk ID display in ChunkMetadataIcon hover card
+- [x] 5-second auto-refresh for timeline
+- [x] Cache update with null embeddings (working, embedding gen deferred)
 
 **Test Flow:**
 1. Open document in reader (`/read/[id]`)

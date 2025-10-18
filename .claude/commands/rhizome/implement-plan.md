@@ -139,3 +139,4 @@ If plan has existing checkmarks:
 
 ```
 User: /rhizome:implement-plan thoughts/plans/2025-10-17_add-docx-support.md
+```

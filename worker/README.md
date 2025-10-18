@@ -1,11 +1,19 @@
 # Worker Module - Document Processing System
 
-> **Last Updated**: January 29, 2025  
-> **Architecture**: Single Responsibility Principle
+> **Last Updated**: February 13, 2025
+> **Architecture**: Single Responsibility Principle + Clean Architecture
 
 ## Overview
 
-The worker module is a standalone Node.js service that processes documents asynchronously. It follows a clean architecture with clear separation between data transformation (processors) and I/O operations (handlers).
+The worker module is a standalone Node.js service that processes documents asynchronously with **3-engine collision detection** for discovering connections between ideas. It follows clean architecture with clear separation between data transformation (processors), I/O operations (handlers), and connection detection (engines).
+
+**Key Capabilities**:
+- **10 Job Types**: Document processing, connection detection, exports, imports, integrations
+- **8 Document Formats**: PDF, EPUB, YouTube, Web, Markdown, Text, Paste, Readwise
+- **3 Detection Engines**: Semantic Similarity (25%), Contradiction (40%), Thematic Bridge (35%)
+- **Local or Cloud**: 100% local processing (Ollama + Docling) OR cloud (Gemini)
+- **Pause & Resume**: Checkpoint-based resumption with SHA-256 validation
+- **39 CLI Scripts**: Testing, debugging, validation, import/export utilities
 
 ## Architecture Principles
 
@@ -22,43 +30,121 @@ Each component has exactly one responsibility:
 
 ```
 worker/
-├── processors/           # Document format processors (data transformation only)
-│   ├── base.ts         # Abstract base class with shared utilities
-│   ├── pdf-processor.ts # PDF document processing
-│   ├── youtube-processor.ts # YouTube transcript processing
-│   ├── web-processor.ts # Web article extraction
-│   ├── markdown-asis-processor.ts # Markdown preservation
-│   ├── markdown-clean-processor.ts # Markdown AI cleaning
+├── processors/           [10 files] Document format processors (data transformation only)
+│   ├── base.ts          # Abstract base class (SourceProcessor)
+│   ├── router.ts        # Routes by source_type
+│   ├── pdf-processor.ts # PDF via Docling/Gemini
+│   ├── epub-processor.ts # EPUB ebooks
+│   ├── youtube-processor.ts # YouTube transcripts
+│   ├── web-processor.ts # Web articles (Jina AI)
+│   ├── markdown-processor.ts # Markdown (as-is or AI-cleaned)
 │   ├── text-processor.ts # Plain text formatting
-│   └── paste-processor.ts # Direct paste processing
-├── handlers/            # Job orchestration and I/O operations
-│   └── process-document.ts # Main document processing handler
-├── engines/            # Collision detection engines
-│   ├── semantic-similarity.ts # Embedding-based similarity
-│   ├── conceptual-density.ts # Concept clustering
-│   ├── structural-pattern.ts # Document structure matching
-│   ├── citation-network.ts # Reference graph analysis
-│   ├── temporal-proximity.ts # Time-based clustering
-│   ├── contradiction-detection.ts # Opposing viewpoints
-│   └── emotional-resonance.ts # Emotional patterns
-├── lib/                # Shared utilities and services
-│   ├── ai-clients.ts  # AI service clients (Gemini, embeddings)
-│   ├── cache.ts       # Caching layer
-│   ├── monitoring.ts  # Performance monitoring
-│   └── weight-config.ts # User preference weights
-└── index.ts           # Worker entry point
+│   └── paste-processor.ts # Direct paste input
+├── handlers/            [11 files] Job orchestration and I/O operations
+│   ├── process-document.ts # Main document processing pipeline
+│   ├── detect-connections.ts # Run 3-engine collision detection
+│   ├── reprocess-document.ts # Full reprocessing with rollback
+│   ├── reprocess-connections.ts # Regenerate connections only
+│   ├── recover-annotations.ts # Fuzzy-match annotations after edits
+│   ├── remap-connections.ts # Update cross-doc connections
+│   ├── obsidian-sync.ts # Bidirectional Obsidian vault sync
+│   ├── readwise-import.ts # Import Readwise highlights
+│   ├── export-document.ts # Create portable ZIP exports
+│   ├── import-document.ts # Import from ZIP with conflict resolution
+│   └── continue-processing.ts # Resume from checkpoint after failure
+├── engines/             [8 files] 3-engine collision detection system
+│   ├── orchestrator.ts  # Coordinates all 3 engines
+│   ├── semantic-similarity.ts # Embedding cosine distance (25%)
+│   ├── contradiction-detection.ts # Metadata-based tensions (40%)
+│   ├── thematic-bridge.ts # AI concept mapping via Gemini (35%)
+│   ├── thematic-bridge-qwen.ts # Local Ollama version
+│   ├── base-engine.ts   # Abstract base class
+│   ├── scoring.ts       # Confidence calculation
+│   └── types.ts         # Interface definitions
+├── lib/                 [29+ files] Core utilities and services
+│   ├── ai-client.ts     # Gemini API client
+│   ├── embeddings.ts    # Embedding generation (cloud)
+│   ├── storage-helpers.ts # Supabase Storage operations
+│   ├── fuzzy-matching.ts # 4-tier annotation recovery
+│   ├── weight-config.ts # Engine weight configuration
+│   ├── retry-manager.ts # Error classification & retry
+│   ├── performance-monitor.ts # Metrics collection
+│   ├── chunking/        [7 files] Semantic chunking pipeline
+│   ├── epub/            [4 files] EPUB-specific parsing
+│   ├── local/           [5 files] Local processing (Ollama + HuggingFace)
+│   ├── prompts/         [1 file] AI prompt templates
+│   └── validation/      [1 file] Metadata schema validation (Zod)
+├── jobs/                [1 file] Periodic cron jobs
+│   └── export-annotations.ts # Hourly annotation export to Storage
+├── types/               [10 files] TypeScript definitions
+│   ├── processor.ts     # ProcessResult, ProcessedChunk
+│   ├── metadata.ts      # 8 metadata types
+│   ├── multi-format.ts  # SourceType, format interfaces
+│   ├── database.ts      # Database schema types
+│   ├── chunking.ts      # ChunkingStrategy, ChunkingConfig
+│   ├── job-schemas.ts   # Zod schemas for job validation
+│   └── ...
+├── scripts/             [39 files] CLI utilities for testing & debugging
+│   ├── test-*.ts        # Integration tests (local pipeline, PDF, EPUB, etc.)
+│   ├── validate-*.ts    # Validation utilities (metadata, matching, etc.)
+│   ├── check-*.ts       # Inspection tools (documents, chunks, connections)
+│   ├── import-*.ts      # Import utilities (Readwise, etc.)
+│   └── ...
+├── tests/               Integration test suites
+├── __tests__/           [8 files] Unit tests
+├── benchmarks/          [4 files] Performance benchmarks
+└── index.ts             # Worker entry point + job handlers
 
 ```
 
 ## Processing Flow
 
-### 1. Job Pickup
+### 1. Worker Loop & Job Pickup
+
+The worker runs continuously, checking for jobs every 5 seconds and processing them sequentially:
+
 ```typescript
-// Background job created by main app
-{
-  job_type: 'process-document',
-  input_data: { document_id, source_type }
+// index.ts - Main worker loop
+while (!isShuttingDown) {
+  await processNextJob()  // Fetch and process 1 job
+  await retryLoop()       // Check for retry-eligible jobs every 30s
+  await sleep(5000)       // 5-second polling interval
 }
+```
+
+**Job Selection Priority**:
+1. **Pending** jobs (status: 'pending')
+2. **Failed** jobs ready for retry (next_retry_at < now)
+3. **Stale** processing jobs (started >30 minutes ago, no heartbeat)
+
+### 2. Job Types & Handlers
+
+The worker supports **10 job types**, each mapped to a specific handler:
+
+| Job Type | Handler | Purpose |
+|----------|---------|---------|
+| `process_document` | `processDocumentHandler` | Full document processing pipeline |
+| `detect-connections` | `detectConnectionsHandler` | Run 3-engine collision detection |
+| `reprocess-document` | `reprocessDocument` | Full reprocessing with annotation recovery |
+| `reprocess_connections` | `reprocessConnectionsHandler` | Regenerate connections only (Smart Mode) |
+| `import_document` | `importDocumentHandler` | Import from ZIP with conflict resolution |
+| `export_documents` | `exportDocumentHandler` | Create portable ZIP exports |
+| `obsidian-export` | `exportToObsidian` | Export markdown to Obsidian vault |
+| `obsidian-sync` | `syncFromObsidian` | Import edited markdown from vault |
+| `readwise-import` | `importReadwiseHighlights` | Import Readwise highlights |
+| `continue-processing` | `continueProcessing` | Resume from checkpoint after pause |
+
+**Job Creation Example**:
+```typescript
+// Main app creates background job
+const { data: job } = await supabase
+  .from('background_jobs')
+  .insert({
+    job_type: 'process_document',
+    input_data: { documentId, sourceType },
+    status: 'pending',
+    user_id: userId
+  })
 ```
 
 ### 2. Handler Orchestration
