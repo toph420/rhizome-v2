@@ -1,6 +1,5 @@
 ---
 description: Create implementation plans through interactive research and iteration
-model: opus
 ---
 
 # Create Plan
