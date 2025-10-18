@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Upload, FileText, DollarSign, Clock, Link as LinkIcon, ClipboardPaste, Video, Globe, Loader2, Sparkles } from 'lucide-react'
@@ -628,6 +627,9 @@ export function UploadZone() {
               onExtractImagesChange={setExtractImages}
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
+              isMarkdownFile={selectedFile?.name.endsWith('.md') || selectedFile?.name.endsWith('.markdown')}
+              markdownProcessing={markdownProcessing}
+              onMarkdownProcessingChange={setMarkdownProcessing}
             />
           ) : uploadPhase === 'detecting' && uploadSource === 'file' ? (
             <Card className="p-12 text-center">
@@ -684,26 +686,6 @@ export function UploadZone() {
                       {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                     </p>
                   </div>
-
-                  {selectedFile.name.endsWith('.md') && (
-                    <div className="text-left space-y-2">
-                      <Label>Markdown Processing</Label>
-                      <RadioGroup value={markdownProcessing} onValueChange={(v) => setMarkdownProcessing(v as 'asis' | 'clean')}>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="asis" id="asis" />
-                          <Label htmlFor="asis" className="font-normal cursor-pointer">
-                            Save as-is (chunk by headings)
-                          </Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="clean" id="clean" />
-                          <Label htmlFor="clean" className="font-normal cursor-pointer">
-                            Clean with AI (semantic chunking)
-                          </Label>
-                        </div>
-                      </RadioGroup>
-                    </div>
-                  )}
 
                   {costEstimate && (
                     <div className="grid grid-cols-3 gap-4 text-sm">
@@ -768,6 +750,9 @@ export function UploadZone() {
               onExtractImagesChange={setExtractImages}
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
+              isMarkdownFile={false}
+              markdownProcessing={markdownProcessing}
+              onMarkdownProcessingChange={setMarkdownProcessing}
             />
           ) : uploadPhase === 'detecting' && uploadSource === 'url' ? (
             <Card className="p-12 text-center">

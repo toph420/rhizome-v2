@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Upload, X, Sparkles, Info } from 'lucide-react'
 import Image from 'next/image'
 import type { DetectedMetadata, DocumentType } from '@/types/metadata'
@@ -70,6 +71,9 @@ interface DocumentPreviewProps {
   onExtractImagesChange?: (checked: boolean) => void
   chunkerType?: ChunkerType
   onChunkerTypeChange?: (chunkerType: ChunkerType) => void
+  isMarkdownFile?: boolean
+  markdownProcessing?: 'asis' | 'clean'
+  onMarkdownProcessingChange?: (processing: 'asis' | 'clean') => void
 }
 
 const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
@@ -110,7 +114,10 @@ export function DocumentPreview({
   extractImages = false,
   onExtractImagesChange,
   chunkerType = 'recursive',
-  onChunkerTypeChange
+  onChunkerTypeChange,
+  isMarkdownFile = false,
+  markdownProcessing = 'asis',
+  onMarkdownProcessingChange
 }: DocumentPreviewProps) {
   const [edited, setEdited] = useState(metadata)
   const [coverImage, setCoverImage] = useState<File | null>(null)
@@ -292,8 +299,40 @@ export function DocumentPreview({
           </Select>
         </div>
 
+        {/* Markdown Processing Option - Only show for markdown files */}
+        {isMarkdownFile && (
+          <div className="space-y-2">
+            <Label htmlFor="markdown-processing">Markdown Processing</Label>
+            <RadioGroup
+              value={markdownProcessing}
+              onValueChange={(value: 'asis' | 'clean') => {
+                onMarkdownProcessingChange?.(value)
+              }}
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="asis" id="markdown-asis" />
+                <Label htmlFor="markdown-asis" className="font-normal cursor-pointer">
+                  Save as-is (no AI processing)
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="clean" id="markdown-clean" />
+                <Label htmlFor="markdown-clean" className="font-normal cursor-pointer flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Clean with AI (recommended)
+                </Label>
+              </div>
+            </RadioGroup>
+            <p className="text-xs text-muted-foreground">
+              {markdownProcessing === 'asis'
+                ? 'Use original markdown as-is, no AI cleanup'
+                : 'AI will improve formatting and structure'}
+            </p>
+          </div>
+        )}
+
         {/* AI Cleanup Option - Only show for 'none' and 'after_cleanup' workflows */}
-        {(reviewWorkflow === 'none' || reviewWorkflow === 'after_cleanup') && (
+        {(reviewWorkflow === 'none' || reviewWorkflow === 'after_cleanup') && !isMarkdownFile && (
           <div className="flex items-center gap-2">
             <Checkbox
               id="clean-markdown-preview"
