@@ -1,0 +1,8 @@
+# Thoughts Directory
+
+This directory contains development artifacts for the Rhizome V2 project:
+
+- `handoffs/` - Session handoff documents for context preservation
+- `plans/` - Implementation plans for features
+- `decisions/` - Architecture decision records
+- `templates/` - Rhizome-specific templates for plans and handoffs
