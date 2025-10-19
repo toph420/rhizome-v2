@@ -449,9 +449,9 @@ export const validateChunkRefComponent = (
 - [x] Validators export correctly
 
 #### Manual Verification:
-- [ ] Can import SparkComponent and SparkEntity in other files
-- [ ] ChunkRef validator accepts optional documentId
-- [ ] Spark validators correctly validate component structure
+- [x] Can import SparkComponent and SparkEntity in other files
+- [x] ChunkRef validator accepts optional documentId
+- [x] Spark validators correctly validate component structure
 
 **Implementation Note**: No database changes. Type definitions only.
 
@@ -918,15 +918,15 @@ export class SparkOperations {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run type-check`
-- [ ] No import errors: `npm run build`
-- [ ] SparkOperations exports correctly
+- [x] Types compile: `npm run type-check`
+- [x] No import errors: `npm run build`
+- [x] SparkOperations exports correctly
 
 #### Manual Verification:
-- [ ] Can instantiate SparkOperations with ECS and userId
-- [ ] create() method builds 4 components correctly
-- [ ] getByDocument() queries by document_id filter
-- [ ] updateAfterRecovery() updates all relevant components
+- [x] Can instantiate SparkOperations with ECS and userId
+- [x] create() method builds 4 components correctly
+- [x] getByDocument() queries by document_id filter
+- [x] updateAfterRecovery() updates all relevant components
 
 **Implementation Note**: No database changes. Operations layer only.
 
@@ -1151,17 +1151,17 @@ export async function searchSparks(query: string, limit = 20) {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run type-check`
-- [ ] Server actions build: `npm run build`
+- [x] Types compile: `npm run type-check`
+- [x] Server actions build: `npm run build`
 
 #### Manual Verification:
-- [ ] createSpark uses SparkOperations.create()
-- [ ] deleteSpark uses SparkOperations.delete()
-- [ ] No direct ECS calls (all via ops)
-- [ ] Cache table updated with correct data
+- [x] createSpark uses SparkOperations.create()
+- [x] deleteSpark uses SparkOperations.delete()
+- [x] No direct ECS calls (all via ops)
+- [x] Cache table updated with correct data
 
 **Service Restarts:**
-- [ ] Next.js: Auto-reload on server action changes
+- [x] Next.js: Auto-reload on server action changes
 
 ---
 
@@ -1393,19 +1393,19 @@ export interface SparkSelection {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run type-check`
-- [ ] Component builds: `npm run build`
+- [x] Types compile: `npm run type-check`
+- [x] Component builds: `npm run build`
 
 #### Manual Verification:
-- [ ] Selections display separately from textarea
-- [ ] "Quote This" button adds selection to array
-- [ ] Selections show chunk ID badge
-- [ ] Can remove selections individually
-- [ ] Selections passed to createSpark()
-- [ ] Textarea remains clean (no auto-appended text)
+- [x] Selections display separately from textarea
+- [x] "Quote This" button adds selection to array
+- [x] Selections show chunk ID badge
+- [x] Can remove selections individually
+- [x] Selections passed to createSpark()
+- [x] Textarea remains clean (no auto-appended text)
 
 **Service Restarts:**
-- [ ] Next.js: Auto-reload on component changes
+- [x] Next.js: Auto-reload on component changes
 
 ---
 
@@ -1874,18 +1874,18 @@ function cosineSimilarity(a: number[], b: number[]): number {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Worker builds: `cd worker && npm run build`
-- [ ] No TypeScript errors
+- [x] Worker builds: `cd worker && npm run build`
+- [x] No TypeScript errors
 
 #### Manual Verification:
-- [ ] Selection-based recovery uses 4-tier fuzzy matching
-- [ ] Thought-based recovery uses semantic similarity
-- [ ] Confidence thresholds: ≥0.85 success, 0.70-0.85 review, <0.70 orphaned
-- [ ] Components updated correctly after recovery
-- [ ] Orphaned sparks marked properly
+- [x] Selection-based recovery uses 4-tier fuzzy matching
+- [x] Thought-based recovery uses semantic similarity
+- [x] Confidence thresholds: ≥0.85 success, 0.70-0.85 review, <0.70 orphaned
+- [x] Components updated correctly after recovery
+- [x] Orphaned sparks marked properly
 
 **Service Restarts:**
-- [ ] Worker: Restart via `npm run dev`
+- [x] Worker: Restart via `npm run dev`
 
 ---
 
@@ -2090,16 +2090,16 @@ export interface ObsidianSettings {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Worker builds: `cd worker && npm run build`
-- [ ] No TypeScript errors
+- [x] Worker builds: `cd worker && npm run build`
+- [x] No TypeScript errors (obsidian-sync.ts compiles cleanly)
 
 #### Manual Verification:
-- [ ] Sparks export to `.sparks.md` file
-- [ ] YAML frontmatter includes all metadata
-- [ ] Selections displayed as quotes
-- [ ] Connections summarized by type
-- [ ] Multiple sparks separated by `---`
-- [ ] Obsidian can read and render files
+- [x] Sparks export to `.sparks.md` file
+- [x] YAML frontmatter includes all metadata
+- [x] Selections displayed as quotes
+- [x] Connections summarized by type
+- [x] Multiple sparks separated by `---`
+- [x] Obsidian can read and render files
 
 **Test Flow:**
 1. Create 3 sparks for a document (with selections and without)
@@ -2109,8 +2109,10 @@ export interface ObsidianSettings {
 5. Verify YAML frontmatter complete
 6. Open in Obsidian and verify rendering
 
+**Note**: Formatting improvements deferred to later iteration (YAML frontmatter ordering).
+
 **Service Restarts:**
-- [ ] Worker: Restart via `npm run dev`
+- [x] Worker: Restart via `npm run dev`
 
 ---
 
@@ -2864,6 +2866,432 @@ describe('Spark Recovery', () => {
 - Server actions: `src/app/actions/sparks.ts`
 - UI component: `src/components/reader/QuickSparkCapture.tsx`
 - Cache migration: `supabase/migrations/054_create_sparks_cache.sql`
+
+---
+
+## Phase 6b: Link Annotations to Sparks
+
+### Overview
+
+Add ability to reference annotations from sparks, like citations for your thoughts. Users can link existing annotations to a spark while the spark panel is open, creating relationships between highlights and thoughts.
+
+**Use Case**: "I'm thinking X (spark) because of these highlights I made (annotations)."
+
+### Changes Required
+
+#### 1. Update ECS Components (Phase 1 Extension)
+
+**File**: `src/lib/ecs/components.ts`
+**Changes**: Add annotation references field to SparkComponent
+
+```typescript
+/** Spark component data (spark-specific) */
+export interface SparkComponent {
+  /** Multiple text selections (can be empty for thought-only sparks) */
+  selections: SparkSelection[];
+  /** Connections to other chunks */
+  connections: SparkConnection[];
+
+  // Annotation references (NEW)
+  /** Array of annotation entity IDs linked to this spark */
+  annotationRefs?: string[];
+
+  // Recovery metadata
+  orphaned?: boolean;
+  recoveryConfidence?: number;
+  recoveryMethod?: 'selections' | 'semantic' | 'context' | 'orphaned';
+  needsReview?: boolean;
+  originalChunkContent?: string;
+  originalChunkHash?: string;
+}
+```
+
+#### 2. Extend SparkOperations (Phase 2 Extension)
+
+**File**: `src/lib/ecs/sparks.ts`
+**Changes**: Add methods for managing annotation references
+
+```typescript
+/**
+ * Add annotation reference to spark.
+ *
+ * @param sparkId - Entity ID of the spark
+ * @param annotationId - Entity ID of the annotation to link
+ */
+async addAnnotationRef(
+  sparkId: string,
+  annotationId: string
+): Promise<void> {
+  const entity = await this.ecs.getEntity(sparkId, this.userId);
+  if (!entity) {
+    throw new Error('Spark not found');
+  }
+
+  const components = this.extractComponents(entity);
+  const sparkComponent = components.find(
+    (c) => c.component_type === 'Spark'
+  );
+
+  if (sparkComponent) {
+    const currentRefs = sparkComponent.data.annotationRefs || [];
+
+    // Don't add duplicates
+    if (currentRefs.includes(annotationId)) {
+      return;
+    }
+
+    await this.ecs.updateComponent(
+      sparkComponent.id,
+      {
+        ...sparkComponent.data,
+        annotationRefs: [...currentRefs, annotationId],
+      },
+      this.userId
+    );
+  }
+
+  // Update Temporal.updatedAt
+  const temporalComponent = components.find(
+    (c) => c.component_type === 'Temporal'
+  );
+  if (temporalComponent) {
+    await this.ecs.updateComponent(
+      temporalComponent.id,
+      {
+        ...temporalComponent.data,
+        updatedAt: new Date().toISOString(),
+      },
+      this.userId
+    );
+  }
+}
+
+/**
+ * Remove annotation reference from spark.
+ *
+ * @param sparkId - Entity ID of the spark
+ * @param annotationId - Entity ID of the annotation to unlink
+ */
+async removeAnnotationRef(
+  sparkId: string,
+  annotationId: string
+): Promise<void> {
+  const entity = await this.ecs.getEntity(sparkId, this.userId);
+  if (!entity) {
+    throw new Error('Spark not found');
+  }
+
+  const components = this.extractComponents(entity);
+  const sparkComponent = components.find(
+    (c) => c.component_type === 'Spark'
+  );
+
+  if (sparkComponent) {
+    const currentRefs = sparkComponent.data.annotationRefs || [];
+    const updatedRefs = currentRefs.filter((id: string) => id !== annotationId);
+
+    await this.ecs.updateComponent(
+      sparkComponent.id,
+      {
+        ...sparkComponent.data,
+        annotationRefs: updatedRefs,
+      },
+      this.userId
+    );
+  }
+
+  // Update Temporal.updatedAt
+  const temporalComponent = components.find(
+    (c) => c.component_type === 'Temporal'
+  );
+  if (temporalComponent) {
+    await this.ecs.updateComponent(
+      temporalComponent.id,
+      {
+        ...temporalComponent.data,
+        updatedAt: new Date().toISOString(),
+      },
+      this.userId
+    );
+  }
+}
+```
+
+#### 3. Add Server Actions (Phase 3 Extension)
+
+**File**: `src/app/actions/sparks.ts`
+**Changes**: Add server actions for linking/unlinking annotations
+
+```typescript
+/**
+ * Link annotation to spark
+ */
+export async function linkAnnotationToSpark(
+  sparkId: string,
+  annotationId: string
+) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  const ecs = createECS()
+  const ops = new SparkOperations(ecs, user.id)
+
+  await ops.addAnnotationRef(sparkId, annotationId)
+
+  revalidatePath('/sparks')
+  return { success: true }
+}
+
+/**
+ * Unlink annotation from spark
+ */
+export async function unlinkAnnotationFromSpark(
+  sparkId: string,
+  annotationId: string
+) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  const ecs = createECS()
+  const ops = new SparkOperations(ecs, user.id)
+
+  await ops.removeAnnotationRef(sparkId, annotationId)
+
+  revalidatePath('/sparks')
+  return { success: true }
+}
+```
+
+#### 4. Update QuickSparkCapture UI (Phase 4 Extension)
+
+**File**: `src/components/reader/QuickSparkCapture.tsx`
+**Changes**: Add annotations list with linking capability
+
+```typescript
+// Add to imports
+import { getAnnotationsByDocument } from '@/app/actions/annotations'
+import { AnnotationEntity } from '@/lib/ecs/components'
+
+// Add state for annotations and linked refs
+const [annotations, setAnnotations] = useState<AnnotationEntity[]>([])
+const [linkedAnnotationIds, setLinkedAnnotationIds] = useState<string[]>([])
+const [showAnnotations, setShowAnnotations] = useState(false)
+
+// Fetch annotations when panel opens
+useEffect(() => {
+  if (isOpen) {
+    getAnnotationsByDocument(documentId).then(setAnnotations)
+  }
+}, [isOpen, documentId])
+
+// Reset linked annotations when panel closes
+useEffect(() => {
+  if (!isOpen) {
+    setLinkedAnnotationIds([])
+  }
+}, [isOpen])
+
+// Handle linking annotation
+const handleLinkAnnotation = (annotationId: string) => {
+  setLinkedAnnotationIds(prev => [...prev, annotationId])
+}
+
+// Handle unlinking annotation
+const handleUnlinkAnnotation = (annotationId: string) => {
+  setLinkedAnnotationIds(prev => prev.filter(id => id !== annotationId))
+}
+
+// Update handleSubmit to include annotation refs
+const handleSubmit = async () => {
+  if (!content.trim() || loading) return
+
+  setLoading(true)
+  try {
+    // ... existing context building ...
+
+    // Create spark with selections and annotation refs
+    const result = await createSpark({
+      content: content.trim(),
+      selections,
+      context: sparkContext
+    })
+
+    // Link annotations to the created spark
+    if (linkedAnnotationIds.length > 0 && result.sparkId) {
+      await Promise.all(
+        linkedAnnotationIds.map(annotationId =>
+          linkAnnotationToSpark(result.sparkId, annotationId)
+        )
+      )
+    }
+
+    closeSparkCapture()
+    console.log('[Sparks] ✓ Created successfully with annotation links')
+  } catch (error) {
+    console.error('[Sparks] Failed to create:', error)
+    alert('Failed to create spark. Please try again.')
+  } finally {
+    setLoading(false)
+  }
+}
+```
+
+**UI Section** (add after selections display, before textarea):
+
+```typescript
+{/* Linked Annotations Display */}
+{linkedAnnotationIds.length > 0 && (
+  <div className="space-y-2">
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Highlighter className="w-3 h-3" />
+      <span>{linkedAnnotationIds.length} linked annotation{linkedAnnotationIds.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      {linkedAnnotationIds.map((annotationId) => {
+        const annotation = annotations.find(a => a.id === annotationId)
+        if (!annotation) return null
+
+        const position = annotation.components.Position
+        const content = annotation.components.Content
+
+        return (
+          <div
+            key={annotationId}
+            className="group relative p-2 bg-muted/30 rounded border border-muted-foreground/20 text-xs"
+          >
+            <p className="pr-6 italic max-w-[200px] truncate">
+              "{position.originalText}"
+            </p>
+            {content.tags.length > 0 && (
+              <div className="flex gap-1 mt-1">
+                {content.tags.slice(0, 2).map(tag => (
+                  <Badge key={tag} variant="outline" className="h-4 text-[10px]">
+                    #{tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute top-1 right-1 h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
+              onClick={() => handleUnlinkAnnotation(annotationId)}
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          </div>
+        )
+      })}
+    </div>
+  </div>
+)}
+
+{/* Annotations Browser (Collapsible) */}
+{annotations.length > 0 && (
+  <div className="space-y-2 border-t pt-2">
+    <button
+      onClick={() => setShowAnnotations(!showAnnotations)}
+      className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground w-full"
+    >
+      <Highlighter className="w-3 h-3" />
+      <span>
+        {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} in document
+      </span>
+      <ChevronDown
+        className={`w-3 h-3 ml-auto transition-transform ${
+          showAnnotations ? 'rotate-180' : ''
+        }`}
+      />
+    </button>
+
+    {showAnnotations && (
+      <div className="max-h-[200px] overflow-y-auto space-y-2">
+        {annotations
+          .filter(a => !linkedAnnotationIds.includes(a.id))
+          .map((annotation) => {
+            const position = annotation.components.Position
+            const content = annotation.components.Content
+            const visual = annotation.components.Visual
+
+            return (
+              <div
+                key={annotation.id}
+                className="p-2 bg-muted/20 rounded border border-muted-foreground/10 hover:border-muted-foreground/30 transition-colors"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs italic truncate">
+                      "{position.originalText}"
+                    </p>
+                    {content.note && (
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
+                        {content.note}
+                      </p>
+                    )}
+                    {content.tags.length > 0 && (
+                      <div className="flex gap-1 mt-1">
+                        {content.tags.slice(0, 3).map(tag => (
+                          <Badge key={tag} variant="outline" className="h-4 text-[10px]">
+                            #{tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleLinkAnnotation(annotation.id)}
+                    className="text-xs h-7 shrink-0"
+                  >
+                    Link
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+      </div>
+    )}
+  </div>
+)}
+```
+
+Don't forget to add ChevronDown import:
+```typescript
+import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter, ChevronDown } from 'lucide-react'
+```
+
+### Success Criteria
+
+#### Automated Verification:
+- [ ] Types compile: `npm run build`
+- [ ] No TypeScript errors in components.ts
+- [ ] No TypeScript errors in sparks.ts
+- [ ] No TypeScript errors in server actions
+- [ ] No TypeScript errors in QuickSparkCapture.tsx
+
+#### Manual Verification:
+- [ ] Can see annotations list in spark panel (collapsed by default)
+- [ ] Can expand/collapse annotations list
+- [ ] "Link" button adds annotation to linked list
+- [ ] Linked annotations display as removable chips
+- [ ] Can remove linked annotation with X button
+- [ ] Linked annotations excluded from browser list
+- [ ] Annotations saved with spark on submit
+- [ ] annotationRefs field populated in Spark component
+- [ ] Multiple annotations can be linked to one spark
+
+#### Integration Testing:
+- [ ] Create spark with no linked annotations (works as before)
+- [ ] Create spark with 1 linked annotation
+- [ ] Create spark with 3+ linked annotations
+- [ ] Verify annotationRefs array in database components table
+- [ ] Verify Temporal.updatedAt updates when linking/unlinking
+
+**Service Restarts:**
+- [ ] Next.js: Auto-reload on component/action changes
+
+**Implementation Note**: Purely additive feature. `annotationRefs` is optional, so existing sparks continue to work without changes.
 
 ---
 

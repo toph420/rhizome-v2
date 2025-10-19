@@ -203,6 +203,7 @@ export interface ObsidianSettings {
   vaultPath: string | null
   autoSync: boolean
   syncAnnotations: boolean
+  exportSparks?: boolean  // NEW - Export sparks to .sparks.md (default: true)
   exportPath: string  // Relative path in vault (e.g., "Rhizome/")
 }
 
