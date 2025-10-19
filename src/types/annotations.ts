@@ -1,7 +1,31 @@
 /**
  * Annotation system type definitions.
- * Defines interfaces for text selection, annotation data, and connection synthesis.
+ * Uses 5-component ECS pattern for consistency with Sparks.
  */
+
+// ============================================
+// RE-EXPORT ECS TYPES
+// ============================================
+
+/**
+ * Re-export annotation types from ECS components.
+ * This maintains backwards compatibility while using the canonical 5-component pattern.
+ */
+export type {
+  AnnotationEntity,
+  PositionComponent,
+  VisualComponent,
+  ContentComponent,
+  TemporalComponent,
+  ChunkRefComponent,
+} from '@/lib/ecs/components'
+
+// Alias for backwards compatibility
+export type { AnnotationEntity as StoredAnnotation } from '@/lib/ecs/components'
+
+// ============================================
+// UI-SPECIFIC TYPES
+// ============================================
 
 /**
  * Text selection captured from Range API.
@@ -14,69 +38,6 @@ export interface TextSelection {
     chunkIds: string[]  // Array for multi-chunk selections
   }
   rect: DOMRect
-}
-
-/**
- * Text context surrounding an annotation (±5 words).
- */
-export interface TextContext {
-  before: string
-  content: string
-  after: string
-}
-
-/**
- * Annotation component data (stored in ECS).
- */
-export interface AnnotationData {
-  text: string
-  note?: string
-  tags?: string[]
-  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
-  range: {
-    startOffset: number
-    endOffset: number
-    chunkIds: string[]  // Array for multi-chunk annotations
-  }
-  textContext: TextContext
-}
-
-/**
- * Position component data (fuzzy matching metadata).
- */
-export interface PositionData {
-  chunkIds: string[]  // Array for multi-chunk annotations
-  startOffset: number
-  endOffset: number
-  confidence: number // 0.0-1.0
-  method: 'exact' | 'fuzzy' | 'approximate'
-  textContext: {
-    before: string
-    after: string
-  }
-}
-
-/**
- * Source component data (chunk/document linking).
- */
-export interface SourceData {
-  chunk_ids: string[]  // Array for multi-chunk annotations (connection graph)
-  document_id: string
-}
-
-/**
- * Complete stored annotation entity from ECS.
- */
-export interface StoredAnnotation {
-  id: string
-  user_id: string
-  created_at: string
-  updated_at: string
-  components: {
-    annotation?: AnnotationData
-    position?: PositionData
-    source?: SourceData
-  }
 }
 
 /**

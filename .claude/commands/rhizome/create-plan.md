@@ -458,7 +458,3 @@ Continue refining until user satisfied.
    - Spawn follow-ups if unexpected
    - Cross-check against codebase
    - Don't accept incorrect results
-
-## Example
-
-User invokes: `/rhizome:create-plan Add support for DOCX files`
