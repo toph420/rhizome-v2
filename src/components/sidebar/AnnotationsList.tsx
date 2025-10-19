@@ -9,7 +9,7 @@ import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
 import { updateAnnotation, deleteAnnotation } from '@/app/actions/annotations'
 import { formatDistanceToNow } from 'date-fns'
-import { Loader2, Pencil, Save, X, Zap, Trash2 } from 'lucide-react'
+import { Loader2, Pencil, Save, X, Zap, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useUIStore } from '@/stores/ui-store'
@@ -62,6 +62,9 @@ export function AnnotationsList({
   const [editColor, setEditColor] = useState<string>('yellow')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+
+  // Expanded state for showing full annotation text
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   // Sort annotations by document order (startOffset)
   const sortedAnnotations = useMemo(() => {
@@ -136,6 +139,20 @@ export function AnnotationsList({
     if (onAnnotationClick) {
       onAnnotationClick(annotation.id, startOffset)
     }
+  }
+
+  // Toggle expanded state for annotation text
+  function toggleExpanded(annotationId: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(annotationId)) {
+        next.delete(annotationId)
+      } else {
+        next.add(annotationId)
+      }
+      return next
+    })
   }
 
   // Enter edit mode for annotation
@@ -426,11 +443,35 @@ export function AnnotationsList({
                 )}
               </div>
 
-              {/* Annotation text */}
-              <div>
-                <p className="text-sm leading-tight line-clamp-3">
+              {/* Annotation text with expand/collapse */}
+              <div className="space-y-1">
+                <p className={cn(
+                  "text-sm leading-tight",
+                  !expandedIds.has(annotation.id) && "line-clamp-3"
+                )}>
                   {positionData.originalText}
                 </p>
+                {/* Show expand button if text is longer than 3 lines (rough estimate: >150 chars) */}
+                {positionData.originalText && positionData.originalText.length > 150 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs -ml-2"
+                    onClick={(e) => toggleExpanded(annotation.id, e)}
+                  >
+                    {expandedIds.has(annotation.id) ? (
+                      <>
+                        <ChevronUp className="h-3 w-3 mr-1" />
+                        Show less
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-3 w-3 mr-1" />
+                        Show more
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
 
               {/* Note - editable in edit mode */}

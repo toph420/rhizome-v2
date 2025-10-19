@@ -218,8 +218,8 @@ export async function getAnnotationsNeedingReview(
 
     if (method === 'lost' || confidence === 0) {
       lost.push({
-        entityId: annotation.id,
-        originalText: position.originalText,
+        id: annotation.id,
+        text: position.originalText,
         note: content.note,
         color: visual.color,
         confidence: 0,
@@ -227,20 +227,26 @@ export async function getAnnotationsNeedingReview(
       })
     } else if (position.needsReview) {
       needsReview.push({
-        entityId: annotation.id,
-        originalText: position.originalText,
-        note: content.note,
-        color: visual.color,
-        confidence,
-        method,
+        annotation: {
+          id: annotation.id,
+          text: position.originalText,
+          startOffset: position.startOffset,
+          endOffset: position.endOffset,
+          textContext: position.textContext,
+        },
         suggestedMatch: {
           text: position.originalText,
-          context: position.textContext,
+          startOffset: position.startOffset,
+          endOffset: position.endOffset,
+          confidence,
+          method,
+          contextBefore: position.textContext?.before,
+          contextAfter: position.textContext?.after,
         },
       })
     } else {
       success.push({
-        entityId: annotation.id,
+        id: annotation.id,
         text: position.originalText,
         note: content.note,
         color: visual.color,
@@ -251,6 +257,115 @@ export async function getAnnotationsNeedingReview(
   }
 
   return { success, needsReview, lost }
+}
+
+/**
+ * Accept a suggested annotation match from recovery
+ * Updates the Position component with new offsets and marks as reviewed
+ */
+export async function acceptAnnotationMatch(
+  annotationId: string,
+  suggestedMatch: {
+    startOffset: number
+    endOffset: number
+    text: string
+    confidence: number
+    method: string
+  }
+) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const ecs = createECS()
+    const ops = new AnnotationOperations(ecs, user.id)
+
+    // Get the annotation entity
+    const entity = await ecs.getEntity(annotationId, user.id)
+    if (!entity) {
+      return { success: false, error: 'Annotation not found' }
+    }
+
+    // Find the Position component
+    const positionComponent = entity.components?.find(
+      (c) => c.component_type === 'Position'
+    )
+
+    if (!positionComponent) {
+      return { success: false, error: 'Position component not found' }
+    }
+
+    // Update Position component with accepted match
+    const updatedData = {
+      ...positionComponent.data,
+      startOffset: suggestedMatch.startOffset,
+      endOffset: suggestedMatch.endOffset,
+      originalText: suggestedMatch.text,
+      recoveryConfidence: suggestedMatch.confidence,
+      recoveryMethod: suggestedMatch.method,
+      needsReview: false, // Mark as reviewed and accepted
+    }
+
+    await ecs.updateComponent(positionComponent.id, updatedData, user.id)
+
+    return { success: true }
+  } catch (error) {
+    console.error('[acceptAnnotationMatch] Failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * Reject an annotation match from recovery (marks as lost)
+ * Sets confidence to 0 and method to 'lost'
+ */
+export async function rejectAnnotationMatch(annotationId: string) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    const ecs = createECS()
+
+    // Get the annotation entity
+    const entity = await ecs.getEntity(annotationId, user.id)
+    if (!entity) {
+      return { success: false, error: 'Annotation not found' }
+    }
+
+    // Find the Position component
+    const positionComponent = entity.components?.find(
+      (c) => c.component_type === 'Position'
+    )
+
+    if (!positionComponent) {
+      return { success: false, error: 'Position component not found' }
+    }
+
+    // Update Position component to mark as lost
+    const updatedData = {
+      ...positionComponent.data,
+      recoveryConfidence: 0,
+      recoveryMethod: 'lost',
+      needsReview: false, // Mark as reviewed (rejected)
+    }
+
+    await ecs.updateComponent(positionComponent.id, updatedData, user.id)
+
+    return { success: true }
+  } catch (error) {
+    console.error('[rejectAnnotationMatch] Failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
 }
 
 /**

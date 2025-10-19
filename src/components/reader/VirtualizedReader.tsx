@@ -241,6 +241,10 @@ export function VirtualizedReader() {
 
   // Handle optimistic annotation updates (for new annotations)
   const handleAnnotationCreated = useCallback((annotation: OptimisticAnnotation) => {
+    // Clear browser selection immediately to prevent expansion after DOM injection
+    // This fixes the issue where multi-chunk annotations cause selection to expand
+    clearSelection()
+
     setOptimisticAnnotations((prev) => {
       const next = new Map(prev)
 
@@ -315,7 +319,7 @@ export function VirtualizedReader() {
 
       return next
     })
-  }, [documentId, addAnnotation])
+  }, [documentId, addAnnotation, clearSelection])
 
   // Handle annotation updates (for editing existing annotations)
   const handleAnnotationUpdated = useCallback((annotation: AnnotationEntity) => {

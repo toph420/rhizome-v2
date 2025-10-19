@@ -10,11 +10,13 @@ import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight, FileText
 import { toast } from 'sonner'
 import type { RecoveryResults, ReviewItem } from '../../worker/types/recovery'
 import { getPendingImports, acceptImport, rejectImport, type PendingImport } from '@/app/actions/import-review'
+import { acceptAnnotationMatch, rejectAnnotationMatch } from '@/app/actions/annotations'
 
 interface AnnotationReviewTabProps {
   documentId: string
   results: RecoveryResults | null
   onHighlightAnnotation?: (annotationId: string) => void
+  onAnnotationClick?: (annotationId: string, startOffset: number) => void
 }
 
 /**
@@ -30,7 +32,8 @@ interface AnnotationReviewTabProps {
 export function AnnotationReviewTab({
   documentId,
   results,
-  onHighlightAnnotation
+  onHighlightAnnotation,
+  onAnnotationClick
 }: AnnotationReviewTabProps) {
   const [showLost, setShowLost] = useState(false)
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
@@ -73,23 +76,33 @@ export function AnnotationReviewTab({
     setProcessingIds((prev) => new Set(prev).add(item.annotation.id))
 
     try {
-      const response = await fetch('/api/annotations/accept-match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          componentId: item.annotation.id,
-          suggestedMatch: item.suggestedMatch
-        })
+      const result = await acceptAnnotationMatch(item.annotation.id, {
+        startOffset: item.suggestedMatch.startOffset,
+        endOffset: item.suggestedMatch.endOffset,
+        text: item.suggestedMatch.text,
+        confidence: item.suggestedMatch.confidence,
+        method: item.suggestedMatch.method,
       })
 
-      if (!response.ok) throw new Error('Accept failed')
+      if (!result.success) {
+        throw new Error(result.error || 'Accept failed')
+      }
 
       toast.success('Annotation Accepted', {
         description: `Confidence: ${(item.suggestedMatch.confidence * 100).toFixed(1)}%`
       })
 
-      // Reload to show updated state
-      window.location.reload()
+      // Remove from needsReview list (no page reload needed)
+      if (results) {
+        results.needsReview = results.needsReview.filter(r => r.annotation.id !== item.annotation.id)
+        // Move to success list
+        results.success.push({
+          id: item.annotation.id,
+          text: item.suggestedMatch.text,
+          confidence: item.suggestedMatch.confidence,
+          method: item.suggestedMatch.method,
+        })
+      }
 
     } catch (error) {
       toast.error('Accept Failed', {
@@ -105,24 +118,31 @@ export function AnnotationReviewTab({
   }
 
   /**
-   * Discard a single annotation
+   * Discard a single annotation (mark as lost)
    */
   async function handleDiscard(item: ReviewItem) {
     setProcessingIds((prev) => new Set(prev).add(item.annotation.id))
 
     try {
-      const response = await fetch('/api/annotations/discard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ componentId: item.annotation.id })
-      })
+      const result = await rejectAnnotationMatch(item.annotation.id)
 
-      if (!response.ok) throw new Error('Discard failed')
+      if (!result.success) {
+        throw new Error(result.error || 'Reject failed')
+      }
 
       toast.success('Annotation Discarded')
 
-      // Reload to show updated state
-      window.location.reload()
+      // Remove from needsReview list (no page reload needed)
+      if (results) {
+        results.needsReview = results.needsReview.filter(r => r.annotation.id !== item.annotation.id)
+        // Move to lost list
+        results.lost.push({
+          id: item.annotation.id,
+          text: item.annotation.text,
+          confidence: 0,
+          method: 'lost',
+        })
+      }
 
     } catch (error) {
       toast.error('Discard Failed', {
@@ -142,27 +162,38 @@ export function AnnotationReviewTab({
    */
   async function handleAcceptAll() {
     try {
-      const response = await fetch('/api/annotations/batch-accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          matches: needsReview.map((item) => ({
-            componentId: item.annotation.id,
-            suggestedMatch: item.suggestedMatch
-          }))
-        })
-      })
+      // Process all accepts in parallel
+      const results = await Promise.all(
+        needsReview.map((item) =>
+          acceptAnnotationMatch(item.annotation.id, {
+            startOffset: item.suggestedMatch.startOffset,
+            endOffset: item.suggestedMatch.endOffset,
+            text: item.suggestedMatch.text,
+            confidence: item.suggestedMatch.confidence,
+            method: item.suggestedMatch.method,
+          })
+        )
+      )
 
-      if (!response.ok) throw new Error('Batch accept failed')
-
-      const { updated } = await response.json()
+      const failed = results.filter((r) => !r.success)
+      if (failed.length > 0) {
+        throw new Error(`${failed.length} annotations failed to accept`)
+      }
 
       toast.success('All Accepted', {
-        description: `Accepted ${updated} annotations`
+        description: `Accepted ${needsReview.length} annotations`
       })
 
-      // Reload to show updated state
-      window.location.reload()
+      // Clear needsReview list (no page reload needed)
+      if (results) {
+        results.success.push(...needsReview.map(item => ({
+          id: item.annotation.id,
+          text: item.suggestedMatch.text,
+          confidence: item.suggestedMatch.confidence,
+          method: item.suggestedMatch.method,
+        })))
+        results.needsReview = []
+      }
 
     } catch (error) {
       toast.error('Batch Accept Failed', {
@@ -176,24 +207,30 @@ export function AnnotationReviewTab({
    */
   async function handleDiscardAll() {
     try {
-      const response = await fetch('/api/annotations/batch-discard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          componentIds: needsReview.map((item) => item.annotation.id)
-        })
-      })
+      // Process all rejects in parallel
+      const results = await Promise.all(
+        needsReview.map((item) => rejectAnnotationMatch(item.annotation.id))
+      )
 
-      if (!response.ok) throw new Error('Batch discard failed')
-
-      const { deleted } = await response.json()
+      const failed = results.filter((r) => !r.success)
+      if (failed.length > 0) {
+        throw new Error(`${failed.length} annotations failed to discard`)
+      }
 
       toast.success('All Discarded', {
-        description: `Discarded ${deleted} annotations`
+        description: `Discarded ${needsReview.length} annotations`
       })
 
-      // Reload to show updated state
-      window.location.reload()
+      // Clear needsReview list (no page reload needed)
+      if (results) {
+        results.lost.push(...needsReview.map(item => ({
+          id: item.annotation.id,
+          text: item.annotation.text,
+          confidence: 0,
+          method: 'lost',
+        })))
+        results.needsReview = []
+      }
 
     } catch (error) {
       toast.error('Batch Discard Failed', {
@@ -317,7 +354,14 @@ export function AnnotationReviewTab({
                 <Card
                   key={item.annotation.id}
                   className="p-3 cursor-pointer hover:bg-accent transition-colors"
-                  onClick={() => onHighlightAnnotation?.(item.annotation.id)}
+                  onClick={() => {
+                    // Prefer onAnnotationClick for scroll coordination (like AnnotationsList)
+                    if (onAnnotationClick) {
+                      onAnnotationClick(item.annotation.id, item.annotation.startOffset)
+                    } else {
+                      onHighlightAnnotation?.(item.annotation.id)
+                    }
+                  }}
                 >
                   <div className="space-y-2">
                     {/* Confidence badge */}

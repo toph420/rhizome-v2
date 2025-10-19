@@ -75,8 +75,10 @@ export function injectAnnotations(
       annotation.endOffset - blockStartOffset
     )
 
-    const isFirst = index === 0 || annotation.startOffset !== sorted[index - 1].startOffset
-    const isLast = index === sorted.length - 1 || annotation.endOffset !== sorted[index + 1].endOffset
+    // Only show resize handles at the actual start/end of the annotation
+    // Not at every block boundary for multi-block annotations
+    const annotationStartsInThisBlock = annotation.startOffset >= blockStartOffset && annotation.startOffset < blockEndOffset
+    const annotationEndsInThisBlock = annotation.endOffset > blockStartOffset && annotation.endOffset <= blockEndOffset
 
     markTextRange(
       body,
@@ -84,8 +86,8 @@ export function injectAnnotations(
       relativeEnd,
       annotation.id,
       annotation.color,
-      isFirst,
-      isLast
+      annotationStartsInThisBlock,
+      annotationEndsInThisBlock
     )
   })
 

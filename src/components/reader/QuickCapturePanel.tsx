@@ -13,6 +13,7 @@ import { extractContext } from '@/lib/annotations/text-range'
 import type { TextSelection, Chunk, OptimisticAnnotation, AnnotationEntity } from '@/types/annotations'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
+import { useAnnotationStore } from '@/stores/annotation-store'
 
 interface QuickCapturePanelProps {
   selection: TextSelection
@@ -80,6 +81,9 @@ export function QuickCapturePanel({
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
 
+  // Get store actions for immediate UI updates
+  const removeAnnotation = useAnnotationStore(state => state.removeAnnotation)
+
   // Handle delete
   const handleDelete = useCallback(async () => {
     if (!existingAnnotation?.id) return
@@ -90,6 +94,18 @@ export function QuickCapturePanel({
       const result = await deleteAnnotation(existingAnnotation.id)
       if (result.success) {
         toast.success('Annotation deleted')
+
+        // Immediately remove from store for instant UI update
+        removeAnnotation(documentId, existingAnnotation.id)
+
+        // Also trigger optimistic delete if callback exists
+        if (onAnnotationCreated) {
+          onAnnotationCreated({
+            id: existingAnnotation.id,
+            _deleted: true,
+          } as OptimisticAnnotation)
+        }
+
         onClose()
       } else {
         toast.error(result.error || 'Failed to delete annotation')
@@ -100,7 +116,7 @@ export function QuickCapturePanel({
       toast.error('Failed to delete annotation')
       setDeleting(false)
     }
-  }, [existingAnnotation?.id, onClose])
+  }, [existingAnnotation?.id, documentId, removeAnnotation, onAnnotationCreated, onClose])
   const dragHandleRef = useRef<HTMLDivElement>(null)
 
   // Derived state

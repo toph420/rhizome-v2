@@ -224,6 +224,7 @@ export function RightPanel({
                   documentId={documentId}
                   results={reviewResults}
                   onHighlightAnnotation={onHighlightAnnotation}
+                  onAnnotationClick={onAnnotationClick}
                 />
               )}
 
