@@ -2463,8 +2463,8 @@ export const useRecoveryStore = create<RecoveryState>()(
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run type-check`
-- [ ] Stores export correctly: `npm run build`
+- [x] Types compile: `npm run type-check`
+- [x] Stores export correctly: `npm run build`
 
 #### Manual Verification:
 - [ ] spark-store manages document-keyed state
@@ -2573,18 +2573,18 @@ END $$;
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Migration applies: `npx supabase db reset`
-- [ ] No SQL errors
-- [ ] Columns exist: `\d components` shows recovery fields
-- [ ] Indexes created: `\d+ components` shows new indexes
+- [x] Migration applies: `npx supabase db reset`
+- [x] No SQL errors
+- [x] Columns exist: `\d components` shows recovery fields
+- [x] Indexes created: `\d+ components` shows new indexes
 
 #### Manual Verification:
-- [ ] sparks_cache has selections column
-- [ ] Check constraints enforce valid values
+- [x] sparks_cache has selections column
+- [x] Check constraints enforce valid values
 - [ ] Indexes used in recovery queries
 
 **Service Restarts:**
-- [ ] Supabase: `npx supabase db reset`
+- [x] Supabase: `npx supabase db reset`
 
 ---
 
