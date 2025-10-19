@@ -57,6 +57,14 @@ export const BlockRenderer = memo(function BlockRenderer({
       ann.startOffset < block.endOffset
   )
 
+  // DEBUG: Log when annotations change
+  useEffect(() => {
+    if (overlappingAnnotations.length > 0) {
+      const annotationInfo = overlappingAnnotations.map(a => `${a.id.substring(0, 8)}:${a.color}`).join(', ')
+      console.log(`[BlockRenderer] Annotations: ${annotationInfo}`)
+    }
+  }, [overlappingAnnotations])
+
   // BANDAID: Find all chunks that START within this block's offset range
   // This catches chunks 3, 4, 8, 9 that are split mid-paragraph by Docling
   // Exclude the block's own chunk (already shown above) to prevent duplicates

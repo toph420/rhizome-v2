@@ -65,6 +65,7 @@ export interface SparkCacheRow {
   origin_chunk_id: string
   document_id: string
   tags: string[]
+  connections: SparkConnection[] // Added in migration 056
   embedding?: number[]
   storage_path: string
   cached_at: string

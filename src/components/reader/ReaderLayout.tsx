@@ -115,9 +115,9 @@ export function ReaderLayout({
   // UIStore: View modes and UI preferences
   const viewMode = useUIStore(state => state.viewMode)
   const setViewMode = useUIStore(state => state.setViewMode)
-  const showQuickSpark = useUIStore(state => state.quickCaptureOpen)
-  const openQuickCapture = useUIStore(state => state.openQuickCapture)
-  const closeQuickCapture = useUIStore(state => state.closeQuickCapture)
+  const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
+  const openSparkCapture = useUIStore(state => state.openSparkCapture)
+  const closeSparkCapture = useUIStore(state => state.closeSparkCapture)
 
   // Correction mode state
   const [correctionMode, setCorrectionMode] = useState<CorrectionModeState | null>(null)
@@ -181,18 +181,18 @@ export function ReaderLayout({
       // ⌘K or Ctrl+K
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
-        openQuickCapture()
+        openSparkCapture()
       }
 
-      // Escape to close modal
-      if (e.key === 'Escape' && showQuickSpark) {
-        closeQuickCapture()
+      // Escape to close spark panel
+      if (e.key === 'Escape' && sparkCaptureOpen) {
+        closeSparkCapture()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showQuickSpark, openQuickCapture, closeQuickCapture])
+  }, [sparkCaptureOpen, openSparkCapture, closeSparkCapture])
 
 
   /**
@@ -447,7 +447,7 @@ export function ReaderLayout({
         chunkerType={chunkerType}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
-        onQuickSpark={openQuickCapture}
+        onQuickSpark={openSparkCapture}
       />
 
       <div className="flex-1 overflow-hidden relative">
@@ -488,6 +488,7 @@ export function ReaderLayout({
         visibleChunks={visibleChunks.map(c => c.id)}
         connections={filteredConnections}
         engineWeights={{ semantic: 0.25, contradiction: 0.40, bridge: 0.35 }}
+        chunks={chunks}
       />
 
       {/* Correction mode panel */}

@@ -4,8 +4,8 @@
 
 **Implementation Status**:
 - ✅ **Core ECS System**: Fully implemented with factory pattern
-- ✅ **Annotations**: Complete 3-component pattern (annotation + position + source)
-- 🚧 **Sparks**: UI exists (QuickSparkModal), backend TODO (UP NEXT!)
+- ✅ **Annotations**: Complete 3-component pattern (annotation + position + source) with wrapper class
+- ✅ **Sparks**: Complete 2-component pattern (spark + source) - **NEEDS WRAPPER CLASS** for consistency
 - 📋 **Flashcards/Study**: UI placeholder only, backend not implemented
 
 ## Overview
@@ -17,6 +17,123 @@ The Entity Component System (ECS) is the core data architecture for Rhizome V2. 
 - **Components** are bags of data (JSONB)
 - **Any entity can have ANY components**
 - **No inheritance, only composition**
+
+---
+
+## ⚠️ MANDATORY PATTERN: Operations Wrapper Classes
+
+**CRITICAL FOR CONSISTENCY**: All ECS entities MUST use an operations wrapper class pattern.
+
+### Why This Pattern is Required
+
+**Problem**: Direct ECS calls (`ecs.createEntity()`) scattered across server actions leads to:
+- Inconsistent implementation across features
+- No type safety at entity level
+- Difficult testing (mocking raw ECS vs specific operations)
+- Hard to refactor (change ECS = update many files)
+- No discoverability of available operations
+
+**Solution**: Operations wrapper class for every entity type
+
+### The Pattern
+
+**File Structure:**
+```
+src/lib/ecs/
+├── ecs.ts                 # Core ECS class
+├── components.ts          # Shared component types
+├── annotations.ts         # AnnotationOperations wrapper ✅ CORRECT
+├── sparks.ts             # SparkOperations wrapper ⚠️ TODO
+└── flashcards.ts         # FlashcardOperations wrapper (future)
+```
+
+**Template:**
+```typescript
+// src/lib/ecs/{entity-name}.ts
+import { ECS } from './ecs'
+
+export interface Create{EntityName}Input {
+  // Required fields for creating this entity
+}
+
+export interface Update{EntityName}Input {
+  // Optional fields for updating
+}
+
+export interface {EntityName}Entity {
+  // Complete entity with typed components
+}
+
+export class {EntityName}Operations {
+  constructor(private ecs: ECS, private userId: string) {}
+
+  async create(input: Create{EntityName}Input): Promise<string> {
+    return await this.ecs.createEntity(this.userId, {
+      // Define components here
+    })
+  }
+
+  async update(entityId: string, updates: Update{EntityName}Input): Promise<void> {
+    // Type-safe update logic
+  }
+
+  async delete(entityId: string): Promise<void> {
+    await this.ecs.deleteEntity(entityId, this.userId)
+  }
+
+  async getRecent(limit: number): Promise<{EntityName}Entity[]> {
+    // Query logic
+  }
+
+  async search(query: string): Promise<{EntityName}Entity[]> {
+    // Search logic
+  }
+}
+```
+
+**Usage in Server Actions:**
+```typescript
+// src/app/actions/{entity-name}.ts
+'use server'
+
+import { createECS } from '@/lib/ecs'
+import { {EntityName}Operations } from '@/lib/ecs/{entity-name}'
+
+export async function create{EntityName}(input: Create{EntityName}Input) {
+  const user = await getCurrentUser()
+  const ops = new {EntityName}Operations(createECS(), user.id)
+
+  const entityId = await ops.create(input)
+
+  // Additional logic: storage, cache, revalidation
+  return { success: true, id: entityId }
+}
+```
+
+### Current State
+
+**✅ Annotations (CORRECT PATTERN):**
+- Has `src/lib/ecs/annotations.ts` with `AnnotationOperations` class
+- Server actions use the wrapper
+- Clean, type-safe API
+
+**❌ Sparks (INCORRECT - NEEDS FIX):**
+- Missing `src/lib/ecs/sparks.ts`
+- Server actions use raw ECS calls
+- Inconsistent with annotations pattern
+- **TODO**: Create SparkOperations wrapper class
+
+### For Future Entities
+
+When implementing flashcards, study sessions, themes, or any new ECS entity:
+
+1. **Start with the wrapper class** (`src/lib/ecs/{entity-name}.ts`)
+2. Define component structure in `src/lib/ecs/components.ts`
+3. Create operations class with type-safe methods
+4. Use wrapper in server actions
+5. **NEVER** use raw `ecs.createEntity()` in server actions
+
+This pattern is non-negotiable for codebase consistency.
 
 ## Actual Implementation
 

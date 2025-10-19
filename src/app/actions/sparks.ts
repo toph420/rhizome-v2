@@ -100,11 +100,12 @@ export async function createSpark(input: CreateSparkInput) {
       origin_chunk_id: input.context.originChunkId,
       document_id: input.context.documentId,
       tags,
+      connections, // Save connections array to cache (migration 056)
       embedding: null, // TODO: Generate via background job
       storage_path: `${user.id}/sparks/${sparkId}/content.json`,
       cached_at: new Date().toISOString()
     })
-    console.log(`[Sparks] ✓ Updated query cache`)
+    console.log(`[Sparks] ✓ Updated query cache with ${connections.length} connections`)
   } catch (error) {
     console.error(`[Sparks] Cache update failed (non-critical):`, error)
     // Don't fail the operation - cache is rebuildable

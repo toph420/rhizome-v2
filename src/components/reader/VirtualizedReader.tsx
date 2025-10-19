@@ -10,6 +10,7 @@ import { AnnotationsDebugPanel } from './AnnotationsDebugPanel'
 import { useTextSelection } from '@/hooks/useTextSelection'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
+import { useUIStore } from '@/stores/ui-store'
 import { getAnnotations } from '@/app/actions/annotations'
 import type { StoredAnnotation, OptimisticAnnotation, TextSelection } from '@/types/annotations'
 
@@ -51,6 +52,11 @@ export function VirtualizedReader() {
   // This prevents panel from closing when browser clears selection on click
   const [captureSelection, setCaptureSelection] = useState<TextSelection | null>(null)
 
+  // Expose method to force-show annotation panel with a selection (for spark panel integration)
+  const forceShowAnnotationPanel = useCallback((selection: TextSelection) => {
+    setCaptureSelection(selection)
+  }, [])
+
   // Track annotation being edited (if any)
   const [editingAnnotation, setEditingAnnotation] = useState<StoredAnnotation | null>(null)
 
@@ -60,15 +66,28 @@ export function VirtualizedReader() {
     enabled: true,
   })
 
-  // When selection changes, capture it for the panel (unless in correction mode)
+  // When selection changes, capture it for the panel (unless in correction mode or spark panel is open)
   const correctionModeActive = useReaderStore(state => state.correctionModeActive)
+  const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
+  const pendingAnnotationSelection = useUIStore(state => state.pendingAnnotationSelection)
+  const setPendingAnnotationSelection = useUIStore(state => state.setPendingAnnotationSelection)
 
   useEffect(() => {
-    // Don't capture selection if in correction mode (fixing chunk positions)
-    if (selection && !captureSelection && !correctionModeActive) {
+    // Don't capture selection if:
+    // - In correction mode (fixing chunk positions)
+    // - Spark capture panel is open (spark panel owns the selection)
+    if (selection && !captureSelection && !correctionModeActive && !sparkCaptureOpen) {
       setCaptureSelection(selection)
     }
-  }, [selection, captureSelection, correctionModeActive])
+  }, [selection, captureSelection, correctionModeActive, sparkCaptureOpen])
+
+  // Handle pending annotation selection from spark panel
+  useEffect(() => {
+    if (pendingAnnotationSelection) {
+      setCaptureSelection(pendingAnnotationSelection)
+      setPendingAnnotationSelection(null) // Clear after using
+    }
+  }, [pendingAnnotationSelection, setPendingAnnotationSelection])
 
   // Load annotations from database into Zustand store
   useEffect(() => {
@@ -294,7 +313,15 @@ export function VirtualizedReader() {
 
   // Handle annotation updates (for editing existing annotations)
   const handleAnnotationUpdated = useCallback((annotation: StoredAnnotation) => {
+    // Update the store
     updateStoreAnnotation(documentId, annotation.id, annotation)
+
+    // Remove from optimistic annotations (if present) to prevent stale override
+    setOptimisticAnnotations(prev => {
+      const next = new Map(prev)
+      next.delete(annotation.id)
+      return next
+    })
   }, [documentId, updateStoreAnnotation])
 
   // Handle annotation click to enter edit mode
@@ -353,6 +380,15 @@ export function VirtualizedReader() {
           // Find the chunk for this block
           const chunk = chunks.find(c => c.id === block.chunkId)
 
+          // Create a key that changes when annotations in this block change
+          // This forces BlockRenderer to re-render when annotation colors/content change
+          const blockAnnotations = annotationsForBlocks.filter(
+            ann => ann.endOffset > block.startOffset && ann.startOffset < block.endOffset
+          )
+          const annotationKey = blockAnnotations
+            .map(ann => `${ann.id}:${ann.color}`)
+            .join(',')
+
           return (
             <div
               className="max-w-4xl mx-auto px-8 transition-all duration-300"
@@ -360,6 +396,7 @@ export function VirtualizedReader() {
               data-block-index={index}
             >
               <BlockRenderer
+                key={`${block.startOffset}-${annotationKey}`}
                 block={block}
                 annotations={annotationsForBlocks}
                 chunk={chunk}

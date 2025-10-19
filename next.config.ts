@@ -6,6 +6,16 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '50mb', // Allow up to 50MB for PDF uploads
     },
   },
+
+  // Ignore log files to prevent Fast Refresh on worker logging
+  webpack: (config, { isServer }) => {
+    config.watchOptions = {
+      ...config.watchOptions,
+      ignored: ['**/node_modules/**', '**/.git/**', '**/*.log'],
+    }
+    return config
+  },
+
   // Silence workspace root warning (we use npm, not bun)
   outputFileTracingRoot: undefined,
   // Allow external images (YouTube thumbnails)

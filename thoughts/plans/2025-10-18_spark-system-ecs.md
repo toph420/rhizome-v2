@@ -1853,3 +1853,223 @@ await rebuildSparksCache(userId)
 5. Monitor performance
 
 **This is the ECS-native approach. No domain tables. Pure entities + components + Storage.**
+
+---
+
+## Implementation Log & Bug Fixes
+
+### Phases 1-5: Core Implementation (COMPLETED ✅)
+
+All planned phases completed successfully:
+- Phase 1: Types & Storage helpers
+- Phase 2: Cache table schema
+- Phase 3: Connection logic
+- Phase 4: Server actions (createSpark, deleteSpark, getRecentSparks, searchSparks)
+- Phase 5: UI components (QuickSparkCapture panel, SparksTab timeline)
+
+### Post-Implementation Bug Fixes & Improvements
+
+#### Text Selection & UX Issues
+**Problem**: Selection conflicts between spark panel and annotation panel, typing lag, UI performance issues
+**Root Cause**: Over-engineered selection preservation, aggressive event listeners, synchronous tag extraction
+
+**Fixes Applied**:
+1. **Removed aggressive selectionchange listener** - Was causing UI freezing by constantly restoring ranges
+2. **Debounced tag/chunk extraction** (300ms) - Prevents typing lag from synchronous regex parsing
+3. **Frozen selection data** - Preserves selection info without fighting browser's natural clearing
+4. **Fixed sparkCaptureOpen state** - Correctly prevents annotation panel when spark panel owns selection
+
+**Result**: Smooth typing, no performance issues, clean state management
+
+#### Annotation Color Update Issues
+**Problem**: Editing annotation color showed toast but didn't update visual immediately
+**Root Cause**: Removed unnecessary `revalidatePath` call (server cache layer, not client state layer)
+
+**Fix**: Removed `revalidatePath` import and call - Zustand store handles client updates correctly
+
+**Result**: Instant visual updates on color changes
+
+#### Spark Panel UX Improvements
+1. **Moved panel to left side** (`left-0 top-20 bottom-20 w-[400px]`) - Doesn't cover reading area
+2. **Fixed scroll position** for "Create Annotation" - Uses `block: 'start'` to show annotation in upper viewport
+3. **Added click-to-edit** - Clicking spark in SparksTab opens panel with pre-filled content via `editingSparkContent` in UIStore
+4. **Fixed connections capture** - Added fallbacks for `originChunkId` and `activeConnections` to prevent empty context
+
+### Architectural Decisions Made
+
+1. **UIStore for cross-component communication** - Used for spark panel state, pending annotation selection, editing content
+2. **Debouncing over synchronous processing** - Better UX than blocking operations
+3. **Data preservation over visual persistence** - Accept browser selection clearing, preserve data layer
+4. **Simple over complex** - Removed over-engineered solutions, used straightforward Zustand patterns
+
+### Testing Status
+
+**Working**:
+- ✅ Spark creation with Cmd+K
+- ✅ Auto-quote selection
+- ✅ Tag extraction (#tags)
+- ✅ Chunk linking (/chunk_id)  
+- ✅ Timeline display with 5s refresh
+- ✅ Click-to-edit sparks
+- ✅ Annotation panel draggable
+- ✅ Color updates instant
+- ✅ Panel positioning (left side, no blocking)
+
+**Needs Verification**:
+- ⚠️ Connections actually being saved and displayed
+- ⚠️ Storage JSON completeness
+- ⚠️ Cache updates working correctly
+- ⚠️ Selection edge cases (multi-chunk, boundaries)
+- ⚠️ Performance under load (1000+ sparks)
+
+### Bug Fixes (2025-10-18 - Session 2)
+
+**Issue 1: Typing Lag Fixed ✅**
+- **Root Cause**: useEffect with `content.length` dependency (line 119) caused cursor repositioning on every keystroke
+- **Fix**: Removed `content.length` from dependency array - only runs when panel opens
+- **File**: `src/components/reader/QuickSparkCapture.tsx`
+- **Result**: Smooth typing, no lag or weird letter behavior
+
+**Issue 2: Connections Now Displayed ✅**
+- **Root Cause**: `sparks_cache` table missing `connections` column
+- **Fix**: Created migration 056 to add `connections JSONB` column with GIN index
+- **Files Modified**:
+  - `supabase/migrations/056_add_connections_to_sparks_cache.sql` - Added connections column
+  - `src/lib/sparks/types.ts` - Updated `SparkCacheRow` interface
+  - `src/app/actions/sparks.ts` - Save connections to cache on create
+  - `src/components/sidebar/SparksTab.tsx` - Display connection counts with breakdown by type
+  - `src/components/reader/QuickSparkCapture.tsx` - Improved connection context display
+- **Result**: Connections now saved and displayed in UI with full breakdown
+
+**Issue 3: Context Info Display Added ✅**
+- **Feature**: Added expandable context info to each spark in sidebar
+- **Implementation**: Collapsible section showing origin chunk, connections detail, storage path, timestamps
+- **File**: `src/components/sidebar/SparksTab.tsx`
+- **Result**: Users can inspect all captured context data per spark
+
+### Bug Fixes (2025-10-18 - Session 3)
+
+**Issue 4: Annotation Color Not Updating ✅**
+- **Root Cause**: Stale optimistic annotation overriding updated store data in merge logic
+- **Investigation**:
+  - Store updated correctly: `purple → pink` ✓
+  - BlockRenderer re-rendered ✓
+  - But allAnnotations merge logic replaced store (pink) with stale optimistic (purple) ❌
+- **Fix**: Clear optimistic annotation from Map after update completes
+- **Files Modified**:
+  - `src/components/reader/VirtualizedReader.tsx` (lines 314-325) - Remove from optimistic Map after update
+  - `src/components/reader/BlockRenderer.tsx` (lines 60-66) - Added debug logging
+  - `src/stores/annotation-store.ts` (lines 84-100) - Added debug logging
+- **Result**: Annotation color changes appear immediately without duplicates
+
+**Issue 5: Selection Expansion (External Cause) ✅**
+- **Root Cause**: Worker log output causing Next.js fast refresh
+- **Fix**: External to this implementation
+- **Result**: No selection expansion issues
+
+### Known Issues / Future Work
+
+1. ~~**Connection verification**~~ - ✅ FIXED: Connections now saved and displayed
+2. ~~**Typing lag**~~ - ✅ FIXED: Smooth typing experience restored
+3. ~~**Selection expansion**~~ - ✅ FIXED: External cause (worker logs)
+4. ~~**Annotation color update**~~ - ✅ FIXED: Optimistic annotation cleared on update
+5. **ECS Consistency** - ⚠️ **CRITICAL**: Sparks use direct ECS calls, annotations use wrapper class
+   - Need `src/lib/ecs/sparks.ts` following `annotations.ts` pattern
+   - Prevents inconsistency as codebase grows (flashcards, study sessions, etc.)
+   - See: Architecture Consistency section below
+6. **Edit vs Create mode** - Currently all spark submissions create new sparks; need update/delete functionality
+7. **Spark deduplication** - No prevention of duplicate sparks from same content
+8. **Search implementation** - searchSparks action exists but no UI for it yet
+9. **Obsidian export** - Integration exists for annotations but not sparks (Phase 6)
+
+### Code Quality Notes
+
+**Clean Patterns Used**:
+- Zustand for client state (no prop drilling)
+- Server Actions for mutations ('use server')
+- ECS for flexible data (entities + components)
+- Storage-first for portability
+- Debouncing for performance
+
+**Avoided Anti-Patterns**:
+- ❌ No modals (used slide-in panels)
+- ❌ No prop drilling (UIStore)
+- ❌ No premature optimization
+- ❌ No complex state machines
+- ❌ No fighting the browser
+
+**Tech Debt**:
+- Some `any` types in selection handling (QuickSparkCapture line 58, 74)
+- UI store types could be more specific for `pendingAnnotationSelection`
+- Could extract debounce logic to custom hook
+- Tag/chunk extraction could be moved to worker for heavy usage
+
+---
+
+## Architecture Consistency Requirements
+
+### ECS Pattern Inconsistency Identified
+
+**Current State:**
+- **Annotations**: Use `AnnotationOperations` wrapper class (`src/lib/ecs/annotations.ts`)
+  - Type-safe API: `ops.create()`, `ops.update()`, `ops.delete()`
+  - 5 components: Position, Visual, Content, Temporal, ChunkRef
+  - Clean abstraction layer over raw ECS
+
+- **Sparks**: Use direct ECS calls in server actions (`src/app/actions/sparks.ts`)
+  - Direct calls: `ecs.createEntity()`, `ecs.deleteEntity()`
+  - 2 components: spark, source
+  - No wrapper class, no abstraction layer
+
+**Problem:**
+As the codebase grows with flashcards, study sessions, themes, etc., this inconsistency will:
+1. Create confusion about which pattern to follow
+2. Make refactoring harder (change ECS internals = update 10 places vs 1)
+3. Reduce type safety (no validation at ECS entity layer)
+4. Harder to test (mocking raw ECS vs mocking operations class)
+
+**Recommendation:**
+Create `src/lib/ecs/sparks.ts` following the `annotations.ts` pattern:
+
+```typescript
+// src/lib/ecs/sparks.ts
+export interface CreateSparkInput {
+  content: string
+  tags: string[]
+  connections: SparkConnection[]
+  chunkId: string
+  documentId: string
+}
+
+export class SparkOperations {
+  constructor(private ecs: ECS, private userId: string) {}
+
+  async create(input: CreateSparkInput): Promise<string>
+  async update(sparkId: string, updates: UpdateSparkInput): Promise<void>
+  async delete(sparkId: string): Promise<void>
+  async getRecent(limit: number): Promise<SparkEntity[]>
+  async search(query: string): Promise<SparkEntity[]>
+}
+```
+
+**Benefits:**
+1. **Consistency**: All ECS entities follow same pattern
+2. **Type Safety**: Input validation at operations layer
+3. **Testability**: Mock SparkOperations instead of raw ECS
+4. **Discoverability**: Clear API shows available operations
+5. **Future-proof**: New entities (flashcards, study) follow this pattern
+6. **Maintainability**: Change ECS internals in one place
+
+**Implementation Tasks:**
+1. Create `src/lib/ecs/sparks.ts` with SparkOperations class
+2. Add SparkComponent types to `src/lib/ecs/components.ts`
+3. Update `src/app/actions/sparks.ts` to use SparkOperations
+4. Add Zod schemas for component validation
+5. Document pattern in ECS_IMPLEMENTATION.md
+
+**Estimated Effort:** 30-45 minutes
+
+---
+
+**Last Updated**: 2025-10-18
+**Status**: Core functionality complete, architecture consistency improvements needed

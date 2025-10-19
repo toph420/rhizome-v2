@@ -65,3 +65,4 @@ __pycache__/
 *$py.class
 *.so
 .Python
+worker-live.log

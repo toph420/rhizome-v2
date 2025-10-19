@@ -177,9 +177,7 @@ export async function updateAnnotation(
 
     await ecs.updateComponent(annotationComponent.id, updatedData, user.id)
 
-    // NOTE: No revalidation - client handles optimistic updates
-    // QuickCapturePanel calls onAnnotationUpdated() immediately for instant UI updates
-
+    // Client handles optimistic updates via Zustand store
     return { success: true }
   } catch (error) {
     console.error('Failed to update annotation:', error)
