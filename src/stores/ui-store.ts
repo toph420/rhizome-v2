@@ -24,7 +24,9 @@ interface UIState {
   activeAnnotation: StoredAnnotation | null
   sparkCaptureOpen: boolean // Spark quick capture
   pendingAnnotationSelection: any | null // Selection to annotate from spark panel
+  editingSparkId: string | null // ID of spark being edited (null = creating new)
   editingSparkContent: string | null // Content to pre-fill when editing spark
+  editingSparkSelections: any[] // Selections to restore when editing
   linkedAnnotationIds: string[] // NEW - Phase 6b: Annotations linked to current spark
 
   // Actions
@@ -42,6 +44,7 @@ interface UIState {
   closeSparkCapture: () => void
   setPendingAnnotationSelection: (selection: any | null) => void
   setEditingSparkContent: (content: string | null) => void
+  setEditingSpark: (sparkId: string | null, content: string | null, selections?: any[], annotations?: string[]) => void
   addLinkedAnnotation: (annotationId: string) => void  // NEW - Phase 6b
   removeLinkedAnnotation: (annotationId: string) => void  // NEW - Phase 6b
   clearLinkedAnnotations: () => void  // NEW - Phase 6b
@@ -66,7 +69,9 @@ export const useUIStore = create<UIState>()(
       activeAnnotation: null,
       sparkCaptureOpen: false,
       pendingAnnotationSelection: null,
+      editingSparkId: null,
       editingSparkContent: null,
+      editingSparkSelections: [],
       linkedAnnotationIds: [],  // NEW - Phase 6b
 
       setViewMode: (mode) => {
@@ -129,13 +134,27 @@ export const useUIStore = create<UIState>()(
         set({ sparkCaptureOpen: true }),
 
       closeSparkCapture: () =>
-        set({ sparkCaptureOpen: false, linkedAnnotationIds: [] }),  // Clear on close
+        set({
+          sparkCaptureOpen: false,
+          editingSparkId: null,
+          editingSparkContent: null,
+          editingSparkSelections: [],
+          linkedAnnotationIds: []
+        }),
 
       setPendingAnnotationSelection: (selection) =>
         set({ pendingAnnotationSelection: selection }),
 
       setEditingSparkContent: (content) =>
         set({ editingSparkContent: content }),
+
+      setEditingSpark: (sparkId, content, selections = [], annotations = []) =>
+        set({
+          editingSparkId: sparkId,
+          editingSparkContent: content,
+          editingSparkSelections: selections,
+          linkedAnnotationIds: annotations
+        }),
 
       // NEW - Phase 6b: Manage linked annotations for spark
       addLinkedAnnotation: (annotationId) => {
@@ -173,7 +192,9 @@ export const useUIStore = create<UIState>()(
           state.activeAnnotation = null
           state.sparkCaptureOpen = false
           state.pendingAnnotationSelection = null
+          state.editingSparkId = null
           state.editingSparkContent = null
+          state.editingSparkSelections = []
           state.linkedAnnotationIds = []  // NEW - Phase 6b
         }
       },

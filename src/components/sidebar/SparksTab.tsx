@@ -21,6 +21,8 @@ interface Spark {
   tags: string[]
   origin_chunk_id: string
   connections: SparkConnection[] // Added in migration 056
+  selections?: any[] // Added in migration 057
+  annotation_refs?: string[] // Linked annotations
   storage_path: string
 }
 
@@ -42,14 +44,19 @@ export function SparksTab({ documentId }: SparksTabProps) {
   const [expandedSpark, setExpandedSpark] = useState<string | null>(null)
 
   const openSparkCapture = useUIStore(state => state.openSparkCapture)
-  const setEditingSparkContent = useUIStore(state => state.setEditingSparkContent)
+  const setEditingSpark = useUIStore(state => state.setEditingSpark)
+  const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
 
   useEffect(() => {
     loadSparks() // Initial load with loading state
-
-    // REMOVED: 5-second auto-refresh was causing constant re-renders
-    // Sparks will refresh when user creates a new one via revalidatePath
   }, [])
+
+  // Refetch when spark panel closes (after create/update)
+  useEffect(() => {
+    if (!sparkCaptureOpen) {
+      loadSparks(false) // Refetch without loading state
+    }
+  }, [sparkCaptureOpen])
 
   const loadSparks = async (showLoading = true) => {
     if (showLoading) {
@@ -70,7 +77,12 @@ export function SparksTab({ documentId }: SparksTabProps) {
   }
 
   const handleSparkClick = (spark: Spark) => {
-    setEditingSparkContent(spark.content)
+    setEditingSpark(
+      spark.entity_id,
+      spark.content,
+      spark.selections || [],
+      spark.annotation_refs || []
+    )
     openSparkCapture()
   }
 

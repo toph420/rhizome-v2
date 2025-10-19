@@ -544,3 +544,56 @@ export async function getAnnotationsByDocument(
     return []
   }
 }
+
+/**
+ * Get specific annotations by their entity IDs.
+ * Used for lazy loading annotation content in spark panel.
+ *
+ * @param ids - Array of annotation entity IDs
+ * @returns Array of StoredAnnotation objects
+ */
+export async function getAnnotationsByIds(
+  ids: string[]
+): Promise<StoredAnnotation[]> {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return []
+
+    const ecs = createECS()
+
+    const annotations: StoredAnnotation[] = []
+
+    for (const entityId of ids) {
+      const entity = await ecs.getEntity(entityId, user.id)
+      if (!entity) continue
+
+      // Get all components for this entity
+      const components = entity.components || []
+
+      // Annotations use lowercase component names: annotation, position, source
+      const annotationComp = components.find(c => c.component_type === 'annotation')
+      const positionComp = components.find(c => c.component_type === 'position')
+      const sourceComp = components.find(c => c.component_type === 'source')
+
+      // Only include complete annotations (all 3 components required)
+      if (annotationComp && positionComp && sourceComp) {
+        annotations.push({
+          id: entityId,
+          user_id: user.id,
+          created_at: entity.created_at,
+          updated_at: entity.updated_at,
+          components: {
+            annotation: annotationComp.data,
+            position: positionComp.data,
+            source: sourceComp.data,
+          }
+        })
+      }
+    }
+
+    return annotations
+  } catch (error) {
+    console.error('[getAnnotationsByIds] Failed:', error)
+    return []
+  }
+}

@@ -6,11 +6,14 @@ import { Card } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter } from 'lucide-react'
-import { createSpark, linkAnnotationToSpark } from '@/app/actions/sparks'
+import { createSpark, updateSpark, linkAnnotationToSpark } from '@/app/actions/sparks'
+import { getAnnotationsByIds } from '@/app/actions/annotations'
 import { extractTags, extractChunkIds } from '@/lib/sparks/extractors'
 import type { SparkContext, SparkSelection } from '@/lib/sparks/types'
+import type { StoredAnnotation } from '@/types/annotations'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUIStore } from '@/stores/ui-store'
+import { useAnnotationStore } from '@/stores/annotation-store'
 import { useTextSelection } from '@/hooks/useTextSelection'
 
 interface QuickSparkCaptureProps {
@@ -52,7 +55,9 @@ export function QuickSparkCapture({
   const closeSparkCapture = useUIStore(state => state.closeSparkCapture)
   const openQuickCapture = useUIStore(state => state.openQuickCapture)
   const setPendingAnnotationSelection = useUIStore(state => state.setPendingAnnotationSelection)
+  const editingSparkId = useUIStore(state => state.editingSparkId)
   const editingSparkContent = useUIStore(state => state.editingSparkContent)
+  const editingSparkSelections = useUIStore(state => state.editingSparkSelections)
   const setEditingSparkContent = useUIStore(state => state.setEditingSparkContent)
 
   const [content, setContent] = useState('')
@@ -60,11 +65,15 @@ export function QuickSparkCapture({
   const [frozenSelection, setFrozenSelection] = useState<any>(null)
   const [debouncedContent, setDebouncedContent] = useState('')
   const [selections, setSelections] = useState<SparkSelection[]>([])  // NEW - multiple selections
+  const [loadedAnnotations, setLoadedAnnotations] = useState<StoredAnnotation[]>([])  // Lazy-loaded annotation content
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // NEW - Phase 6b (revised): Use UIStore for linked annotations
   const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
   const removeLinkedAnnotation = useUIStore(state => state.removeLinkedAnnotation)
+
+  // Annotation store for hybrid loading
+  const annotations = useAnnotationStore(state => state.annotations)
 
   // Text selection when panel is open (only enabled when panel is open)
   const { selection, clearSelection } = useTextSelection({
@@ -93,17 +102,23 @@ export function QuickSparkCapture({
   const extractedTags = useMemo(() => extractTags(debouncedContent), [debouncedContent])
   const extractedChunkIds = useMemo(() => extractChunkIds(debouncedContent), [debouncedContent])
 
-  // Pre-fill editing content when panel opens (no auto-quoting)
+  // Pre-fill editing data when panel opens or when switching to different spark
   useEffect(() => {
-    if (isOpen && !content) {
-      // If editing existing spark, pre-fill content
+    if (isOpen && editingSparkId) {
+      // Pre-fill content, selections, and linked annotations when editing
       if (editingSparkContent) {
         setContent(editingSparkContent)
-        setEditingSparkContent(null) // Clear after using
       }
-      // NOTE: Removed auto-quoting - users now explicitly click "Quote This"
+      if (editingSparkSelections && editingSparkSelections.length > 0) {
+        setSelections(editingSparkSelections)
+      }
+      // linkedAnnotationIds already tracked in UIStore, no need to set here
+    } else if (isOpen && !editingSparkId) {
+      // Creating new spark - clear everything
+      setContent('')
+      setSelections([])
     }
-  }, [isOpen, editingSparkContent, setEditingSparkContent, content]) // Run when panel opens or editing content changes
+  }, [isOpen, editingSparkId, editingSparkContent, editingSparkSelections]) // Run when editingSparkId changes
 
   // Focus textarea when panel opens (run only once when panel opens)
   useEffect(() => {
@@ -124,10 +139,49 @@ export function QuickSparkCapture({
       setContent('')
       setSelections([])
       setFrozenSelection(null)
+      setLoadedAnnotations([])
       // Note: linkedAnnotationIds cleared by UIStore closeSparkCapture
       clearSelection()
     }
   }, [isOpen, clearSelection])
+
+  // Hybrid annotation loading: check store first, fetch missing from server
+  useEffect(() => {
+    if (linkedAnnotationIds.length === 0) {
+      setLoadedAnnotations([])
+      return
+    }
+
+    // Try to find in store first (fast path)
+    const foundInStore: StoredAnnotation[] = []
+    const missingIds: string[] = []
+
+    for (const id of linkedAnnotationIds) {
+      let found = false
+      // Search across all documents in store
+      for (const docId in annotations) {
+        const annotation = annotations[docId]?.find(a => a.id === id)
+        if (annotation) {
+          foundInStore.push(annotation)
+          found = true
+          break
+        }
+      }
+      if (!found) {
+        missingIds.push(id)
+      }
+    }
+
+    if (missingIds.length === 0) {
+      // All found in store - fast path
+      setLoadedAnnotations(foundInStore)
+    } else {
+      // Some missing - fetch from server
+      getAnnotationsByIds(missingIds).then(fetched => {
+        setLoadedAnnotations([...foundInStore, ...fetched])
+      })
+    }
+  }, [linkedAnnotationIds, annotations])
 
   // Add visual indicator class to body when panel is open
   useEffect(() => {
@@ -147,46 +201,67 @@ export function QuickSparkCapture({
 
     setLoading(true)
     try {
-      // Build context from current reader state
-      const sparkContext: SparkContext = {
-        documentId,
-        documentTitle,
-        originChunkId: currentChunkId || visibleChunks[0] || '',
-        visibleChunks,
-        scrollPosition: window.scrollY,
-        activeConnections: connections || [],
-        engineWeights,
-        selection: selection ? {
-          text: selection.text,
-          chunkId: selection.range.chunkIds[0] || currentChunkId,
-          startOffset: selection.range.startOffset,
-          endOffset: selection.range.endOffset
-        } : undefined
-      }
+      if (editingSparkId) {
+        // Update existing spark
+        const tags = extractTags(content)
+        const result = await updateSpark({
+          sparkId: editingSparkId,
+          content: content.trim(),
+          selections,
+          tags,
+        })
 
-      // Create spark with selections
-      const result = await createSpark({
-        content: content.trim(),
-        selections, // Pass selections array
-        context: sparkContext
-      })
-
-      // NEW - Phase 6b: Link annotations to the created spark
-      if (linkedAnnotationIds.length > 0 && result.sparkId) {
-        await Promise.all(
-          linkedAnnotationIds.map(annotationId =>
-            linkAnnotationToSpark(result.sparkId, annotationId)
+        // Link annotations if any were added during edit
+        if (linkedAnnotationIds.length > 0) {
+          await Promise.all(
+            linkedAnnotationIds.map(annotationId =>
+              linkAnnotationToSpark(editingSparkId, annotationId)
+            )
           )
-        )
+        }
+
+        console.log('[Sparks] ✓ Updated successfully')
+      } else {
+        // Create new spark
+        const sparkContext: SparkContext = {
+          documentId,
+          documentTitle,
+          originChunkId: currentChunkId || visibleChunks[0] || '',
+          visibleChunks,
+          scrollPosition: window.scrollY,
+          activeConnections: connections || [],
+          engineWeights,
+          selection: selection ? {
+            text: selection.text,
+            chunkId: selection.range.chunkIds[0] || currentChunkId,
+            startOffset: selection.range.startOffset,
+            endOffset: selection.range.endOffset
+          } : undefined
+        }
+
+        const result = await createSpark({
+          content: content.trim(),
+          selections,
+          context: sparkContext
+        })
+
+        // Link annotations to the created spark
+        if (linkedAnnotationIds.length > 0 && result.sparkId) {
+          await Promise.all(
+            linkedAnnotationIds.map(annotationId =>
+              linkAnnotationToSpark(result.sparkId, annotationId)
+            )
+          )
+        }
+
+        console.log('[Sparks] ✓ Created successfully' + (linkedAnnotationIds.length > 0 ? ` with ${linkedAnnotationIds.length} linked annotations` : ''))
       }
 
       // Close panel
       closeSparkCapture()
-
-      console.log('[Sparks] ✓ Created successfully' + (linkedAnnotationIds.length > 0 ? ` with ${linkedAnnotationIds.length} linked annotations` : ''))
     } catch (error) {
-      console.error('[Sparks] Failed to create:', error)
-      alert('Failed to create spark. Please try again.')
+      console.error('[Sparks] Failed to save:', error)
+      alert('Failed to save spark. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -336,32 +411,61 @@ export function QuickSparkCapture({
                 </div>
               )}
 
-              {/* NEW - Phase 6b (revised): Linked Annotations Display */}
-              {linkedAnnotationIds.length > 0 && (
+              {/* NEW - Phase 6b (revised): Linked Annotations Display with lazy-loaded content */}
+              {loadedAnnotations.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Highlighter className="w-3 h-3" />
-                    <span>{linkedAnnotationIds.length} linked annotation{linkedAnnotationIds.length !== 1 ? 's' : ''}</span>
+                    <span>{loadedAnnotations.length} linked annotation{loadedAnnotations.length !== 1 ? 's' : ''}</span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {linkedAnnotationIds.map((annotationId) => (
+                  {loadedAnnotations.map((annotation) => {
+                    // Annotations use lowercase component names
+                    const annotationData = annotation.components.annotation
+                    const position = annotation.components.position
+
+                    // Color mapping for border
+                    const colorMap: Record<string, string> = {
+                      yellow: '#fbbf24',
+                      blue: '#3b82f6',
+                      green: '#10b981',
+                      red: '#ef4444',
+                      purple: '#a855f7',
+                      orange: '#f97316',
+                      pink: '#ec4899',
+                    }
+
+                    // Get color from annotation component (color is stored there)
+                    const borderColor = annotationData?.color ? (colorMap[annotationData.color] || '#6b7280') : '#6b7280'
+
+                    return (
                       <div
-                        key={annotationId}
-                        className="group relative px-3 py-1.5 bg-muted/30 rounded border border-muted-foreground/20 text-xs flex items-center gap-2"
+                        key={annotation.id}
+                        className="p-2 bg-muted/30 rounded border border-muted-foreground/20 text-sm relative group"
+                        style={{ borderLeftWidth: '3px', borderLeftColor: borderColor }}
                       >
-                        <Highlighter className="w-3 h-3 text-muted-foreground" />
-                        <span className="font-mono text-[10px]">{annotationId.slice(0, 8)}...</span>
+                        <p className="pr-6 text-xs italic mb-1">
+                          &ldquo;{annotationData?.text?.slice(0, 100) || annotationData?.note?.slice(0, 100) || 'No text'}{(annotationData?.text?.length || annotationData?.note?.length || 0) > 100 ? '...' : ''}&rdquo;
+                        </p>
+                        {annotationData?.tags && annotationData.tags.length > 0 && (
+                          <div className="flex gap-1 flex-wrap">
+                            {annotationData.tags.slice(0, 3).map((tag, i) => (
+                              <Badge key={i} variant="secondary" className="h-4 text-xs px-1.5">
+                                #{tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100"
-                          onClick={() => removeLinkedAnnotation(annotationId)}
+                          className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                          onClick={() => removeLinkedAnnotation(annotation.id)}
                         >
                           <X className="w-3 h-3" />
                         </Button>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
               )}
 
@@ -479,12 +583,12 @@ export function QuickSparkCapture({
                   {loading ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
+                      {editingSparkId ? 'Updating...' : 'Saving...'}
                     </>
                   ) : (
                     <>
                       <Zap className="w-4 h-4 mr-2" />
-                      Save Spark
+                      {editingSparkId ? 'Update Spark' : 'Save Spark'}
                     </>
                   )}
                 </Button>

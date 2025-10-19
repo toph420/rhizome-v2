@@ -107,6 +107,8 @@ export async function createSpark(input: CreateSparkInput) {
       document_id: input.context.documentId,
       tags,
       connections,
+      selections: input.selections || [],
+      annotation_refs: [],  // ✅ Initialize empty - will be filled when annotations are linked
       embedding: null, // TODO: Generate via background job
       storage_path: `${user.id}/sparks/${sparkId}/content.json`,
       cached_at: new Date().toISOString(),
@@ -121,6 +123,119 @@ export async function createSpark(input: CreateSparkInput) {
   revalidatePath(`/read/${input.context.documentId}`)
 
   return { success: true, sparkId }
+}
+
+interface UpdateSparkInput {
+  sparkId: string
+  content?: string
+  selections?: SparkSelection[]
+  tags?: string[]
+}
+
+/**
+ * Update existing spark
+ *
+ * Flow:
+ * 1. Validate user authentication
+ * 2. Extract updated metadata
+ * 3. Update ECS components via SparkOperations
+ * 4. Update Storage (source of truth)
+ * 5. Update query cache
+ * 6. Revalidate paths
+ */
+export async function updateSpark(input: UpdateSparkInput) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  const supabase = await createClient()
+  const ecs = createECS()
+  const ops = new SparkOperations(ecs, user.id)
+
+  // 1. Get current spark data BEFORE update (for Storage rebuild)
+  const entityBefore = await ecs.getEntity(input.sparkId, user.id)
+  if (!entityBefore) throw new Error('Spark not found')
+
+  const sparkComponentBefore = entityBefore.components?.find((c: any) => c.component_type === 'Spark')
+  const chunkRefComponent = entityBefore.components?.find((c: any) => c.component_type === 'ChunkRef')
+
+  // 2. Update ECS components
+  await ops.update(input.sparkId, {
+    content: input.content,
+    tags: input.tags,
+  })
+
+  // 3. Get FRESH spark data after update
+  const entity = await ecs.getEntity(input.sparkId, user.id)
+  if (!entity) throw new Error('Spark not found')
+
+  const sparkComponent = entity.components?.find((c: any) => c.component_type === 'Spark')
+  const contentComponent = entity.components?.find((c: any) => c.component_type === 'Content')
+
+  if (input.selections !== undefined && sparkComponent) {
+    // Update selections in Spark component if provided
+    await supabase
+      .from('components')
+      .update({
+        data: {
+          ...sparkComponent.data,
+          selections: input.selections
+        }
+      })
+      .eq('entity_id', input.sparkId)
+      .eq('component_type', 'Spark')
+  }
+
+  // Use fresh data from refetch for Storage
+  const sparkData: SparkStorageJson = {
+    entity_id: input.sparkId,
+    user_id: user.id,
+    component_type: 'spark',
+    data: {
+      content: contentComponent?.data.note || '',  // ✅ FIX: Use fresh data
+      createdAt: entity.created_at,
+      updatedAt: new Date().toISOString(),
+      tags: contentComponent?.data.tags || [],     // ✅ FIX: Use fresh data
+      connections: sparkComponent?.data.connections || [],
+      selections: input.selections !== undefined ? input.selections : (sparkComponent?.data.selections || []),
+    },
+    context: {} as SparkContext, // Context doesn't change on update
+    source: {
+      chunk_id: chunkRefComponent?.data.chunkId || '',
+      document_id: chunkRefComponent?.data.documentId || '',
+    },
+  }
+
+  // 4. Update Storage
+  try {
+    const storagePath = await uploadSparkToStorage(user.id, input.sparkId, sparkData)
+    console.log(`[Sparks] ✓ Updated in Storage: ${storagePath}`)
+  } catch (error) {
+    console.error(`[Sparks] Storage update failed:`, error)
+  }
+
+  // 5. Update query cache with FRESH data
+  try {
+    await supabase
+      .from('sparks_cache')
+      .update({
+        content: contentComponent?.data.note,  // ✅ FIX: Use fresh data from refetch
+        tags: contentComponent?.data.tags,      // ✅ FIX: Use fresh data from refetch
+        selections: input.selections !== undefined ? input.selections : sparkComponent?.data.selections,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('entity_id', input.sparkId)
+    console.log(`[Sparks] ✓ Updated query cache`)
+  } catch (error) {
+    console.error(`[Sparks] Cache update failed (non-critical):`, error)
+  }
+
+  // 6. Revalidate paths
+  revalidatePath('/sparks')
+  if (chunkRefComponent?.data.documentId) {
+    revalidatePath(`/read/${chunkRefComponent.data.documentId}`)
+  }
+
+  return { success: true, sparkId: input.sparkId }
 }
 
 /**
@@ -166,10 +281,28 @@ export async function linkAnnotationToSpark(
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
 
+  const supabase = await createClient()
   const ecs = createECS()
   const ops = new SparkOperations(ecs, user.id)
 
+  // Update Spark component
   await ops.addAnnotationRef(sparkId, annotationId)
+
+  // Get fresh annotation_refs from Spark component
+  const entity = await ecs.getEntity(sparkId, user.id)
+  const sparkComponent = entity?.components?.find((c: any) => c.component_type === 'Spark')
+  const annotationRefs = sparkComponent?.data.annotationRefs || []
+
+  // Update cache
+  try {
+    await supabase
+      .from('sparks_cache')
+      .update({ annotation_refs: annotationRefs })
+      .eq('entity_id', sparkId)
+    console.log(`[Sparks] ✓ Updated cache with annotation refs`)
+  } catch (error) {
+    console.error(`[Sparks] Cache update failed (non-critical):`, error)
+  }
 
   revalidatePath('/sparks')
   return { success: true }
@@ -185,10 +318,28 @@ export async function unlinkAnnotationFromSpark(
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
 
+  const supabase = await createClient()
   const ecs = createECS()
   const ops = new SparkOperations(ecs, user.id)
 
+  // Update Spark component
   await ops.removeAnnotationRef(sparkId, annotationId)
+
+  // Get fresh annotation_refs from Spark component
+  const entity = await ecs.getEntity(sparkId, user.id)
+  const sparkComponent = entity?.components?.find((c: any) => c.component_type === 'Spark')
+  const annotationRefs = sparkComponent?.data.annotationRefs || []
+
+  // Update cache
+  try {
+    await supabase
+      .from('sparks_cache')
+      .update({ annotation_refs: annotationRefs })
+      .eq('entity_id', sparkId)
+    console.log(`[Sparks] ✓ Updated cache with annotation refs`)
+  } catch (error) {
+    console.error(`[Sparks] Cache update failed (non-critical):`, error)
+  }
 
   revalidatePath('/sparks')
   return { success: true }
