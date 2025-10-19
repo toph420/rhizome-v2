@@ -451,7 +451,7 @@ async getNeedingReview(documentId: string): Promise<AnnotationEntity[]> {
 
 ### Overview
 
-Replace direct ECS calls in server actions with `AnnotationOperations` wrapper. Maintain backwards-compatible API for UI.
+Replace direct ECS calls in server actions with `AnnotationOperations` wrapper. Keep consistent function signatures for UI.
 
 ### Changes Required
 
@@ -570,7 +570,7 @@ export async function createAnnotation(
 - ✅ Uses `AnnotationOperations` wrapper
 - ✅ PascalCase components created internally
 - ✅ Chunk index logic preserved
-- ✅ Same external API (backwards compatible)
+- ✅ Consistent function signatures
 - ✅ Cleaner, less code (135 lines → ~50 lines)
 
 #### 3. Refactor updateAnnotation()
@@ -860,7 +860,7 @@ export async function getAnnotationsNeedingReview(
 - [ ] No direct `ecs.createEntity()` calls with lowercase components
 - [ ] All functions have proper error handling
 - [ ] Console logs include `[Annotations]` prefix
-- [ ] Return types match existing API (backwards compatible)
+- [ ] Function signatures maintain clean API design
 
 ---
 
@@ -1267,7 +1267,7 @@ ORDER BY component_type;
 - [ ] Performance acceptable (create <1s)
 - [ ] UI feels responsive
 - [ ] No data loss
-- [ ] Backwards compatible (existing UI workflows work)
+- [ ] User workflows unchanged (create, edit, delete work as before)
 
 ---
 
