@@ -5,13 +5,15 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter } from 'lucide-react'
-import { createSpark } from '@/app/actions/sparks'
+import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter, ChevronDown } from 'lucide-react'
+import { createSpark, linkAnnotationToSpark } from '@/app/actions/sparks'
 import { extractTags, extractChunkIds } from '@/lib/sparks/extractors'
-import type { SparkContext } from '@/lib/sparks/types'
+import type { SparkContext, SparkSelection } from '@/lib/sparks/types'
+import type { AnnotationEntity } from '@/lib/ecs/components'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUIStore } from '@/stores/ui-store'
 import { useTextSelection } from '@/hooks/useTextSelection'
+import { getAnnotationsByDocument } from '@/app/actions/annotations'
 
 interface QuickSparkCaptureProps {
   documentId: string
@@ -59,6 +61,10 @@ export function QuickSparkCapture({
   const [loading, setLoading] = useState(false)
   const [frozenSelection, setFrozenSelection] = useState<any>(null)
   const [debouncedContent, setDebouncedContent] = useState('')
+  const [selections, setSelections] = useState<SparkSelection[]>([])  // NEW - multiple selections
+  const [annotations, setAnnotations] = useState<AnnotationEntity[]>([])  // NEW - Phase 6b
+  const [linkedAnnotationIds, setLinkedAnnotationIds] = useState<string[]>([])  // NEW - Phase 6b
+  const [showAnnotations, setShowAnnotations] = useState(false)  // NEW - Phase 6b
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Text selection when panel is open (only enabled when panel is open)
@@ -88,23 +94,17 @@ export function QuickSparkCapture({
   const extractedTags = useMemo(() => extractTags(debouncedContent), [debouncedContent])
   const extractedChunkIds = useMemo(() => extractChunkIds(debouncedContent), [debouncedContent])
 
-  // Auto-quote selection when panel opens, or pre-fill editing content
+  // Pre-fill editing content when panel opens (no auto-quoting)
   useEffect(() => {
     if (isOpen && !content) {
       // If editing existing spark, pre-fill content
       if (editingSparkContent) {
         setContent(editingSparkContent)
         setEditingSparkContent(null) // Clear after using
-      } else {
-        // Otherwise, auto-quote selection if exists
-        const browserSelection = window.getSelection()
-        const selectedText = browserSelection?.toString().trim()
-        if (selectedText) {
-          setContent(`> "${selectedText}"\n\n`)
-        }
       }
+      // NOTE: Removed auto-quoting - users now explicitly click "Quote This"
     }
-  }, [isOpen, editingSparkContent, setEditingSparkContent]) // Run when panel opens or editing content changes
+  }, [isOpen, editingSparkContent, setEditingSparkContent, content]) // Run when panel opens or editing content changes
 
   // Focus textarea when panel opens (run only once when panel opens)
   useEffect(() => {
@@ -119,14 +119,26 @@ export function QuickSparkCapture({
     }
   }, [isOpen]) // Only run when panel opens, NOT on every content change
 
-  // Reset content and frozen selection when panel closes
+  // Reset content, selections, and frozen selection when panel closes
   useEffect(() => {
     if (!isOpen) {
       setContent('')
+      setSelections([])
       setFrozenSelection(null)
+      setLinkedAnnotationIds([])  // NEW - Phase 6b: Reset linked annotations
       clearSelection()
     }
   }, [isOpen, clearSelection])
+
+  // NEW - Phase 6b: Fetch annotations when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      getAnnotationsByDocument(documentId).then(setAnnotations).catch(error => {
+        console.error('[QuickSparkCapture] Failed to fetch annotations:', error)
+        setAnnotations([])
+      })
+    }
+  }, [isOpen, documentId])
 
   // Add visual indicator class to body when panel is open
   useEffect(() => {
@@ -140,6 +152,16 @@ export function QuickSparkCapture({
       document.body.classList.remove('spark-capture-active')
     }
   }, [isOpen])
+
+  // NEW - Phase 6b: Handle linking annotation
+  const handleLinkAnnotation = (annotationId: string) => {
+    setLinkedAnnotationIds(prev => [...prev, annotationId])
+  }
+
+  // NEW - Phase 6b: Handle unlinking annotation
+  const handleUnlinkAnnotation = (annotationId: string) => {
+    setLinkedAnnotationIds(prev => prev.filter(id => id !== annotationId))
+  }
 
   const handleSubmit = async () => {
     if (!content.trim() || loading) return
@@ -163,16 +185,26 @@ export function QuickSparkCapture({
         } : undefined
       }
 
-      // Create spark
-      await createSpark({
+      // Create spark with selections
+      const result = await createSpark({
         content: content.trim(),
+        selections, // Pass selections array
         context: sparkContext
       })
+
+      // NEW - Phase 6b: Link annotations to the created spark
+      if (linkedAnnotationIds.length > 0 && result.sparkId) {
+        await Promise.all(
+          linkedAnnotationIds.map(annotationId =>
+            linkAnnotationToSpark(result.sparkId, annotationId)
+          )
+        )
+      }
 
       // Close panel
       closeSparkCapture()
 
-      console.log('[Sparks] ✓ Created successfully')
+      console.log('[Sparks] ✓ Created successfully' + (linkedAnnotationIds.length > 0 ? ` with ${linkedAnnotationIds.length} linked annotations` : ''))
     } catch (error) {
       console.error('[Sparks] Failed to create:', error)
       alert('Failed to create spark. Please try again.')
@@ -189,19 +221,53 @@ export function QuickSparkCapture({
     }
   }
 
-  // Quote selected text into spark content
+  // Helper: Get context before selected text
+  const getContextBefore = (text: string, fullMarkdown: string): string => {
+    const index = fullMarkdown.indexOf(text)
+    if (index === -1) return ''
+    const start = Math.max(0, index - 100)
+    return fullMarkdown.slice(start, index)
+  }
+
+  // Helper: Get context after selected text
+  const getContextAfter = (text: string, fullMarkdown: string): string => {
+    const index = fullMarkdown.indexOf(text)
+    if (index === -1) return ''
+    const end = Math.min(fullMarkdown.length, index + text.length + 100)
+    return fullMarkdown.slice(index + text.length, end)
+  }
+
+  // Quote selected text into selections array (not textarea)
   const handleQuoteThis = useCallback(() => {
     const activeSelection = frozenSelection || selection
     if (!activeSelection) return
 
-    const quote = `> "${activeSelection.text}"\n\n`
-    setContent(prev => prev + quote)
+    // Get full markdown for context
+    const markdown = chunks.map((c: any) => c.markdown || '').join('\n')
+
+    const newSelection: SparkSelection = {
+      text: activeSelection.text,
+      chunkId: activeSelection.range.chunkIds[0] || currentChunkId,
+      startOffset: activeSelection.range.startOffset,
+      endOffset: activeSelection.range.endOffset,
+      textContext: {
+        before: getContextBefore(activeSelection.text, markdown),
+        after: getContextAfter(activeSelection.text, markdown)
+      }
+    }
+
+    setSelections(prev => [...prev, newSelection])
     setFrozenSelection(null) // Clear frozen selection after quoting
     clearSelection()
 
     // Focus back on textarea
     textareaRef.current?.focus()
-  }, [frozenSelection, selection, clearSelection])
+  }, [frozenSelection, selection, clearSelection, chunks, currentChunkId])
+
+  // Remove selection from array
+  const handleRemoveSelection = (index: number) => {
+    setSelections(prev => prev.filter((_, i) => i !== index))
+  }
 
   // Create annotation from selection (keeps spark panel open)
   const handleCreateAnnotation = useCallback(() => {
@@ -258,12 +324,46 @@ export function QuickSparkCapture({
 
             {/* Content */}
             <div className="p-4 space-y-4">
+              {/* Selections Display (NEW) */}
+              {selections.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Quote className="w-3 h-3" />
+                    <span>{selections.length} selection{selections.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  {selections.map((sel, i) => (
+                    <div
+                      key={i}
+                      className="p-2 bg-muted/30 rounded border border-muted-foreground/20 text-sm relative group"
+                    >
+                      <p className="pr-6 italic">
+                        &ldquo;{sel.text.length > 150
+                          ? sel.text.slice(0, 150) + '...'
+                          : sel.text}&rdquo;
+                      </p>
+                      <Badge variant="outline" className="mt-1 text-xs">
+                        {sel.chunkId}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                        onClick={() => handleRemoveSelection(i)}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* User's Thought (Clean Textarea) */}
               <Textarea
                 ref={textareaRef}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Capture your thought... Use /chunk_id to link chunks, #tags for organization"
+                placeholder="What's your thought? Use /chunk_id to link chunks, #tags for organization"
                 className="min-h-[120px] resize-none font-mono text-sm"
                 disabled={loading}
               />

@@ -1,10 +1,23 @@
 // Spark component (stored in ECS components table)
 export interface SparkComponent {
   content: string
-  created_at: string
-  updated_at?: string
+  createdAt: string
+  updatedAt?: string
   tags: string[]
   connections: SparkConnection[]
+  selections: SparkSelection[]  // NEW - multiple text selections
+}
+
+// Text selection within a spark
+export interface SparkSelection {
+  text: string
+  chunkId: string
+  startOffset: number
+  endOffset: number
+  textContext?: {
+    before: string
+    after: string
+  }
 }
 
 // Connection stored within spark component (NOT connections table)

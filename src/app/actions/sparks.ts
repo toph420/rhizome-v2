@@ -4,31 +4,31 @@ import { revalidatePath } from 'next/cache'
 import { getCurrentUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { createECS } from '@/lib/ecs'
+import { SparkOperations } from '@/lib/ecs/sparks'
 import {
   uploadSparkToStorage,
   buildSparkConnections,
-  extractTags
+  extractTags,
 } from '@/lib/sparks'
-import type { SparkContext, SparkStorageJson } from '@/lib/sparks/types'
+import type { SparkContext, SparkStorageJson, SparkSelection } from '@/lib/sparks/types'
 
 interface CreateSparkInput {
   content: string
+  selections?: SparkSelection[]  // NEW - multiple selections
   context: SparkContext
 }
 
 /**
- * Create a new spark (ECS-native)
+ * Create a new spark (ECS-native with SparkOperations)
  *
- * Flow (follows annotation pattern exactly):
+ * Flow:
  * 1. Validate user authentication
  * 2. Extract metadata from content (tags, chunk mentions)
  * 3. Build connection graph (origin + mentions + inherited)
- * 4. Create ECS entity with spark + source components
+ * 4. Create ECS entity with 4 components via SparkOperations
  * 5. Upload complete data to Storage (source of truth)
- * 6. Update query cache (optional, non-fatal) - TODO: implement via background job
+ * 6. Update query cache (optional, non-fatal)
  * 7. Revalidate paths for UI refresh
- *
- * Pattern: src/app/actions/annotations.ts:39-135
  */
 export async function createSpark(input: CreateSparkInput) {
   const user = await getCurrentUser()
@@ -44,43 +44,50 @@ export async function createSpark(input: CreateSparkInput) {
     user.id
   )
 
-  // 2. Create ECS entity (NO domain tables)
-  // Pattern: Two-component pattern (spark + source)
+  // 2. Get origin chunk content for recovery
+  const { data: originChunk } = await supabase
+    .from('chunks')
+    .select('content')
+    .eq('id', input.context.originChunkId)
+    .single()
+
+  // 3. Create ECS entity using SparkOperations (4-component pattern)
   const ecs = createECS()
-  const sparkId = await ecs.createEntity(user.id, {
-    spark: {
-      content: input.content,
-      created_at: new Date().toISOString(),
-      tags,
-      connections // Complete connection graph stored here
-    },
-    source: {
-      chunk_id: input.context.originChunkId,
-      document_id: input.context.documentId
-    }
+  const ops = new SparkOperations(ecs, user.id)
+
+  const sparkId = await ops.create({
+    content: input.content,
+    selections: input.selections || [],
+    tags,
+    connections,
+    chunkId: input.context.originChunkId,
+    chunkIds: input.context.visibleChunks,
+    documentId: input.context.documentId,
+    originChunkContent: originChunk?.content?.slice(0, 500),
   })
 
   console.log(`[Sparks] ✓ Created ECS entity: ${sparkId}`)
 
-  // 3. Build complete Storage JSON
+  // 4. Build complete Storage JSON
   const sparkData: SparkStorageJson = {
     entity_id: sparkId,
     user_id: user.id,
     component_type: 'spark',
     data: {
       content: input.content,
-      created_at: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       tags,
-      connections
+      connections,
+      selections: input.selections || [],
     },
     context: input.context,
     source: {
       chunk_id: input.context.originChunkId,
-      document_id: input.context.documentId
-    }
+      document_id: input.context.documentId,
+    },
   }
 
-  // 4. Upload to Storage (source of truth)
+  // 5. Upload to Storage (source of truth)
   try {
     const storagePath = await uploadSparkToStorage(user.id, sparkId, sparkData)
     console.log(`[Sparks] ✓ Uploaded to Storage: ${storagePath}`)
@@ -89,8 +96,7 @@ export async function createSpark(input: CreateSparkInput) {
     // Continue - Storage can be rebuilt from ECS if needed
   }
 
-  // 5. Update query cache (optional, non-fatal)
-  // Note: Embedding generation deferred to background job
+  // 6. Update query cache (optional, non-fatal)
   try {
     await supabase.from('sparks_cache').insert({
       entity_id: sparkId,
@@ -100,18 +106,17 @@ export async function createSpark(input: CreateSparkInput) {
       origin_chunk_id: input.context.originChunkId,
       document_id: input.context.documentId,
       tags,
-      connections, // Save connections array to cache (migration 056)
+      connections,
       embedding: null, // TODO: Generate via background job
       storage_path: `${user.id}/sparks/${sparkId}/content.json`,
-      cached_at: new Date().toISOString()
+      cached_at: new Date().toISOString(),
     })
-    console.log(`[Sparks] ✓ Updated query cache with ${connections.length} connections`)
+    console.log(`[Sparks] ✓ Updated query cache`)
   } catch (error) {
     console.error(`[Sparks] Cache update failed (non-critical):`, error)
-    // Don't fail the operation - cache is rebuildable
   }
 
-  // 6. Revalidate paths
+  // 7. Revalidate paths
   revalidatePath('/sparks')
   revalidatePath(`/read/${input.context.documentId}`)
 
@@ -120,8 +125,6 @@ export async function createSpark(input: CreateSparkInput) {
 
 /**
  * Delete spark (cascade delete)
- *
- * Pattern: src/app/actions/annotations.ts:198-221
  */
 export async function deleteSpark(sparkId: string) {
   const user = await getCurrentUser()
@@ -129,6 +132,7 @@ export async function deleteSpark(sparkId: string) {
 
   const supabase = await createClient()
   const ecs = createECS()
+  const ops = new SparkOperations(ecs, user.id)
 
   // 1. Delete from Storage
   const storagePath = `${user.id}/sparks/${sparkId}/content.json`
@@ -139,7 +143,7 @@ export async function deleteSpark(sparkId: string) {
   }
 
   // 2. Delete ECS entity (cascades to components)
-  await ecs.deleteEntity(sparkId, user.id)
+  await ops.delete(sparkId)
 
   // 3. Delete from cache (optional, non-fatal)
   try {
@@ -147,6 +151,44 @@ export async function deleteSpark(sparkId: string) {
   } catch (error) {
     console.error(`[Sparks] Cache delete failed (non-critical):`, error)
   }
+
+  revalidatePath('/sparks')
+  return { success: true }
+}
+
+/**
+ * Link annotation to spark
+ */
+export async function linkAnnotationToSpark(
+  sparkId: string,
+  annotationId: string
+) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  const ecs = createECS()
+  const ops = new SparkOperations(ecs, user.id)
+
+  await ops.addAnnotationRef(sparkId, annotationId)
+
+  revalidatePath('/sparks')
+  return { success: true }
+}
+
+/**
+ * Unlink annotation from spark
+ */
+export async function unlinkAnnotationFromSpark(
+  sparkId: string,
+  annotationId: string
+) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  const ecs = createECS()
+  const ops = new SparkOperations(ecs, user.id)
+
+  await ops.removeAnnotationRef(sparkId, annotationId)
 
   revalidatePath('/sparks')
   return { success: true }

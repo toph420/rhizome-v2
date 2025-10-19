@@ -2,6 +2,7 @@
 export type {
   SparkComponent,
   SparkConnection,
+  SparkSelection,
   SparkContext,
   SparkStorageJson,
   SparkCacheRow
