@@ -7,11 +7,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, X, Tag, Palette, Layers, GripVertical } from 'lucide-react'
+import { Loader2, X, Tag, Palette, Layers, GripVertical, Zap } from 'lucide-react'
 import { createAnnotation, updateAnnotation } from '@/app/actions/annotations'
 import { extractContext } from '@/lib/annotations/text-range'
 import type { TextSelection, Chunk, OptimisticAnnotation, StoredAnnotation } from '@/types/annotations'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/stores/ui-store'
 
 interface QuickCapturePanelProps {
   selection: TextSelection
@@ -59,6 +60,11 @@ export function QuickCapturePanel({
   existingAnnotation,
   mode = 'create',
 }: QuickCapturePanelProps) {
+  // NEW - Phase 6b: Check if spark panel is open and get link action
+  const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
+  const addLinkedAnnotation = useUIStore(state => state.addLinkedAnnotation)
+  const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
+
   // Initialize state from existingAnnotation in edit mode
   const [note, setNote] = useState(existingAnnotation?.components.annotation?.note || '')
   const [tagInput, setTagInput] = useState('')
@@ -271,6 +277,21 @@ export function QuickCapturePanel({
     },
     [tags]
   )
+
+  // NEW - Phase 6b: Handle linking to spark
+  const handleLinkToSpark = useCallback(() => {
+    // In create mode, we don't have an ID yet, so we need to save first
+    if (mode === 'create') {
+      toast.info('Save annotation first, then link to spark')
+      return
+    }
+
+    // In edit mode, we have the annotation ID
+    if (existingAnnotation?.id) {
+      addLinkedAnnotation(existingAnnotation.id)
+      toast.success('Linked to spark')
+    }
+  }, [mode, existingAnnotation, addLinkedAnnotation])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -519,6 +540,19 @@ export function QuickCapturePanel({
             <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
+            {/* NEW - Phase 6b: Link to Spark button (only show when spark panel is open) */}
+            {sparkCaptureOpen && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLinkToSpark}
+                disabled={saving || (mode === 'create') || (existingAnnotation?.id && linkedAnnotationIds.includes(existingAnnotation.id))}
+                className="gap-1.5"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                {existingAnnotation?.id && linkedAnnotationIds.includes(existingAnnotation.id) ? 'Linked' : 'Link to Spark'}
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={() => void saveAnnotation(selectedColor, true)}

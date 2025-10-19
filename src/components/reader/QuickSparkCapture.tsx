@@ -5,15 +5,13 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter, ChevronDown } from 'lucide-react'
+import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter } from 'lucide-react'
 import { createSpark, linkAnnotationToSpark } from '@/app/actions/sparks'
 import { extractTags, extractChunkIds } from '@/lib/sparks/extractors'
 import type { SparkContext, SparkSelection } from '@/lib/sparks/types'
-import type { AnnotationEntity } from '@/lib/ecs/components'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUIStore } from '@/stores/ui-store'
 import { useTextSelection } from '@/hooks/useTextSelection'
-import { getAnnotationsByDocument } from '@/app/actions/annotations'
 
 interface QuickSparkCaptureProps {
   documentId: string
@@ -62,10 +60,11 @@ export function QuickSparkCapture({
   const [frozenSelection, setFrozenSelection] = useState<any>(null)
   const [debouncedContent, setDebouncedContent] = useState('')
   const [selections, setSelections] = useState<SparkSelection[]>([])  // NEW - multiple selections
-  const [annotations, setAnnotations] = useState<AnnotationEntity[]>([])  // NEW - Phase 6b
-  const [linkedAnnotationIds, setLinkedAnnotationIds] = useState<string[]>([])  // NEW - Phase 6b
-  const [showAnnotations, setShowAnnotations] = useState(false)  // NEW - Phase 6b
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // NEW - Phase 6b (revised): Use UIStore for linked annotations
+  const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
+  const removeLinkedAnnotation = useUIStore(state => state.removeLinkedAnnotation)
 
   // Text selection when panel is open (only enabled when panel is open)
   const { selection, clearSelection } = useTextSelection({
@@ -125,20 +124,10 @@ export function QuickSparkCapture({
       setContent('')
       setSelections([])
       setFrozenSelection(null)
-      setLinkedAnnotationIds([])  // NEW - Phase 6b: Reset linked annotations
+      // Note: linkedAnnotationIds cleared by UIStore closeSparkCapture
       clearSelection()
     }
   }, [isOpen, clearSelection])
-
-  // NEW - Phase 6b: Fetch annotations when panel opens
-  useEffect(() => {
-    if (isOpen) {
-      getAnnotationsByDocument(documentId).then(setAnnotations).catch(error => {
-        console.error('[QuickSparkCapture] Failed to fetch annotations:', error)
-        setAnnotations([])
-      })
-    }
-  }, [isOpen, documentId])
 
   // Add visual indicator class to body when panel is open
   useEffect(() => {
@@ -152,16 +141,6 @@ export function QuickSparkCapture({
       document.body.classList.remove('spark-capture-active')
     }
   }, [isOpen])
-
-  // NEW - Phase 6b: Handle linking annotation
-  const handleLinkAnnotation = (annotationId: string) => {
-    setLinkedAnnotationIds(prev => [...prev, annotationId])
-  }
-
-  // NEW - Phase 6b: Handle unlinking annotation
-  const handleUnlinkAnnotation = (annotationId: string) => {
-    setLinkedAnnotationIds(prev => prev.filter(id => id !== annotationId))
-  }
 
   const handleSubmit = async () => {
     if (!content.trim() || loading) return
@@ -354,6 +333,35 @@ export function QuickSparkCapture({
                       </Button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* NEW - Phase 6b (revised): Linked Annotations Display */}
+              {linkedAnnotationIds.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Highlighter className="w-3 h-3" />
+                    <span>{linkedAnnotationIds.length} linked annotation{linkedAnnotationIds.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {linkedAnnotationIds.map((annotationId) => (
+                      <div
+                        key={annotationId}
+                        className="group relative px-3 py-1.5 bg-muted/30 rounded border border-muted-foreground/20 text-xs flex items-center gap-2"
+                      >
+                        <Highlighter className="w-3 h-3 text-muted-foreground" />
+                        <span className="font-mono text-[10px]">{annotationId.slice(0, 8)}...</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100"
+                          onClick={() => removeLinkedAnnotation(annotationId)}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

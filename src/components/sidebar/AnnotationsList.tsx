@@ -9,9 +9,10 @@ import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
 import { updateAnnotation } from '@/app/actions/annotations'
 import { formatDistanceToNow } from 'date-fns'
-import { Loader2, Pencil, Save, X } from 'lucide-react'
+import { Loader2, Pencil, Save, X, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useUIStore } from '@/stores/ui-store'
 
 // Constant empty array to prevent infinite loops from new references
 const EMPTY_ANNOTATIONS: any[] = []
@@ -43,6 +44,11 @@ export function AnnotationsList({
     state => state.annotations[documentId ?? ''] ?? EMPTY_ANNOTATIONS
   )
   const updateStoreAnnotation = useAnnotationStore(state => state.updateAnnotation)
+
+  // NEW - Phase 6b: Check if spark panel is open and get link actions
+  const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
+  const addLinkedAnnotation = useUIStore(state => state.addLinkedAnnotation)
+  const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
 
   // Get viewport offsets from ReaderStore for precise visibility detection
   const viewportOffsets = useReaderStore(state => state.viewportOffsets)
@@ -314,17 +320,42 @@ export function AnnotationsList({
                   )}
                 </div>
 
-                {/* Edit/Save buttons */}
+                {/* Edit/Save buttons + Link to Spark */}
                 {!isEditing ? (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground transition-all flex-shrink-0"
-                    onClick={(e) => handleEditClick(annotation, e)}
-                    title="Edit annotation"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
+                  <div className="flex gap-1 flex-shrink-0">
+                    {/* NEW - Phase 6b: Link to Spark button (only when spark panel open) */}
+                    {sparkCaptureOpen && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className={cn(
+                          "h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground transition-all flex-shrink-0",
+                          linkedAnnotationIds.includes(annotation.id) && "opacity-100 bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400"
+                        )}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (linkedAnnotationIds.includes(annotation.id)) {
+                            toast.info('Already linked to spark')
+                          } else {
+                            addLinkedAnnotation(annotation.id)
+                            toast.success('Linked to spark')
+                          }
+                        }}
+                        title={linkedAnnotationIds.includes(annotation.id) ? "Linked to spark" : "Link to spark"}
+                      >
+                        <Zap className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground transition-all flex-shrink-0"
+                      onClick={(e) => handleEditClick(annotation, e)}
+                      title="Edit annotation"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </div>
                 ) : (
                   <div className="flex gap-1 flex-shrink-0">
                     <Button

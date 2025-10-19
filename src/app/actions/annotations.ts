@@ -462,3 +462,85 @@ export async function getAnnotationsNeedingReview(
     return { success: [], needsReview: [], lost: [] }
   }
 }
+
+/**
+ * Get annotations for a document as AnnotationEntity objects
+ * Used by QuickSparkCapture to show linkable annotations
+ *
+ * @param documentId - Document ID to query
+ * @returns Array of AnnotationEntity objects
+ */
+export async function getAnnotationsByDocument(
+  documentId: string
+): Promise<AnnotationEntity[]> {
+  try {
+    const user = await getCurrentUser()
+    if (!user) return []
+
+    const ecs = createECS()
+    const supabase = await createClient()
+
+    // Query for all annotation entities in this document
+    const { data: positionComponents } = await supabase
+      .from('components')
+      .select('entity_id')
+      .eq('component_type', 'Position')
+      .eq('data->>documentId', documentId)
+
+    if (!positionComponents || positionComponents.length === 0) {
+      return []
+    }
+
+    const entityIds = positionComponents.map(c => c.entity_id)
+
+    // Get all components for these entities
+    const { data: allComponents } = await supabase
+      .from('components')
+      .select('entity_id, component_type, data, created_at, updated_at')
+      .in('entity_id', entityIds)
+
+    if (!allComponents) return []
+
+    // Group components by entity_id
+    const entityMap = new Map<string, any[]>()
+    for (const comp of allComponents) {
+      if (!entityMap.has(comp.entity_id)) {
+        entityMap.set(comp.entity_id, [])
+      }
+      entityMap.get(comp.entity_id)!.push(comp)
+    }
+
+    // Build AnnotationEntity objects
+    const annotations: AnnotationEntity[] = []
+    for (const [entityId, comps] of entityMap.entries()) {
+      const position = comps.find(c => c.component_type === 'Position')
+      const content = comps.find(c => c.component_type === 'Content')
+      const visual = comps.find(c => c.component_type === 'Visual')
+      const temporal = comps.find(c => c.component_type === 'Temporal')
+
+      // Only include complete annotations
+      if (position && content && visual && temporal) {
+        const entity = await ecs.getEntity(entityId, user.id)
+        if (entity) {
+          annotations.push({
+            id: entityId,
+            user_id: user.id,
+            created_at: entity.created_at,
+            updated_at: entity.updated_at,
+            components: {
+              Position: position.data,
+              Content: content.data,
+              Visual: visual.data,
+              Temporal: temporal.data,
+            }
+          } as AnnotationEntity)
+        }
+      }
+    }
+
+    return annotations
+  } catch (error) {
+    console.error('[getAnnotationsByDocument] Failed:', error)
+    return []
+  }
+}
