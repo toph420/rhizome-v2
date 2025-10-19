@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
-import { updateAnnotation } from '@/app/actions/annotations'
+import { updateAnnotation, deleteAnnotation } from '@/app/actions/annotations'
 import { formatDistanceToNow } from 'date-fns'
-import { Loader2, Pencil, Save, X, Zap } from 'lucide-react'
+import { Loader2, Pencil, Save, X, Zap, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useUIStore } from '@/stores/ui-store'
@@ -61,12 +61,13 @@ export function AnnotationsList({
   const [editNote, setEditNote] = useState('')
   const [editColor, setEditColor] = useState<string>('yellow')
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   // Sort annotations by document order (startOffset)
   const sortedAnnotations = useMemo(() => {
     return [...annotations].sort((a, b) => {
-      const aOffset = a.components.position?.startOffset || a.components.annotation?.range.startOffset || 0
-      const bOffset = b.components.position?.startOffset || b.components.annotation?.range.startOffset || 0
+      const aOffset = a.components.Position?.startOffset || 0
+      const bOffset = b.components.Position?.startOffset || 0
       return aOffset - bOffset
     })
   }, [annotations])
@@ -80,13 +81,9 @@ export function AnnotationsList({
     const visible = new Set<string>()
 
     sortedAnnotations.forEach(annotation => {
-      // Get annotation's precise offsets (prefer recovered position, fallback to original range)
-      const startOffset = annotation.components.position?.startOffset
-        ?? annotation.components.annotation?.range.startOffset
-        ?? 0
-      const endOffset = annotation.components.position?.endOffset
-        ?? annotation.components.annotation?.range.endOffset
-        ?? 0
+      // Get annotation's precise offsets from Position component
+      const startOffset = annotation.components.Position?.startOffset ?? 0
+      const endOffset = annotation.components.Position?.endOffset ?? 0
 
       // Check if annotation overlaps with viewport (same logic as ReaderStore for chunks)
       const isVisible =
@@ -103,8 +100,8 @@ export function AnnotationsList({
       totalAnnotations: sortedAnnotations.length,
       visibleAnnotations: visible.size,
       sampleAnnotations: sortedAnnotations.slice(0, 3).map(a => {
-        const start = a.components.position?.startOffset ?? a.components.annotation?.range.startOffset ?? 0
-        const end = a.components.position?.endOffset ?? a.components.annotation?.range.endOffset ?? 0
+        const start = a.components.Position?.startOffset ?? 0
+        const end = a.components.Position?.endOffset ?? 0
         const isVis = start <= viewportOffsets.end && end >= viewportOffsets.start
         return {
           id: a.id.slice(0, 8),
@@ -131,8 +128,7 @@ export function AnnotationsList({
 
   // Handle annotation card click - call parent callback for scroll coordination
   function handleAnnotationCardClick(annotation: typeof sortedAnnotations[0]) {
-    const startOffset = annotation.components.position?.startOffset
-      || annotation.components.annotation?.range.startOffset
+    const startOffset = annotation.components.Position?.startOffset
 
     if (startOffset === undefined) return
 
@@ -146,8 +142,32 @@ export function AnnotationsList({
   function handleEditClick(annotation: typeof sortedAnnotations[0], e: React.MouseEvent) {
     e.stopPropagation()
     setEditingId(annotation.id)
-    setEditNote(annotation.components.annotation?.note || '')
-    setEditColor(annotation.components.annotation?.color || 'yellow')
+    setEditNote(annotation.components.Content?.note || '')
+    setEditColor(annotation.components.Visual?.color || 'yellow')
+  }
+
+  // Delete annotation
+  async function handleDelete(annotationId: string, e: React.MouseEvent) {
+    e.stopPropagation()
+
+    if (!confirm('Delete this annotation?')) return
+
+    setDeleting(annotationId)
+    try {
+      const result = await deleteAnnotation(annotationId)
+      if (result.success) {
+        toast.success('Annotation deleted')
+        // Remove from store
+        useAnnotationStore.getState().removeAnnotation(documentId, annotationId)
+      } else {
+        toast.error(result.error || 'Failed to delete annotation')
+      }
+    } catch (error) {
+      console.error('[AnnotationsList] Delete failed:', error)
+      toast.error('Failed to delete annotation')
+    } finally {
+      setDeleting(null)
+    }
   }
 
   // Save annotation edits
@@ -167,9 +187,12 @@ export function AnnotationsList({
             ...existingAnnotation,
             components: {
               ...existingAnnotation.components,
-              annotation: {
-                ...existingAnnotation.components.annotation!,
+              Content: {
+                ...existingAnnotation.components.Content!,
                 note: editNote,
+              },
+              Visual: {
+                ...existingAnnotation.components.Visual!,
                 color: editColor as any,
               }
             }
@@ -240,14 +263,15 @@ export function AnnotationsList({
       </div>
 
       {sortedAnnotations.map((annotation) => {
-        const annotationData = annotation.components.annotation
-        const positionData = annotation.components.position
+        const contentData = annotation.components.Content
+        const visualData = annotation.components.Visual
+        const positionData = annotation.components.Position
         const isVisible = visibleAnnotationIds.has(annotation.id)
         const isEditing = editingId === annotation.id
 
-        if (!annotationData) return null
+        if (!contentData || !visualData || !positionData) return null
 
-        const colorBorderClass = getColorClass(annotationData.color)
+        const colorBorderClass = getColorClass(visualData.color)
 
         return (
           <Card
@@ -301,12 +325,12 @@ export function AnnotationsList({
                     </div>
                   ) : (
                     <>
-                      {annotationData.tags?.filter(tag => tag !== 'readwise-import').map((tag) => (
+                      {contentData.tags?.filter(tag => tag !== 'readwise-import').map((tag) => (
                         <Badge key={tag} variant="outline" className="text-xs flex-shrink-0">
                           {tag}
                         </Badge>
                       ))}
-                      {annotationData.tags?.includes('readwise-import') && (
+                      {contentData.tags?.includes('readwise-import') && (
                         <Badge variant="secondary" className="text-xs flex-shrink-0">
                           Readwise
                         </Badge>
@@ -355,6 +379,20 @@ export function AnnotationsList({
                     >
                       <Pencil className="h-3 w-3" />
                     </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive transition-all flex-shrink-0"
+                      onClick={(e) => handleDelete(annotation.id, e)}
+                      disabled={deleting === annotation.id}
+                      title="Delete annotation"
+                    >
+                      {deleting === annotation.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
                   </div>
                 ) : (
                   <div className="flex gap-1 flex-shrink-0">
@@ -391,7 +429,7 @@ export function AnnotationsList({
               {/* Annotation text */}
               <div>
                 <p className="text-sm leading-tight line-clamp-3">
-                  {annotationData.text}
+                  {positionData.originalText}
                 </p>
               </div>
 
@@ -406,11 +444,11 @@ export function AnnotationsList({
                     onClick={(e) => e.stopPropagation()}
                   />
                 </div>
-              ) : annotationData.note ? (
+              ) : contentData.note ? (
                 <div className="bg-muted/50 p-2 rounded-sm">
                   <p className="text-xs text-muted-foreground break-words">
                     <span className="font-medium">Note: </span>
-                    {annotationData.note}
+                    {contentData.note}
                   </p>
                 </div>
               ) : null}
@@ -420,9 +458,9 @@ export function AnnotationsList({
                 <span className="flex-shrink-0">
                   {formatDistanceToNow(new Date(annotation.created_at), { addSuffix: true })}
                 </span>
-                {positionData?.method && positionData.method !== 'exact' && !isEditing && (
+                {positionData.recoveryMethod && positionData.recoveryMethod !== 'exact' && !isEditing && positionData.recoveryConfidence !== undefined && (
                   <Badge variant="outline" className="text-xs flex-shrink-0">
-                    {positionData.method} ({(positionData.confidence * 100).toFixed(0)}%)
+                    {positionData.recoveryMethod} ({(positionData.recoveryConfidence * 100).toFixed(0)}%)
                   </Badge>
                 )}
               </div>

@@ -102,52 +102,58 @@ interface PortableAnnotation {
 }
 
 /**
- * Transform ECS components to portable format
- * Merges annotation, position, and source components into single portable object
+ * Transform 5-component ECS structure to portable format
+ * Merges Position, Visual, Content, Temporal, and ChunkRef into single portable object
  */
-function transformToPortableFormat(
-  annotationData: AnnotationData,
+function transformToPortableFormat5Component(
   positionComponent: ComponentRecord,
-  sourceData: SourceData
+  visualData: any,
+  contentData: any,
+  temporalData: any,
+  chunkRefData: any
 ): PortableAnnotation {
-  const posData = positionComponent.data as PositionData
+  const posData = positionComponent.data
 
   // Safely access position data with fallbacks
   const startOffset = posData?.startOffset ?? 0
   const endOffset = posData?.endOffset ?? 0
 
   return {
-    // Annotation fields
-    text: annotationData.text,
-    note: annotationData.note,
-    color: annotationData.color,
-    tags: annotationData.tags,
+    // From Position component
+    text: posData.originalText,
+
+    // From Content component
+    note: contentData.note,
+    tags: contentData.tags,
+
+    // From Visual component
+    color: visualData.color,
 
     // Position fields
     position: {
       start: startOffset,
       end: endOffset,
-      method: posData?.method,
-      confidence: posData?.confidence,
-      originalChunkIndex: positionComponent.original_chunk_index ?? posData?.originalChunkIndex
+      method: posData?.recoveryMethod,
+      confidence: posData?.recoveryConfidence,
+      originalChunkIndex: positionComponent.original_chunk_index
     },
 
-    // Context (prefer annotation context, fallback to position context)
-    textContext: annotationData.textContext || posData?.textContext,
+    // Context from Position component
+    textContext: posData?.textContext,
 
-    // Source references (from position chunkIds or source chunk_ids)
-    chunkIds: posData?.chunkIds || sourceData.chunk_ids || (sourceData.chunk_id ? [sourceData.chunk_id] : undefined),
+    // Source references from ChunkRef component
+    chunkIds: chunkRefData.chunkIds,
 
-    // Recovery metadata (if annotation was recovered after edit)
-    recovery: positionComponent.recovery_method ? {
-      method: positionComponent.recovery_method,
-      confidence: positionComponent.recovery_confidence || 0,
-      needsReview: positionComponent.needs_review || false
+    // Recovery metadata (from Position component)
+    recovery: posData.recoveryMethod ? {
+      method: posData.recoveryMethod,
+      confidence: posData.recoveryConfidence || 0,
+      needsReview: posData.needsReview || false
     } : undefined,
 
-    // Timestamps
-    created_at: positionComponent.created_at,
-    updated_at: positionComponent.updated_at
+    // Timestamps from Temporal component
+    created_at: temporalData.createdAt,
+    updated_at: temporalData.updatedAt
   }
 }
 
@@ -160,11 +166,11 @@ async function exportDocumentAnnotations(
   markdownPath: string
 ): Promise<number> {
   // Fetch annotations using entity_id join pattern (same as recover-annotations.ts)
-  // First get entity_ids from source components
+  // First get entity_ids from ChunkRef components
   const { data: sourceEntities } = await supabase
     .from('components')
     .select('entity_id')
-    .eq('component_type', 'source')
+    .eq('component_type', 'ChunkRef')
     .eq('data->>document_id', documentId)
 
   const entityIds = sourceEntities?.map(c => c.entity_id) || []
@@ -173,73 +179,113 @@ async function exportDocumentAnnotations(
     return 0
   }
 
-  // Fetch all three component types in parallel
-  const [positionResult, annotationResult, sourceResult] = await Promise.all([
+  // Fetch all five component types in parallel
+  const [positionResult, visualResult, contentResult, temporalResult, chunkRefResult] = await Promise.all([
     supabase
       .from('components')
       .select('*')
-      .eq('component_type', 'position')
+      .eq('component_type', 'Position')
       .in('entity_id', entityIds)
       .order('created_at', { ascending: true }),
 
     supabase
       .from('components')
       .select('entity_id, data')
-      .eq('component_type', 'annotation')
+      .eq('component_type', 'Visual')
       .in('entity_id', entityIds),
 
     supabase
       .from('components')
       .select('entity_id, data')
-      .eq('component_type', 'source')
+      .eq('component_type', 'Content')
+      .in('entity_id', entityIds),
+
+    supabase
+      .from('components')
+      .select('entity_id, data')
+      .eq('component_type', 'Temporal')
+      .in('entity_id', entityIds),
+
+    supabase
+      .from('components')
+      .select('entity_id, data')
+      .eq('component_type', 'ChunkRef')
       .in('entity_id', entityIds)
   ])
 
   if (positionResult.error) {
-    console.error(`Failed to fetch position components: ${positionResult.error.message}`)
+    console.error(`Failed to fetch Position components: ${positionResult.error.message}`)
     return 0
   }
 
-  if (annotationResult.error) {
-    console.error(`Failed to fetch annotation components: ${annotationResult.error.message}`)
+  if (visualResult.error) {
+    console.error(`Failed to fetch Visual components: ${visualResult.error.message}`)
     return 0
   }
 
-  if (sourceResult.error) {
-    console.error(`Failed to fetch source components: ${sourceResult.error.message}`)
+  if (contentResult.error) {
+    console.error(`Failed to fetch Content components: ${contentResult.error.message}`)
+    return 0
+  }
+
+  if (temporalResult.error) {
+    console.error(`Failed to fetch Temporal components: ${temporalResult.error.message}`)
+    return 0
+  }
+
+  if (chunkRefResult.error) {
+    console.error(`Failed to fetch ChunkRef components: ${chunkRefResult.error.message}`)
     return 0
   }
 
   const positionComponents = positionResult.data || []
-  const annotationComponents = annotationResult.data || []
-  const sourceComponents = sourceResult.data || []
+  const visualComponents = visualResult.data || []
+  const contentComponents = contentResult.data || []
+  const temporalComponents = temporalResult.data || []
+  const chunkRefComponents = chunkRefResult.data || []
 
   if (positionComponents.length === 0) {
     return 0
   }
 
   // Create lookup maps
-  const annotationMap = new Map<string, AnnotationData>(
-    annotationComponents.map(c => [c.entity_id, c.data as AnnotationData])
+  const visualMap = new Map(
+    visualComponents.map(c => [c.entity_id, c.data])
   )
 
-  const sourceMap = new Map<string, SourceData>(
-    sourceComponents.map(c => [c.entity_id, c.data as SourceData])
+  const contentMap = new Map(
+    contentComponents.map(c => [c.entity_id, c.data])
   )
 
-  // Transform to portable format by merging all three components
+  const temporalMap = new Map(
+    temporalComponents.map(c => [c.entity_id, c.data])
+  )
+
+  const chunkRefMap = new Map(
+    chunkRefComponents.map(c => [c.entity_id, c.data])
+  )
+
+  // Transform to portable format by merging all five components
   const portableAnnotations = positionComponents
     .map(positionComponent => {
-      const annotationData = annotationMap.get(positionComponent.entity_id)
-      const sourceData = sourceMap.get(positionComponent.entity_id)
+      const visualData = visualMap.get(positionComponent.entity_id)
+      const contentData = contentMap.get(positionComponent.entity_id)
+      const temporalData = temporalMap.get(positionComponent.entity_id)
+      const chunkRefData = chunkRefMap.get(positionComponent.entity_id)
 
       // Skip if missing required components
-      if (!annotationData || !sourceData) {
+      if (!visualData || !contentData || !temporalData || !chunkRefData) {
         console.warn(`Missing components for entity ${positionComponent.entity_id}`)
         return null
       }
 
-      return transformToPortableFormat(annotationData, positionComponent, sourceData)
+      return transformToPortableFormat5Component(
+        positionComponent,
+        visualData,
+        contentData,
+        temporalData,
+        chunkRefData
+      )
     })
     .filter((ann): ann is PortableAnnotation => ann !== null)
 

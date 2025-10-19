@@ -4,7 +4,7 @@
  */
 
 import type { ReactNode } from 'react'
-import type { StoredAnnotation, PositionData } from '@/types/annotations'
+import type { AnnotationEntity, PositionComponent } from '@/types/annotations'
 import { Badge } from '@/components/ui/badge'
 
 // Import fuzzy matching algorithm from worker
@@ -27,54 +27,52 @@ import { fuzzyMatchChunkToSource } from '../../../worker/lib/fuzzy-matching'
  * }
  */
 export async function restoreAnnotationPosition(
-  annotation: StoredAnnotation,
+  annotation: AnnotationEntity,
   sourceMarkdown: string
-): Promise<PositionData> {
-  const annotationData = annotation.components.annotation
-  const positionData = annotation.components.position
-  const sourceData = annotation.components.source
-  
-  if (!annotationData || !positionData || !sourceData) {
+): Promise<PositionComponent> {
+  const positionData = annotation.components.Position
+  const chunkRefData = annotation.components.ChunkRef
+
+  if (!positionData || !chunkRefData) {
     throw new Error('Invalid annotation: missing required components')
   }
-  
-  const { text, textContext } = annotationData
-  
+
+  const { originalText, textContext } = positionData
+
   // Tier 1: Exact match (fast path - <10ms)
-  const exactIndex = sourceMarkdown.indexOf(text)
+  const exactIndex = sourceMarkdown.indexOf(originalText)
   if (exactIndex !== -1) {
     return {
-      chunkId: sourceData.chunk_id,
+      ...positionData,
       startOffset: exactIndex,
-      endOffset: exactIndex + text.length,
-      confidence: 1.0,
-      method: 'exact',
-      textContext: {
-        before: textContext.before,
-        after: textContext.after
-      }
+      endOffset: exactIndex + originalText.length,
+      recoveryConfidence: 1.0,
+      recoveryMethod: 'exact',
+      textContext: textContext || { before: '', after: '' },
+      needsReview: false,
     }
   }
-  
+
   // Tier 2: Fuzzy matching (high accuracy - <50ms)
   const result = fuzzyMatchChunkToSource(
-    text,
+    originalText,
     sourceMarkdown,
     0, // chunkIndex not needed for single annotation
     1, // totalChunks not needed
     { trigramThreshold: 0.75 }
   )
-  
+
   return {
-    chunkId: sourceData.chunk_id,
+    ...positionData,
     startOffset: result.startOffset,
     endOffset: result.endOffset,
-    confidence: result.confidence,
-    method: result.method,
+    recoveryConfidence: result.confidence,
+    recoveryMethod: result.method === 'fuzzy' || result.method === 'approximate' ? 'context' : 'exact',
     textContext: {
       before: result.contextBefore,
       after: result.contextAfter
-    }
+    },
+    needsReview: result.confidence >= 0.70 && result.confidence < 0.85,
   }
 }
 

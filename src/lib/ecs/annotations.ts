@@ -28,10 +28,10 @@ export interface CreateAnnotationInput {
   endOffset: number;
   /** Original selected text */
   originalText: string;
-  /** Chunk ID this annotation belongs to */
-  chunkId: string;
+  /** Array of chunk IDs (multi-chunk support) */
+  chunkIds: string[];
   /** Position within the chunk */
-  chunkPosition: number;
+  chunkPosition?: number;
   /** Visual type */
   type: VisualComponent['type'];
   /** Highlight color (optional, defaults to yellow) */
@@ -42,6 +42,19 @@ export interface CreateAnnotationInput {
   tags?: string[];
   /** Page label if available (optional) */
   pageLabel?: string;
+
+  // Recovery metadata
+  /** Surrounding text for context-guided fuzzy matching (±100 chars) */
+  textContext?: {
+    before: string;
+    after: string;
+  };
+  /** Original chunk index for chunk-bounded search */
+  originalChunkIndex?: number;
+
+  // Spark references
+  /** Array of spark entity IDs linked to this annotation */
+  sparkRefs?: string[];
 }
 
 export interface UpdateAnnotationInput {
@@ -90,6 +103,7 @@ export class AnnotationOperations {
    */
   async create(input: CreateAnnotationInput): Promise<string> {
     const now = new Date().toISOString();
+    const primaryChunkId = input.chunkIds[0];
 
     const entityId = await this.ecs.createEntity(this.userId, {
       Position: {
@@ -99,6 +113,12 @@ export class AnnotationOperations {
         endOffset: input.endOffset,
         originalText: input.originalText,
         pageLabel: input.pageLabel,
+        textContext: input.textContext,
+        originalChunkIndex: input.originalChunkIndex,
+        // Recovery fields initialized
+        recoveryConfidence: 1.0,
+        recoveryMethod: 'exact',
+        needsReview: false,
       },
       Visual: {
         type: input.type,
@@ -111,12 +131,14 @@ export class AnnotationOperations {
       Temporal: {
         createdAt: now,
         updatedAt: now,
-        lastViewedAt: now,
       },
       ChunkRef: {
-        chunkId: input.chunkId,
-        chunk_id: input.chunkId, // For ECS filtering
-        chunkPosition: input.chunkPosition,
+        chunkId: primaryChunkId,
+        chunk_id: primaryChunkId, // For ECS filtering
+        chunkIds: input.chunkIds, // Full array for multi-chunk support
+        chunkPosition: input.chunkPosition ?? 0,
+        documentId: input.documentId,
+        document_id: input.documentId, // For ECS filtering
       },
     });
 
@@ -130,10 +152,10 @@ export class AnnotationOperations {
    * @returns Array of annotation entities
    */
   async getByDocument(documentId: string): Promise<AnnotationEntity[]> {
-    // Query without component type filter to get ALL components
-    // We filter by document_id which is on the components table
+    // Query for Position component to get only annotations (not sparks)
+    // Position component is unique to annotations
     const entities = await this.ecs.query(
-      [], // Empty array = don't filter by component type
+      ['Position'], // Filter for Position component (annotations only)
       this.userId,
       { document_id: documentId }
     );
@@ -323,6 +345,119 @@ export class AnnotationOperations {
         content.note?.toLowerCase().includes(lowerQuery) ||
         content.tags.some((tag) => tag.toLowerCase().includes(lowerQuery))
       );
+    });
+  }
+
+  /**
+   * Add spark reference to annotation
+   */
+  async addSparkRef(annotationId: string, sparkId: string): Promise<void> {
+    const entity = await this.ecs.getEntity(annotationId, this.userId);
+    if (!entity) throw new Error('Annotation not found');
+
+    const components = this.extractComponents(entity);
+    const contentComponent = components.find(c => c.component_type === 'Content');
+
+    if (contentComponent) {
+      const currentData = contentComponent.data as ContentComponent & { sparkRefs?: string[] };
+      const currentRefs = currentData.sparkRefs || [];
+      if (currentRefs.includes(sparkId)) return;
+
+      await this.ecs.updateComponent(
+        contentComponent.id,
+        {
+          ...contentComponent.data,
+          sparkRefs: [...currentRefs, sparkId],
+        },
+        this.userId
+      );
+    }
+
+    // Update Temporal.updatedAt
+    const temporalComponent = components.find(c => c.component_type === 'Temporal');
+    if (temporalComponent) {
+      await this.ecs.updateComponent(
+        temporalComponent.id,
+        { ...temporalComponent.data, updatedAt: new Date().toISOString() },
+        this.userId
+      );
+    }
+  }
+
+  /**
+   * Update annotation after recovery process
+   */
+  async updateAfterRecovery(
+    entityId: string,
+    chunkId: string,
+    confidence: number,
+    method: string
+  ): Promise<void> {
+    const entity = await this.ecs.getEntity(entityId, this.userId);
+    if (!entity) throw new Error('Annotation not found');
+
+    const components = this.extractComponents(entity);
+    const positionComponent = components.find(c => c.component_type === 'Position');
+
+    if (positionComponent) {
+      await this.ecs.updateComponent(
+        positionComponent.id,
+        {
+          ...positionComponent.data,
+          recoveryConfidence: confidence,
+          recoveryMethod: method,
+          needsReview: confidence >= 0.70 && confidence < 0.85,
+        },
+        this.userId
+      );
+    }
+
+    // Update ChunkRef if chunk changed
+    const chunkRefComponent = components.find(c => c.component_type === 'ChunkRef');
+    if (chunkRefComponent && chunkRefComponent.data.chunkId !== chunkId) {
+      await this.ecs.updateComponent(
+        chunkRefComponent.id,
+        {
+          ...chunkRefComponent.data,
+          chunkId,
+          chunk_id: chunkId,
+          chunkIds: [chunkId], // Update array too
+        },
+        this.userId
+      );
+    }
+
+    // Update Temporal.lastRecoveredAt
+    const temporalComponent = components.find(c => c.component_type === 'Temporal');
+    if (temporalComponent) {
+      await this.ecs.updateComponent(
+        temporalComponent.id,
+        {
+          ...temporalComponent.data,
+          lastRecoveredAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        this.userId
+      );
+    }
+  }
+
+  /**
+   * Mark annotation as orphaned (recovery failed)
+   */
+  async markOrphaned(entityId: string): Promise<void> {
+    await this.updateAfterRecovery(entityId, '', 0, 'lost');
+  }
+
+  /**
+   * Get annotations needing review
+   */
+  async getNeedingReview(documentId: string): Promise<AnnotationEntity[]> {
+    const allAnnotations = await this.getByDocument(documentId);
+
+    return allAnnotations.filter(ann => {
+      const position = this.getComponent<PositionComponent>(ann, 'Position');
+      return position.needsReview === true;
     });
   }
 

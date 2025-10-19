@@ -2,14 +2,10 @@
 
 import { z } from 'zod'
 import { createECS } from '@/lib/ecs'
+import { AnnotationOperations } from '@/lib/ecs/annotations'
 import { getCurrentUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
-import type {
-  StoredAnnotation,
-  AnnotationData,
-  PositionData,
-  SourceData,
-} from '@/types/annotations'
+import type { AnnotationEntity } from '@/types/annotations'
 
 /**
  * Zod schema for annotation creation.
@@ -32,7 +28,7 @@ const CreateAnnotationSchema = z.object({
 })
 
 /**
- * Creates annotation entity with 3 components (annotation, position, source).
+ * Creates annotation entity with 5 components (Position, Visual, Content, Temporal, ChunkRef).
  * @param data - Annotation creation data.
  * @returns Success with entity ID or error.
  */
@@ -49,84 +45,49 @@ export async function createAnnotation(
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Create ECS instance
-    const ecs = createECS()
     const supabase = await createClient()
 
-    // Get primary chunk (first in array, or null for gap regions)
+    // Get chunk index for recovery optimization
     const primaryChunkId = validated.chunkIds.length > 0 ? validated.chunkIds[0] : null
-
-    // ENHANCEMENT: Find chunk index for chunk-bounded recovery
-    // This enables 50-75x performance boost during annotation recovery
-    // Skip if no chunks (gap region annotation)
     let chunkIndex = -1
+
     if (primaryChunkId) {
       const { data: chunks } = await supabase
         .from('chunks')
-        .select('id, chunk_index, start_offset, end_offset')
+        .select('id, chunk_index')
         .eq('document_id', validated.documentId)
         .eq('is_current', true)
         .order('chunk_index')
 
-      chunkIndex = chunks?.findIndex(
-        c => c.id === primaryChunkId
-      ) ?? -1
+      chunkIndex = chunks?.findIndex(c => c.id === primaryChunkId) ?? -1
     }
 
-    // Create entity with 3 components
-    const entityId = await ecs.createEntity(user.id, {
-      annotation: {
-        text: validated.text,
-        note: validated.note,
-        tags: validated.tags || [],
-        color: validated.color,
-        range: {
-          startOffset: validated.startOffset,
-          endOffset: validated.endOffset,
-          chunkIds: validated.chunkIds, // Array of chunk IDs
-        },
-        textContext: validated.textContext,
+    // Use AnnotationOperations wrapper
+    const ecs = createECS()
+    const ops = new AnnotationOperations(ecs, user.id)
+
+    const entityId = await ops.create({
+      documentId: validated.documentId,
+      startOffset: validated.startOffset,
+      endOffset: validated.endOffset,
+      originalText: validated.text,
+      chunkIds: validated.chunkIds.length > 0 ? validated.chunkIds : [''], // Handle gap regions
+      type: 'highlight', // Default type
+      color: validated.color,
+      note: validated.note,
+      tags: validated.tags,
+      textContext: {
+        before: validated.textContext.before,
+        after: validated.textContext.after,
       },
-      position: {
-        chunkIds: validated.chunkIds, // Array of chunk IDs
-        startOffset: validated.startOffset,
-        endOffset: validated.endOffset,
-        confidence: 1.0, // Exact match on creation
-        method: 'exact',
-        textContext: {
-          before: validated.textContext.before,
-          after: validated.textContext.after,
-        },
-        originalChunkIndex: chunkIndex >= 0 ? chunkIndex : undefined, // For chunk-bounded recovery
-      },
-      source: {
-        chunk_id: primaryChunkId || null, // Primary chunk for ECS filtering (null for gap regions)
-        chunk_ids: validated.chunkIds, // All chunks for connection graph queries
-        document_id: validated.documentId,
-      },
+      originalChunkIndex: chunkIndex >= 0 ? chunkIndex : undefined,
     })
 
-    // Update position component with originalChunkIndex in database
-    if (chunkIndex >= 0) {
-      const { data: positionComponent } = await supabase
-        .from('components')
-        .select('id')
-        .eq('entity_id', entityId)
-        .eq('component_type', 'position')
-        .single()
+    console.log(`[Annotations] ✓ Created: ${entityId}`)
 
-      if (positionComponent) {
-        await supabase
-          .from('components')
-          .update({ original_chunk_index: chunkIndex })
-          .eq('id', positionComponent.id)
-      }
-    }
-
-    // No revalidation needed - client handles optimistic updates
     return { success: true, id: entityId }
   } catch (error) {
-    console.error('Failed to create annotation:', error)
+    console.error('[Annotations] Create failed:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -141,46 +102,32 @@ export async function createAnnotation(
  * @param updates.note - Optional note text.
  * @param updates.color - Optional color value.
  * @param updates.tags - Optional tags array.
+ * @param updates.type - Optional visual type.
  * @returns Success or error.
  */
 export async function updateAnnotation(
   entityId: string,
-  updates: { note?: string; color?: string; tags?: string[] }
+  updates: { note?: string; tags?: string[]; color?: string; type?: string }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser()
-    if (!user) {
-      return { success: false, error: 'Not authenticated' }
-    }
+    if (!user) return { success: false, error: 'Not authenticated' }
 
     const ecs = createECS()
+    const ops = new AnnotationOperations(ecs, user.id)
 
-    // Get entity to find annotation component
-    const entity = await ecs.getEntity(entityId, user.id)
-    if (!entity) {
-      return { success: false, error: 'Annotation not found' }
-    }
+    await ops.update(entityId, {
+      note: updates.note,
+      tags: updates.tags,
+      color: updates.color as any, // Type assertion for color enum
+      type: updates.type as any, // Type assertion for type enum
+    })
 
-    const annotationComponent = entity.components?.find(
-      (c) => c.component_type === 'annotation'
-    )
+    console.log(`[Annotations] ✓ Updated: ${entityId}`)
 
-    if (!annotationComponent) {
-      return { success: false, error: 'Annotation component not found' }
-    }
-
-    // Merge updates with existing data
-    const updatedData = {
-      ...annotationComponent.data,
-      ...updates,
-    }
-
-    await ecs.updateComponent(annotationComponent.id, updatedData, user.id)
-
-    // Client handles optimistic updates via Zustand store
     return { success: true }
   } catch (error) {
-    console.error('Failed to update annotation:', error)
+    console.error('[Annotations] Update failed:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -198,19 +145,18 @@ export async function deleteAnnotation(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser()
-    if (!user) {
-      return { success: false, error: 'Not authenticated' }
-    }
+    if (!user) return { success: false, error: 'Not authenticated' }
 
     const ecs = createECS()
-    await ecs.deleteEntity(entityId, user.id)
+    const ops = new AnnotationOperations(ecs, user.id)
 
-    // NOTE: No revalidation - client handles optimistic updates
-    // Component should remove annotation from local state immediately
+    await ops.delete(entityId)
+
+    console.log(`[Annotations] ✓ Deleted: ${entityId}`)
 
     return { success: true }
   } catch (error) {
-    console.error('Failed to delete annotation:', error)
+    console.error('[Annotations] Delete failed:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -221,246 +167,90 @@ export async function deleteAnnotation(
 /**
  * Gets all annotations for a document.
  * @param documentId - Document ID to query.
- * @returns Array of StoredAnnotation entities.
+ * @returns Array of AnnotationEntity objects.
  */
 export async function getAnnotations(
   documentId: string
-): Promise<{ success: boolean; data: StoredAnnotation[]; error?: string }> {
-  try {
-    const user = await getCurrentUser()
-    if (!user) {
-      return { success: false, data: [], error: 'Not authenticated' }
-    }
+): Promise<AnnotationEntity[]> {
+  const user = await getCurrentUser()
+  if (!user) return []
 
-    const ecs = createECS()
+  const ecs = createECS()
+  const ops = new AnnotationOperations(ecs, user.id)
 
-    const entities = await ecs.query(
-      ['annotation', 'position', 'source'],
-      user.id,
-      { document_id: documentId }
-    )
-
-    // Map to StoredAnnotation interface
-    // ComponentData is intentionally 'any' for ECS flexibility, so we type-assert
-    const annotations: StoredAnnotation[] = entities.map((entity) => ({
-      id: entity.id,
-      user_id: entity.user_id,
-      created_at: entity.created_at,
-      updated_at: entity.updated_at,
-      components: {
-        annotation: entity.components?.find((c) => c.component_type === 'annotation')
-          ?.data as unknown as AnnotationData | undefined,
-        position: entity.components?.find((c) => c.component_type === 'position')
-          ?.data as unknown as PositionData | undefined,
-        source: entity.components?.find((c) => c.component_type === 'source')
-          ?.data as unknown as SourceData | undefined,
-      },
-    }))
-
-    return { success: true, data: annotations }
-  } catch (error) {
-    console.error('Failed to get annotations:', error)
-    return {
-      success: false,
-      data: [],
-      error: error instanceof Error ? error.message : 'Unknown error',
-    }
-  }
+  return await ops.getByDocument(documentId)
 }
 
 /**
  * Gets annotations needing review after document reprocessing.
  *
- * Uses optimized query strategy: filters by documentId FIRST at database level,
- * then fetches related components. Includes comprehensive edge case handling.
- *
  * @param documentId - Document ID to query.
- * @returns RecoveryResults categorized by confidence level, or null if no recovered annotations.
+ * @returns RecoveryResults categorized by confidence level.
  */
 export async function getAnnotationsNeedingReview(
   documentId: string
-): Promise<{
-  success: Array<{
-    id: string
-    text: string
-    startOffset: number
-    endOffset: number
-    textContext?: { before: string; after: string }
-    originalChunkIndex?: number
-  }>
-  needsReview: Array<{
-    annotation: {
-      id: string
-      text: string
-      startOffset: number
-      endOffset: number
-      textContext?: { before: string; after: string }
-      originalChunkIndex?: number
-    }
-    suggestedMatch: {
-      text: string
-      startOffset: number
-      endOffset: number
-      confidence: number
-      method: 'exact' | 'context' | 'chunk_bounded' | 'trigram'
-      contextBefore?: string
-      contextAfter?: string
-    }
-  }>
-  lost: Array<{
-    id: string
-    text: string
-    startOffset: number
-    endOffset: number
-    textContext?: { before: string; after: string }
-    originalChunkIndex?: number
-  }>
-}> {
-  try {
-    const supabase = await createClient()
-    const user = await getCurrentUser()
+) {
+  const user = await getCurrentUser()
+  if (!user) return { success: [], needsReview: [], lost: [] }
 
-    if (!user) {
-      return { success: [], needsReview: [], lost: [] }
+  const ecs = createECS()
+  const ops = new AnnotationOperations(ecs, user.id)
+
+  const allAnnotations = await ops.getByDocument(documentId)
+
+  const success: any[] = []
+  const needsReview: any[] = []
+  const lost: any[] = []
+
+  for (const annotation of allAnnotations) {
+    const position = annotation.components.Position
+    const content = annotation.components.Content
+    const visual = annotation.components.Visual
+
+    // Skip annotations missing required components (shouldn't happen with 5-component pattern)
+    if (!position || !content || !visual) {
+      console.warn(`[getAnnotationsNeedingReview] Skipping annotation ${annotation.id} - missing components`)
+      continue
     }
 
-    // OPTIMIZATION: Filter by documentId FIRST at database level
-    // This prevents fetching recovery data for all documents
-    // Note: Must join through entities table since user_id is there, not on components
-    const { data: sources, error: sourcesError } = await supabase
-      .from('components')
-      .select(`
-        entity_id,
-        entities!inner(user_id)
-      `)
-      .eq('component_type', 'source')
-      .eq('data->>document_id', documentId)
-      .eq('entities.user_id', user.id)
+    const confidence = position.recoveryConfidence ?? 0
+    const method = position.recoveryMethod
 
-    if (sourcesError) {
-      console.error('[getAnnotationsNeedingReview] Source query failed:', sourcesError)
-      throw sourcesError
+    if (method === 'lost' || confidence === 0) {
+      lost.push({
+        entityId: annotation.id,
+        originalText: position.originalText,
+        note: content.note,
+        color: visual.color,
+        confidence: 0,
+        method: 'lost',
+      })
+    } else if (position.needsReview) {
+      needsReview.push({
+        entityId: annotation.id,
+        originalText: position.originalText,
+        note: content.note,
+        color: visual.color,
+        confidence,
+        method,
+        suggestedMatch: {
+          text: position.originalText,
+          context: position.textContext,
+        },
+      })
+    } else {
+      success.push({
+        entityId: annotation.id,
+        text: position.originalText,
+        note: content.note,
+        color: visual.color,
+        confidence,
+        method,
+      })
     }
-
-    const entityIds = sources?.map((s: { entity_id: string }) => s.entity_id) || []
-
-    if (entityIds.length === 0) {
-      // No annotations for this document
-      return { success: [], needsReview: [], lost: [] }
-    }
-
-    // Get position components for ONLY those entities
-    const { data: positions, error: positionsError } = await supabase
-      .from('components')
-      .select('id, entity_id, data, recovery_confidence, recovery_method, needs_review, original_chunk_index')
-      .eq('component_type', 'position')
-      .in('entity_id', entityIds)
-      .not('recovery_method', 'is', null)
-
-    if (positionsError) {
-      console.error('[getAnnotationsNeedingReview] Position query failed:', positionsError)
-      throw positionsError
-    }
-
-    // No recovered annotations
-    if (!positions || positions.length === 0) {
-      return { success: [], needsReview: [], lost: [] }
-    }
-
-    // Get annotation components for same entities
-    const { data: annotations, error: annotationsError } = await supabase
-      .from('components')
-      .select('entity_id, data')
-      .eq('component_type', 'annotation')
-      .in('entity_id', entityIds)
-
-    if (annotationsError) {
-      console.error('[getAnnotationsNeedingReview] Annotation query failed:', annotationsError)
-      throw annotationsError
-    }
-
-    // EDGE CASE HANDLING: Use Maps for defensive lookup
-    const positionMap = new Map(
-      positions?.map((p: any) => [p.entity_id, p]) || []
-    )
-    const annotationMap = new Map(
-      annotations?.map((a: any) => [a.entity_id, a]) || []
-    )
-
-    const success: any[] = []
-    const needsReview: any[] = []
-    const lost: any[] = []
-
-    for (const entityId of entityIds) {
-      const position = positionMap.get(entityId)
-      const annotation = annotationMap.get(entityId)
-
-      // EDGE CASE #1: Missing components (annotation without position, or vice versa)
-      if (!position || !annotation) {
-        console.warn(
-          `[getAnnotationsNeedingReview] Missing components for entity ${entityId}:`,
-          { hasPosition: !!position, hasAnnotation: !!annotation }
-        )
-        continue
-      }
-
-      // Skip if no recovery metadata (not a recovered annotation)
-      if (!position.recovery_method) {
-        continue
-      }
-
-      // Map to Annotation interface with null safety
-      const annotationObj = {
-        id: entityId,
-        text: annotation.data?.text || '',
-        startOffset: position.data?.startOffset || 0,
-        endOffset: position.data?.endOffset || 0,
-        textContext: position.data?.textContext
-          ? {
-              before: position.data.textContext.before || '',
-              after: position.data.textContext.after || '',
-            }
-          : undefined,
-        originalChunkIndex: position.original_chunk_index,
-      }
-
-      // EDGE CASE #2: Lost annotations with null confidence
-      if (
-        position.recovery_method === 'lost' ||
-        position.recovery_confidence === 0 ||
-        position.recovery_confidence === null
-      ) {
-        lost.push(annotationObj)
-      } else if (position.recovery_confidence >= 0.85 && !position.needs_review) {
-        // High confidence - auto-recovered
-        success.push(annotationObj)
-      } else if (position.needs_review) {
-        // Medium confidence - needs manual review
-        const suggestedMatch = {
-          text: annotation.data?.text || '',
-          startOffset: position.data?.startOffset || 0,
-          endOffset: position.data?.endOffset || 0,
-          confidence: position.recovery_confidence || 0,
-          method: position.recovery_method as 'exact' | 'context' | 'chunk_bounded' | 'trigram',
-          // EDGE CASE #3: Undefined text context - provide fallbacks
-          contextBefore: position.data?.textContext?.before || '',
-          contextAfter: position.data?.textContext?.after || '',
-        }
-
-        needsReview.push({
-          annotation: annotationObj,
-          suggestedMatch,
-        })
-      }
-    }
-
-    return { success, needsReview, lost }
-  } catch (error) {
-    console.error('[getAnnotationsNeedingReview] Failed:', error)
-    // ERROR BOUNDARY: Return empty results instead of throwing
-    // This prevents the entire reader page from crashing
-    return { success: [], needsReview: [], lost: [] }
   }
+
+  return { success, needsReview, lost }
 }
 
 /**
@@ -550,44 +340,46 @@ export async function getAnnotationsByDocument(
  * Used for lazy loading annotation content in spark panel.
  *
  * @param ids - Array of annotation entity IDs
- * @returns Array of StoredAnnotation objects
+ * @returns Array of AnnotationEntity objects
  */
 export async function getAnnotationsByIds(
   ids: string[]
-): Promise<StoredAnnotation[]> {
+): Promise<AnnotationEntity[]> {
   try {
     const user = await getCurrentUser()
     if (!user) return []
 
     const ecs = createECS()
-
-    const annotations: StoredAnnotation[] = []
+    const annotations: AnnotationEntity[] = []
 
     for (const entityId of ids) {
       const entity = await ecs.getEntity(entityId, user.id)
       if (!entity) continue
 
-      // Get all components for this entity
       const components = entity.components || []
 
-      // Annotations use lowercase component names: annotation, position, source
-      const annotationComp = components.find(c => c.component_type === 'annotation')
-      const positionComp = components.find(c => c.component_type === 'position')
-      const sourceComp = components.find(c => c.component_type === 'source')
+      // Use PascalCase component names
+      const position = components.find(c => c.component_type === 'Position')
+      const visual = components.find(c => c.component_type === 'Visual')
+      const content = components.find(c => c.component_type === 'Content')
+      const temporal = components.find(c => c.component_type === 'Temporal')
+      const chunkRef = components.find(c => c.component_type === 'ChunkRef')
 
-      // Only include complete annotations (all 3 components required)
-      if (annotationComp && positionComp && sourceComp) {
+      // Only include complete annotations (all 5 components)
+      if (position && visual && content && temporal && chunkRef) {
         annotations.push({
           id: entityId,
           user_id: user.id,
           created_at: entity.created_at,
           updated_at: entity.updated_at,
           components: {
-            annotation: annotationComp.data,
-            position: positionComp.data,
-            source: sourceComp.data,
+            Position: position.data as any,
+            Visual: visual.data as any,
+            Content: content.data as any,
+            Temporal: temporal.data as any,
+            ChunkRef: chunkRef.data as any,
           }
-        })
+        } as AnnotationEntity)
       }
     }
 

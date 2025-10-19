@@ -419,9 +419,10 @@ export function QuickSparkCapture({
                     <span>{loadedAnnotations.length} linked annotation{loadedAnnotations.length !== 1 ? 's' : ''}</span>
                   </div>
                   {loadedAnnotations.map((annotation) => {
-                    // Annotations use lowercase component names
-                    const annotationData = annotation.components.annotation
-                    const position = annotation.components.position
+                    // Annotations use PascalCase component names
+                    const positionData = annotation.components.Position
+                    const contentData = annotation.components.Content
+                    const visualData = annotation.components.Visual
 
                     // Color mapping for border
                     const colorMap: Record<string, string> = {
@@ -434,8 +435,8 @@ export function QuickSparkCapture({
                       pink: '#ec4899',
                     }
 
-                    // Get color from annotation component (color is stored there)
-                    const borderColor = annotationData?.color ? (colorMap[annotationData.color] || '#6b7280') : '#6b7280'
+                    // Get color from Visual component
+                    const borderColor = visualData?.color ? (colorMap[visualData.color] || '#6b7280') : '#6b7280'
 
                     return (
                       <div
@@ -444,11 +445,11 @@ export function QuickSparkCapture({
                         style={{ borderLeftWidth: '3px', borderLeftColor: borderColor }}
                       >
                         <p className="pr-6 text-xs italic mb-1">
-                          &ldquo;{annotationData?.text?.slice(0, 100) || annotationData?.note?.slice(0, 100) || 'No text'}{(annotationData?.text?.length || annotationData?.note?.length || 0) > 100 ? '...' : ''}&rdquo;
+                          &ldquo;{positionData?.originalText?.slice(0, 100) || contentData?.note?.slice(0, 100) || 'No text'}{(positionData?.originalText?.length || contentData?.note?.length || 0) > 100 ? '...' : ''}&rdquo;
                         </p>
-                        {annotationData?.tags && annotationData.tags.length > 0 && (
+                        {contentData?.tags && contentData.tags.length > 0 && (
                           <div className="flex gap-1 flex-wrap">
-                            {annotationData.tags.slice(0, 3).map((tag, i) => (
+                            {contentData.tags.slice(0, 3).map((tag, i) => (
                               <Badge key={i} variant="secondary" className="h-4 text-xs px-1.5">
                                 #{tag}
                               </Badge>

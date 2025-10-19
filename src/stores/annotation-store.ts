@@ -85,8 +85,8 @@ export const useAnnotationStore = create<AnnotationState>((set) => ({
     set((state) => {
       console.log('[AnnotationStore] updateAnnotation called:', {
         annotationId: annotationId.substring(0, 8),
-        newColor: updates.components?.annotation?.color,
-        existingAnnotation: state.annotations[documentId]?.find(a => a.id === annotationId)?.components.annotation?.color
+        newColor: updates.components?.Visual?.color,
+        existingAnnotation: state.annotations[documentId]?.find(a => a.id === annotationId)?.components.Visual?.color
       })
 
       return {

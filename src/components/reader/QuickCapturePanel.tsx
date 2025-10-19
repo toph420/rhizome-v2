@@ -7,10 +7,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, X, Tag, Palette, Layers, GripVertical, Zap } from 'lucide-react'
-import { createAnnotation, updateAnnotation } from '@/app/actions/annotations'
+import { Loader2, X, Tag, Palette, Layers, GripVertical, Zap, Trash2 } from 'lucide-react'
+import { createAnnotation, updateAnnotation, deleteAnnotation } from '@/app/actions/annotations'
 import { extractContext } from '@/lib/annotations/text-range'
-import type { TextSelection, Chunk, OptimisticAnnotation, StoredAnnotation } from '@/types/annotations'
+import type { TextSelection, Chunk, OptimisticAnnotation, AnnotationEntity } from '@/types/annotations'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
 
@@ -21,8 +21,8 @@ interface QuickCapturePanelProps {
   chunks: Chunk[]
   markdown: string
   onAnnotationCreated?: (annotation: OptimisticAnnotation) => void
-  onAnnotationUpdated?: (annotation: StoredAnnotation) => void
-  existingAnnotation?: StoredAnnotation | null
+  onAnnotationUpdated?: (annotation: AnnotationEntity) => void
+  existingAnnotation?: AnnotationEntity | null
   mode?: 'create' | 'edit'
 }
 
@@ -66,18 +66,41 @@ export function QuickCapturePanel({
   const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
 
   // Initialize state from existingAnnotation in edit mode
-  const [note, setNote] = useState(existingAnnotation?.components.annotation?.note || '')
+  const [note, setNote] = useState(existingAnnotation?.components.Content?.note || '')
   const [tagInput, setTagInput] = useState('')
-  const [tags, setTags] = useState<string[]>(existingAnnotation?.components.annotation?.tags || [])
+  const [tags, setTags] = useState<string[]>(existingAnnotation?.components.Content?.tags || [])
   const [savingColor, setSavingColor] = useState<HighlightColor | null>(null)
   const [selectedColor, setSelectedColor] = useState<HighlightColor>(
-    existingAnnotation?.components.annotation?.color || 'yellow'
+    existingAnnotation?.components.Visual?.color || 'yellow'
   )
   const [isDragging, setIsDragging] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const panelRef = useRef<HTMLDivElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
+
+  // Handle delete
+  const handleDelete = useCallback(async () => {
+    if (!existingAnnotation?.id) return
+    if (!confirm('Delete this annotation?')) return
+
+    setDeleting(true)
+    try {
+      const result = await deleteAnnotation(existingAnnotation.id)
+      if (result.success) {
+        toast.success('Annotation deleted')
+        onClose()
+      } else {
+        toast.error(result.error || 'Failed to delete annotation')
+        setDeleting(false)
+      }
+    } catch (error) {
+      console.error('[QuickCapturePanel] Delete failed:', error)
+      toast.error('Failed to delete annotation')
+      setDeleting(false)
+    }
+  }, [existingAnnotation?.id, onClose])
   const dragHandleRef = useRef<HTMLDivElement>(null)
 
   // Derived state
@@ -127,15 +150,18 @@ export function QuickCapturePanel({
           if (result.success) {
             // Update serverAnnotations via callback
             if (onAnnotationUpdated) {
-              const updatedAnnotation: StoredAnnotation = {
+              const updatedAnnotation: AnnotationEntity = {
                 ...existingAnnotation,
                 components: {
                   ...existingAnnotation.components,
-                  annotation: {
-                    ...existingAnnotation.components.annotation!,
-                    color,
+                  Content: {
+                    ...existingAnnotation.components.Content!,
                     note: note.trim() || undefined,
-                    tags: tags.length > 0 ? tags : undefined,
+                    tags: tags.length > 0 ? tags : [],
+                  },
+                  Visual: {
+                    ...existingAnnotation.components.Visual!,
+                    color,
                   },
                 },
               }
@@ -537,16 +563,38 @@ export function QuickCapturePanel({
             Click color to save • Letter key to save & close • ⌘↵ to finish
           </p>
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={saving || deleting}>
               Cancel
             </Button>
+            {/* Delete button - only in edit mode */}
+            {mode === 'edit' && existingAnnotation && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={saving || deleting}
+                className="gap-1.5"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </>
+                )}
+              </Button>
+            )}
             {/* NEW - Phase 6b: Link to Spark button (only show when spark panel is open) */}
             {sparkCaptureOpen && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleLinkToSpark}
-                disabled={saving || (mode === 'create') || (existingAnnotation?.id && linkedAnnotationIds.includes(existingAnnotation.id))}
+                disabled={saving || mode === 'create' || (!!existingAnnotation?.id && linkedAnnotationIds.includes(existingAnnotation.id))}
                 className="gap-1.5"
               >
                 <Zap className="h-3.5 w-3.5" />

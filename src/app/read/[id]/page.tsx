@@ -177,8 +177,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     }
     
     // Query annotations for this document
-    const annotationsResult = await getAnnotations(id)
-    const annotations = annotationsResult.success ? annotationsResult.data : []
+    const annotations = await getAnnotations(id)
 
     // Fetch review results for annotation recovery with error handling
     let reviewResults = null

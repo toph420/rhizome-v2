@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { ChevronRight, ChevronDown } from 'lucide-react'
-import type { StoredAnnotation } from '@/types/annotations'
+import type { AnnotationEntity } from '@/types/annotations'
 
 interface AnnotationsDebugPanelProps {
-  annotations: StoredAnnotation[]
+  annotations: AnnotationEntity[]
 }
 
 /**
@@ -64,26 +64,26 @@ export function AnnotationsDebugPanel({ annotations }: AnnotationsDebugPanelProp
                 <div className="flex items-center justify-between">
                   <Badge
                     variant="secondary"
-                    className={`bg-${ann.components.annotation?.color}-200`}
+                    className={`bg-${ann.components.Visual?.color}-200`}
                   >
-                    {ann.components.annotation?.color}
+                    {ann.components.Visual?.color}
                   </Badge>
                   <span className="text-muted-foreground font-mono">
-                    {ann.components.annotation?.range.startOffset}-
-                    {ann.components.annotation?.range.endOffset}
+                    {ann.components.Position?.startOffset}-
+                    {ann.components.Position?.endOffset}
                   </span>
                 </div>
                 <div className="line-clamp-2 text-muted-foreground">
-                  &ldquo;{ann.components.annotation?.text}&rdquo;
+                  &ldquo;{ann.components.Position?.originalText}&rdquo;
                 </div>
-                {ann.components.annotation?.note && (
+                {ann.components.Content?.note && (
                   <div className="text-muted-foreground italic">
-                    Note: {ann.components.annotation.note}
+                    Note: {ann.components.Content.note}
                   </div>
                 )}
-                {ann.components.annotation?.tags && ann.components.annotation.tags.length > 0 && (
+                {ann.components.Content?.tags && ann.components.Content.tags.length > 0 && (
                   <div className="flex gap-1 flex-wrap">
-                    {ann.components.annotation.tags.map((tag) => (
+                    {ann.components.Content.tags.map((tag) => (
                       <Badge key={tag} variant="outline" className="text-xs">
                         {tag}
                       </Badge>

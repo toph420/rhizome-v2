@@ -243,7 +243,9 @@
     background: currentColor;
     opacity: 0.3;
     transition: all 0.2s ease;
-    height:20px
+    height:20px;
+    user-select: none;
+    pointer-events: none;
   }
 
   [data-annotation-start]:hover::before {
@@ -267,6 +269,8 @@
     background: currentColor;
     opacity: 0.3;
     transition: all 0.2s ease;
+    user-select: none;
+    pointer-events: none;
   }
 
   [data-annotation-end]:hover::after {

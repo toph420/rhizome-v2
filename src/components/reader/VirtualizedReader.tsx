@@ -12,10 +12,10 @@ import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
 import { useUIStore } from '@/stores/ui-store'
 import { getAnnotations } from '@/app/actions/annotations'
-import type { StoredAnnotation, OptimisticAnnotation, TextSelection } from '@/types/annotations'
+import type { AnnotationEntity, OptimisticAnnotation, TextSelection } from '@/types/annotations'
 
 // Constant empty array to prevent infinite loops from new references
-const EMPTY_ANNOTATIONS: StoredAnnotation[] = []
+const EMPTY_ANNOTATIONS: AnnotationEntity[] = []
 
 /**
  * Virtualized document reader with annotation support.
@@ -58,7 +58,7 @@ export function VirtualizedReader() {
   }, [])
 
   // Track annotation being edited (if any)
-  const [editingAnnotation, setEditingAnnotation] = useState<StoredAnnotation | null>(null)
+  const [editingAnnotation, setEditingAnnotation] = useState<AnnotationEntity | null>(null)
 
   // Text selection tracking for new annotations
   const { selection, clearSelection } = useTextSelection({
@@ -95,12 +95,8 @@ export function VirtualizedReader() {
 
     async function loadAnnotations() {
       try {
-        const result = await getAnnotations(documentId!)
-        if (result.success) {
-          setAnnotations(documentId!, result.data)
-        } else {
-          console.error('[VirtualizedReader] Failed to load annotations:', result.error)
-        }
+        const annotations = await getAnnotations(documentId!)
+        setAnnotations(documentId!, annotations)
       } catch (error) {
         console.error('[VirtualizedReader] Error loading annotations:', error)
       }
@@ -147,12 +143,12 @@ export function VirtualizedReader() {
     // IMPORTANT: Read offsets from position component (has recovered offsets after reprocessing)
     // annotation.range has ORIGINAL offsets, position has CURRENT/RECOVERED offsets
     const storeAnnotationsSimple = annotations
-      .filter(ann => ann.components.position && ann.components.annotation)
+      .filter(ann => ann.components.Position && ann.components.Visual)
       .map(ann => ({
         id: ann.id,
-        startOffset: ann.components.position!.startOffset,
-        endOffset: ann.components.position!.endOffset,
-        color: ann.components.annotation!.color,
+        startOffset: ann.components.Position!.startOffset,
+        endOffset: ann.components.Position!.endOffset,
+        color: ann.components.Visual!.color,
       }))
 
     // Add optimistic annotations
@@ -271,33 +267,43 @@ export function VirtualizedReader() {
         })
 
         // Add to Zustand store for permanent storage and editing
-        const storedAnnotation: StoredAnnotation = {
+        const storedAnnotation: AnnotationEntity = {
           id: annotation.id,
           user_id: '',
           created_at: annotation.created_at,
           updated_at: annotation.created_at,
           components: {
-            annotation: {
-              text: annotation.text,
-              note: annotation.note,
-              tags: annotation.tags || [],
-              color: annotation.color,
-              range: {
-                startOffset: annotation.start_offset,
-                endOffset: annotation.end_offset,
-                chunkIds: annotation.chunk_ids,
-              },
-              textContext: annotation.text_context,
-            },
-            position: {
+            Position: {
+              documentId: annotation.document_id,
+              document_id: annotation.document_id,
               startOffset: annotation.start_offset,
               endOffset: annotation.end_offset,
-              chunkIds: annotation.chunk_ids,
-              confidence: 1.0,
-              method: 'exact',
-              textContext: annotation.text_context
+              originalText: annotation.text,
+              textContext: annotation.text_context,
+              recoveryConfidence: 1.0,
+              recoveryMethod: 'exact',
+              needsReview: false,
             },
-            source: undefined,
+            Visual: {
+              type: 'highlight',
+              color: annotation.color,
+            },
+            Content: {
+              note: annotation.note,
+              tags: annotation.tags || [],
+            },
+            Temporal: {
+              createdAt: annotation.created_at,
+              updatedAt: annotation.created_at,
+            },
+            ChunkRef: {
+              chunkId: annotation.chunk_ids[0],
+              chunk_id: annotation.chunk_ids[0],
+              chunkIds: annotation.chunk_ids,
+              chunkPosition: 0,
+              documentId: annotation.document_id,
+              document_id: annotation.document_id,
+            },
           },
         }
 
@@ -312,8 +318,9 @@ export function VirtualizedReader() {
   }, [documentId, addAnnotation])
 
   // Handle annotation updates (for editing existing annotations)
-  const handleAnnotationUpdated = useCallback((annotation: StoredAnnotation) => {
+  const handleAnnotationUpdated = useCallback((annotation: AnnotationEntity) => {
     // Update the store
+    if (!documentId) return
     updateStoreAnnotation(documentId, annotation.id, annotation)
 
     // Remove from optimistic annotations (if present) to prevent stale override
@@ -337,7 +344,7 @@ export function VirtualizedReader() {
 
     // Find annotation in store
     const annotation = annotations.find(a => a.id === annotationId)
-    if (!annotation || !annotation.components.annotation) {
+    if (!annotation || !annotation.components.Position) {
       toast.error('Annotation not found', {
         description: 'This annotation may have been deleted',
         duration: 3000,
@@ -350,8 +357,12 @@ export function VirtualizedReader() {
 
     // Construct TextSelection from annotation data
     const textSelection: TextSelection = {
-      text: annotation.components.annotation.text,
-      range: annotation.components.annotation.range,
+      text: annotation.components.Position.originalText,
+      range: {
+        startOffset: annotation.components.Position.startOffset,
+        endOffset: annotation.components.Position.endOffset,
+        chunkIds: annotation.components.ChunkRef?.chunkIds || [],
+      },
       rect
     }
 

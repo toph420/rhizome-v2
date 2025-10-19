@@ -37,11 +37,11 @@ export async function recoverAnnotations(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  // First, get all entity_ids for this document (source components)
+  // First, get all entity_ids for this document (ChunkRef components)
   const { data: sourceComponents } = await supabase
     .from('components')
     .select('entity_id')
-    .eq('component_type', 'source')
+    .eq('component_type', 'ChunkRef')
     .eq('data->>document_id', documentId)
 
   const entityIds = sourceComponents?.map(c => c.entity_id) || []
@@ -51,11 +51,11 @@ export async function recoverAnnotations(
     return { success: [], needsReview: [], lost: [] }
   }
 
-  // Fetch both position and annotation components for recovery
+  // Fetch both Position and Content components for recovery
   const { data: positionComponents, error: posError } = await supabase
     .from('components')
     .select('id, entity_id, data, original_chunk_index')
-    .eq('component_type', 'position')
+    .eq('component_type', 'Position')
     .in('entity_id', entityIds)
 
   if (posError) {
@@ -67,20 +67,20 @@ export async function recoverAnnotations(
     return { success: [], needsReview: [], lost: [] }
   }
 
-  // Fetch annotation components (contain the text)
-  const { data: annotationComponents, error: annError } = await supabase
+  // Fetch Content components (contain the note)
+  const { data: contentComponents, error: annError } = await supabase
     .from('components')
     .select('entity_id, data')
-    .eq('component_type', 'annotation')
+    .eq('component_type', 'Content')
     .in('entity_id', entityIds)
 
   if (annError) {
-    throw new Error(`Failed to fetch annotation components: ${annError.message}`)
+    throw new Error(`Failed to fetch content components: ${annError.message}`)
   }
 
-  // Create a map of entity_id -> annotation text
-  const annotationTextMap = new Map(
-    annotationComponents?.map(c => [c.entity_id, c.data.text]) || []
+  // Create a map of entity_id -> note (from Content component)
+  const contentMap = new Map(
+    contentComponents?.map(c => [c.entity_id, c.data.note]) || []
   )
 
   console.log(`[RecoverAnnotations] Recovering ${positionComponents.length} annotations...`)
@@ -91,19 +91,19 @@ export async function recoverAnnotations(
 
   // Process each annotation
   for (const component of positionComponents) {
-    const annotationText = annotationTextMap.get(component.entity_id)
+    const originalText = component.data.originalText
 
-    if (!annotationText) {
-      console.warn(`  ⚠️  No annotation text for entity ${component.entity_id}, skipping`)
+    if (!originalText) {
+      console.warn(`  ⚠️  No originalText for entity ${component.entity_id}, skipping`)
       continue
     }
 
     const annotation: Annotation = {
       id: component.entity_id,
-      text: annotationText, // From annotation component
+      text: originalText, // From Position.originalText
       startOffset: component.data.startOffset,
       endOffset: component.data.endOffset,
-      textContext: component.data.textContext, // From position component (ECS pattern)
+      textContext: component.data.textContext, // From Position component
       originalChunkIndex: component.original_chunk_index
     }
 
@@ -135,22 +135,20 @@ export async function recoverAnnotations(
       // Extract matched text from new markdown
       const matchedText = newMarkdown.substring(match.startOffset, match.endOffset)
 
-      // Update both position and annotation components
-      await Promise.all([
-        updateAnnotationPosition(supabase, component.id, {
-          startOffset: match.startOffset,
-          endOffset: match.endOffset,
-          recoveryMethod: match.method,
-          recoveryConfidence: match.confidence,
-          needsReview: false,
-          textContext: {
-            before: match.contextBefore || '',
-            after: match.contextAfter || ''
-          },
-          newChunkIndex
-        }, newChunks),
-        updateAnnotationText(supabase, component.entity_id, matchedText)
-      ])
+      // Update Position component with new offsets and recovery metadata
+      await updateAnnotationPosition(supabase, component.id, {
+        startOffset: match.startOffset,
+        endOffset: match.endOffset,
+        recoveryMethod: match.method,
+        recoveryConfidence: match.confidence,
+        needsReview: false,
+        textContext: {
+          before: match.contextBefore || '',
+          after: match.contextAfter || ''
+        },
+        newChunkIndex,
+        matchedText
+      }, newChunks)
     } else {
       // Medium confidence (0.75-0.85) - needs review
       console.log(`  ⚠️  Needs review (${(match.confidence * 100).toFixed(1)}%): "${annotation.text.slice(0, 50)}..."`)
@@ -163,22 +161,20 @@ export async function recoverAnnotations(
       // Extract matched text from new markdown
       const matchedText = newMarkdown.substring(match.startOffset, match.endOffset)
 
-      // Update both position and annotation components
-      await Promise.all([
-        updateAnnotationPosition(supabase, component.id, {
-          startOffset: match.startOffset,
-          endOffset: match.endOffset,
-          recoveryMethod: match.method,
-          recoveryConfidence: match.confidence,
-          needsReview: true,
-          textContext: {
-            before: match.contextBefore || '',
-            after: match.contextAfter || ''
-          },
-          newChunkIndex
-        }, newChunks),
-        updateAnnotationText(supabase, component.entity_id, matchedText)
-      ])
+      // Update Position component with new offsets and recovery metadata
+      await updateAnnotationPosition(supabase, component.id, {
+        startOffset: match.startOffset,
+        endOffset: match.endOffset,
+        recoveryMethod: match.method,
+        recoveryConfidence: match.confidence,
+        needsReview: true,
+        textContext: {
+          before: match.contextBefore || '',
+          after: match.contextAfter || ''
+        },
+        newChunkIndex,
+        matchedText
+      }, newChunks)
     }
   }
 
@@ -192,7 +188,7 @@ export async function recoverAnnotations(
 }
 
 /**
- * Update annotation position component after recovery
+ * Update Position component after recovery
  * Uses read-merge-write pattern for JSONB data
  *
  * @param supabase - Supabase client
@@ -211,27 +207,34 @@ async function updateAnnotationPosition(
     needsReview: boolean
     textContext?: { before: string; after: string }
     newChunkIndex?: number
+    matchedText?: string
   },
   newChunks: Array<{ id: string; start_offset: number; end_offset: number }>
 ): Promise<void> {
   // Fetch current data for merging
-  const { data: component } = await supabase
+  const result: any = await supabase
     .from('components')
     .select('data')
     .eq('id', componentId)
     .single()
 
-  if (!component) {
-    console.error(`Component ${componentId} not found`)
+  if (result.error || !result.data) {
+    console.error(`Component ${componentId} not found:`, result.error?.message)
     return
   }
 
-  // Merge updates into existing data
+  const currentData: any = result.data.data
+
+  // Merge updates into existing data (includes recoveryConfidence, recoveryMethod, needsReview)
   const updatedData = {
-    ...component.data,
-    startOffset: updates.startOffset ?? component.data.startOffset,
-    endOffset: updates.endOffset ?? component.data.endOffset,
-    textContext: updates.textContext ?? component.data.textContext
+    ...currentData,
+    startOffset: updates.startOffset ?? currentData.startOffset,
+    endOffset: updates.endOffset ?? currentData.endOffset,
+    textContext: updates.textContext ?? currentData.textContext,
+    originalText: updates.matchedText ?? currentData.originalText, // Update recovered text
+    recoveryConfidence: updates.recoveryConfidence,
+    recoveryMethod: updates.recoveryMethod,
+    needsReview: updates.needsReview,
   }
 
   // Calculate overlapping chunks (for multi-chunk annotations)
@@ -241,59 +244,23 @@ async function updateAnnotationPosition(
       )
     : []
 
-  // Update all fields in single query
-  const { error } = await supabase
-    .from('components')
-    .update({
-      data: updatedData,
-      recovery_method: updates.recoveryMethod,
-      recovery_confidence: updates.recoveryConfidence,
-      needs_review: updates.needsReview,
-      original_chunk_index: updates.newChunkIndex !== undefined && updates.newChunkIndex >= 0
-        ? updates.newChunkIndex
-        : null,
-      chunk_ids: overlappingChunks.length > 0 ? overlappingChunks.map(c => c.id) : null
-    })
-    .eq('id', componentId)
+  // Update Position component data
+  const updatePayload = {
+    data: updatedData,
+    original_chunk_index: updates.newChunkIndex !== undefined && updates.newChunkIndex >= 0
+      ? updates.newChunkIndex
+      : null,
+    chunk_ids: overlappingChunks.length > 0 ? overlappingChunks.map(c => c.id) : null
+  }
 
-  if (error) {
-    console.error(`Failed to update annotation position: ${error.message}`)
+  const updateResult: any = await (supabase
+    .from('components')
+    .update(updatePayload as any)
+    .eq('id', componentId))
+
+  if (updateResult.error) {
+    console.error(`Failed to update Position component: ${updateResult.error.message}`)
   }
 }
 
-/**
- * Updates annotation component's text with recovered text
- */
-async function updateAnnotationText(
-  supabase: ReturnType<typeof createClient>,
-  entityId: string,
-  newText: string
-): Promise<void> {
-  // Fetch annotation component for this entity
-  const { data: annotationComponent } = await supabase
-    .from('components')
-    .select('id, data')
-    .eq('entity_id', entityId)
-    .eq('component_type', 'annotation')
-    .single()
-
-  if (!annotationComponent) {
-    console.error(`Annotation component not found for entity ${entityId}`)
-    return
-  }
-
-  // Update annotation text
-  const updatedData = {
-    ...annotationComponent.data,
-    text: newText
-  }
-
-  const { error } = await supabase
-    .from('components')
-    .update({ data: updatedData })
-    .eq('id', annotationComponent.id)
-
-  if (error) {
-    console.error(`Failed to update annotation text: ${error.message}`)
-  }
-}
+// Removed updateAnnotationText - originalText now stored in Position component
