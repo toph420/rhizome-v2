@@ -274,6 +274,27 @@
     opacity: 0.6;
     cursor: ew-resize;
   }
+
+  /* ============================================
+     Spark Capture Mode Selection Indicator
+     ============================================ */
+
+  /* When spark capture panel is open, selected text has distinct visual */
+  body.spark-capture-active ::selection {
+    background-color: rgba(250, 204, 21, 0.4); /* Yellow-400 with opacity */
+    color: inherit;
+  }
+
+  body.spark-capture-active.dark ::selection {
+    background-color: rgba(250, 204, 21, 0.25);
+    color: inherit;
+  }
+
+  /* REMOVED: Animation on ::selection was causing selection expansion bug
+   * Animating ::selection is non-standard and causes browsers to
+   * continuously re-render selections, leading to normalization/expansion
+   * issues. Static color indication is sufficient.
+   */
 }
 
 @layer utilities {

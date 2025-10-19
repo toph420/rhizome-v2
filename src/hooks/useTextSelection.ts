@@ -89,6 +89,7 @@ export function useTextSelection(
   const [selection, setSelection] = useState<TextSelectionState | null>(null)
   const [isSelecting, setIsSelecting] = useState(false)
   const debounceTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
+  const preservedSelectionRef = useRef<{ startOffset: number; endOffset: number; text: string } | null>(null)
 
   /**
    * Process current selection and update state.
@@ -117,9 +118,10 @@ export function useTextSelection(
 
       // Calculate markdown offsets using multi-block approach
       // This handles selections spanning multiple blocks independently
+      // Word snapping trims leading/trailing whitespace for clean selections
       let offsetResult
       try {
-        offsetResult = calculateMultiBlockOffsets(range, true)
+        offsetResult = calculateMultiBlockOffsets(range, true) // Re-enabled snapping
       } catch (error) {
         console.warn('[useTextSelection] Selection not within valid blocks:', error)
         setSelection(null)
