@@ -1,12 +1,14 @@
 # ECS Implementation Guide
 
-**Last Updated**: 2025-10-18
+**Last Updated**: 2025-10-19
 
 **Implementation Status**:
 - ✅ **Core ECS System**: Fully implemented with factory pattern
-- ✅ **Annotations**: Complete 3-component pattern (annotation + position + source) with wrapper class
-- ✅ **Sparks**: Complete 2-component pattern (spark + source) - **NEEDS WRAPPER CLASS** for consistency
+- ✅ **Annotations**: Complete **5-component pattern** (Position + Visual + Content + Temporal + ChunkRef) with AnnotationOperations wrapper class
+- ✅ **Sparks**: Complete 4-component pattern (Spark + Content + Temporal + ChunkRef) - **NEEDS WRAPPER CLASS** for consistency
 - 📋 **Flashcards/Study**: UI placeholder only, backend not implemented
+
+**BREAKING CHANGE** (2025-10-19): Annotation system migrated from 3-component lowercase (annotation, position, source) to 5-component PascalCase (Position, Visual, Content, Temporal, ChunkRef). See `docs/ANNOTATIONS_SYSTEM.md` for details.
 
 ## Overview
 
@@ -112,16 +114,18 @@ export async function create{EntityName}(input: Create{EntityName}Input) {
 
 ### Current State
 
-**✅ Annotations (CORRECT PATTERN):**
+**✅ Annotations (CORRECT PATTERN - 5-component):**
 - Has `src/lib/ecs/annotations.ts` with `AnnotationOperations` class
-- Server actions use the wrapper
-- Clean, type-safe API
+- Uses 5-component structure: Position, Visual, Content, Temporal, ChunkRef
+- Server actions use the wrapper (`src/app/actions/annotations.ts`)
+- Clean, type-safe API with full recovery system
+- See `docs/ANNOTATIONS_SYSTEM.md` for complete documentation
 
 **❌ Sparks (INCORRECT - NEEDS FIX):**
 - Missing `src/lib/ecs/sparks.ts`
 - Server actions use raw ECS calls
-- Inconsistent with annotations pattern
-- **TODO**: Create SparkOperations wrapper class
+- Uses 4-component pattern (Spark, Content, Temporal, ChunkRef)
+- **TODO**: Create SparkOperations wrapper class matching AnnotationOperations pattern
 
 ### For Future Entities
 
@@ -323,56 +327,73 @@ export async function createAnnotation(
 ### Creating Different Entity Types
 
 ```typescript
-// 1. ANNOTATION (✅ IMPLEMENTED - 3-component pattern)
-// See src/app/actions/annotations.ts for full implementation
-const annotationId = await ecs.createEntity(userId, {
-  annotation: {
-    text: "Important insight about system design",
-    note: "This relates to my architecture decisions",
-    color: "yellow", // yellow|green|blue|red|purple|orange|pink
-    tags: ["architecture", "patterns"],
-    range: {
-      startOffset: 100,
-      endOffset: 250,
-      chunkIds: [chunkId] // Array for multi-chunk annotations
-    },
-    textContext: {
-      before: "...context before selected text...",
-      content: "selected text content",
-      after: "...context after selected text..."
-    }
+// 1. ANNOTATION (✅ IMPLEMENTED - 5-component pattern with PascalCase)
+// See src/app/actions/annotations.ts and src/lib/ecs/annotations.ts
+// Use AnnotationOperations wrapper class, NOT raw ecs.createEntity()
+import { AnnotationOperations } from '@/lib/ecs/annotations'
+
+const ops = new AnnotationOperations(ecs, userId)
+const annotationId = await ops.create({
+  documentId: documentId,
+  text: "Important insight about system design",
+  note: "This relates to my architecture decisions",
+  color: "yellow", // yellow|green|blue|red|purple|orange|pink
+  tags: ["architecture", "patterns"],
+  chunkIds: [chunkId], // Array for multi-chunk annotations
+  startOffset: 100,
+  endOffset: 250,
+  textContext: {
+    before: "...context before selected text...",
+    after: "...context after selected text..."
   },
-  position: {
-    chunkIds: [chunkId],
-    startOffset: 100,
-    endOffset: 250,
-    confidence: 1.0, // 1.0 on creation, <1.0 after fuzzy recovery
-    method: 'exact', // exact|context|chunk_bounded|trigram
-    textContext: {
-      before: "...context before...",
-      after: "...context after..."
-    }
-  },
-  source: {
-    chunk_id: chunkId, // Primary chunk for ECS filtering
-    chunk_ids: [chunkId], // All chunks for multi-chunk support
-    document_id: documentId
-  }
+  chunkPosition: 0
 })
 
-// 2. SPARK (UP NEXT - UI exists, backend not implemented)
-// QuickSparkModal (⌘K) currently saves as annotations
-// TODO: Implement spark component with simplified structure
+// This creates an entity with 5 components:
+// - Position: { startOffset, endOffset, originalText, textContext, recoveryMethod, recoveryConfidence, needsReview }
+// - Visual: { color }
+// - Content: { note, tags }
+// - Temporal: { createdAt, updatedAt }
+// - ChunkRef: { documentId, document_id, chunkId, chunk_id, chunkIds, chunkPosition }
+
+// 2. SPARK (✅ IMPLEMENTED - 4-component pattern, NEEDS WRAPPER CLASS)
+// QuickSparkModal (⌘K) creates sparks directly
+// TODO: Create SparkOperations wrapper class for consistency
 const sparkId = await ecs.createEntity(userId, {
-  spark: {
-    idea: "Connection between ECS and functional programming",
-    tags: ["architecture", "patterns"],
-    color: "blue"
+  Spark: {
+    selections: [{
+      text: "Important insight",
+      chunkId: chunkId,
+      startOffset: 100,
+      endOffset: 200,
+      textContext: { before: "...", after: "..." }
+    }],
+    connections: [{
+      type: 'origin',
+      chunkId: chunkId,
+      metadata: { relationship: 'origin' },
+      strength: 1
+    }],
+    annotationRefs: [annotationId], // Links to related annotations
+    originalChunkHash: "...",
+    originalChunkContent: "..."
   },
-  source: {
-    parent_entity_id: annotationId, // Optional link to parent annotation
+  Content: {
+    note: "My quick thought",
+    tags: ["idea", "architecture"]
+  },
+  Temporal: {
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  ChunkRef: {
+    documentId: documentId,
+    document_id: documentId,
+    chunkId: chunkId,
     chunk_id: chunkId,
-    document_id: documentId
+    chunkIds: [chunkId],
+    chunkPosition: 0,
+    hasSelections: true
   }
 })
 
@@ -405,16 +426,23 @@ if (!user) throw new Error('Not authenticated')
 
 const ecs = createECS()
 
-// Get all annotations for a document (REAL EXAMPLE from annotations.ts:237-243)
-const annotations = await ecs.query(
-  ['annotation', 'position', 'source'], // Must have ALL THREE
+// PREFERRED: Use AnnotationOperations wrapper
+import { AnnotationOperations } from '@/lib/ecs/annotations'
+const ops = new AnnotationOperations(ecs, user.id)
+const annotations = await ops.getByDocument(documentId)
+
+// RAW ECS: Get all annotations for a document
+// Queries for Position component to exclude Sparks (which have no Position)
+const annotationsRaw = await ecs.query(
+  ['Position'], // Filter for Position component (annotations only)
   user.id,
   { document_id: documentId }
 )
+// Returns entities with ALL 5 components: Position, Visual, Content, Temporal, ChunkRef
 
-// Get all sparks (PLANNED - not yet implemented)
+// Get all sparks (implemented, but needs wrapper class)
 const sparks = await ecs.query(
-  ['spark', 'source'],
+  ['Spark'],  // Sparks have: Spark, Content, Temporal, ChunkRef (no Position)
   user.id,
   { document_id: documentId }
 )
@@ -596,20 +624,34 @@ CREATE INDEX idx_entities_user ON entities(user_id);
 
 ## Component Types (Current & Planned)
 
-### ✅ Implemented Components
-- **annotation**: Text highlights with notes, tags, color (see `src/app/actions/annotations.ts:76-107`)
-- **position**: Location tracking with fuzzy recovery for annotation remapping (see `src/app/actions/annotations.ts:90-101`)
-- **source**: Links to chunks/documents (used across all entity types)
+### ✅ Implemented Components (PascalCase)
+
+**Annotation Components** (5-component pattern):
+- **Position**: Text location with recovery metadata (startOffset, endOffset, originalText, textContext, recoveryMethod, recoveryConfidence, needsReview)
+- **Visual**: Display styling (color)
+- **Content**: User-provided data (note, tags)
+- **Temporal**: Timestamps (createdAt, updatedAt)
+- **ChunkRef**: Document/chunk references (documentId, chunkId, chunkIds, chunkPosition)
+
+**Spark Components** (4-component pattern):
+- **Spark**: Quick idea/annotation with selections, connections, annotationRefs
+- **Content**: Note and tags
+- **Temporal**: Timestamps
+- **ChunkRef**: Document/chunk references
+
+**Shared Components**:
+- **Content**: Used by both Annotations and Sparks for note/tags
+- **Temporal**: Used by both for timestamps
+- **ChunkRef**: Used by both for document linking
 
 ### 🚧 Partially Implemented (UI Only, Backend TODO)
 - **flashcard**: Question/answer pairs (UI placeholder exists, backend not implemented)
 - **study**: FSRS spaced repetition data (UI placeholder exists, backend not implemented)
 
 ### 📋 Planned Components (Priority Order)
-1. **spark**: Quick annotations/ideas (UP NEXT - UI exists via QuickSparkModal, needs ECS backend)
-2. **embedding**: Vector embeddings for similarity search
-3. **themes**: Extracted themes and concepts from connections
-4. **connections**: Links between entities (connection graph)
+1. **embedding**: Vector embeddings for similarity search
+2. **themes**: Extracted themes and concepts from connections
+3. **connections**: Links between entities (connection graph)
 
 ## Client-Side Usage (React)
 
