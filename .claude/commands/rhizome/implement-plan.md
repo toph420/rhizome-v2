@@ -8,14 +8,14 @@ Implement an approved technical plan from `thoughts/plans/`. Plans contain phase
 
 ## Getting Started
 
-When given a plan path:
-- Read the plan completely and check for existing checkmarks (- [x])
-- Read all files mentioned in the plan
-- **Read files fully** - never use limit/offset, need complete context
-- Create todo list to track progress
-- Start implementing if you understand what needs to be done
+**If plan path provided:**
+- Read plan completely
+- Read all mentioned files fully (no limit/offset)
+- Create TodoWrite for tracking
+- Start implementing
 
-If no plan path provided, ask for one.
+**If no plan path:**
+Ask: "Which plan should I implement? (path from thoughts/plans/)"
 
 ## Implementation Philosophy
 
@@ -79,22 +79,19 @@ After implementing a phase:
 - Update progress in plan and todos
 - Check off completed items in plan file using Edit
 
-**Pause for human verification:**
+**After phase completion:**
 ```
-Phase [N] Complete - Ready for Manual Verification
+Phase [N] automated checks: ✅
 
-Automated verification passed:
-- [List checks that passed]
+Manual verification needed:
+- [list items]
 
-Please perform manual verification:
-- [List manual items from plan]
-
-Let me know when manual testing complete so I can proceed to Phase [N+1].
+Continue to Phase [N+1]? (type 'yes' or provide feedback)
 ```
 
-If instructed to execute multiple phases consecutively, skip pause until last phase. Otherwise, assume you're doing one phase at a time.
+If instructed to execute multiple phases, skip pause until last phase.
 
-Do NOT check off manual testing items until confirmed by user.
+Do NOT check off manual items until user confirms.
 
 ## Service Restarts
 

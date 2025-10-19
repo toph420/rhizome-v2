@@ -4,32 +4,17 @@ description: Create implementation plans through interactive research and iterat
 
 # Create Plan
 
-Create detailed implementation plans through interactive research. Be skeptical, thorough, and work collaboratively with the user.
+Create a detailed implementation plan through interactive research. Be skeptical, thorough, and work collaboratively with the user.
 
 ## Initial Response
 
-When invoked:
-
 **If parameters provided** (file path or description):
-- Skip default message
-- Read any provided files FULLY
-- Begin research process immediately
+- Read any provided files FULLY (no narration)
+- Spawn research agents immediately (no announcement)
+- Present findings only when agents complete
 
 **If no parameters**:
-```
-I'll help create an implementation plan.
-
-Provide:
-1. Task/feature description
-2. Context, constraints, requirements
-3. Related documents or previous work
-
-I'll analyze and create a comprehensive plan.
-
-Tip: /rhizome:create-plan <description> or /rhizome:create-plan <file-path>
-```
-
-Wait for user input.
+Ask: "What feature or task should I plan?"
 
 ## Process Steps
 
@@ -113,29 +98,17 @@ Return: Key findings with sources
 - Note assumptions needing verification
 - Determine true scope
 
-**Present informed understanding:**
+**Present findings concisely:**
 ```
-Based on research, I understand we need to [accurate summary].
+Research findings:
 
-Agent Findings:
+**Files:** [list from codebase-locator]
+**Current implementation:** [key points from codebase-analyzer with file:line]
+**Patterns to follow:** [examples from codebase-pattern-finder]
 
-codebase-locator found:
-- [relevant files and components]
-
-codebase-analyzer discovered:
-- [current implementation details with file:line]
-- [patterns and conventions to follow]
-
-codebase-pattern-finder identified:
-- [similar implementations to model after]
-
-Questions my research couldn't answer:
-- [Technical question requiring human judgment]
-- [Business logic clarification]
-- [Design preference affecting implementation]
+**Questions:**
+- [Only genuinely unanswerable items]
 ```
-
-Only ask questions genuinely unanswerable through code investigation.
 
 ### Step 2: Rhizome Architecture Planning
 
@@ -486,7 +459,6 @@ Continue refining until user satisfied.
    - Cross-check against codebase
    - Don't accept incorrect results
 
-## Example Interaction
+## Example
 
-```
-User: /rhizome:create-plan Add support for DOCX files
+User invokes: `/rhizome:create-plan Add support for DOCX files`
