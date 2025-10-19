@@ -82,14 +82,22 @@ export const useAnnotationStore = create<AnnotationState>((set) => ({
    * @returns {void}
    */
   updateAnnotation: (documentId, annotationId, updates) =>
-    set((state) => ({
-      annotations: {
-        ...state.annotations,
-        [documentId]: state.annotations[documentId]?.map(ann =>
-          ann.id === annotationId ? { ...ann, ...updates } : ann
-        ) || []
+    set((state) => {
+      console.log('[AnnotationStore] updateAnnotation called:', {
+        annotationId: annotationId.substring(0, 8),
+        newColor: updates.components?.annotation?.color,
+        existingAnnotation: state.annotations[documentId]?.find(a => a.id === annotationId)?.components.annotation?.color
+      })
+
+      return {
+        annotations: {
+          ...state.annotations,
+          [documentId]: state.annotations[documentId]?.map(ann =>
+            ann.id === annotationId ? { ...ann, ...updates } : ann
+          ) || []
+        }
       }
-    })),
+    }),
   /**
    * Removes an annotation from a document.
    * @param documentId - Document identifier.

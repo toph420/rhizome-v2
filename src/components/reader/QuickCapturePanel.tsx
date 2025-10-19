@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, X, Tag, Palette, Layers } from 'lucide-react'
+import { Loader2, X, Tag, Palette, Layers, GripVertical } from 'lucide-react'
 import { createAnnotation, updateAnnotation } from '@/app/actions/annotations'
 import { extractContext } from '@/lib/annotations/text-range'
 import type { TextSelection, Chunk, OptimisticAnnotation, StoredAnnotation } from '@/types/annotations'
@@ -46,6 +46,7 @@ const COLOR_OPTIONS: Array<{
  * Portal-based panel for creating and editing annotations.
  * Supports both create mode (new annotations) and edit mode (existing annotations).
  * Uses optimistic updates for instant feedback.
+ * **Draggable** - can be moved around the screen by dragging the header.
  */
 export function QuickCapturePanel({
   selection,
@@ -66,10 +67,12 @@ export function QuickCapturePanel({
   const [selectedColor, setSelectedColor] = useState<HighlightColor>(
     existingAnnotation?.components.annotation?.color || 'yellow'
   )
+  const [isDragging, setIsDragging] = useState(false)
 
   const panelRef = useRef<HTMLDivElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
+  const dragHandleRef = useRef<HTMLDivElement>(null)
 
   // Derived state
   const saving = savingColor !== null
@@ -286,12 +289,19 @@ export function QuickCapturePanel({
         return
       }
 
+      // Cmd+Enter saves and closes (when typing)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && isTyping) {
+        e.preventDefault()
+        void saveAnnotation(selectedColor, true)
+        return
+      }
+
       // Don't capture color shortcuts if user is typing
       if (isTyping) {
         return
       }
 
-      // Color shortcuts (only when NOT typing)
+      // Color shortcuts (only when NOT typing) - save and close
       const colorOption = COLOR_OPTIONS.find(
         (opt) => opt.key === e.key.toLowerCase()
       )
@@ -304,7 +314,7 @@ export function QuickCapturePanel({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [saveAnnotation, onClose])
+  }, [saveAnnotation, onClose, selectedColor])
 
   // Calculate position (memoized to prevent re-calculation)
   const style: React.CSSProperties = useMemo(() => ({
@@ -320,9 +330,12 @@ export function QuickCapturePanel({
     COLOR_OPTIONS.map((option) => (
       <button
         key={option.color}
-        onClick={() => setSelectedColor(option.color)}
+        onClick={() => {
+          setSelectedColor(option.color)
+          void saveAnnotation(option.color, false) // Save immediately but keep panel open
+        }}
         disabled={saving}
-        title={`${option.label} (${option.key})`}
+        title={`${option.label} (click to save, ${option.key} to save & close)`}
         className={cn(
           'w-8 h-8 rounded-md transition-all flex items-center justify-center border-2',
           option.bgClass,
@@ -335,29 +348,95 @@ export function QuickCapturePanel({
         </span>
       </button>
     ))
-  ), [saving, selectedColor])
+  ), [saving, selectedColor, saveAnnotation])
+
+  // Enable drag from handle element
+  useEffect(() => {
+    const handleEl = dragHandleRef.current
+    const panelEl = panelRef.current
+    if (!handleEl || !panelEl) return
+
+    let isDrag = false
+    let startX = 0
+    let startY = 0
+    let initialX = 0
+    let initialY = 0
+
+    const handleMouseDown = (e: MouseEvent) => {
+      isDrag = true
+      setIsDragging(true)
+      startX = e.clientX
+      startY = e.clientY
+      const rect = panelEl.getBoundingClientRect()
+      initialX = rect.left
+      initialY = rect.top
+      e.preventDefault()
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDrag) return
+      const deltaX = e.clientX - startX
+      const deltaY = e.clientY - startY
+      const newX = Math.max(0, Math.min(initialX + deltaX, window.innerWidth - 420))
+      const newY = Math.max(0, Math.min(initialY + deltaY, window.innerHeight - 200))
+      panelEl.style.left = `${newX}px`
+      panelEl.style.top = `${newY}px`
+      panelEl.style.transform = 'none' // Remove centering transform when dragging
+    }
+
+    const handleMouseUp = () => {
+      if (isDrag) {
+        isDrag = false
+        setIsDragging(false)
+      }
+    }
+
+    handleEl.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      handleEl.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
 
   const panelContent = (
     <div
       ref={panelRef}
       role="dialog"
       aria-modal="true"
-      className="quick-capture-panel bg-background border rounded-lg shadow-2xl p-4 w-[420px]"
+      className={cn(
+        "quick-capture-panel bg-background border rounded-lg shadow-2xl p-4 w-[420px] transition-opacity",
+        isDragging && "opacity-90"
+      )}
       style={style}
     >
       <div className="space-y-3">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0 space-y-1">
-            <p className="text-sm text-muted-foreground line-clamp-2 break-words">
-              &ldquo;{selection.text}&rdquo;
-            </p>
-            {selection.range.chunkIds.length > 1 && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Layers className="h-3 w-3" />
-                <span>Spans {selection.range.chunkIds.length} chunks</span>
-              </div>
+        {/* Header with drag handle */}
+        <div className="flex items-start justify-between gap-2 -m-4 p-4 mb-0">
+          <div
+            ref={dragHandleRef}
+            data-drag-handle
+            className={cn(
+              "flex items-center gap-1 flex-1 min-w-0",
+              !isDragging && "cursor-grab",
+              isDragging && "cursor-grabbing"
             )}
+          >
+            <GripVertical className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <div className="flex-1 min-w-0 space-y-1">
+              <p className="text-sm text-muted-foreground line-clamp-2 break-words">
+                &ldquo;{selection.text}&rdquo;
+              </p>
+              {selection.range.chunkIds.length > 1 && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Layers className="h-3 w-3" />
+                  <span>Spans {selection.range.chunkIds.length} chunks</span>
+                </div>
+              )}
+            </div>
           </div>
           <Button
             variant="ghost"
@@ -434,7 +513,7 @@ export function QuickCapturePanel({
         {/* Actions */}
         <div className="flex justify-between items-center pt-2">
           <p className="text-xs text-muted-foreground">
-            Click color to select • Press letter key to save & close
+            Click color to save • Letter key to save & close • ⌘↵ to finish
           </p>
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>

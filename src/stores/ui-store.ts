@@ -19,9 +19,12 @@ interface UIState {
   showChunkBoundaries: boolean
   showHeatmap: boolean
 
-  // Quick Capture panel (moved from AnnotationStore)
-  quickCaptureOpen: boolean
+  // Quick Capture panels
+  quickCaptureOpen: boolean // Annotation quick capture
   activeAnnotation: StoredAnnotation | null
+  sparkCaptureOpen: boolean // Spark quick capture
+  pendingAnnotationSelection: any | null // Selection to annotate from spark panel
+  editingSparkContent: string | null // Content to pre-fill when editing spark
 
   // Actions
   setViewMode: (mode: ViewMode) => void
@@ -34,6 +37,10 @@ interface UIState {
   openQuickCapture: () => void
   closeQuickCapture: () => void
   setActiveAnnotation: (annotation: StoredAnnotation | null) => void
+  openSparkCapture: () => void
+  closeSparkCapture: () => void
+  setPendingAnnotationSelection: (selection: any | null) => void
+  setEditingSparkContent: (content: string | null) => void
 }
 
 /**
@@ -53,6 +60,9 @@ export const useUIStore = create<UIState>()(
       showHeatmap: true,
       quickCaptureOpen: false,
       activeAnnotation: null,
+      sparkCaptureOpen: false,
+      pendingAnnotationSelection: null,
+      editingSparkContent: null,
 
       setViewMode: (mode) => {
         set({ viewMode: mode })
@@ -109,6 +119,18 @@ export const useUIStore = create<UIState>()(
 
       setActiveAnnotation: (annotation) =>
         set({ activeAnnotation: annotation }),
+
+      openSparkCapture: () =>
+        set({ sparkCaptureOpen: true }),
+
+      closeSparkCapture: () =>
+        set({ sparkCaptureOpen: false }),
+
+      setPendingAnnotationSelection: (selection) =>
+        set({ pendingAnnotationSelection: selection }),
+
+      setEditingSparkContent: (content) =>
+        set({ editingSparkContent: content }),
     }),
     {
       name: 'ui-storage',
@@ -127,6 +149,9 @@ export const useUIStore = create<UIState>()(
           state.expandedAnnotations = new Set()
           state.quickCaptureOpen = false
           state.activeAnnotation = null
+          state.sparkCaptureOpen = false
+          state.pendingAnnotationSelection = null
+          state.editingSparkContent = null
         }
       },
     }
