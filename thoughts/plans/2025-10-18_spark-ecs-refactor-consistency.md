@@ -2873,13 +2873,34 @@ describe('Spark Recovery', () => {
 
 ### Overview
 
-Add ability to reference annotations from sparks, like citations for your thoughts. Users can link existing annotations to a spark while the spark panel is open, creating relationships between highlights and thoughts.
+Add ability to reference annotations from sparks, like citations for your thoughts. Users can link existing annotations to a spark using **contextual buttons** that appear where annotations already exist (annotation quick capture panel and Annotations tab).
 
 **Use Case**: "I'm thinking X (spark) because of these highlights I made (annotations)."
 
-### Changes Required
+**UX Philosophy**: No dropdown lists - use contextual "Link to Spark" buttons that appear when the spark panel is open, providing a seamless workflow without mode switching.
 
-#### 1. Update ECS Components (Phase 1 Extension)
+### Changes Required (Revised Implementation)
+
+#### 1. Move Linked Annotations to UIStore (Shared State)
+
+**File**: `src/stores/ui-store.ts`
+**Changes**: Add linkedAnnotationIds to UIStore for cross-component access
+
+```typescript
+interface UIState {
+  // ... existing state ...
+  linkedAnnotationIds: string[] // NEW - Phase 6b: Annotations linked to current spark
+
+  // Actions
+  addLinkedAnnotation: (annotationId: string) => void
+  removeLinkedAnnotation: (annotationId: string) => void
+  clearLinkedAnnotations: () => void
+}
+```
+
+**Why UIStore**: QuickSparkCapture, QuickCapturePanel, and AnnotationsList all need access to the same state. UIStore provides single source of truth.
+
+#### 2. Update ECS Components (Phase 1 Extension - COMPLETED)
 
 **File**: `src/lib/ecs/components.ts`
 **Changes**: Add annotation references field to SparkComponent
@@ -2906,7 +2927,7 @@ export interface SparkComponent {
 }
 ```
 
-#### 2. Extend SparkOperations (Phase 2 Extension)
+#### 3. Extend SparkOperations (Phase 2 Extension - COMPLETED)
 
 **File**: `src/lib/ecs/sparks.ts`
 **Changes**: Add methods for managing annotation references
@@ -3017,7 +3038,7 @@ async removeAnnotationRef(
 }
 ```
 
-#### 3. Add Server Actions (Phase 3 Extension)
+#### 4. Add Server Actions (Phase 3 Extension - COMPLETED)
 
 **File**: `src/app/actions/sparks.ts`
 **Changes**: Add server actions for linking/unlinking annotations
@@ -3062,84 +3083,38 @@ export async function unlinkAnnotationFromSpark(
 }
 ```
 
-#### 4. Update QuickSparkCapture UI (Phase 4 Extension)
+#### 5. Update QuickSparkCapture UI (Phase 4 Extension - REVISED & COMPLETED)
 
 **File**: `src/components/reader/QuickSparkCapture.tsx`
-**Changes**: Add annotations list with linking capability
+**Changes**: Use UIStore for linked annotations, display linked annotation chips (NO dropdown browser)
 
 ```typescript
-// Add to imports
-import { getAnnotationsByDocument } from '@/app/actions/annotations'
-import { AnnotationEntity } from '@/lib/ecs/components'
+// Use UIStore instead of local state
+const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
+const removeLinkedAnnotation = useUIStore(state => state.removeLinkedAnnotation)
 
-// Add state for annotations and linked refs
-const [annotations, setAnnotations] = useState<AnnotationEntity[]>([])
-const [linkedAnnotationIds, setLinkedAnnotationIds] = useState<string[]>([])
-const [showAnnotations, setShowAnnotations] = useState(false)
-
-// Fetch annotations when panel opens
-useEffect(() => {
-  if (isOpen) {
-    getAnnotationsByDocument(documentId).then(setAnnotations)
-  }
-}, [isOpen, documentId])
-
-// Reset linked annotations when panel closes
-useEffect(() => {
-  if (!isOpen) {
-    setLinkedAnnotationIds([])
-  }
-}, [isOpen])
-
-// Handle linking annotation
-const handleLinkAnnotation = (annotationId: string) => {
-  setLinkedAnnotationIds(prev => [...prev, annotationId])
-}
-
-// Handle unlinking annotation
-const handleUnlinkAnnotation = (annotationId: string) => {
-  setLinkedAnnotationIds(prev => prev.filter(id => id !== annotationId))
-}
-
-// Update handleSubmit to include annotation refs
+// Update handleSubmit to link annotations after spark creation
 const handleSubmit = async () => {
-  if (!content.trim() || loading) return
+  // ... create spark ...
+  const result = await createSpark({ ... })
 
-  setLoading(true)
-  try {
-    // ... existing context building ...
-
-    // Create spark with selections and annotation refs
-    const result = await createSpark({
-      content: content.trim(),
-      selections,
-      context: sparkContext
-    })
-
-    // Link annotations to the created spark
-    if (linkedAnnotationIds.length > 0 && result.sparkId) {
-      await Promise.all(
-        linkedAnnotationIds.map(annotationId =>
-          linkAnnotationToSpark(result.sparkId, annotationId)
-        )
+  // Link annotations to the created spark
+  if (linkedAnnotationIds.length > 0 && result.sparkId) {
+    await Promise.all(
+      linkedAnnotationIds.map(annotationId =>
+        linkAnnotationToSpark(result.sparkId, annotationId)
       )
-    }
-
-    closeSparkCapture()
-    console.log('[Sparks] ✓ Created successfully with annotation links')
-  } catch (error) {
-    console.error('[Sparks] Failed to create:', error)
-    alert('Failed to create spark. Please try again.')
-  } finally {
-    setLoading(false)
+    )
   }
+
+  closeSparkCapture()
 }
 ```
 
-**UI Section** (add after selections display, before textarea):
+**Simplified UI** - Just show linked annotation IDs as removable chips:
 
 ```typescript
-{/* Linked Annotations Display */}
+{/* Linked Annotations Display (simplified) */}
 {linkedAnnotationIds.length > 0 && (
   <div className="space-y-2">
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -3147,151 +3122,129 @@ const handleSubmit = async () => {
       <span>{linkedAnnotationIds.length} linked annotation{linkedAnnotationIds.length !== 1 ? 's' : ''}</span>
     </div>
     <div className="flex flex-wrap gap-2">
-      {linkedAnnotationIds.map((annotationId) => {
-        const annotation = annotations.find(a => a.id === annotationId)
-        if (!annotation) return null
-
-        const position = annotation.components.Position
-        const content = annotation.components.Content
-
-        return (
-          <div
-            key={annotationId}
-            className="group relative p-2 bg-muted/30 rounded border border-muted-foreground/20 text-xs"
-          >
-            <p className="pr-6 italic max-w-[200px] truncate">
-              "{position.originalText}"
-            </p>
-            {content.tags.length > 0 && (
-              <div className="flex gap-1 mt-1">
-                {content.tags.slice(0, 2).map(tag => (
-                  <Badge key={tag} variant="outline" className="h-4 text-[10px]">
-                    #{tag}
-                  </Badge>
-                ))}
-              </div>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="absolute top-1 right-1 h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
-              onClick={() => handleUnlinkAnnotation(annotationId)}
-            >
-              <X className="w-3 h-3" />
-            </Button>
-          </div>
-        )
-      })}
+      {linkedAnnotationIds.map((annotationId) => (
+        <div key={annotationId} className="group relative px-3 py-1.5 bg-muted/30 rounded border">
+          <Highlighter className="w-3 h-3" />
+          <span className="font-mono text-[10px]">{annotationId.slice(0, 8)}...</span>
+          <Button onClick={() => removeLinkedAnnotation(annotationId)}>
+            <X className="w-3 h-3" />
+          </Button>
+        </div>
+      ))}
     </div>
-  </div>
-)}
-
-{/* Annotations Browser (Collapsible) */}
-{annotations.length > 0 && (
-  <div className="space-y-2 border-t pt-2">
-    <button
-      onClick={() => setShowAnnotations(!showAnnotations)}
-      className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground w-full"
-    >
-      <Highlighter className="w-3 h-3" />
-      <span>
-        {annotations.length} annotation{annotations.length !== 1 ? 's' : ''} in document
-      </span>
-      <ChevronDown
-        className={`w-3 h-3 ml-auto transition-transform ${
-          showAnnotations ? 'rotate-180' : ''
-        }`}
-      />
-    </button>
-
-    {showAnnotations && (
-      <div className="max-h-[200px] overflow-y-auto space-y-2">
-        {annotations
-          .filter(a => !linkedAnnotationIds.includes(a.id))
-          .map((annotation) => {
-            const position = annotation.components.Position
-            const content = annotation.components.Content
-            const visual = annotation.components.Visual
-
-            return (
-              <div
-                key={annotation.id}
-                className="p-2 bg-muted/20 rounded border border-muted-foreground/10 hover:border-muted-foreground/30 transition-colors"
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs italic truncate">
-                      "{position.originalText}"
-                    </p>
-                    {content.note && (
-                      <p className="text-xs text-muted-foreground mt-1 truncate">
-                        {content.note}
-                      </p>
-                    )}
-                    {content.tags.length > 0 && (
-                      <div className="flex gap-1 mt-1">
-                        {content.tags.slice(0, 3).map(tag => (
-                          <Badge key={tag} variant="outline" className="h-4 text-[10px]">
-                            #{tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleLinkAnnotation(annotation.id)}
-                    className="text-xs h-7 shrink-0"
-                  >
-                    Link
-                  </Button>
-                </div>
-              </div>
-            )
-          })}
-      </div>
-    )}
   </div>
 )}
 ```
 
-Don't forget to add ChevronDown import:
+#### 6. Add "Link to Spark" Button to QuickCapturePanel (NEW - COMPLETED)
+
+**File**: `src/components/reader/QuickCapturePanel.tsx`
+**Changes**: Add contextual button when spark panel is open
+
 ```typescript
-import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter, ChevronDown } from 'lucide-react'
+// Add UIStore hooks
+const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
+const addLinkedAnnotation = useUIStore(state => state.addLinkedAnnotation)
+const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
+
+// Add handler
+const handleLinkToSpark = useCallback(() => {
+  if (mode === 'create') {
+    toast.info('Save annotation first, then link to spark')
+    return
+  }
+  if (existingAnnotation?.id) {
+    addLinkedAnnotation(existingAnnotation.id)
+    toast.success('Linked to spark')
+  }
+}, [mode, existingAnnotation, addLinkedAnnotation])
+
+// Add button in actions section (between Cancel and Save Note)
+{sparkCaptureOpen && (
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={handleLinkToSpark}
+    disabled={saving || (mode === 'create') || (existingAnnotation?.id && linkedAnnotationIds.includes(existingAnnotation.id))}
+  >
+    <Zap className="h-3.5 w-3.5" />
+    {existingAnnotation?.id && linkedAnnotationIds.includes(existingAnnotation.id) ? 'Linked' : 'Link to Spark'}
+  </Button>
+)}
+```
+
+#### 7. Add "Link to Spark" Button to AnnotationsList (NEW - COMPLETED)
+
+**File**: `src/components/sidebar/AnnotationsList.tsx`
+**Changes**: Add button next to edit button on each annotation card
+
+```typescript
+// Add UIStore hooks
+const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
+const addLinkedAnnotation = useUIStore(state => state.addLinkedAnnotation)
+const linkedAnnotationIds = useUIStore(state => state.linkedAnnotationIds)
+
+// Add button next to edit button (with group-hover reveal)
+{sparkCaptureOpen && (
+  <Button
+    size="icon"
+    variant="ghost"
+    className={cn(
+      "h-6 w-6 opacity-0 group-hover:opacity-100",
+      linkedAnnotationIds.includes(annotation.id) && "opacity-100 bg-yellow-100 text-yellow-600"
+    )}
+    onClick={(e) => {
+      e.stopPropagation()
+      if (!linkedAnnotationIds.includes(annotation.id)) {
+        addLinkedAnnotation(annotation.id)
+        toast.success('Linked to spark')
+      }
+    }}
+    title={linkedAnnotationIds.includes(annotation.id) ? "Linked to spark" : "Link to spark"}
+  >
+    <Zap className="h-3 w-3" />
+  </Button>
+)}
 ```
 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Types compile: `npm run build`
-- [ ] No TypeScript errors in components.ts
-- [ ] No TypeScript errors in sparks.ts
-- [ ] No TypeScript errors in server actions
-- [ ] No TypeScript errors in QuickSparkCapture.tsx
+- [x] Types compile: `npm run build`
+- [x] No TypeScript errors in components.ts
+- [x] No TypeScript errors in sparks.ts
+- [x] No TypeScript errors in server actions
+- [x] No TypeScript errors in QuickSparkCapture.tsx
 
 #### Manual Verification:
-- [ ] Can see annotations list in spark panel (collapsed by default)
-- [ ] Can expand/collapse annotations list
-- [ ] "Link" button adds annotation to linked list
-- [ ] Linked annotations display as removable chips
-- [ ] Can remove linked annotation with X button
-- [ ] Linked annotations excluded from browser list
-- [ ] Annotations saved with spark on submit
-- [ ] annotationRefs field populated in Spark component
-- [ ] Multiple annotations can be linked to one spark
+- [x] "Link to Spark" button appears in QuickCapturePanel when spark panel open
+- [x] "Link to Spark" button appears on each annotation in AnnotationsList when spark panel open
+- [x] Buttons show ⚡ Zap icon for visual consistency
+- [x] Clicking button links annotation (toast notification confirms)
+- [x] Linked annotations display as ID chips in spark panel
+- [x] Can remove linked annotation with X button on chip
+- [x] Linked annotations show yellow highlight in AnnotationsList
+- [x] Button shows "Linked" state when already linked
+- [x] Annotations saved with spark on submit
+- [x] annotationRefs field populated in Spark component
+- [x] Multiple annotations can be linked to one spark
+- [x] UIStore properly shares state across all components
 
 #### Integration Testing:
-- [ ] Create spark with no linked annotations (works as before)
-- [ ] Create spark with 1 linked annotation
-- [ ] Create spark with 3+ linked annotations
-- [ ] Verify annotationRefs array in database components table
-- [ ] Verify Temporal.updatedAt updates when linking/unlinking
+- [x] Create spark with no linked annotations (works as before)
+- [x] Create spark with 1 linked annotation
+- [x] Create spark with 3+ linked annotations
+- [x] Verify annotationRefs array in database components table
+- [x] Verify Temporal.updatedAt updates when linking/unlinking
+- [x] UIStore cleared when spark panel closes
+- [x] Buttons only appear when spark panel is open
 
 **Service Restarts:**
-- [ ] Next.js: Auto-reload on component/action changes
+- [x] Next.js: Auto-reload on component/action changes
 
 **Implementation Note**: Purely additive feature. `annotationRefs` is optional, so existing sparks continue to work without changes.
+
+**UX Win**: Contextual buttons provide much better workflow than dropdown browser. Users link annotations where they already see them (in quick capture or annotations list), creating a seamless experience without mode switching.
 
 ---
 
