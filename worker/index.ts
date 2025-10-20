@@ -12,6 +12,8 @@ import { importDocumentHandler } from './handlers/import-document.js'
 import { reprocessConnectionsHandler } from './handlers/reprocess-connections.js'
 import { exportDocumentHandler } from './handlers/export-document.js'
 import { importReadwiseHighlights } from './handlers/readwise-import.js'
+import { scanVaultHandler } from './handlers/scan-vault.js'
+import { importFromVaultHandler } from './handlers/import-from-vault.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
 import { retryLoop, classifyError, recordJobFailure } from './lib/retry-manager.js'
@@ -108,6 +110,8 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
+  'scan-vault': scanVaultHandler,
+  'import-from-vault': importFromVaultHandler,
   'continue-processing': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
     const skipAiCleanup = (job.input_data as any).skipAiCleanup || false

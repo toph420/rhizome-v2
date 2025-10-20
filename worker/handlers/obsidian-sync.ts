@@ -5,9 +5,17 @@
 
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import { createHash } from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { reprocessDocument } from './reprocess-document.js'
 import type { RecoveryResults } from '../types/recovery.js'
+import { createVaultStructure, getDocumentVaultPath, type VaultConfig } from '../lib/vault-structure.js'
+import { generateConnectionsMarkdown } from '../lib/connection-graph.js'
+import { generateHighlightsMarkdown } from '../lib/highlights-generator.js'
+import { generateSparksMarkdown } from '../lib/sparks-generator.js'
+import { exportAnnotationsToJson } from '../lib/vault-export-annotations.js'
+import { exportSparksToJson } from '../lib/vault-export-sparks.js'
+import { exportConnectionsToJson } from '../lib/vault-export-connections.js'
 
 /**
  * Get Supabase client (lazy initialization to avoid env loading issues)
@@ -35,10 +43,11 @@ function getSupabaseClient() {
 export interface ObsidianSettings {
   vaultName: string
   vaultPath: string
+  rhizomePath: string  // Relative path in vault (e.g., "Rhizome/")
   autoSync: boolean
   syncAnnotations: boolean
-  exportSparks?: boolean  // NEW - Export sparks to .sparks.md (default: true)
-  exportPath: string  // Relative path in vault (e.g., "Rhizome/")
+  exportSparks?: boolean  // Export sparks to .sparks.md (default: true)
+  exportConnections?: boolean  // Export connection graphs (default: true)
 }
 
 export interface ExportResult {
@@ -60,8 +69,8 @@ export interface SyncResult {
 // ============================================================================
 
 /**
- * Export document markdown to Obsidian vault
- * Also exports annotations.json if syncAnnotations is enabled
+ * Export document to Obsidian vault with full structure
+ * Enhanced version with Documents/{title}/ folders, .rhizome/ metadata, and connection graphs
  */
 export async function exportToObsidian(
   documentId: string,
@@ -75,7 +84,7 @@ export async function exportToObsidian(
     // 1. Get document and Obsidian settings
     const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('title, markdown_path, obsidian_path, storage_path')
+      .select('title, markdown_path, storage_path')
       .eq('id', documentId)
       .single()
 
@@ -95,20 +104,30 @@ export async function exportToObsidian(
 
     const obsidianSettings = settings.obsidian_settings as ObsidianSettings
 
-    // Validate required fields are populated
+    // Validate required fields
     if (!obsidianSettings.vaultPath || !obsidianSettings.vaultName) {
-      throw new Error(
-        'Obsidian vault not configured. Please set vaultPath and vaultName in user settings.\n' +
-        'Example: UPDATE user_settings SET obsidian_settings = jsonb_set(obsidian_settings, \'{vaultPath}\', \'"/path/to/vault"\')'
-      )
+      throw new Error('Obsidian vault not configured. Please set vaultPath and vaultName in settings.')
     }
 
-    // 2. Download markdown from storage
-    // Construct path: use markdown_path if available, otherwise fallback to storage_path/content.md
+    const vaultConfig: VaultConfig = {
+      vaultPath: obsidianSettings.vaultPath,
+      vaultName: obsidianSettings.vaultName,
+      rhizomePath: obsidianSettings.rhizomePath || 'Rhizome/'
+    }
+
+    // 2. Ensure vault structure exists
+    await createVaultStructure(vaultConfig)
+
+    // 3. Create document folder
+    const docFolderPath = getDocumentVaultPath(vaultConfig, document.title)
+    await fs.mkdir(docFolderPath, { recursive: true })
+    await fs.mkdir(path.join(docFolderPath, '.rhizome'), { recursive: true })
+
+    // 4. Download markdown from storage
     const markdownStoragePath = document.markdown_path || `${document.storage_path}/content.md`
 
     if (!markdownStoragePath) {
-      throw new Error('Cannot determine markdown storage path: both markdown_path and storage_path are null')
+      throw new Error('Cannot determine markdown storage path')
     }
 
     console.log(`[Obsidian Export] Downloading markdown from: ${markdownStoragePath}`)
@@ -123,53 +142,179 @@ export async function exportToObsidian(
 
     const markdown = await markdownBlob.text()
 
-    // 3. Determine vault file path
-    // Always use current exportPath settings (don't rely on stale obsidian_path)
-    const vaultFilePath = path.join(
-      obsidianSettings.vaultPath,
-      obsidianSettings.exportPath || '',
-      `${document.title}.md`
-    )
+    // 5. Write {title}.md (main content with unique filename)
+    const contentPath = path.join(docFolderPath, `${document.title}.md`)
+    await fs.writeFile(contentPath, markdown, 'utf-8')
+    console.log(`[Obsidian Export] ${document.title}.md written`)
 
-    // Create directory if needed
-    await fs.mkdir(path.dirname(vaultFilePath), { recursive: true })
-
-    // 4. Write markdown to vault
-    await fs.writeFile(vaultFilePath, markdown, 'utf-8')
-    console.log(`[Obsidian Export] Markdown written to ${vaultFilePath}`)
-
-    // 5. Export annotations if enabled
-    if (obsidianSettings.syncAnnotations) {
-      await exportAnnotations(documentId, vaultFilePath)
+    // 6. Generate and write {title} - Highlights.md
+    if (obsidianSettings.syncAnnotations !== false) {
+      const highlightsMarkdown = await generateHighlightsMarkdown(
+        documentId,
+        document.title,
+        supabase
+      )
+      const highlightsPath = path.join(docFolderPath, `${document.title} - Highlights.md`)
+      await fs.writeFile(highlightsPath, highlightsMarkdown, 'utf-8')
+      console.log(`[Obsidian Export] ${document.title} - Highlights.md written`)
     }
 
-    // 5a. Export sparks (NEW)
-    // Default to true unless explicitly disabled (backward compatible)
-    const exportSparksEnabled = (obsidianSettings as any).exportSparks !== false
-    if (exportSparksEnabled) {
-      await exportSparks(documentId, vaultFilePath)
+    // 7. Generate and write {title} - Connections.md
+    if (obsidianSettings.exportConnections !== false) {
+      const connectionsMarkdown = await generateConnectionsMarkdown(
+        documentId,
+        document.title,
+        supabase
+      )
+      const connectionsPath = path.join(docFolderPath, `${document.title} - Connections.md`)
+      await fs.writeFile(connectionsPath, connectionsMarkdown, 'utf-8')
+      console.log(`[Obsidian Export] ${document.title} - Connections.md written`)
     }
 
-    // 6. Calculate relative path for database and URI
-    const relativePathToFile = path.relative(obsidianSettings.vaultPath, vaultFilePath)
+    // 8. Generate and write {title} - Sparks.md
+    if (obsidianSettings.exportSparks !== false) {
+      const sparksMarkdown = await generateSparksMarkdown(
+        documentId,
+        document.title,
+        supabase
+      )
+      const sparksPath = path.join(docFolderPath, `${document.title} - Sparks.md`)
+      await fs.writeFile(sparksPath, sparksMarkdown, 'utf-8')
+      console.log(`[Obsidian Export] ${document.title} - Sparks.md written`)
+    }
 
-    // Always update obsidian_path to reflect current location
+    // 9. Copy JSON files from Storage to .rhizome/ and enhance metadata.json
+    const jsonFiles = ['chunks.json', 'metadata.json', 'manifest.json']
+
+    for (const filename of jsonFiles) {
+      try {
+        const storagePath = `${document.storage_path}/${filename}`
+        const { data: jsonBlob } = await supabase.storage
+          .from('documents')
+          .download(storagePath)
+
+        if (jsonBlob) {
+          let jsonText = await jsonBlob.text()
+
+          // ENHANCEMENT: Add document fields to metadata.json for vault import
+          if (filename === 'metadata.json') {
+            try {
+              const metadataObj = JSON.parse(jsonText)
+
+              // Fetch full document record to get all fields
+              const { data: fullDoc } = await supabase
+                .from('documents')
+                .select('title, source_type, status, processing_status, created_at, updated_at')
+                .eq('id', documentId)
+                .single()
+
+              // Enhance metadata with document fields (preserve existing metadata)
+              const enhancedMetadata = {
+                ...metadataObj,
+                // Add document-level fields for vault import
+                title: fullDoc?.title || document.title,
+                source_type: fullDoc?.source_type || 'paste',
+                status: fullDoc?.status || 'completed',
+                processing_status: fullDoc?.processing_status || 'completed',
+                document_created_at: fullDoc?.created_at,
+                document_updated_at: fullDoc?.updated_at,
+                // Mark as enhanced for debugging
+                _vault_export_enhanced: true,
+                _vault_export_timestamp: new Date().toISOString()
+              }
+
+              jsonText = JSON.stringify(enhancedMetadata, null, 2)
+              console.log(`[Obsidian Export] Enhanced metadata.json with document fields (source_type: ${enhancedMetadata.source_type})`)
+            } catch (parseError) {
+              console.warn(`[Obsidian Export] Failed to enhance metadata.json:`, parseError)
+              // Continue with original jsonText if enhancement fails
+            }
+          }
+
+          const rhizomePath = path.join(docFolderPath, '.rhizome', filename)
+          await fs.writeFile(rhizomePath, jsonText, 'utf-8')
+          console.log(`[Obsidian Export] .rhizome/${filename} written`)
+        }
+      } catch (error) {
+        console.warn(`[Obsidian Export] Failed to copy ${filename}:`, error instanceof Error ? error.message : 'Unknown error')
+      }
+    }
+
+    // 10. Export annotations.json (machine-readable ECS entities)
+    if (obsidianSettings.syncAnnotations !== false) {
+      const annotationsJson = await exportAnnotationsToJson(documentId, supabase)
+      const annotationsJsonPath = path.join(docFolderPath, '.rhizome', 'annotations.json')
+      await fs.writeFile(annotationsJsonPath, annotationsJson, 'utf-8')
+      console.log(`[Obsidian Export] .rhizome/annotations.json written`)
+    }
+
+    // 11. Export sparks.json (machine-readable ECS entities)
+    if (obsidianSettings.exportSparks !== false) {
+      const sparksJson = await exportSparksToJson(documentId, supabase)
+      const sparksJsonPath = path.join(docFolderPath, '.rhizome', 'sparks.json')
+      await fs.writeFile(sparksJsonPath, sparksJson, 'utf-8')
+      console.log(`[Obsidian Export] .rhizome/sparks.json written`)
+    }
+
+    // 12. Export connections.json (machine-readable connection rows)
+    if (obsidianSettings.exportConnections !== false) {
+      const connectionsJson = await exportConnectionsToJson(documentId, supabase)
+      const connectionsJsonPath = path.join(docFolderPath, '.rhizome', 'connections.json')
+      await fs.writeFile(connectionsJsonPath, connectionsJson, 'utf-8')
+      console.log(`[Obsidian Export] .rhizome/connections.json written`)
+    }
+
+    // 13. Create source-ref.json (reference to original file)
+    const sourceRef = {
+      storagePath: document.storage_path,
+      note: 'Original file is in Supabase Storage, not in vault'
+    }
+
+    const sourceRefPath = path.join(docFolderPath, '.rhizome', 'source-ref.json')
+    await fs.writeFile(sourceRefPath, JSON.stringify(sourceRef, null, 2), 'utf-8')
+    console.log(`[Obsidian Export] source-ref.json written`)
+
+    // 14. Calculate and store hash
+    const vaultHash = createHash('sha256')
+      .update(markdown)
+      .digest('hex')
+      .substring(0, 16)
+
+    const storageHash = vaultHash // Same at export time
+
+    // Upsert sync state
+    await supabase
+      .from('obsidian_sync_state')
+      .upsert({
+        document_id: documentId,
+        user_id: userId,
+        vault_path: path.relative(vaultConfig.vaultPath, contentPath),
+        vault_hash: vaultHash,
+        storage_hash: storageHash,
+        vault_modified_at: new Date().toISOString(),
+        storage_modified_at: new Date().toISOString(),
+        last_sync_at: new Date().toISOString(),
+        last_sync_direction: 'storage_to_vault',
+        conflict_state: 'none'
+      }, {
+        onConflict: 'document_id'
+      })
+
+    // 11. Update document.obsidian_path (for backward compatibility)
+    const relativePathToFile = path.relative(vaultConfig.vaultPath, contentPath)
     await supabase
       .from('documents')
       .update({ obsidian_path: relativePathToFile })
       .eq('id', documentId)
 
-    // 7. Generate Obsidian URI
-    const uri = getObsidianUri(
-      obsidianSettings.vaultName,
-      relativePathToFile
-    )
+    // 12. Generate Obsidian URI
+    const uri = getObsidianUri(vaultConfig.vaultName, relativePathToFile)
 
     console.log(`[Obsidian Export] ✅ Export complete`)
 
     return {
       success: true,
-      path: vaultFilePath,
+      path: contentPath,
       uri
     }
 
