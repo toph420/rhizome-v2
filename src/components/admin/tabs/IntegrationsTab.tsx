@@ -5,9 +5,14 @@ import {
   exportToObsidian,
   syncFromObsidian,
   importReadwiseHighlights,
+  scanVault,
+  importFromVault,
   type ObsidianExportResult,
   type ObsidianSyncResult,
   type ReadwiseImportResult,
+  type VaultScanResult,
+  type VaultImportResult,
+  type VaultDocument,
 } from '@/app/actions/integrations'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -66,6 +71,10 @@ export function IntegrationsTab() {
 
   // Readwise file upload
   const [readwiseFile, setReadwiseFile] = useState<File | null>(null)
+
+  // Vault import state
+  const [vaultDocuments, setVaultDocuments] = useState<VaultDocument[]>([])
+  const [loadingVault, setLoadingVault] = useState(false)
 
   // Operation history
   const [operationHistory, setOperationHistory] = useState<IntegrationJob[]>([])
@@ -129,7 +138,7 @@ export function IntegrationsTab() {
       const { data, error } = await supabase
         .from('background_jobs')
         .select('id, job_type, status, error_message, created_at, output_data')
-        .in('job_type', ['obsidian-export', 'obsidian-sync', 'readwise-import'])
+        .in('job_type', ['obsidian-export', 'obsidian-sync', 'readwise-import', 'import-from-vault'])
         .order('created_at', { ascending: false })
         .limit(10)
 
@@ -414,6 +423,54 @@ export function IntegrationsTab() {
   }
 
   // ============================================================================
+  // VAULT IMPORT OPERATIONS
+  // ============================================================================
+
+  const handleScanVault = async () => {
+    setLoadingVault(true)
+    setMessage(null)
+
+    try {
+      const result: VaultScanResult = await scanVault()
+
+      if (result.success && result.documents) {
+        setVaultDocuments(result.documents)
+        setMessage({ type: 'success', text: `Found ${result.documents.length} documents in vault` })
+      } else {
+        setMessage({ type: 'error', text: result.error || 'Failed to scan vault' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` })
+    } finally {
+      setLoadingVault(false)
+    }
+  }
+
+  const handleImportFromVault = async (documentTitle: string) => {
+    setIsOperating(true)
+    setMessage(null)
+
+    try {
+      const result: VaultImportResult = await importFromVault(documentTitle)
+
+      if (result.success) {
+        setMessage({
+          type: 'success',
+          text: `Import started for "${documentTitle}". Check operation history for status.`
+        })
+        loadDocuments() // Refresh document list
+        setTimeout(() => loadOperationHistory(), 1000)
+      } else {
+        setMessage({ type: 'error', text: result.error || 'Import failed' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` })
+    } finally {
+      setIsOperating(false)
+    }
+  }
+
+  // ============================================================================
   // HELPER FUNCTIONS
   // ============================================================================
 
@@ -425,6 +482,8 @@ export function IntegrationsTab() {
         return 'Sync from Obsidian'
       case 'readwise-import':
         return 'Import Readwise'
+      case 'import-from-vault':
+        return 'Import from Vault'
       default:
         return jobType
     }
@@ -531,7 +590,7 @@ export function IntegrationsTab() {
         </div>
       )}
 
-      {/* Main Content */}
+      {/* Document-Dependent Operations (only show if documents exist) */}
       {!loading && documents.length > 0 && (
         <>
           {/* Document Selector */}
@@ -758,8 +817,89 @@ export function IntegrationsTab() {
               <p>• Fuzzy matches → review queue (import_pending table)</p>
             </div>
           </div>
+        </>
+      )}
 
-          <Separator />
+      {/* Always show these sections (work without documents) */}
+      {!loading && (
+        <>
+          {documents.length > 0 && <Separator />}
+
+          {/* Vault Import Section - Always Visible */}
+          <div className="border rounded-lg p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Upload className="size-5" />
+              <h4 className="text-md font-semibold">Import from Vault</h4>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Restore documents from your Obsidian vault to the database. Works even when database is empty - perfect for database resets or initial setup.
+            </p>
+
+            <div className="space-y-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleScanVault}
+                    disabled={loadingVault || isOperating}
+                    variant="default"
+                  >
+                    {loadingVault ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Scanning...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 size-4" />
+                        Scan Vault
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Scan your Obsidian vault for available documents</p>
+                </TooltipContent>
+              </Tooltip>
+
+              {vaultDocuments.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    Found {vaultDocuments.length} documents in vault
+                  </p>
+
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {vaultDocuments.map((doc) => (
+                      <div key={doc.title} className="flex items-center justify-between p-2 border rounded">
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">{doc.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {doc.complete ? (
+                              <span className="text-green-600">✅ Complete</span>
+                            ) : (
+                              <span className="text-amber-600">⚠️ Incomplete (missing {!doc.hasChunksJson ? 'chunks.json' : 'metadata.json'})</span>
+                            )}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => handleImportFromVault(doc.title)}
+                          disabled={!doc.complete || isOperating}
+                        >
+                          Import
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>• <strong>Scan Vault</strong>: Lists all documents in your Obsidian vault</p>
+                <p>• <strong>Import</strong>: Restores document to database from vault files</p>
+                <p>• Complete documents have content.md + chunks.json + metadata.json</p>
+              </div>
+            </div>
+          </div>
 
           {/* Operation History */}
           <div className="space-y-3">
@@ -828,16 +968,6 @@ export function IntegrationsTab() {
             )}
           </div>
         </>
-      )}
-
-      {/* Empty State */}
-      {!loading && documents.length === 0 && (
-        <div className="border rounded-lg p-8 text-center">
-          <p className="text-muted-foreground">No completed documents available</p>
-          <p className="text-sm text-muted-foreground mt-2">
-            Process documents first to use integrations
-          </p>
-        </div>
       )}
       </div>
     </TooltipProvider>

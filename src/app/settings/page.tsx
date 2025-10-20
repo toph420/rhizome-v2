@@ -1,31 +1,44 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { Loader2, Save, FolderOpen } from 'lucide-react'
+import { Loader2, Save, FolderOpen, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Switch } from '@/components/ui/switch'
+import {
+  getObsidianSettings,
+  saveObsidianSettings,
+  validateVault,
+  createVault,
+  type ObsidianSettings
+} from '@/app/actions/settings'
 
-interface ObsidianSettings {
-  vaultName: string | null
-  vaultPath: string | null
-  autoSync: boolean
+interface SettingsState {
+  vaultName: string
+  vaultPath: string
+  rhizomePath: string
   syncAnnotations: boolean
-  exportPath: string
+  exportSparks: boolean
+  exportConnections: boolean
 }
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState<ObsidianSettings>({
+  const [settings, setSettings] = useState<SettingsState>({
     vaultName: '',
     vaultPath: '',
-    autoSync: false,
+    rhizomePath: 'Rhizome/',
     syncAnnotations: true,
-    exportPath: 'Rhizome/'
+    exportSparks: true,
+    exportConnections: true
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [structureValid, setStructureValid] = useState<boolean | null>(null)
+  const [validationMessage, setValidationMessage] = useState('')
 
   useEffect(() => {
     loadSettings()
@@ -33,49 +46,89 @@ export default function SettingsPage() {
 
   async function loadSettings() {
     try {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      )
+      const result = await getObsidianSettings()
 
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('obsidian_settings')
-        .eq('user_id', '00000000-0000-0000-0000-000000000000')
-        .single()
-
-      if (error) {
-        console.error('Failed to load settings:', error)
+      if (!result.success) {
         toast.error('Failed to load settings')
+        console.error('Failed to load settings:', result.error)
         return
       }
 
-      if (data?.obsidian_settings) {
-        setSettings(data.obsidian_settings as ObsidianSettings)
+      if (result.settings) {
+        setSettings(result.settings)
       }
     } catch (error) {
       console.error('Error loading settings:', error)
+      toast.error('Error loading settings')
     } finally {
       setLoading(false)
     }
   }
 
-  async function saveSettings() {
+  async function validateStructure() {
+    setValidating(true)
+    setValidationMessage('')
+
+    try {
+      const result = await validateVault(settings.vaultPath, settings.rhizomePath)
+
+      if (!result.success) {
+        setStructureValid(false)
+        setValidationMessage(`Error: ${result.error}`)
+        toast.error('Failed to validate structure')
+        return
+      }
+
+      if (result.valid) {
+        setStructureValid(true)
+        setValidationMessage('✅ Vault structure is valid')
+        toast.success('Vault structure is valid')
+      } else {
+        setStructureValid(false)
+        setValidationMessage(`❌ Missing directories: ${result.missing?.join(', ')}`)
+        toast.error('Vault structure is incomplete')
+      }
+    } catch (error) {
+      setStructureValid(false)
+      setValidationMessage(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error('Failed to validate structure')
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  async function createStructure() {
+    try {
+      const result = await createVault(
+        settings.vaultPath,
+        settings.vaultName,
+        settings.rhizomePath
+      )
+
+      if (result.success) {
+        setStructureValid(true)
+        setValidationMessage('✅ Vault structure created successfully')
+        toast.success('Vault structure created successfully')
+      } else {
+        setValidationMessage(`❌ Failed to create structure: ${result.error}`)
+        toast.error('Failed to create structure')
+      }
+    } catch (error) {
+      setValidationMessage(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error('Failed to create structure')
+    }
+  }
+
+  async function handleSaveSettings() {
     setSaving(true)
 
     try {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      )
+      const result = await saveObsidianSettings(settings)
 
-      const { error } = await supabase
-        .from('user_settings')
-        .update({ obsidian_settings: settings })
-        .eq('user_id', '00000000-0000-0000-0000-000000000000')
-
-      if (error) {
-        throw error
+      if (!result.success) {
+        toast.error('Failed to save settings')
+        console.error('Failed to save settings:', result.error)
+        return
       }
 
       toast.success('Settings saved successfully')
@@ -157,48 +210,108 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="exportPath">Export Path (within vault)</Label>
+              <Label htmlFor="rhizomePath">Rhizome Path (within vault)</Label>
               <Input
-                id="exportPath"
+                id="rhizomePath"
                 placeholder="Rhizome/"
-                value={settings.exportPath}
-                onChange={(e) => setSettings({ ...settings, exportPath: e.target.value })}
+                value={settings.rhizomePath}
+                onChange={(e) => setSettings({ ...settings, rhizomePath: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                Subfolder within your vault where documents will be exported
+                Subfolder within your vault where documents will be exported (default: Rhizome/)
               </p>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="syncAnnotations"
-                checked={settings.syncAnnotations}
-                onChange={(e) => setSettings({ ...settings, syncAnnotations: e.target.checked })}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              <Label htmlFor="syncAnnotations" className="font-normal cursor-pointer">
-                Export annotations alongside markdown (.annotations.json)
-              </Label>
+            {/* Validation Section */}
+            <div className="space-y-3 pt-4 border-t">
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={validateStructure}
+                  disabled={!settings.vaultPath || validating}
+                >
+                  {validating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Validating...
+                    </>
+                  ) : (
+                    'Validate Structure'
+                  )}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={createStructure}
+                  disabled={!settings.vaultPath || structureValid === true}
+                >
+                  Create Structure
+                </Button>
+              </div>
+
+              {validationMessage && (
+                <Alert variant={structureValid ? 'default' : 'destructive'}>
+                  {structureValid ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  <AlertDescription>{validationMessage}</AlertDescription>
+                </Alert>
+              )}
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="autoSync"
-                checked={settings.autoSync}
-                onChange={(e) => setSettings({ ...settings, autoSync: e.target.checked })}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              <Label htmlFor="autoSync" className="font-normal cursor-pointer">
-                Auto-sync changes from Obsidian (experimental)
-              </Label>
+            {/* Sync Options */}
+            <div className="space-y-4 pt-4 border-t">
+              <h3 className="font-semibold text-sm">Sync Options</h3>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="syncAnnotations">Sync Annotations</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Export highlights.md alongside content
+                  </p>
+                </div>
+                <Switch
+                  id="syncAnnotations"
+                  checked={settings.syncAnnotations}
+                  onCheckedChange={(checked) => setSettings({ ...settings, syncAnnotations: checked })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="exportSparks">Export Sparks</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Export sparks to daily note files
+                  </p>
+                </div>
+                <Switch
+                  id="exportSparks"
+                  checked={settings.exportSparks}
+                  onCheckedChange={(checked) => setSettings({ ...settings, exportSparks: checked })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="exportConnections">Export Connections</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Generate connection graph markdown files
+                  </p>
+                </div>
+                <Switch
+                  id="exportConnections"
+                  checked={settings.exportConnections}
+                  onCheckedChange={(checked) => setSettings({ ...settings, exportConnections: checked })}
+                />
+              </div>
             </div>
           </div>
 
           <div className="pt-4 border-t">
             <Button
-              onClick={saveSettings}
+              onClick={handleSaveSettings}
               disabled={saving || !settings.vaultName || !settings.vaultPath}
               className="w-full sm:w-auto"
             >

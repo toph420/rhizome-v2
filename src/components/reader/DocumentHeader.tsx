@@ -9,6 +9,7 @@ import { ExternalLink, RefreshCw, Loader2, BookMarked, Compass, BookOpen, Gradua
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useRouter } from 'next/navigation'
 import { chunkerLabels, chunkerDescriptions, chunkerColors, type ChunkerType } from '@/types/chunker'
+import { exportToObsidian, syncFromObsidian } from '@/app/actions/integrations'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -51,37 +52,25 @@ export function DocumentHeader({
 
   /**
    * Export document to Obsidian vault and open in editor
-   * Uses invisible iframe for reliable protocol handling
+   * Creates background job for export
    */
   async function handleEditInObsidian() {
     setIsExporting(true)
 
     try {
-      const response = await fetch('/api/obsidian/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId })
+      toast.info('Exporting to Obsidian...', {
+        description: 'Creating vault files'
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || 'Export failed')
+      const result = await exportToObsidian(documentId)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Export failed')
       }
 
-      const { uri, path } = await response.json()
-
-      // CRITICAL: Use iframe for protocol handling, NOT window.open
-      // This ensures Obsidian URI works on all platforms
-      const iframe = document.createElement('iframe')
-      iframe.style.display = 'none'
-      iframe.src = uri
-      document.body.appendChild(iframe)
-
-      // Remove iframe after 1 second (protocol handler will have triggered)
-      setTimeout(() => iframe.remove(), 1000)
-
-      toast.success('Exported to Obsidian', {
-        description: `Document available at: ${path}`
+      toast.success('Export job created', {
+        description: 'Document will be available in Obsidian shortly. Check ProcessingDock for progress.',
+        duration: 5000
       })
 
     } catch (error) {
@@ -94,85 +83,33 @@ export function DocumentHeader({
     }
   }
 
-  /**
-   * Poll job status until completion
-   */
-  async function pollJobStatus(jobId: string): Promise<any> {
-    const maxAttempts = 900 // 30 minutes
-    const intervalMs = 2000 // 2 seconds
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const response = await fetch(`/api/obsidian/status/${jobId}`)
-      const data = await response.json()
-
-      if (data.status === 'completed') {
-        return data.result
-      }
-
-      if (data.status === 'failed') {
-        throw new Error(data.error || 'Job failed')
-      }
-
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, intervalMs))
-    }
-
-    throw new Error('Sync timeout - processing took too long')
-  }
 
   /**
-   * Sync edited markdown from Obsidian vault (async version)
+   * Sync edited markdown from Obsidian vault
    * Triggers reprocessing pipeline with annotation recovery
-   * Uses client-side polling to avoid API timeout issues
+   * Creates background job for sync
    */
   async function handleSync() {
     setIsSyncing(true)
 
     try {
-      // Start sync job
-      const response = await fetch('/api/obsidian/sync-async', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId })
+      toast.info('Sync started', {
+        description: 'Processing document - this may take several minutes for large files'
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || 'Sync failed')
+      const result = await syncFromObsidian(documentId)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Sync failed')
       }
 
-      const { jobId } = await response.json()
-
-      toast.info('Sync Started', {
-        description: 'Processing document - this may take several minutes for large files',
-        duration: 3000
-      })
-
-      // Poll for completion
-      const { changed, recovery } = await pollJobStatus(jobId)
-
-      if (!changed) {
-        toast.info('No Changes', {
-          description: 'Document is already up to date'
-        })
-        return
-      }
-
-      // Show recovery stats in toast
-      const stats = recovery
-        ? `Recovered: ${recovery.success.length} | Review: ${recovery.needsReview.length} | Lost: ${recovery.lost.length}`
-        : 'No annotations to recover'
-
-      toast.success('Sync Complete', {
-        description: recovery
-          ? `Document updated successfully. ${stats}`
-          : 'Document updated successfully',
+      toast.success('Sync job created', {
+        description: 'Check ProcessingDock for progress. Page will reload when complete.',
         duration: 5000
       })
 
-      // Reload page to show updated content and recovered annotations
-      // TODO: Replace with optimistic UI update once review panel is integrated
-      window.location.reload()
+      // Note: In production, would want to poll job status and reload when complete
+      // For now, user can monitor via ProcessingDock
 
     } catch (error) {
       console.error('[DocumentHeader] Sync failed:', error)

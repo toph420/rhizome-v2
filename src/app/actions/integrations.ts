@@ -87,7 +87,7 @@ export async function exportToObsidian(
       .from('background_jobs')
       .insert({
         user_id: user.id,
-        job_type: 'obsidian-export',
+        job_type: 'obsidian_export',
         entity_type: 'document',
         entity_id: documentId,
         input_data: {
@@ -178,7 +178,7 @@ export async function syncFromObsidian(
       .from('background_jobs')
       .insert({
         user_id: user.id,
-        job_type: 'obsidian-sync',
+        job_type: 'obsidian_sync',
         entity_type: 'document',
         entity_id: documentId,
         input_data: {
@@ -203,6 +203,208 @@ export async function syncFromObsidian(
 
   } catch (error) {
     console.error('[syncFromObsidian] Unexpected error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
+// VAULT IMPORT OPERATIONS
+// ============================================================================
+
+/**
+ * Vault document info
+ */
+export interface VaultDocument {
+  title: string
+  complete: boolean
+  hasContent: boolean
+  hasHighlights: boolean | null
+  hasConnections: boolean | null
+  hasChunksJson: boolean
+  hasMetadataJson: boolean
+  hasManifestJson: boolean
+}
+
+/**
+ * Result of vault scan operation
+ */
+export interface VaultScanResult {
+  success: boolean
+  documents?: VaultDocument[]
+  vaultPath?: string
+  error?: string
+}
+
+/**
+ * Result of vault import operation
+ */
+export interface VaultImportResult {
+  success: boolean
+  documentId?: string
+  documentTitle?: string
+  chunksImported?: number
+  error?: string
+}
+
+/**
+ * Scan Obsidian vault for available documents.
+ * Returns list of documents found in the vault with their completion status.
+ *
+ * @returns Result with list of vault documents
+ *
+ * @example
+ * ```typescript
+ * const result = await scanVault()
+ * if (result.success) {
+ *   result.documents.forEach(doc => {
+ *     console.log(`${doc.title}: ${doc.complete ? 'Complete' : 'Incomplete'}`)
+ *   })
+ * }
+ * ```
+ */
+export async function scanVault(): Promise<VaultScanResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const user = await getCurrentUser()
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // Get vault settings
+    const { data: settings, error: settingsError } = await supabase
+      .from('user_settings')
+      .select('obsidian_settings')
+      .eq('user_id', user.id)
+      .single()
+
+    if (settingsError || !settings?.obsidian_settings?.vaultPath) {
+      return { success: false, error: 'Vault not configured. Please configure vault path in Settings.' }
+    }
+
+    const vaultConfig = settings.obsidian_settings
+
+    // Create background job for vault scan (quick operation)
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .insert({
+        user_id: user.id,
+        job_type: 'scan_vault',
+        input_data: {
+          userId: user.id,
+          vaultPath: vaultConfig.vaultPath,
+          rhizomePath: vaultConfig.rhizomePath || 'Rhizome/'
+        }
+      })
+      .select()
+      .single()
+
+    if (jobError) {
+      console.error('[scanVault] Failed to create job:', jobError)
+      return { success: false, error: `Job creation failed: ${jobError.message}` }
+    }
+
+    // Poll for job completion (vault scan is quick, ~2-5 seconds)
+    let attempts = 0
+    while (attempts < 30) {
+      const { data: completedJob } = await supabase
+        .from('background_jobs')
+        .select('status, output_data')
+        .eq('id', job.id)
+        .single()
+
+      if (completedJob?.status === 'completed') {
+        return {
+          success: true,
+          documents: completedJob.output_data.documents,
+          vaultPath: vaultConfig.vaultPath
+        }
+      }
+
+      if (completedJob?.status === 'failed') {
+        return {
+          success: false,
+          error: completedJob.output_data?.error || 'Vault scan failed'
+        }
+      }
+
+      // Wait 200ms before next poll
+      await new Promise(resolve => setTimeout(resolve, 200))
+      attempts++
+    }
+
+    return { success: false, error: 'Vault scan timeout' }
+
+  } catch (error) {
+    console.error('[scanVault] Unexpected error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Import document from Obsidian vault to database.
+ * Restores document from vault files (content.md, chunks.json, metadata.json).
+ *
+ * @param documentTitle - Title of document to import from vault
+ * @returns Result with document ID and import stats
+ *
+ * @example
+ * ```typescript
+ * const result = await importFromVault("Gravity's Rainbow")
+ * if (result.success) {
+ *   console.log(`Imported ${result.chunksImported} chunks`)
+ * }
+ * ```
+ */
+export async function importFromVault(
+  documentTitle: string
+): Promise<VaultImportResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const user = await getCurrentUser()
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    if (!documentTitle || typeof documentTitle !== 'string') {
+      return { success: false, error: 'Invalid document title' }
+    }
+
+    console.log(`[importFromVault] Starting import for: ${documentTitle}`)
+
+    // Create background job for vault import
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .insert({
+        user_id: user.id,
+        job_type: 'import_from_vault',
+        input_data: {
+          documentTitle,
+          strategy: 'merge_smart',
+          uploadToStorage: true,
+          userId: user.id
+        }
+      })
+      .select()
+      .single()
+
+    if (jobError) {
+      console.error('[importFromVault] Failed to create job:', jobError)
+      return { success: false, error: `Job creation failed: ${jobError.message}` }
+    }
+
+    console.log(`[importFromVault] Job created: ${job.id}`)
+
+    return {
+      success: true,
+      documentTitle
+    }
+
+  } catch (error) {
+    console.error('[importFromVault] Unexpected error:', error)
     const message = error instanceof Error ? error.message : 'Unknown error'
     return { success: false, error: message }
   }
@@ -297,7 +499,7 @@ export async function importReadwiseHighlights(
       .from('background_jobs')
       .insert({
         user_id: user.id,
-        job_type: 'readwise-import',
+        job_type: 'readwise_import',
         entity_type: 'document',
         entity_id: documentId,
         input_data: {

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { FileText, Eye, Loader2, Trash2, Pause, Play, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { deleteDocument } from '@/app/actions/delete-document'
+import { exportToObsidian } from '@/app/actions/integrations'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -174,28 +175,29 @@ export function DocumentList() {
 
   async function openInObsidian(documentId: string) {
     try {
-      const response = await fetch('/api/obsidian/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId })
+      setProcessing(documentId)
+      toast.info('Exporting to Obsidian...', {
+        description: 'Creating vault files'
       })
 
-      if (!response.ok) {
-        throw new Error('Export failed')
+      const result = await exportToObsidian(documentId)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Export failed')
       }
 
-      const { uri } = await response.json()
+      // Note: Job-based export - URI will be in job output_data
+      // For now, just show success. Real URI handling would require job polling
+      toast.success('Export job created', {
+        description: 'Document will be available in Obsidian shortly'
+      })
 
-      // Open in Obsidian via protocol handler
-      const iframe = document.createElement('iframe')
-      iframe.style.display = 'none'
-      iframe.src = uri
-      document.body.appendChild(iframe)
-      setTimeout(() => iframe.remove(), 1000)
-
-      toast.success('Opened in Obsidian')
+      setProcessing(null)
     } catch (error) {
-      toast.error('Failed to open in Obsidian')
+      setProcessing(null)
+      toast.error('Failed to export to Obsidian', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      })
     }
   }
 
