@@ -2,6 +2,7 @@
 description: Implement technical plans from thoughts/plans with verification
 ---
 
+
 # Implement Plan
 
 Implement an approved technical plan from `thoughts/plans/`. Plans contain phases with specific changes and success criteria.
