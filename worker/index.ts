@@ -41,11 +41,11 @@ console.log = function(...args: any[]) {
 
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,
-  'detect-connections': detectConnectionsHandler,
+  'detect_connections': detectConnectionsHandler,
   'import_document': importDocumentHandler,
   'reprocess_connections': reprocessConnectionsHandler,
   'export_documents': exportDocumentHandler,
-  'reprocess-document': async (supabase: any, job: any) => {
+  'reprocess_document': async (supabase: any, job: any) => {
     const { documentId } = job.input_data
     const results = await reprocessDocument(documentId, supabase, job.id)  // Pass jobId for progress tracking
 
@@ -59,7 +59,7 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
-  'obsidian-export': async (supabase: any, job: any) => {
+  'obsidian_export': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
     const result = await exportToObsidian(documentId, userId)
 
@@ -76,7 +76,7 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
-  'obsidian-sync': async (supabase: any, job: any) => {
+  'obsidian_sync': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
     const result = await syncFromObsidian(documentId, userId, job.id)  // Pass jobId for progress tracking
 
@@ -93,7 +93,7 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
-  'readwise-import': async (supabase: any, job: any) => {
+  'readwise_import': async (supabase: any, job: any) => {
     const { documentId, readwiseData } = job.input_data
     const results = await importReadwiseHighlights(documentId, readwiseData)
 
@@ -110,9 +110,9 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
-  'scan-vault': scanVaultHandler,
-  'import-from-vault': importFromVaultHandler,
-  'continue-processing': async (supabase: any, job: any) => {
+  'scan_vault': scanVaultHandler,
+  'import_from_vault': importFromVaultHandler,
+  'continue_processing': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
     const skipAiCleanup = (job.input_data as any).skipAiCleanup || false
     const result = await continueProcessing(documentId, userId, job.id, skipAiCleanup)  // Pass jobId for progress tracking

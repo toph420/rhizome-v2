@@ -18,6 +18,7 @@ import { scanVaultDocuments, readVaultDocumentData } from '../lib/vault-reader.j
 import { importAnnotationsFromVault } from '../lib/vault-import-annotations.js'
 import { importSparksFromVault } from '../lib/vault-import-sparks.js'
 import { importConnectionsFromVault } from '../lib/vault-import-connections.js'
+import { generateEmbeddings } from '../lib/embeddings.js'
 import * as path from 'path'
 import * as fs from 'fs/promises'
 import * as crypto from 'crypto'
@@ -49,7 +50,7 @@ async function updateProgress(
  * Import document from vault to database
  */
 export async function importFromVaultHandler(supabase: any, job: any): Promise<void> {
-  const { documentTitle, strategy, uploadToStorage, userId } = job.input_data
+  const { documentTitle, strategy, uploadToStorage, userId, regenerateEmbeddings = true } = job.input_data
 
   console.log(`[ImportFromVault] Starting import for "${documentTitle}"`)
 
@@ -144,11 +145,15 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
         console.log('  - Has from() method:', typeof supabase.from === 'function')
 
         // Generate UUID and storage_path upfront (storage_path is NOT NULL, required for insert)
-        const newDocId = crypto.randomUUID()
+        // IMPORTANT: Use document_id from metadata.json if present (vault portability)
+        const vaultDocId = docData.metadata.document_id
+        const newDocId = vaultDocId || crypto.randomUUID()  // Preserve vault UUID or generate new
         const newStoragePath = `${userId}/${newDocId}`
 
+        console.log('[ImportFromVault] Document ID strategy:', vaultDocId ? `Preserving vault UUID: ${newDocId}` : `Generating new UUID: ${newDocId}`)
+
         const insertData = {
-          id: newDocId,  // Provide explicit ID
+          id: newDocId,  // Use preserved or new ID
           user_id: userId,
           title: title,
           source_type: sourceType,
@@ -254,6 +259,19 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
 
       if (markdownError) {
         console.warn(`⚠️ Failed to upload content.md: ${markdownError.message}`)
+      } else {
+        // Update document with markdown_path for vault export compatibility
+        const markdownPath = `${storagePath}/content.md`
+        const { error: updateError } = await supabase
+          .from('documents')
+          .update({ markdown_path: markdownPath })
+          .eq('id', documentId)
+
+        if (updateError) {
+          console.warn(`⚠️ Failed to update markdown_path: ${updateError.message}`)
+        } else {
+          console.log(`✅ Updated document.markdown_path: ${markdownPath}`)
+        }
       }
 
       console.log('[ImportFromVault] JSON files uploaded to Storage')
@@ -263,11 +281,22 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
     // ✅ STEP 6: IMPORT CHUNKS TO DATABASE (60-80%)
     await updateProgress(supabase, job.id, 65, 'importing', 'processing', 'Importing chunks to database')
 
-    // For new documents (just created), use 'replace' to INSERT chunks
-    // For existing documents, use user's preferred strategy (default: merge_smart)
+    // Check if document has any existing chunks
+    const { count: existingChunkCount } = await supabase
+      .from('chunks')
+      .select('*', { count: 'exact', head: true })
+      .eq('document_id', documentId)
+
+    // Strategy selection logic:
+    // 1. New document (just created) → use 'replace' to INSERT chunks
+    // 2. Document exists but has 0 chunks → use 'replace' to INSERT chunks
+    // 3. Document exists with chunks → use user's preferred strategy (default: merge_smart)
     const wasJustCreated = !existingDoc
-    const importStrategy = wasJustCreated ? 'replace' : (strategy || 'merge_smart')
-    console.log(`[ImportFromVault] Importing ${docData.chunks.chunks.length} chunks with strategy: ${importStrategy}${wasJustCreated ? ' (new document)' : ''}`)
+    const hasNoChunks = existingChunkCount === 0
+    const needsInsert = wasJustCreated || hasNoChunks
+    const importStrategy = needsInsert ? 'replace' : (strategy || 'merge_smart')
+
+    console.log(`[ImportFromVault] Importing ${docData.chunks.chunks.length} chunks with strategy: ${importStrategy}${needsInsert ? ` (${wasJustCreated ? 'new document' : 'empty document'})` : ''}`)
 
     const chunksImported = await applyImportStrategy(
       supabase,
@@ -363,6 +392,97 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
       console.log(`[ImportFromVault] No connections.json found or import failed: ${error.message}`)
     }
 
+    // ✅ STEP 9.5: REGENERATE EMBEDDINGS (85-88%)
+    let embeddingsRegenerated = false
+    let connectionDetectionJobId: string | null = null
+
+    if (chunksImported > 0 && regenerateEmbeddings) {
+      await updateProgress(supabase, job.id, 85, 'embeddings', 'processing', 'Regenerating embeddings for imported chunks')
+      console.log(`[ImportFromVault] Regenerating embeddings for ${chunksImported} chunks...`)
+
+      try {
+        // Get imported chunks
+        const { data: importedChunks, error: chunksError } = await supabase
+          .from('chunks')
+          .select('id, content, chunk_index')
+          .eq('document_id', documentId)
+          .eq('is_current', true)
+          .order('chunk_index')
+
+        if (chunksError) {
+          console.warn(`⚠️ Failed to fetch chunks for embeddings: ${chunksError.message}`)
+        } else if (importedChunks && importedChunks.length > 0) {
+          // Generate embeddings
+          const texts = importedChunks.map((c: any) => c.content)
+          const embeddings = await generateEmbeddings(texts)
+          console.log(`[ImportFromVault] Generated ${embeddings.length} embeddings`)
+
+          // Update chunks with embeddings
+          for (let i = 0; i < importedChunks.length; i++) {
+            const { error: updateError } = await supabase
+              .from('chunks')
+              .update({ embedding: embeddings[i] })
+              .eq('id', importedChunks[i].id)
+
+            if (updateError) {
+              console.warn(`⚠️ Failed to update chunk ${i} embedding: ${updateError.message}`)
+            }
+          }
+
+          embeddingsRegenerated = true
+          console.log(`✅ [ImportFromVault] Embeddings regenerated for all ${importedChunks.length} chunks`)
+
+          // Only trigger connection detection if connections weren't imported from vault
+          // (i.e., connections.json was missing or import failed)
+          const connectionsWereImported = connectionsResult.imported > 0 || connectionsResult.remapped > 0
+
+          if (!connectionsWereImported) {
+            // Trigger connection detection job - no connections in vault, need to detect
+            await updateProgress(supabase, job.id, 88, 'connections', 'processing', 'Triggering connection detection (no connections.json found)')
+
+            const { data: connectionJob, error: jobError } = await supabase
+              .from('background_jobs')
+              .insert({
+                job_type: 'detect_connections',
+                user_id: userId,
+                input_data: {
+                  document_id: documentId,
+                  source: 'vault-import-auto'
+                },
+                status: 'pending'
+              })
+              .select('id')
+              .single()
+
+            if (jobError) {
+              console.warn(`⚠️ Failed to create connection detection job: ${jobError.message}`)
+            } else {
+              connectionDetectionJobId = connectionJob.id
+              console.log(`✅ [ImportFromVault] Connection detection job created: ${connectionJob.id}`)
+            }
+          } else {
+            console.log(`⏭️  [ImportFromVault] Skipping connection detection - ${connectionsWereImported ? connectionsResult.imported + connectionsResult.remapped : 0} connections already imported from vault`)
+          }
+        }
+      } catch (error: any) {
+        console.warn(`⚠️ Embeddings regeneration failed: ${error.message}`)
+      }
+    }
+
+    // ✅ STEP 9.6: UPDATE DOCUMENT FLAGS (89%)
+    // Set markdown_available and embeddings_available flags for UI
+    if (chunksImported > 0) {
+      await supabase
+        .from('documents')
+        .update({
+          markdown_available: true,
+          embeddings_available: embeddingsRegenerated
+        })
+        .eq('id', documentId)
+
+      console.log(`[ImportFromVault] Document flags updated (embeddings_available: ${embeddingsRegenerated})`)
+    }
+
     // ✅ STEP 10: UPDATE SYNC STATE (90%)
     await updateProgress(supabase, job.id, 90, 'sync_state', 'processing', 'Updating sync state')
 
@@ -408,7 +528,9 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
           connectionsImported: connectionsResult.imported,
           connectionsRemapped: connectionsResult.remapped,
           uploadedToStorage: uploadToStorage !== false,
-          strategy: importStrategy
+          strategy: importStrategy,
+          embeddingsRegenerated,
+          connectionDetectionJobId
         },
         completed_at: new Date().toISOString()
       })
@@ -419,6 +541,10 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
     console.log(`  - Annotations: ${annotationsResult.imported} imported, ${annotationsResult.recovered} recovered`)
     console.log(`  - Sparks: ${sparksResult.imported} imported, ${sparksResult.recovered} recovered`)
     console.log(`  - Connections: ${connectionsResult.imported} imported, ${connectionsResult.remapped} remapped`)
+    console.log(`  - Embeddings: ${embeddingsRegenerated ? '✅ regenerated' : '⏭️  skipped'}`)
+    if (connectionDetectionJobId) {
+      console.log(`  - Connection detection: job ${connectionDetectionJobId} queued`)
+    }
 
   } catch (error: any) {
     console.error('❌ [ImportFromVault] Import failed:', error)
@@ -482,10 +608,16 @@ async function applyImportStrategy(
 
     console.log(`💾 Inserting ${chunks.length} chunks from vault`)
 
+    // Check if chunks have IDs (for UUID preservation)
+    const hasChunkIds = chunks.some(c => c.id)
+    console.log(`[ImportFromVault] Chunk ID strategy:`, hasChunkIds ? `Preserving ${chunks.filter(c => c.id).length} vault UUIDs` : `Generating new UUIDs (backward compatible)`)
+
     // Prepare chunks for insert
     const chunksToInsert = chunks.map(chunk => ({
+      // IMPORTANT: Preserve chunk ID from vault if present (for annotation references)
+      ...(chunk.id ? { id: chunk.id } : {}),  // Use vault UUID or let DB generate
       document_id: documentId,
-      user_id: userId,
+      // Note: chunks table has no user_id column (linked via document)
       content: chunk.content,
       chunk_index: chunk.chunk_index,
       start_offset: chunk.start_offset,
@@ -513,10 +645,8 @@ async function applyImportStrategy(
       emotional_metadata: chunk.emotional_metadata,
       conceptual_metadata: chunk.conceptual_metadata,
       domain_metadata: chunk.domain_metadata,
-      metadata_extracted_at: chunk.metadata_extracted_at,
-      // Timestamps
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      metadata_extracted_at: chunk.metadata_extracted_at
+      // created_at will default to now() from database
     }))
 
     const { error: insertError } = await supabase

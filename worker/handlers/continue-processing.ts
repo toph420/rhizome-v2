@@ -463,7 +463,7 @@ export async function continueProcessing(
     const { data: existingJobs } = await supabase
       .from('background_jobs')
       .select('id, status')
-      .eq('job_type', 'detect-connections')
+      .eq('job_type', 'detect_connections')
       .eq('user_id', userId)
       .in('status', ['pending', 'processing'])
       .contains('input_data', { document_id: documentId })
@@ -476,7 +476,7 @@ export async function continueProcessing(
         .from('background_jobs')
         .insert({
           user_id: userId,
-          job_type: 'detect-connections',
+          job_type: 'detect_connections',
           status: 'pending',
           input_data: {
             document_id: documentId,

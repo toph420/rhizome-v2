@@ -6,7 +6,8 @@ import { enhanceThemesFromConcepts, enhanceSummaryFromConcepts } from '../lib/ma
 import type { SourceType } from '../types/multi-format.js'
 import type { ProcessResult } from '../types/processor.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
+import { saveToStorage } from '../lib/storage-helpers.js'
 
 console.log(`🤖 Using Gemini model: ${GEMINI_MODEL}`)
 
@@ -462,6 +463,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       const { heading_path, ...chunkWithoutHeadingPath } = chunk as any
 
       return {
+        id: randomUUID(),  // Generate UUID upfront for vault portability
         ...chunkWithoutHeadingPath,  // Processor already mapped metadata correctly
         document_id,  // CRITICAL: Set document_id AFTER spread to prevent undefined override
         embedding: embeddings[i]
@@ -504,6 +506,27 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     }
     console.log(`✅ Saved ${chunksWithEmbeddings.length} chunks to database`)
 
+    // ✅ UUID PRESERVATION: Update Storage chunks.json with UUIDs for vault portability
+    // This ensures vault exports include chunk IDs, allowing annotations to survive round-trips
+    console.log(`🔄 Updating Storage chunks.json with ${chunksWithEmbeddings.length} UUIDs...`)
+    const chunksForStorage = chunksWithEmbeddings.map(chunk => {
+      const { embedding, ...chunkWithoutEmbedding } = chunk
+      return chunkWithoutEmbedding
+    })
+
+    const storagePath = `${userId}/${document_id}`
+    await saveToStorage(
+      supabase,
+      `${storagePath}/chunks.json`,
+      {
+        chunks: chunksForStorage,
+        version: "1.0",
+        document_id: document_id,
+        timestamp: new Date().toISOString()
+      }
+    )
+    console.log(`✅ Updated Storage chunks.json with UUIDs (vault-ready)`)
+
     // Update progress after successful insertion
     await updateProgress(supabase, job.id, 90, 'saving', 'processing', `Saved ${chunksWithEmbeddings.length} chunks successfully`)
 
@@ -520,7 +543,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       const { data: existingJobs } = await supabase
         .from('background_jobs')
         .select('id, status')
-        .eq('job_type', 'detect-connections')
+        .eq('job_type', 'detect_connections')
         .eq('user_id', userId)
         .in('status', ['pending', 'processing'])
         .contains('input_data', { document_id })
@@ -534,7 +557,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
           .from('background_jobs')
           .insert({
             user_id: userId,  // Required field in background_jobs table
-            job_type: 'detect-connections',
+            job_type: 'detect_connections',
             status: 'pending',
             input_data: {
               document_id,
