@@ -47,11 +47,7 @@ import { bulletproofMatch, type MatchResult } from '../lib/local/bulletproof-mat
 import { chunkWithChonkie } from '../lib/chonkie/chonkie-chunker.js'
 import { transferMetadataToChonkieChunks } from '../lib/chonkie/metadata-transfer.js'
 import type { ChonkieStrategy } from '../lib/chonkie/types.js'
-// Phase 6: Local metadata enrichment imports
-import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-metadata.js'
-// Phase 7: Local embeddings imports
-import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
-import { generateEmbeddings } from '../lib/embeddings.js'
+// Phase 2: Local metadata enrichment and embeddings handled by base class
 // Cached chunks table integration
 import { saveCachedChunks, hashMarkdown } from '../lib/cached-chunks.js'
 // Phase 1: Shared chunker configuration
@@ -423,184 +419,19 @@ export class PDFProcessor extends SourceProcessor {
     logChunkStatistics(chunkingStats, 'PDF Chunks (After Chonkie + Metadata Transfer)')
 
     // Stage 8: Metadata Enrichment (77-90%)
-    // Phase 6: Extract structured metadata using PydanticAI + Ollama
+    // Phase 2: Use shared method from base class
     console.log('[PDFProcessor] Stage 8: Starting local metadata enrichment (PydanticAI + Ollama)')
-    await this.updateProgress(78, 'metadata', 'processing', 'Extracting structured metadata')
-
-    try {
-      const BATCH_SIZE = 10 // Process 10 chunks at a time (balance speed vs memory)
-      const enrichedChunks: ProcessedChunk[] = []
-
-      for (let i = 0; i < finalChunks.length; i += BATCH_SIZE) {
-        const batch = finalChunks.slice(i, i + BATCH_SIZE)
-
-        // Prepare batch for metadata extraction
-        const batchInput: ChunkInput[] = batch.map(chunk => ({
-          id: `${this.job.document_id}-${chunk.chunk_index}`,
-          content: chunk.content
-        }))
-
-        console.log(`[PDFProcessor] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(finalChunks.length / BATCH_SIZE)}`)
-
-        // Extract metadata
-        const metadataMap = await extractMetadataBatch(batchInput, {
-          onProgress: (processed, total) => {
-            const overallProgress = 78 + Math.floor(((i + processed) / finalChunks.length) * 12)
-            this.updateProgress(overallProgress, 'metadata', 'processing', `Enriching chunk ${i + processed}/${finalChunks.length}`)
-          }
-        })
-
-        // Enrich chunks with metadata
-        for (const chunk of batch) {
-          const chunkId = `${this.job.document_id}-${chunk.chunk_index}`
-          const metadata = metadataMap.get(chunkId)
-
-          if (metadata) {
-            enrichedChunks.push({
-              ...chunk,
-              themes: metadata.themes,
-              importance_score: metadata.importance,
-              summary: metadata.summary,
-              emotional_metadata: {
-                polarity: metadata.emotional.polarity,
-                primaryEmotion: metadata.emotional.primaryEmotion as any, // PydanticAI returns string
-                intensity: metadata.emotional.intensity
-              },
-              conceptual_metadata: {
-                concepts: metadata.concepts as any // PydanticAI returns simplified structure
-              },
-              domain_metadata: {
-                primaryDomain: metadata.domain as any, // PydanticAI returns string
-                confidence: 0.8 // PydanticAI extracts with high confidence
-              },
-              metadata_extracted_at: new Date().toISOString()
-            })
-          } else {
-            // Fallback: use default metadata if extraction failed
-            console.warn(`[PDFProcessor] Metadata extraction failed for chunk ${chunk.chunk_index} - using defaults`)
-            enrichedChunks.push(chunk) // Keep original chunk with default metadata
-          }
-        }
-
-        // Progress update after each batch
-        const progress = 78 + Math.floor(((i + batch.length) / finalChunks.length) * 12)
-        await this.updateProgress(progress, 'metadata', 'processing', `Batch ${Math.floor(i / BATCH_SIZE) + 1} complete`)
-      }
-
-      // Replace finalChunks with enriched version
-      finalChunks = enrichedChunks
-
-      console.log(`[PDFProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
-      await this.updateProgress(90, 'metadata', 'complete', 'Metadata enrichment done')
-
-    } catch (error: any) {
-      console.error(`[PDFProcessor] Metadata enrichment failed: ${error.message}`)
-      console.warn('[PDFProcessor] Continuing with default metadata')
-
-      // Mark document for review but don't fail processing
-      await this.markForReview(
-        'metadata_enrichment_failed',
-        `Local metadata enrichment failed: ${error.message}. Using default metadata.`
-      )
-
-      await this.updateProgress(90, 'metadata', 'fallback', 'Using default metadata')
-    }
+    finalChunks = await this.enrichMetadataBatch(finalChunks, 77, 90, {
+      onError: 'mark_review'  // Mark document for review on error
+    })
 
     // Stage 9: Local Embeddings (90-95%)
-    // Phase 7: Generate embeddings using Transformers.js
+    // Phase 2: Use shared method from base class
     console.log('[PDFProcessor] Stage 9: Starting local embeddings generation (Transformers.js)')
-    await this.updateProgress(92, 'embeddings', 'processing', 'Generating local embeddings')
-
-    try {
-      // Phase 5: Import metadata-enhanced embedding functions
-      const { createEnhancedEmbeddingText, validateEnhancedText } = await import('../lib/embeddings/metadata-context.js')
-
-      // Extract content from chunks for embedding
-      // Phase 5: Create enhanced text with metadata context for better retrieval
-      let enhancedCount = 0
-      let fallbackCount = 0
-
-      const chunkTexts = finalChunks.map((chunk) => {
-        // Enhance with metadata context (heading, page, section)
-        const enhancedText = createEnhancedEmbeddingText({
-          content: chunk.content,
-          heading_path: chunk.heading_path,
-          page_start: chunk.page_start,
-          section_marker: chunk.section_marker
-        })
-
-        // Validate enhancement doesn't exceed token limits
-        const validation = validateEnhancedText(chunk.content, enhancedText)
-        if (!validation.valid) {
-          console.warn(`[PDFProcessor] ${validation.warning} - using original text for chunk ${chunk.chunk_index}`)
-          fallbackCount++
-          return chunk.content
-        }
-
-        if (enhancedText !== chunk.content) {
-          enhancedCount++
-        }
-
-        return enhancedText
-      })
-
-      console.log(`[PDFProcessor] Generating embeddings for ${chunkTexts.length} chunks (Xenova/all-mpnet-base-v2)`)
-      console.log(`[PDFProcessor] Metadata enhancement: ${enhancedCount}/${chunkTexts.length} (${((enhancedCount/chunkTexts.length)*100).toFixed(1)}%)`)
-      if (fallbackCount > 0) {
-        console.warn(`[PDFProcessor] Fallback: ${fallbackCount} chunks exceeded token limits`)
-      }
-
-      const startTime = Date.now()
-
-      // Generate embeddings locally with Transformers.js
-      const embeddings = await generateEmbeddingsLocal(chunkTexts)
-
-      const embeddingTime = Date.now() - startTime
-      console.log(`[PDFProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)
-
-      // Validate dimensions (should be 768)
-      if (embeddings.length !== finalChunks.length) {
-        throw new Error(`Embedding count mismatch: expected ${finalChunks.length}, got ${embeddings.length}`)
-      }
-
-      // Attach embeddings to chunks
-      finalChunks = finalChunks.map((chunk, idx) => ({
-        ...chunk,
-        embedding: embeddings[idx]
-      }))
-
-      console.log('[PDFProcessor] Embeddings attached to all chunks')
-      await this.updateProgress(95, 'embeddings', 'complete', 'Local embeddings generated')
-
-    } catch (error: any) {
-      console.error(`[PDFProcessor] Local embeddings failed: ${error.message}`)
-      console.warn('[PDFProcessor] Falling back to Gemini embeddings')
-
-      try {
-        // Fallback to Gemini embeddings if local fails
-        const chunkContents = finalChunks.map(chunk => chunk.content)
-        const embeddings = await generateEmbeddings(chunkContents)
-
-        finalChunks = finalChunks.map((chunk, idx) => ({
-          ...chunk,
-          embedding: embeddings[idx]
-        }))
-
-        console.log('[PDFProcessor] Gemini embeddings fallback successful')
-        await this.updateProgress(95, 'embeddings', 'fallback', 'Using Gemini embeddings')
-
-      } catch (fallbackError: any) {
-        console.error(`[PDFProcessor] Gemini embeddings also failed: ${fallbackError.message}`)
-
-        // Mark document for review but don't fail processing
-        await this.markForReview(
-          'embeddings_failed',
-          `Both local and Gemini embeddings failed. Chunks saved without embeddings. Error: ${fallbackError.message}`
-        )
-
-        await this.updateProgress(95, 'embeddings', 'failed', 'Embeddings generation failed')
-      }
-    }
+    finalChunks = await this.generateChunkEmbeddings(finalChunks, 90, 95, {
+      enhanceWithMetadata: true,  // Use metadata context for better retrieval
+      onError: 'mark_review'  // Mark document for review on error
+    })
 
     // Stage 10: Finalize (95-100%)
     console.log('[PDFProcessor] Stage 10: Finalizing document processing')

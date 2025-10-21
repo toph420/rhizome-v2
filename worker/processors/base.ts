@@ -336,6 +336,279 @@ export abstract class SourceProcessor {
   }
 
   /**
+   * Enrich chunks with structured metadata using PydanticAI + Ollama.
+   * Shared method for PDF, EPUB, and YouTube processors.
+   *
+   * Phase 2: Extracted from processor duplication (240 lines saved)
+   *
+   * @param chunks - Chunks to enrich with metadata
+   * @param startProgress - Starting progress percentage (e.g., 77)
+   * @param endProgress - Ending progress percentage (e.g., 90)
+   * @param options - Optional configuration
+   * @returns Enriched chunks with AI metadata
+   */
+  protected async enrichMetadataBatch(
+    chunks: ProcessedChunk[],
+    startProgress: number,
+    endProgress: number,
+    options?: {
+      batchSize?: number
+      onError?: 'throw' | 'warn' | 'mark_review'
+    }
+  ): Promise<ProcessedChunk[]> {
+    const BATCH_SIZE = options?.batchSize || 10
+    const progressRange = endProgress - startProgress
+    const enrichedChunks: ProcessedChunk[] = []
+
+    // Dynamically import to avoid circular dependency
+    const { extractMetadataBatch } = await import('../lib/chunking/pydantic-metadata.js')
+    type ChunkInput = { id: string; content: string }
+
+    console.log(`[BaseProcessor] Enriching ${chunks.length} chunks with metadata (batch size: ${BATCH_SIZE})`)
+    await this.updateProgress(startProgress + 1, 'metadata', 'processing', 'Extracting structured metadata')
+
+    try {
+      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const batch = chunks.slice(i, i + BATCH_SIZE)
+
+        // Prepare batch for metadata extraction
+        const batchInput: ChunkInput[] = batch.map(chunk => ({
+          id: `${this.job.document_id}-${chunk.chunk_index}`,
+          content: chunk.content
+        }))
+
+        console.log(`[BaseProcessor] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(chunks.length / BATCH_SIZE)}`)
+
+        // Extract metadata with progress tracking
+        const metadataMap = await extractMetadataBatch(batchInput, {
+          onProgress: (processed, _total) => {
+            const overallProgress = startProgress + Math.floor(((i + processed) / chunks.length) * progressRange)
+            this.updateProgress(overallProgress, 'metadata', 'processing', `Enriching chunk ${i + processed}/${chunks.length}`)
+          }
+        })
+
+        // Enrich chunks with extracted metadata
+        for (const chunk of batch) {
+          const chunkId = `${this.job.document_id}-${chunk.chunk_index}`
+          const metadata = metadataMap.get(chunkId)
+
+          if (metadata) {
+            enrichedChunks.push({
+              ...chunk,
+              themes: metadata.themes,
+              importance_score: metadata.importance,
+              summary: metadata.summary,
+              emotional_metadata: {
+                polarity: metadata.emotional.polarity,
+                primaryEmotion: metadata.emotional.primaryEmotion as any,
+                intensity: metadata.emotional.intensity
+              },
+              conceptual_metadata: {
+                concepts: metadata.concepts as any
+              },
+              domain_metadata: {
+                primaryDomain: metadata.domain as any,
+                confidence: 0.8
+              },
+              metadata_extracted_at: new Date().toISOString()
+            })
+          } else {
+            console.warn(`[BaseProcessor] Metadata extraction failed for chunk ${chunk.chunk_index} - using defaults`)
+            enrichedChunks.push(chunk)
+          }
+        }
+
+        // Progress update after each batch
+        const progress = startProgress + Math.floor(((i + batch.length) / chunks.length) * progressRange)
+        await this.updateProgress(progress, 'metadata', 'processing', `Batch ${Math.floor(i / BATCH_SIZE) + 1} complete`)
+      }
+
+      console.log(`[BaseProcessor] Metadata enrichment complete: ${enrichedChunks.length} chunks enriched`)
+      await this.updateProgress(endProgress, 'metadata', 'complete', 'Metadata enrichment done')
+
+      return enrichedChunks
+
+    } catch (error: any) {
+      console.error(`[BaseProcessor] Metadata enrichment failed: ${error.message}`)
+
+      // Handle errors based on configuration
+      const errorHandling = options?.onError || 'mark_review'
+
+      if (errorHandling === 'throw') {
+        throw error
+      } else if (errorHandling === 'warn') {
+        console.warn('[BaseProcessor] Continuing with default metadata')
+        await this.updateProgress(endProgress, 'metadata', 'fallback', 'Using default metadata')
+        return chunks // Return original chunks without enrichment
+      } else {
+        // mark_review: Default behavior for PDF/EPUB processors
+        console.warn('[BaseProcessor] Continuing with default metadata')
+
+        // Try to mark for review (processor-specific method may not exist)
+        if (typeof (this as any).markForReview === 'function') {
+          await (this as any).markForReview(
+            'metadata_enrichment_failed',
+            `Local metadata enrichment failed: ${error.message}. Using default metadata.`
+          )
+        }
+
+        await this.updateProgress(endProgress, 'metadata', 'fallback', 'Using default metadata')
+        return chunks // Return original chunks without enrichment
+      }
+    }
+  }
+
+  /**
+   * Generate embeddings for chunks using Transformers.js with Gemini fallback.
+   * Shared method for PDF, EPUB, and YouTube processors.
+   *
+   * Phase 2: Extracted from processor duplication (270 lines saved)
+   *
+   * @param chunks - Chunks to generate embeddings for
+   * @param startProgress - Starting progress percentage (e.g., 90)
+   * @param endProgress - Ending progress percentage (e.g., 95)
+   * @param options - Optional configuration
+   * @returns Chunks with embeddings attached
+   */
+  protected async generateChunkEmbeddings(
+    chunks: ProcessedChunk[],
+    startProgress: number,
+    endProgress: number,
+    options?: {
+      enhanceWithMetadata?: boolean
+      onError?: 'throw' | 'warn' | 'mark_review'
+    }
+  ): Promise<ProcessedChunk[]> {
+    const enhanceWithMetadata = options?.enhanceWithMetadata ?? true
+
+    console.log(`[BaseProcessor] Generating embeddings for ${chunks.length} chunks`)
+    await this.updateProgress(startProgress + 2, 'embeddings', 'processing', 'Generating local embeddings')
+
+    try {
+      // Dynamically import to avoid circular dependencies
+      const { generateEmbeddingsLocal } = await import('../lib/local/embeddings-local.js')
+      const { generateEmbeddings } = await import('../lib/embeddings.js')
+
+      let chunkTexts: string[]
+      let enhancedCount = 0
+      let fallbackCount = 0
+
+      if (enhanceWithMetadata) {
+        // Import metadata enhancement functions
+        const { createEnhancedEmbeddingText, validateEnhancedText } = await import('../lib/embeddings/metadata-context.js')
+
+        // Create enhanced text with metadata context for better retrieval
+        chunkTexts = chunks.map((chunk) => {
+          const enhancedText = createEnhancedEmbeddingText({
+            content: chunk.content,
+            heading_path: chunk.heading_path,
+            page_start: chunk.page_start,
+            section_marker: chunk.section_marker
+          })
+
+          // Validate enhancement doesn't exceed token limits
+          const validation = validateEnhancedText(chunk.content, enhancedText)
+          if (!validation.valid) {
+            console.warn(`[BaseProcessor] ${validation.warning} - using original text for chunk ${chunk.chunk_index}`)
+            fallbackCount++
+            return chunk.content
+          }
+
+          if (enhancedText !== chunk.content) {
+            enhancedCount++
+          }
+
+          return enhancedText
+        })
+
+        console.log(`[BaseProcessor] Metadata enhancement: ${enhancedCount}/${chunkTexts.length} (${((enhancedCount/chunkTexts.length)*100).toFixed(1)}%)`)
+        if (fallbackCount > 0) {
+          console.warn(`[BaseProcessor] Fallback: ${fallbackCount} chunks exceeded token limits`)
+        }
+      } else {
+        // Use plain chunk content without enhancement (YouTube transcripts)
+        chunkTexts = chunks.map(chunk => chunk.content)
+      }
+
+      console.log(`[BaseProcessor] Generating embeddings (Xenova/all-mpnet-base-v2)`)
+      const startTime = Date.now()
+
+      // Generate embeddings locally with Transformers.js
+      const embeddings = await generateEmbeddingsLocal(chunkTexts)
+
+      const embeddingTime = Date.now() - startTime
+      console.log(`[BaseProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)
+
+      // Validate dimensions
+      if (embeddings.length !== chunks.length) {
+        throw new Error(`Embedding count mismatch: expected ${chunks.length}, got ${embeddings.length}`)
+      }
+
+      // Attach embeddings to chunks
+      const enrichedChunks = chunks.map((chunk, idx) => ({
+        ...chunk,
+        embedding: embeddings[idx]
+      }))
+
+      console.log('[BaseProcessor] Embeddings attached to all chunks')
+      await this.updateProgress(endProgress, 'embeddings', 'complete', 'Local embeddings generated')
+
+      return enrichedChunks
+
+    } catch (error: any) {
+      console.error(`[BaseProcessor] Local embeddings failed: ${error.message}`)
+      console.warn('[BaseProcessor] Falling back to Gemini embeddings')
+
+      try {
+        // Dynamically import Gemini fallback
+        const { generateEmbeddings } = await import('../lib/embeddings.js')
+
+        // Fallback to Gemini embeddings
+        const chunkContents = chunks.map(chunk => chunk.content)
+        const embeddings = await generateEmbeddings(chunkContents)
+
+        const enrichedChunks = chunks.map((chunk, idx) => ({
+          ...chunk,
+          embedding: embeddings[idx]
+        }))
+
+        console.log('[BaseProcessor] Gemini embeddings fallback successful')
+        await this.updateProgress(endProgress, 'embeddings', 'fallback', 'Using Gemini embeddings')
+
+        return enrichedChunks
+
+      } catch (fallbackError: any) {
+        console.error(`[BaseProcessor] Gemini embeddings also failed: ${fallbackError.message}`)
+
+        // Handle errors based on configuration
+        const errorHandling = options?.onError || 'mark_review'
+
+        if (errorHandling === 'throw') {
+          throw fallbackError
+        } else if (errorHandling === 'warn') {
+          console.warn('[BaseProcessor] Continuing without embeddings')
+          await this.updateProgress(endProgress, 'embeddings', 'failed', 'Embeddings generation failed')
+          return chunks // Return chunks without embeddings
+        } else {
+          // mark_review: Default behavior
+          console.warn('[BaseProcessor] Continuing without embeddings')
+
+          // Try to mark for review
+          if (typeof (this as any).markForReview === 'function') {
+            await (this as any).markForReview(
+              'embeddings_failed',
+              `Both local and Gemini embeddings failed. Chunks saved without embeddings. Error: ${fallbackError.message}`
+            )
+          }
+
+          await this.updateProgress(endProgress, 'embeddings', 'failed', 'Embeddings generation failed')
+          return chunks // Return chunks without embeddings
+        }
+      }
+    }
+  }
+
+  /**
    * Builds document-level metadata export for metadata.json.
    * Combines job data, ProcessResult metadata, and format-specific fields.
    *
