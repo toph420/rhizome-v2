@@ -329,7 +329,8 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
           annotationsJsonPath,
           docData.markdown,
           currentChunks,
-          supabase
+          supabase,
+          userId
         )
         console.log(`[ImportFromVault] Annotations: ${annotationsResult.imported} imported, ${annotationsResult.recovered} recovered`)
       }
@@ -357,7 +358,8 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
           sparksJsonPath,
           docData.markdown,
           currentChunks,
-          supabase
+          supabase,
+          userId
         )
         console.log(`[ImportFromVault] Sparks: ${sparksResult.imported} imported, ${sparksResult.recovered} recovered`)
       }

@@ -47,9 +47,20 @@ export type ExportJobOutput = z.infer<typeof ExportJobOutputSchema>
  */
 export const ImportJobOutputSchema = z.object({
   success: z.boolean(),
+  documentId: z.string().optional(),
+  documentTitle: z.string().optional(),
   chunksImported: z.number(),
-  conflictStrategy: z.enum(['skip', 'replace', 'merge_smart']).optional(),
+  annotationsImported: z.number().optional(),
+  annotationsRecovered: z.number().optional(),
+  sparksImported: z.number().optional(),
+  sparksRecovered: z.number().optional(),
+  connectionsImported: z.number().optional(),
+  connectionsRemapped: z.number().optional(),
+  uploadedToStorage: z.boolean().optional(),
+  strategy: z.enum(['skip', 'replace', 'merge_smart']).optional(),
+  conflictStrategy: z.enum(['skip', 'replace', 'merge_smart']).optional(), // Legacy field
   embeddingsRegenerated: z.boolean().optional(),
+  connectionDetectionJobId: z.string().optional(),
   connectionsReprocessed: z.boolean().optional(),
   importDurationMs: z.number().optional(),
   error: z.string().optional(),

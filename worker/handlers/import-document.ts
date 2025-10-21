@@ -251,8 +251,14 @@ async function applyStrategy(
     await updateProgress(supabase, jobId, 50, 'inserting', 'processing', 'Inserting chunks from Storage')
     console.log(`💾 Inserting ${chunks.length} chunks from Storage`)
 
+    // Check if chunks have IDs (for UUID preservation)
+    const hasChunkIds = chunks.some(c => c.id)
+    console.log(`[ImportDocument] Chunk ID strategy:`, hasChunkIds ? `Preserving ${chunks.filter(c => c.id).length} Storage UUIDs` : `Generating new UUIDs (backward compatible)`)
+
     // Prepare chunks for insert (exclude database-specific fields)
     const chunksToInsert = chunks.map(chunk => ({
+      // IMPORTANT: Preserve chunk ID from Storage if present (for annotation references)
+      ...(chunk.id ? { id: chunk.id } : {}),  // Use Storage UUID or let DB generate
       document_id: documentId,
       content: chunk.content,
       chunk_index: chunk.chunk_index,
