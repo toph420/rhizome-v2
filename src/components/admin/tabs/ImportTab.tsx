@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Loader2, Download, Info } from 'lucide-react'
+import { Loader2, Download, Info, Trash2 } from 'lucide-react'
 import { ConflictResolutionDialog } from '@/components/admin/ConflictResolutionDialog'
 import type { ImportConflict } from '@/types/storage'
 import {
@@ -28,10 +28,11 @@ import {
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { JobList } from '@/components/admin/JobList'
+import { clearCompletedJobs, clearFailedJobs } from '@/app/actions/admin'
 
 export function ImportTab() {
   // Use Zustand stores
-  const { scanResults, scanning, error: scanError, scan } = useStorageScanStore()
+  const { scanResults, scanning, error: scanError, scan, pendingImportDocuments, clearPendingImportDocuments } = useStorageScanStore()
   const { jobs, registerJob, updateJob, replaceJob, removeJob } = useBackgroundJobsStore()
 
   // Selection state
@@ -56,11 +57,23 @@ export function ImportTab() {
   // Success/error messages
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
+  // Job cleanup state
+  const [cleaningJobs, setCleaningJobs] = useState<'completed' | 'failed' | null>(null)
+
   // Auto-scan on mount only (not on every render)
   useEffect(() => {
     scan()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Handle pending imports from Scanner Tab
+  useEffect(() => {
+    if (pendingImportDocuments.length > 0) {
+      console.log('[ImportTab] Pre-selecting pending imports:', pendingImportDocuments)
+      setSelectedDocs(new Set(pendingImportDocuments))
+      clearPendingImportDocuments()
+    }
+  }, [pendingImportDocuments, clearPendingImportDocuments])
 
   const toggleDocSelection = (documentId: string) => {
     const newSelected = new Set(selectedDocs)
@@ -209,6 +222,34 @@ export function ImportTab() {
       currentConflict.onResolved?.(jobId)
     }
   }, [currentConflict])
+
+  const handleClearJobs = async (type: 'completed' | 'failed') => {
+    setCleaningJobs(type)
+    try {
+      const result = type === 'completed'
+        ? await clearCompletedJobs()
+        : await clearFailedJobs()
+
+      if (result.success) {
+        setMessage({
+          type: 'success',
+          text: `Cleared ${type} jobs successfully`
+        })
+      } else {
+        setMessage({
+          type: 'error',
+          text: result.error || `Failed to clear ${type} jobs`
+        })
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Error clearing ${type} jobs`
+      })
+    } finally {
+      setCleaningJobs(null)
+    }
+  }
 
   // Filter to only show importable documents
   const importableDocuments =
@@ -447,8 +488,52 @@ export function ImportTab() {
 
       {/* Import Progress */}
       {importJobsList.length > 0 && (
-        <div>
-          <h4 className="text-sm font-medium mb-3">Import Progress</h4>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium">Import Progress</h4>
+            <div className="flex gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleClearJobs('completed')}
+                    disabled={cleaningJobs !== null}
+                  >
+                    {cleaningJobs === 'completed' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 mr-2" />
+                    )}
+                    Clear Completed
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Remove all completed import jobs</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleClearJobs('failed')}
+                    disabled={cleaningJobs !== null}
+                  >
+                    {cleaningJobs === 'failed' ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 mr-2" />
+                    )}
+                    Clear Failed
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Remove all failed import jobs</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
           <JobList
             jobs={importJobsList}
             showFilters={false}

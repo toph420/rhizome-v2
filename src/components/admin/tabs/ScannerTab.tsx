@@ -19,18 +19,22 @@ import {
 } from '@/components/ui/tooltip'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info, Trash2 } from 'lucide-react'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
+import { useAdminPanelStore } from '@/stores/admin/admin-panel'
 import { deleteDocument } from '@/app/actions/delete-document'
+import { exportToObsidian } from '@/app/actions/integrations'
 
 type FilterType = 'all' | 'missing_db' | 'out_sync' | 'healthy'
 
 export function ScannerTab() {
   // Use Zustand store for scan state
-  const { scanResults, scanning, error, scan, invalidate, removeDocument } = useStorageScanStore()
+  const { scanResults, scanning, error, scan, invalidate, removeDocument, setPendingImportDocuments } = useStorageScanStore()
+  const { setActiveTab } = useAdminPanelStore()
 
   // Local UI state only
   const [filter, setFilter] = useState<FilterType>('all')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [deletingDocs, setDeletingDocs] = useState<Set<string>>(new Set())
+  const [exportingDocs, setExportingDocs] = useState<Set<string>>(new Set())
 
   // Auto-scan on mount
   useEffect(() => {
@@ -45,6 +49,41 @@ export function ScannerTab() {
       newExpanded.add(documentId)
     }
     setExpandedRows(newExpanded)
+  }
+
+  const handleImport = (documentId: string) => {
+    // Set this document as pending import and navigate to Import tab
+    setPendingImportDocuments([documentId])
+    setActiveTab('import')
+  }
+
+  const handleSync = (documentId: string, title: string) => {
+    // TODO: Implement smart bi-directional sync
+    alert(`Smart sync not yet implemented for "${title}".\n\nThis will sync changes in both directions (Storage ↔ Database).`)
+  }
+
+  const handleExport = async (documentId: string, title: string) => {
+    // Export to Obsidian vault
+    setExportingDocs(prev => new Set([...prev, documentId]))
+
+    try {
+      const result = await exportToObsidian(documentId)
+
+      if (result.success) {
+        alert(`Export started for "${title}".\n\nCheck the Jobs tab to monitor progress.`)
+      } else {
+        alert(`Failed to export document: ${result.error}`)
+      }
+    } catch (error) {
+      console.error('Error exporting document:', error)
+      alert('An unexpected error occurred while exporting the document')
+    } finally {
+      setExportingDocs(prev => {
+        const next = new Set(prev)
+        next.delete(documentId)
+        return next
+      })
+    }
   }
 
   const handleDelete = async (documentId: string, title: string) => {
@@ -84,6 +123,18 @@ export function ScannerTab() {
         return next
       })
     }
+  }
+
+  const handleImportAll = () => {
+    // Set all filtered documents as pending imports and navigate to Import tab
+    const documentIds = filteredDocuments.map(d => d.documentId)
+    setPendingImportDocuments(documentIds)
+    setActiveTab('import')
+  }
+
+  const handleSyncAll = () => {
+    // TODO: Implement bulk smart sync
+    alert(`Bulk smart sync not yet implemented.\n\nThis will sync ${filteredDocuments.length} documents in both directions.`)
   }
 
   // Filter documents based on selected filter
@@ -324,14 +375,14 @@ export function ScannerTab() {
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  console.log('Import:', doc.documentId)
+                                  handleImport(doc.documentId)
                                 }}
                               >
                                 Import
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>Restore chunks from Storage to Database</p>
+                              <p>Navigate to Import tab with this document pre-selected</p>
                             </TooltipContent>
                           </Tooltip>
                           <Tooltip>
@@ -341,14 +392,14 @@ export function ScannerTab() {
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  console.log('Sync:', doc.documentId)
+                                  handleSync(doc.documentId, doc.title)
                                 }}
                               >
                                 Sync
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>Update Database to match Storage files</p>
+                              <p>Smart bi-directional sync (Storage ↔ Database)</p>
                             </TooltipContent>
                           </Tooltip>
                           <Tooltip>
@@ -358,14 +409,19 @@ export function ScannerTab() {
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  console.log('Export:', doc.documentId)
+                                  handleExport(doc.documentId, doc.title)
                                 }}
+                                disabled={exportingDocs.has(doc.documentId)}
                               >
-                                Export
+                                {exportingDocs.has(doc.documentId) ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  'Export'
+                                )}
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>Download ZIP bundle with all document files</p>
+                              <p>Export to Obsidian vault</p>
                             </TooltipContent>
                           </Tooltip>
                           <Tooltip>
@@ -439,26 +495,26 @@ export function ScannerTab() {
             <TooltipTrigger asChild>
               <Button
                 variant="outline"
-                onClick={() => console.log('Import All:', filteredDocuments.map(d => d.documentId))}
+                onClick={handleImportAll}
               >
                 Import All ({filteredDocuments.length})
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Restore all filtered documents from Storage to Database</p>
+              <p>Navigate to Import tab with all filtered documents pre-selected</p>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="outline"
-                onClick={() => console.log('Sync All:', filteredDocuments.map(d => d.documentId))}
+                onClick={handleSyncAll}
               >
                 Sync All ({filteredDocuments.length})
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Update all filtered documents to match Storage files</p>
+              <p>Smart bi-directional sync for all filtered documents</p>
             </TooltipContent>
           </Tooltip>
         </div>

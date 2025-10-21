@@ -11,12 +11,15 @@ interface StorageScanStore {
   lastScanTime: number | null
   scanning: boolean
   error: string | null
+  pendingImportDocuments: string[] // Document IDs to pre-select in Import Tab
 
   // Actions
   scan: () => Promise<void>
   invalidate: () => void
   getCachedResults: () => DocumentScanResult[] | null
   removeDocument: (documentId: string) => void
+  setPendingImportDocuments: (documentIds: string[]) => void
+  clearPendingImportDocuments: () => void
 }
 
 /**
@@ -46,6 +49,7 @@ export const useStorageScanStore = create<StorageScanStore>()(
       lastScanTime: null,
       scanning: false,
       error: null,
+      pendingImportDocuments: [],
 
       scan: async () => {
         // Check cache first
@@ -121,6 +125,16 @@ export const useStorageScanStore = create<StorageScanStore>()(
         set({
           scanResults: scanResults.filter(doc => doc.documentId !== documentId)
         })
+      },
+
+      setPendingImportDocuments: (documentIds: string[]) => {
+        console.log(`[StorageScan] Setting pending imports:`, documentIds)
+        set({ pendingImportDocuments: documentIds })
+      },
+
+      clearPendingImportDocuments: () => {
+        console.log(`[StorageScan] Clearing pending imports`)
+        set({ pendingImportDocuments: [] })
       },
     }),
     {

@@ -133,7 +133,7 @@ export function JobList({
     } else if (activeFilter === 'export') {
       filtered = filtered.filter((j) => j.type === 'export_documents')
     } else if (activeFilter === 'connections') {
-      filtered = filtered.filter((j) => j.type === 'reprocess_connections')
+      filtered = filtered.filter((j) => j.type === 'reprocess_connections' || j.type === 'detect_connections')
     }
     // Status-based filtering
     else if (activeFilter === 'active') {
@@ -154,7 +154,7 @@ export function JobList({
       all: jobs.length,
       import: jobs.filter((j) => j.type === 'import_document').length,
       export: jobs.filter((j) => j.type === 'export_documents').length,
-      connections: jobs.filter((j) => j.type === 'reprocess_connections').length,
+      connections: jobs.filter((j) => j.type === 'reprocess_connections' || j.type === 'detect_connections').length,
       active: jobs.filter((j) => j.status === 'pending' || j.status === 'processing').length,
       completed: jobs.filter((j) => j.status === 'completed').length,
       failed: jobs.filter((j) => j.status === 'failed').length,

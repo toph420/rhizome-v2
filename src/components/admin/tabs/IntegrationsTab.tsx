@@ -786,7 +786,6 @@ export function IntegrationsTab() {
                     onClick={handleReadwiseAutoImport}
                     disabled={!selectedDoc || isOperating}
                     variant="default"
-                    className="w-full"
                   >
                     {isOperating ? (
                       <>
