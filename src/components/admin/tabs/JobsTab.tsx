@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { clearAllJobs, clearCompletedJobs, clearFailedJobs, forceFailAllProcessing, clearAllJobsAndProcessingDocuments } from '@/app/actions/admin'
+import { clearAllJobs, clearCompletedJobs, clearFailedJobs, forceFailAllProcessing, clearAllJobsAndProcessingDocuments, getAllJobs } from '@/app/actions/admin'
 import { Button } from '@/components/ui/button'
 import { Loader2, Trash2, AlertTriangle, Bomb } from 'lucide-react'
 import {
@@ -17,15 +17,61 @@ export function JobsTab() {
   const [loading, setLoading] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [isHydrated, setIsHydrated] = useState(false)
+  const [dbJobs, setDbJobs] = useState<any[]>([])
 
   // Prevent hydration mismatch
   useEffect(() => {
     setIsHydrated(true)
   }, [])
 
+  // Load jobs from database on mount
+  useEffect(() => {
+    async function loadJobs() {
+      const result = await getAllJobs(24) // Last 24 hours
+      if (result.success && result.jobs) {
+        setDbJobs(result.jobs)
+      }
+    }
+    loadJobs()
+
+    // Refresh every 5 seconds
+    const interval = setInterval(loadJobs, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
   // Get all jobs from store
   const { jobs } = useBackgroundJobsStore()
-  const allJobs = isHydrated ? Array.from(jobs.values()) : []
+  const storeJobs = isHydrated ? Array.from(jobs.values()) : []
+
+  // Merge database jobs with store jobs (database as source of truth)
+  const jobsMap = new Map()
+
+  // Add database jobs first
+  dbJobs.forEach(dbJob => {
+    jobsMap.set(dbJob.id, {
+      id: dbJob.id,
+      type: dbJob.job_type,
+      status: dbJob.status,
+      progress: dbJob.progress_percent || 0,
+      details: dbJob.progress_message || dbJob.progress_stage || '',
+      metadata: dbJob.input_data || {},
+      input_data: dbJob.input_data,
+      result: dbJob.output_data,
+      error: dbJob.error_message,
+      createdAt: new Date(dbJob.created_at).getTime(),
+      updatedAt: dbJob.updated_at ? new Date(dbJob.updated_at).getTime() : undefined,
+    })
+  })
+
+  // Override with store jobs if they're more recent
+  storeJobs.forEach(storeJob => {
+    const existing = jobsMap.get(storeJob.id)
+    if (!existing || (storeJob.updatedAt && (!existing.updatedAt || storeJob.updatedAt > existing.updatedAt))) {
+      jobsMap.set(storeJob.id, storeJob)
+    }
+  })
+
+  const allJobs = Array.from(jobsMap.values())
 
   const handleAction = async (action: () => Promise<any>, loadingKey: string, successMsg: string) => {
     setLoading(loadingKey)

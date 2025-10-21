@@ -639,3 +639,42 @@ export async function clearAllJobsAndProcessingDocuments() {
     return { success: false, error: errorMessage }
   }
 }
+
+/**
+ * Get all recent background jobs from database
+ * Returns jobs from last 24 hours by default
+ */
+export async function getAllJobs(hoursBack: number = 24) {
+  const supabase = await createClient()
+
+  try {
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (userError || !user) {
+      // Not authenticated - return empty jobs (graceful handling for background calls)
+      return { success: true, jobs: [] }
+    }
+
+    // Get jobs from last N hours
+    const cutoffTime = new Date()
+    cutoffTime.setHours(cutoffTime.getHours() - hoursBack)
+
+    const { data: jobs, error } = await supabase
+      .from('background_jobs')
+      .select('*')
+      .eq('user_id', user.id)
+      .gte('created_at', cutoffTime.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(500)
+
+    if (error) throw error
+
+    return {
+      success: true,
+      jobs: jobs || []
+    }
+  } catch (error) {
+    console.error('Error fetching jobs:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message, jobs: [] }
+  }
+}
