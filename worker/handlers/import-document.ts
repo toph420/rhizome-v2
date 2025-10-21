@@ -11,13 +11,14 @@
  * Optional: Regenerate embeddings after import
  *
  * See: docs/tasks/storage-first-portability.md (T-012)
- * Pattern reference: worker/handlers/process-document.ts
+ * REFACTORED: Now uses HandlerJobManager
  */
 
 import { readFromStorage } from '../lib/storage-helpers.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
 import type { ChunksExport, ConflictStrategy } from '../types/storage.js'
 import { createHash } from 'crypto'
+import { HandlerJobManager } from '../lib/handler-job-manager.js'
 
 /**
  * Check if resuming from a paused import.
@@ -50,6 +51,7 @@ async function checkResumeState(job: any): Promise<{ resuming: boolean; lastStag
  */
 export async function importDocumentHandler(supabase: any, job: any): Promise<void> {
   const { document_id, storage_path, strategy, regenerateEmbeddings, reprocessConnections } = job.input_data
+  const jobManager = new HandlerJobManager(supabase, job.id)
 
   console.log(`📥 Starting import for document: ${document_id}`)
   console.log(`   - Strategy: ${strategy}`)
@@ -62,7 +64,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
 
   try {
     // ✅ STEP 1: READ CHUNKS FROM STORAGE (10%)
-    await updateProgress(supabase, job.id, 10, 'reading', 'processing', 'Reading chunks from Storage')
+    await jobManager.updateProgress(10, 'reading', 'Reading chunks from Storage')
 
     const chunksPath = `${storage_path}/chunks.json`
     console.log(`📂 Reading chunks.json from: ${chunksPath}`)
@@ -71,7 +73,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
     console.log(`✓ Loaded ${chunksData.chunks.length} chunks from Storage`)
 
     // ✅ STEP 2: VALIDATE SCHEMA VERSION (20%)
-    await updateProgress(supabase, job.id, 20, 'validating', 'processing', 'Validating schema version')
+    await jobManager.updateProgress(20, 'validating', 'Validating schema version')
 
     if (chunksData.version !== '1.0') {
       throw new Error(`Unsupported chunks.json version: ${chunksData.version}. Expected: 1.0`)
@@ -80,7 +82,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
 
     // ✅ STEP 2.5: ENSURE DOCUMENT EXISTS (30%)
     // Check if document exists in database, create if missing (for deleted documents)
-    await updateProgress(supabase, job.id, 30, 'checking_document', 'processing', 'Verifying document exists')
+    await jobManager.updateProgress(30, 'checking_document', 'Verifying document exists')
 
     const { data: existingDoc } = await supabase
       .from('documents')
@@ -141,7 +143,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
 
     // ✅ STEP 4: REGENERATE EMBEDDINGS (Optional, 60-90%)
     if (regenerateEmbeddings) {
-      await updateProgress(supabase, job.id, 60, 'embeddings', 'processing', 'Regenerating embeddings')
+      await jobManager.updateProgress(60, 'embeddings', 'Regenerating embeddings')
       console.log(`🔢 Regenerating embeddings for ${importedCount} chunks`)
 
       // Query chunks without embeddings
@@ -205,56 +207,27 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
       }
 
       console.log(`✓ Updated embeddings for ${chunksWithoutEmbeddings.length} chunks`)
-      await updateProgress(supabase, job.id, 90, 'embeddings', 'processing', 'Embeddings regenerated')
+      await jobManager.updateProgress(90, 'embeddings', 'Embeddings regenerated')
     }
 
     // ✅ STEP 5: MARK JOB COMPLETE (100%)
-    await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Import completed successfully')
-
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'completed',
-        output_data: {
-          success: true,
-          document_id,
-          strategy,
-          imported: importedCount,
-          regeneratedEmbeddings: regenerateEmbeddings || false,
-          reprocessConnections: reprocessConnections || false
-        },
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id)
+    await jobManager.markComplete(
+      {
+        success: true,
+        document_id,
+        strategy,
+        imported: importedCount,
+        regeneratedEmbeddings: regenerateEmbeddings || false,
+        reprocessConnections: reprocessConnections || false
+      },
+      'Import completed successfully'
+    )
 
     console.log(`✅ Import complete: ${importedCount} chunks imported with strategy '${strategy}'`)
 
   } catch (error: any) {
     console.error('❌ Import failed:', error)
-
-    // Update job with error
-    await updateProgress(
-      supabase,
-      job.id,
-      0,
-      'error',
-      'failed',
-      error.message || 'Import failed'
-    )
-
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'failed',
-        output_data: {
-          success: false,
-          document_id,
-          error: error.message
-        },
-        last_error: error.message,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id)
+    await jobManager.markFailed(error)
 
     throw error
   }
@@ -409,39 +382,3 @@ async function applyStrategy(
   }
 
   throw new Error(`Unknown import strategy: ${strategy}`)
-}
-
-/**
- * Update job progress in background_jobs table.
- *
- * @param supabase - Supabase client
- * @param jobId - Job ID to update
- * @param percentage - Progress percentage (0-100)
- * @param stage - Current processing stage
- * @param status - Job status
- * @param message - Human-readable progress message
- */
-async function updateProgress(
-  supabase: any,
-  jobId: string,
-  percentage: number,
-  stage: string,
-  status: string,
-  message?: string
-) {
-  const { error } = await supabase
-    .from('background_jobs')
-    .update({
-      progress: {
-        percent: percentage,
-        stage,
-        details: message || `${stage}: ${percentage}%`
-      },
-      status
-    })
-    .eq('id', jobId)
-
-  if (error) {
-    console.error('Failed to update job progress:', error)
-  }
-}

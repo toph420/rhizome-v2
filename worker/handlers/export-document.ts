@@ -1,5 +1,8 @@
 /**
  * Export Document Background Job Handler
+ * REFACTORED: Now uses HandlerJobManager
+ */
+ * Export Document Background Job Handler
  *
  * Generates downloadable ZIP bundles containing all document files from Storage.
  *
@@ -32,6 +35,7 @@
 
 import JSZip from 'jszip'
 import { readFromStorage, listStorageFiles } from '../lib/storage-helpers.js'
+import { HandlerJobManager } from '../lib/handler-job-manager.js'
 import { ExportJobOutputSchema } from '../types/job-schemas.js'
 
 /**
@@ -58,7 +62,7 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     const userId = job.user_id
 
     // ✅ STEP 1: GET DOCUMENT METADATA (5%)
-    await updateProgress(supabase, job.id, 5, 'metadata', 'processing', 'Fetching document metadata')
+    await jobManager.updateProgress(5, 'metadata', 'Fetching document metadata')
 
     const { data: documents, error: docsError } = await supabase
       .from('documents')
@@ -72,7 +76,7 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     console.log(`✓ Found ${documents.length} documents to export`)
 
     // ✅ STEP 2: CREATE ZIP ARCHIVE (10%)
-    await updateProgress(supabase, job.id, 10, 'creating_zip', 'processing', 'Creating ZIP archive')
+    await jobManager.updateProgress(10, 'creating_zip', 'Creating ZIP archive')
 
     const zip = new JSZip()
     const timestamp = new Date().toISOString().split('T')[0] // YYYY-MM-DD
@@ -254,20 +258,20 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     }
 
     // ✅ STEP 4: ADD TOP-LEVEL MANIFEST (90%)
-    await updateProgress(supabase, job.id, 90, 'finalizing', 'processing', 'Finalizing ZIP archive')
+    await jobManager.updateProgress(90, 'finalizing', 'Finalizing ZIP archive')
 
     zip.file('manifest.json', JSON.stringify(topLevelManifest, null, 2))
     console.log(`\n✓ Added top-level manifest.json`)
 
     // ✅ STEP 5: GENERATE ZIP BLOB (95%)
-    await updateProgress(supabase, job.id, 95, 'generating', 'processing', 'Generating ZIP file')
+    await jobManager.updateProgress(95, 'generating', 'Generating ZIP file')
 
     console.log(`\n📦 Generating ZIP blob...`)
     const zipBlob = await zip.generateAsync({ type: 'blob' })
     console.log(`✓ ZIP generated: ${(zipBlob.size / 1024 / 1024).toFixed(2)} MB`)
 
     // ✅ STEP 6: SAVE ZIP TO STORAGE (97%)
-    await updateProgress(supabase, job.id, 97, 'saving', 'processing', 'Saving ZIP to Storage')
+    await jobManager.updateProgress(97, 'saving', 'Saving ZIP to Storage')
 
     const zipPath = `${userId}/exports/${zipFilename}`
     console.log(`💾 Saving ZIP to Storage: ${zipPath}`)
@@ -286,7 +290,7 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     console.log(`✓ ZIP saved to Storage`)
 
     // ✅ STEP 7: CREATE SIGNED URL (99%)
-    await updateProgress(supabase, job.id, 99, 'url', 'processing', 'Creating download URL')
+    await jobManager.updateProgress(99, 'url', 'Creating download URL')
 
     const { data: signedUrlData, error: urlError } = await supabase.storage
       .from('documents')
@@ -317,14 +321,7 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     // Validate schema before saving (catches typos at runtime)
     ExportJobOutputSchema.parse(outputData)
 
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'completed',
-        output_data: outputData,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id)
+    await jobManager.markComplete(outputData, 'Export completed successfully')
 
     console.log(`\n✅ Export complete!`)
     console.log(`   - Documents: ${documents.length}`)
@@ -333,65 +330,8 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
 
   } catch (error: any) {
     console.error('❌ Export failed:', error)
-
-    // Update job with error
-    await updateProgress(
-      supabase,
-      job.id,
-      0,
-      'error',
-      'failed',
-      error.message || 'Export failed'
-    )
-
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'failed',
-        output_data: {
-          success: false,
-          error: error.message
-        },
-        last_error: error.message,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id)
-
+    await jobManager.markFailed(error)
     throw error
   }
 }
 
-/**
- * Update job progress in background_jobs table.
- *
- * @param supabase - Supabase client
- * @param jobId - Job ID to update
- * @param percentage - Progress percentage (0-100)
- * @param stage - Current processing stage
- * @param status - Job status
- * @param message - Human-readable progress message
- */
-async function updateProgress(
-  supabase: any,
-  jobId: string,
-  percentage: number,
-  stage: string,
-  status: string,
-  message?: string
-) {
-  const { error } = await supabase
-    .from('background_jobs')
-    .update({
-      progress: {
-        percent: percentage,
-        stage,
-        details: message || `${stage}: ${percentage}%`
-      },
-      status
-    })
-    .eq('id', jobId)
-
-  if (error) {
-    console.error('Failed to update job progress:', error)
-  }
-}
