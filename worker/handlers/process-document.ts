@@ -8,6 +8,7 @@ import type { ProcessResult } from '../types/processor.js'
 import { GEMINI_MODEL } from '../lib/model-config.js'
 import { createHash, randomUUID } from 'crypto'
 import { saveToStorage } from '../lib/storage-helpers.js'
+import { HandlerJobManager } from '../lib/handler-job-manager.js'
 
 console.log(`🤖 Using Gemini model: ${GEMINI_MODEL}`)
 
@@ -91,12 +92,15 @@ async function tryResumeFromCheckpoint(
 /**
  * Main document processing handler.
  * Routes processing to appropriate processor based on source type.
- * 
+ *
+ * REFACTORED: Now uses HandlerJobManager for standardized job state management
+ *
  * @param supabase - Supabase client with service role
  * @param job - Background job containing document processing request
  */
 export async function processDocumentHandler(supabase: any, job: any): Promise<void> {
   const { document_id } = job.input_data
+  const jobManager = new HandlerJobManager(supabase, job.id)
   
   // Validate API key
   if (!process.env.GOOGLE_AI_API_KEY) {
@@ -422,7 +426,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     console.log(`🔢 Generating embeddings for ${result.chunks.length} chunks`)
 
     // Update progress before embedding generation
-    await updateProgress(supabase, job.id, 65, 'chunking', 'processing', 'Preparing chunks for embedding generation')
+    await jobManager.updateProgress(65, 'chunking', 'Preparing chunks for embedding generation')
 
     const chunkTexts = result.chunks.map(chunk => chunk.content).filter(text => text && text.trim().length > 0)
 
@@ -448,13 +452,13 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     console.log(`✅ Generated ${embeddings.length} embeddings`)
 
     // Update progress after embedding generation
-    await updateProgress(supabase, job.id, 80, 'embedding', 'processing', `Generated ${embeddings.length} embeddings`)
+    await jobManager.updateProgress(80, 'embedding', `Generated ${embeddings.length} embeddings`)
     
     // Insert chunks with embeddings to database
     console.log(`💾 Saving chunks with embeddings to database`)
 
     // Update progress before database insertion
-    await updateProgress(supabase, job.id, 82, 'saving', 'processing', `Preparing ${result.chunks.length} chunks for database`)
+    await jobManager.updateProgress(82, 'saving', `Preparing ${result.chunks.length} chunks for database`)
 
     const validChunks = result.chunks.filter(chunk => chunk.content && chunk.content.trim().length > 0)
 
@@ -495,7 +499,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
 
     // ✅ STEP 2: INSERT FRESH CHUNKS
     // Unique constraint on (document_id, chunk_index) prevents duplicates
-    await updateProgress(supabase, job.id, 85, 'saving', 'processing', `Inserting ${chunksWithEmbeddings.length} chunks into database`)
+    await jobManager.updateProgress(85, 'saving', `Inserting ${chunksWithEmbeddings.length} chunks into database`)
 
     const { error: chunkError } = await supabase
       .from('chunks')
@@ -528,14 +532,14 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     console.log(`✅ Updated Storage chunks.json with UUIDs (vault-ready)`)
 
     // Update progress after successful insertion
-    await updateProgress(supabase, job.id, 90, 'saving', 'processing', `Saved ${chunksWithEmbeddings.length} chunks successfully`)
+    await jobManager.updateProgress(90, 'saving', `Saved ${chunksWithEmbeddings.length} chunks successfully`)
 
     // Update stage after chunks inserted
     await updateStage(supabase, job.id, 'chunked')
 
     // ✅ ASYNC CONNECTION DETECTION: Queued as separate job (doesn't block document completion)
     // This prevents the main processing job from timing out during connection detection
-    await updateProgress(supabase, job.id, 92, 'finalizing', 'processing', 'Setting up connection detection')
+    await jobManager.updateProgress(92, 'finalizing', 'Setting up connection detection')
 
     if (chunksWithEmbeddings.length >= 2) {
       // Check for existing ACTIVE jobs to avoid duplicates
@@ -579,7 +583,7 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     }
 
     // Update progress after connection detection setup
-    await updateProgress(supabase, job.id, 95, 'finalizing', 'processing', 'Finalizing document processing')
+    await jobManager.updateProgress(95, 'finalizing', 'Finalizing document processing')
 
     // Update stage after embeddings complete (document ready for use)
     await updateStage(supabase, job.id, 'embedded')
@@ -596,67 +600,38 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
       result.metadata?.extra?.source_type || sourceType // Explicit source type
     )
     
-    // Final progress update
-    await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Processing completed successfully')
-    
-    // Update job with success result
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'completed',
-        output_data: {
-          success: true,
-          document_id,
-          chunks_created: result.chunks.length,
-          metadata: result.metadata,
-          word_count: result.wordCount,
-          outline: result.outline
-        },
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id)
+    // Mark job as complete with output data
+    await jobManager.markComplete(
+      {
+        success: true,
+        document_id,
+        chunks_created: result.chunks.length,
+        metadata: result.metadata,
+        word_count: result.wordCount,
+        outline: result.outline
+      },
+      'Processing completed successfully'
+    )
     
   } catch (error: any) {
     console.error('❌ Processing failed:', error)
-    
+
     // Classify error for appropriate handling
     const errorType = classifyError(error)
-    const userMessage = getUserFriendlyError(error)
-    
+
     // Update document status
-    await updateDocumentStatus(supabase, document_id, 'failed', false, false, userMessage)
-    
-    // Update job with error details
-    await updateProgress(
-      supabase, 
-      job.id, 
-      0, 
-      'error', 
-      'failed', 
-      userMessage
-    )
-    
+    await updateDocumentStatus(supabase, document_id, 'failed', false, false, getUserFriendlyError(error))
+
+    // Mark job as failed with error classification
+    await jobManager.markFailed(error, errorType)
+
     // Determine if retry is appropriate
     if (errorType === 'transient') {
       console.log('🔄 Error is transient, job will be retried')
       throw error // Let job system handle retry
     } else {
       console.log('⛔ Error is permanent, no retry')
-      // Mark job as permanently failed
-      await supabase
-        .from('background_jobs')
-        .update({
-          status: 'failed',
-          output_data: {
-            success: false,
-            document_id,
-            error: userMessage,
-            error_type: errorType
-          },
-          last_error: userMessage,
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', job.id)
+      // Note: jobManager.markFailed already marked as failed with output_data
     }
   }
 }
@@ -752,40 +727,5 @@ async function updateDocumentStatus(
   }
 }
 
-/**
- * Updates job progress in background_jobs table.
- * 
- * @param supabase - Supabase client
- * @param jobId - Job ID to update
- * @param percentage - Progress percentage (0-100)
- * @param stage - Current processing stage
- * @param status - Job status
- * @param message - Human-readable progress message
- */
-async function updateProgress(
-  supabase: any,
-  jobId: string,
-  percentage: number,
-  stage: string,
-  status: string,
-  message?: string
-) {
-  const { error } = await supabase
-    .from('background_jobs')
-    .update({
-      progress: {
-        percent: percentage,
-        stage,
-        details: message || `${stage}: ${percentage}%`
-      },
-      status
-    })
-    .eq('id', jobId)
-    
-  if (error) {
-    console.error('Failed to update job progress:', error)
-  }
-}
-
 // Export for testing
-export { updateDocumentStatus, updateProgress, updateStage }
+export { updateDocumentStatus, updateStage }

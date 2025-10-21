@@ -7,12 +7,14 @@
  * - smart: Preserve user-validated connections, regenerate the rest
  *
  * See: docs/tasks/storage-first-portability.md (Task T-016)
- * Pattern reference: worker/handlers/detect-connections.ts
+ * REFACTORED: Now uses HandlerJobManager and DEFAULT_ENGINE_CONFIG
  */
 
 import { createClient } from '@supabase/supabase-js';
 import { processDocument } from '../engines/orchestrator';
 import { saveToStorage } from '../lib/storage-helpers';
+import { HandlerJobManager } from '../lib/handler-job-manager';
+import { DEFAULT_ENGINE_CONFIG } from '../engines/engine-config';
 
 /**
  * Type definitions matching reprocessConnections Server Action
@@ -38,33 +40,21 @@ interface ReprocessResult {
 /**
  * Main handler for reprocess-connections background jobs.
  * Regenerates connections with optional user-validation preservation.
+ *
+ * REFACTORED: Now uses HandlerJobManager and DEFAULT_ENGINE_CONFIG
  */
 export async function reprocessConnectionsHandler(supabase: any, job: any): Promise<void> {
   const documentId = job.entity_id;
   const userId = job.user_id;
   const options: ReprocessOptions = job.input_data;
+  const jobManager = new HandlerJobManager(supabase, job.id);
 
   console.log(`[ReprocessConnections] Starting for document ${documentId}`);
   console.log(`[ReprocessConnections] Mode: ${options.mode}`);
   console.log(`[ReprocessConnections] Engines: ${options.engines.join(', ')}`);
 
-  // Helper to update progress
-  async function updateProgress(percent: number, stage: string, details?: string) {
-    await supabase
-      .from('background_jobs')
-      .update({
-        progress: {
-          percent,
-          stage,
-          details: details || `${stage}: ${percent}%`
-        },
-        status: 'processing'
-      })
-      .eq('id', job.id);
-  }
-
   try {
-    await updateProgress(10, 'preparing', 'Counting existing connections');
+    await jobManager.updateProgress(10, 'preparing', 'Counting existing connections');
 
     // Step 1: Get chunk IDs for this document
     const { data: chunks, error: chunksError } = await supabase
@@ -107,7 +97,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
     // Step 3: Handle mode-specific logic
     if (options.mode === 'all') {
       // Reprocess All: Delete all connections and regenerate
-      await updateProgress(20, 'deleting', 'Deleting all connections');
+      await jobManager.updateProgress(20, 'deleting', 'Deleting all connections');
 
       const { error: deleteError } = await supabase
         .from('connections')
@@ -122,7 +112,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
 
     } else if (options.mode === 'smart' && options.preserveValidated) {
       // Smart Mode: Preserve user-validated connections
-      await updateProgress(15, 'querying', 'Finding validated connections');
+      await jobManager.updateProgress(15, 'querying', 'Finding validated connections');
 
       // Query validated connections
       const { data: validated, error: validatedError } = await supabase
@@ -141,7 +131,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
 
       // Backup validated connections to Storage if requested
       if (options.backupFirst && validatedCount > 0) {
-        await updateProgress(20, 'backup', 'Backing up validated connections');
+        await jobManager.updateProgress(20, 'backup', 'Backing up validated connections');
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const backupPath = `${userId}/${documentId}/validated-connections-${timestamp}.json`;
@@ -159,7 +149,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
       }
 
       // Delete non-validated connections only
-      await updateProgress(25, 'deleting', 'Deleting non-validated connections');
+      await jobManager.updateProgress(25, 'deleting', 'Deleting non-validated connections');
 
       const { error: deleteError } = await supabase
         .from('connections')
@@ -176,7 +166,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
 
     } else if (options.mode === 'add_new') {
       // Add New Mode: Only process connections to newer documents
-      await updateProgress(20, 'analyzing', 'Finding newer documents');
+      await jobManager.updateProgress(20, 'analyzing', 'Finding newer documents');
 
       // Get current document creation date
       const { data: currentDoc, error: docError } = await supabase
@@ -203,19 +193,14 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
 
       if ((newerDocs?.length || 0) === 0) {
         console.log(`[ReprocessConnections] No newer documents found, skipping reprocessing`);
-        await updateProgress(100, 'complete', 'No new connections to add');
 
-        await supabase
-          .from('background_jobs')
-          .update({
-            status: 'completed',
-            output_data: {
-              ...result,
-              connectionsAfter: connectionsBefore || 0
-            },
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', job.id);
+        await jobManager.markComplete(
+          {
+            ...result,
+            connectionsAfter: connectionsBefore || 0
+          },
+          'No new connections to add'
+        );
 
         return;
       }
@@ -227,7 +212,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
     }
 
     // Step 3: Call orchestrator with selected engines
-    await updateProgress(40, 'processing', 'Running connection detection engines');
+    await jobManager.updateProgress(40, 'processing', 'Running connection detection engines');
 
     console.log(`[ReprocessConnections] Calling orchestrator with engines: ${options.engines.join(', ')}`);
     if (targetDocumentIds) {
@@ -240,26 +225,9 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
       onProgress: async (percent, stage, details) => {
         // Map orchestrator progress to 40-90% range
         const mappedPercent = 40 + Math.floor((percent / 100) * 50);
-        await updateProgress(mappedPercent, stage, details);
+        await jobManager.updateProgress(mappedPercent, stage, details);
       },
-      semanticSimilarity: {
-        threshold: 0.7,
-        maxResultsPerChunk: 50,
-        crossDocumentOnly: true
-      },
-      contradictionDetection: {
-        minConceptOverlap: 0.5,
-        polarityThreshold: 0.3,
-        maxResultsPerChunk: 20,
-        crossDocumentOnly: true
-      },
-      thematicBridge: {
-        minImportance: 0.6,
-        minStrength: 0.6,
-        maxSourceChunks: 50,
-        maxCandidatesPerSource: 10,
-        batchSize: 5
-      }
+      ...DEFAULT_ENGINE_CONFIG
     });
 
     result.byEngine = orchestratorResult.byEngine;
@@ -267,7 +235,7 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
     console.log(`[ReprocessConnections] By engine:`, orchestratorResult.byEngine);
 
     // Step 4: Get final connection count (after)
-    await updateProgress(90, 'finalizing', 'Counting final connections');
+    await jobManager.updateProgress(90, 'finalizing', 'Counting final connections');
 
     const { count: connectionsAfter, error: countAfterError } = await supabase
       .from('connections')
@@ -284,37 +252,16 @@ export async function reprocessConnectionsHandler(supabase: any, job: any): Prom
     console.log(`[ReprocessConnections] Change: ${result.connectionsAfter - result.connectionsBefore}`);
 
     // Step 5: Mark job complete with statistics
-    await updateProgress(100, 'complete', 'Connection reprocessing complete');
-
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'completed',
-        progress: {
-          percent: 100,
-          stage: 'complete',
-          details: `Reprocessed connections: ${result.connectionsBefore} → ${result.connectionsAfter}`
-        },
-        output_data: result,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id);
+    await jobManager.markComplete(
+      result,
+      `Reprocessed connections: ${result.connectionsBefore} → ${result.connectionsAfter}`
+    );
 
     console.log(`[ReprocessConnections] Complete!`);
 
   } catch (error: any) {
     console.error('[ReprocessConnections] Handler error:', error);
-
-    // Mark job as failed
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'failed',
-        last_error: error.message,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id);
-
+    await jobManager.markFailed(error);
     throw error;
   }
 }
