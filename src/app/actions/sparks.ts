@@ -349,17 +349,28 @@ export async function unlinkAnnotationFromSpark(
  * Get sparks for timeline (uses cache for performance)
  *
  * Pattern: Query cache table, fallback to ECS if needed
+ *
+ * @param limit - Maximum number of sparks to return
+ * @param offset - Offset for pagination
+ * @param documentId - Optional document ID to filter sparks
  */
-export async function getRecentSparks(limit = 50, offset = 0) {
+export async function getRecentSparks(limit = 50, offset = 0, documentId?: string) {
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
 
   const supabase = await createClient()
 
-  const { data: sparks, error } = await supabase
+  let query = supabase
     .from('sparks_cache')
     .select('*')
     .eq('user_id', user.id)
+
+  // Filter by document if provided
+  if (documentId) {
+    query = query.eq('document_id', documentId)
+  }
+
+  const { data: sparks, error } = await query
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
 

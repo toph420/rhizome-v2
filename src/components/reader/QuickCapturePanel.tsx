@@ -77,6 +77,10 @@ export function QuickCapturePanel({
   const [isDragging, setIsDragging] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Track if we've created an annotation during this session (for create mode)
+  // Once created, subsequent saves should UPDATE instead of creating duplicates
+  const [createdAnnotation, setCreatedAnnotation] = useState<AnnotationEntity | null>(null)
+
   const panelRef = useRef<HTMLDivElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
@@ -154,34 +158,48 @@ export function QuickCapturePanel({
       setSavingColor(color)
 
       try {
-        if (mode === 'edit' && existingAnnotation) {
-          // EDIT MODE: Update existing annotation
+        // Determine if we should update or create:
+        // - Edit mode with existing annotation → UPDATE
+        // - Create mode but already created this session → UPDATE (prevent duplicates)
+        // - Create mode and nothing created yet → CREATE
+        const shouldUpdate = (mode === 'edit' && existingAnnotation) || (mode === 'create' && createdAnnotation)
+        const annotationToUpdate = mode === 'edit' ? existingAnnotation : createdAnnotation
+
+        if (shouldUpdate && annotationToUpdate) {
+          // UPDATE MODE: Update existing annotation (either from props or created this session)
           // Update annotation via server action
-          const result = await updateAnnotation(existingAnnotation.id, {
+          const result = await updateAnnotation(annotationToUpdate.id, {
             color,
             note: note.trim() || undefined,
             tags: tags.length > 0 ? tags : undefined,
           })
 
           if (result.success) {
+            // Build updated annotation entity
+            const updatedAnnotation: AnnotationEntity = {
+              ...annotationToUpdate,
+              components: {
+                ...annotationToUpdate.components,
+                Content: {
+                  ...annotationToUpdate.components.Content!,
+                  note: note.trim() || undefined,
+                  tags: tags.length > 0 ? tags : [],
+                },
+                Visual: {
+                  ...annotationToUpdate.components.Visual!,
+                  color,
+                },
+              },
+            }
+
             // Update serverAnnotations via callback
             if (onAnnotationUpdated) {
-              const updatedAnnotation: AnnotationEntity = {
-                ...existingAnnotation,
-                components: {
-                  ...existingAnnotation.components,
-                  Content: {
-                    ...existingAnnotation.components.Content!,
-                    note: note.trim() || undefined,
-                    tags: tags.length > 0 ? tags : [],
-                  },
-                  Visual: {
-                    ...existingAnnotation.components.Visual!,
-                    color,
-                  },
-                },
-              }
               onAnnotationUpdated(updatedAnnotation)
+            }
+
+            // Update local tracking if this was a create-mode annotation
+            if (mode === 'create' && createdAnnotation) {
+              setCreatedAnnotation(updatedAnnotation)
             }
 
             toast.success('Highlight updated', {
@@ -244,12 +262,58 @@ export function QuickCapturePanel({
           })
 
           if (result.success) {
-            // Replace temp ID with real ID
-            if (onAnnotationCreated && result.id) {
-              onAnnotationCreated({
-                ...optimisticAnnotation,
+            // Store the created annotation for subsequent updates (prevent duplicates)
+            if (result.id) {
+              const createdEntity: AnnotationEntity = {
                 id: result.id,
-              })
+                user_id: '',
+                created_at: optimisticAnnotation.created_at,
+                updated_at: optimisticAnnotation.created_at,
+                components: {
+                  Position: {
+                    documentId: documentId,
+                    document_id: documentId,
+                    startOffset: selection.range.startOffset,
+                    endOffset: selection.range.endOffset,
+                    originalText: selection.text,
+                    textContext: optimisticAnnotation.text_context,
+                    recoveryConfidence: 1.0,
+                    recoveryMethod: 'exact',
+                    needsReview: false,
+                  },
+                  Visual: {
+                    type: 'highlight',
+                    color,
+                  },
+                  Content: {
+                    note: note.trim() || undefined,
+                    tags: tags.length > 0 ? tags : [],
+                  },
+                  Temporal: {
+                    createdAt: optimisticAnnotation.created_at,
+                    updatedAt: optimisticAnnotation.created_at,
+                  },
+                  ChunkRef: {
+                    chunkId: selection.range.chunkIds[0],
+                    chunk_id: selection.range.chunkIds[0],
+                    chunkIds: selection.range.chunkIds,
+                    chunkPosition: 0,
+                    documentId: documentId,
+                    document_id: documentId,
+                  },
+                },
+              }
+
+              // Store full entity for subsequent updates
+              setCreatedAnnotation(createdEntity)
+
+              // Replace temp ID with real ID
+              if (onAnnotationCreated) {
+                onAnnotationCreated({
+                  ...optimisticAnnotation,
+                  id: result.id,
+                })
+              }
             }
 
             toast.success('Highlight saved', {
@@ -297,10 +361,12 @@ export function QuickCapturePanel({
       documentId,
       note,
       tags,
+      markdown,
       onClose,
       onAnnotationCreated,
       onAnnotationUpdated,
       existingAnnotation,
+      createdAnnotation,
       mode,
     ]
   )
