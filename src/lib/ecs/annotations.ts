@@ -140,7 +140,7 @@ export class AnnotationOperations {
         documentId: input.documentId,
         document_id: input.documentId, // For ECS filtering
       },
-    });
+    }, 'annotation');
 
     return entityId;
   }

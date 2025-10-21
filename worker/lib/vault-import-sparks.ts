@@ -1,149 +1,123 @@
 import { promises as fs } from 'fs'
+import * as path from 'path'
 import { SupabaseClient } from '@supabase/supabase-js'
-import { recoverSparks } from '../handlers/recover-sparks.js'
 
 /**
- * Import sparks from vault JSON
- * Uses direct restore if chunk IDs match, otherwise triggers recovery
+ * Import sparks from global Rhizome/Sparks/ location
+ * Uploads to Storage with date-title naming, populates cache
+ *
+ * Pattern: Sparks are user-level entities, not document-level
+ * Location:
+ *   - Markdown: Rhizome/Sparks/{date}-spark-{title}.md (ignored by import)
+ *   - JSON: Rhizome/Sparks/.rhizome/{date}-spark-{title}.json (imported)
  */
 export async function importSparksFromVault(
-  documentId: string,
-  sparksJsonPath: string,
-  markdown: string,
-  currentChunks: Array<{ id: string; chunk_index: number; start_offset: number; end_offset: number; content: string }>,
-  supabase: SupabaseClient,
-  userId: string
-): Promise<{ imported: number; recovered: number; method: 'direct' | 'recovery' }> {
-  // Read sparks JSON
-  const jsonContent = await fs.readFile(sparksJsonPath, 'utf-8')
-  const sparksData = JSON.parse(jsonContent)
+  vaultPath: string,
+  userId: string,
+  supabase: SupabaseClient
+): Promise<{ imported: number; errors: string[] }> {
+  const sparksDir = path.join(vaultPath, 'Rhizome/Sparks')
+  const rhizomeDir = path.join(sparksDir, '.rhizome')
 
-  if (!sparksData.entities || sparksData.entities.length === 0) {
-    console.log('[ImportSparks] No sparks to import')
-    return { imported: 0, recovered: 0, method: 'direct' }
+  // Check if .rhizome directory exists
+  try {
+    await fs.access(rhizomeDir)
+  } catch {
+    console.log('[ImportSparks] No .rhizome directory in vault sparks folder')
+    return { imported: 0, errors: [] }
   }
 
-  // Check if chunk IDs still exist in current chunks
-  const currentChunkIds = new Set(currentChunks.map(c => c.id))
-  const allChunkIdsExist = sparksData.entities.every((entity: any) => {
-    const chunkRef = entity.components?.ChunkRef?.data
-    if (!chunkRef) return false
+  const files = await fs.readdir(rhizomeDir)
+  const jsonFiles = files.filter(f => f.endsWith('.json'))
 
-    // Check primary chunkId
-    if (chunkRef.chunkId && !currentChunkIds.has(chunkRef.chunkId)) return false
+  let imported = 0
+  const errors: string[] = []
 
-    // Check all chunkIds array
-    if (chunkRef.chunkIds) {
-      return chunkRef.chunkIds.every((id: string) => currentChunkIds.has(id))
-    }
+  for (const file of jsonFiles) {
+    try {
+      const sparkData = JSON.parse(
+        await fs.readFile(path.join(rhizomeDir, file), 'utf-8')
+      )
 
-    return true
-  })
-
-  if (allChunkIdsExist) {
-    // ✅ FAST PATH: Direct restore (chunk IDs match)
-    console.log('[ImportSparks] Chunk IDs match - direct restore')
-    let imported = 0
-
-    for (const entity of sparksData.entities) {
-      const components = entity.components
-
-      // Check if entity already exists (from previous failed import)
-      const { data: existingEntity } = await supabase
-        .from('components')
-        .select('entity_id')
-        .eq('entity_id', entity.entity_id)
-        .limit(1)
-        .single()
-
-      if (existingEntity) {
-        console.log(`[ImportSparks] Entity ${entity.entity_id} already exists, skipping`)
-        continue
-      }
-
-      // Create entity first (required by foreign key constraint)
+      // Create ECS entity
       const { error: entityError } = await supabase
         .from('entities')
         .insert({
-          id: entity.entity_id,
+          id: sparkData.entity_id,
           user_id: userId,
           entity_type: 'spark'
         })
 
       if (entityError) {
-        console.warn(`Failed to create entity ${entity.entity_id}:`, entityError.message)
+        errors.push(`Failed to create entity ${sparkData.entity_id}: ${entityError.message}`)
         continue
       }
 
-      // Insert Spark component
-      const sparkData = components.Spark.data
-      const { error: sparkError } = await supabase
-        .from('components')
-        .insert({
-          entity_id: entity.entity_id,
+      // Insert components (Spark, Content, Temporal, ChunkRef if present)
+      const components = sparkData.components || {}
+
+      if (components.Spark) {
+        await supabase.from('components').insert({
+          entity_id: sparkData.entity_id,
           component_type: 'Spark',
-          document_id: documentId,  // Set column for query filtering
-          data: sparkData
+          data: components.Spark.data
         })
-
-      if (sparkError) {
-        console.warn(`Failed to import Spark for ${entity.entity_id}:`, sparkError.message)
-        continue
       }
 
-      // Insert Content component
-      await supabase
-        .from('components')
-        .insert({
-          entity_id: entity.entity_id,
+      if (components.Content) {
+        await supabase.from('components').insert({
+          entity_id: sparkData.entity_id,
           component_type: 'Content',
           data: components.Content.data
         })
+      }
 
-      // Insert Temporal component
-      await supabase
-        .from('components')
-        .insert({
-          entity_id: entity.entity_id,
+      if (components.Temporal) {
+        await supabase.from('components').insert({
+          entity_id: sparkData.entity_id,
           component_type: 'Temporal',
           data: components.Temporal.data
         })
+      }
 
-      // Insert ChunkRef component
-      const chunkRefData = components.ChunkRef.data
-      await supabase
-        .from('components')
-        .insert({
-          entity_id: entity.entity_id,
+      if (components.ChunkRef) {
+        await supabase.from('components').insert({
+          entity_id: sparkData.entity_id,
           component_type: 'ChunkRef',
-          document_id: documentId,  // Set column for query filtering
-          chunk_id: chunkRefData.chunkId || null,  // Set primary chunk_id
-          data: chunkRefData
+          document_id: components.ChunkRef.data.documentId || null,
+          chunk_id: components.ChunkRef.data.chunkId || null,
+          data: components.ChunkRef.data
+        })
+      }
+
+      // Upload to Storage (use original filename from vault)
+      await supabase.storage
+        .from('documents')
+        .upload(`${userId}/sparks/${file}`, JSON.stringify(sparkData, null, 2), {
+          contentType: 'application/json',
+          upsert: true
         })
 
+      // Update cache
+      await supabase.from('sparks_cache').insert({
+        entity_id: sparkData.entity_id,
+        user_id: userId,
+        content: components.Content?.data.note || '',
+        created_at: components.Temporal?.data.createdAt,
+        updated_at: components.Temporal?.data.updatedAt,
+        origin_chunk_id: components.ChunkRef?.data.chunkId || null,
+        document_id: components.ChunkRef?.data.documentId || null,
+        tags: components.Content?.data.tags || [],
+        storage_path: `${userId}/sparks/${file}`,
+        cached_at: new Date().toISOString()
+      })
+
       imported++
+    } catch (error) {
+      errors.push(`Failed to import ${file}: ${error}`)
     }
-
-    console.log(`[ImportSparks] ✓ Direct restore: ${imported} sparks`)
-    return { imported, recovered: 0, method: 'direct' }
-
-  } else {
-    // 🔄 RECOVERY PATH: Chunk IDs changed, use recovery handler
-    console.log('[ImportSparks] Chunk IDs changed - triggering recovery')
-
-    const recoveryResults = await recoverSparks(
-      documentId,
-      markdown,
-      currentChunks,
-      supabase
-    )
-
-    const recovered = recoveryResults.success.length + recoveryResults.needsReview.length
-    console.log(`[ImportSparks] ✓ Recovery complete: ${recovered} sparks recovered`)
-    console.log(`[ImportSparks]   - Success: ${recoveryResults.success.length}`)
-    console.log(`[ImportSparks]   - Needs review: ${recoveryResults.needsReview.length}`)
-    console.log(`[ImportSparks]   - Orphaned: ${recoveryResults.orphaned.length}`)
-
-    return { imported: 0, recovered, method: 'recovery' }
   }
+
+  console.log(`[ImportSparks] ✓ Imported ${imported} sparks, ${errors.length} errors`)
+  return { imported, errors }
 }

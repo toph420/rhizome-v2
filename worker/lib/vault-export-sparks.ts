@@ -1,103 +1,108 @@
+import { promises as fs } from 'fs'
+import * as path from 'path'
 import { SupabaseClient } from '@supabase/supabase-js'
 
 /**
- * Export sparks to JSON format for vault storage
- * Exports complete ECS entities with all 4 components (Spark, Content, Temporal, ChunkRef)
+ * Export ALL user sparks to global Rhizome/Sparks/ folder
+ * Creates both .md (readable) and .json (portable) files
+ *
+ * Pattern: Sparks are user-level entities, not document-level
+ * Location:
+ *   - Markdown: Rhizome/Sparks/{date}-spark-{title}.md
+ *   - JSON: Rhizome/Sparks/.rhizome/{date}-spark-{title}.json
  */
-export async function exportSparksToJson(
-  documentId: string,
+export async function exportSparksToVault(
+  userId: string,
+  vaultPath: string,
   supabase: SupabaseClient
-): Promise<string> {
-  // Get all spark entity IDs for this document (via ChunkRef component)
-  const { data: chunkRefComponents } = await supabase
-    .from('components')
-    .select('entity_id')
-    .eq('component_type', 'ChunkRef')
-    .eq('data->>documentId', documentId)
+): Promise<{ exported: number }> {
+  const sparksDir = path.join(vaultPath, 'Rhizome/Sparks')
+  const rhizomeDir = path.join(sparksDir, '.rhizome')
+  await fs.mkdir(sparksDir, { recursive: true })
+  await fs.mkdir(rhizomeDir, { recursive: true })
 
-  if (!chunkRefComponents || chunkRefComponents.length === 0) {
-    return JSON.stringify({
-      version: '2.0',
-      entity_type: 'spark',
-      exported_at: new Date().toISOString(),
-      entities: []
-    }, null, 2)
+  // List all spark files in Storage
+  const { data: sparkFiles } = await supabase.storage
+    .from('documents')
+    .list(`${userId}/sparks/`)
+
+  if (!sparkFiles || sparkFiles.length === 0) {
+    console.log('[ExportSparks] No sparks to export')
+    return { exported: 0 }
   }
 
-  const entityIds = chunkRefComponents.map(c => c.entity_id)
+  let exported = 0
 
-  // Filter to only spark entities (have Spark component, not Position)
-  const { data: sparkComponents } = await supabase
-    .from('components')
-    .select('entity_id')
-    .eq('component_type', 'Spark')
-    .in('entity_id', entityIds)
+  for (const file of sparkFiles) {
+    if (!file.name.endsWith('.json')) continue
 
-  if (!sparkComponents || sparkComponents.length === 0) {
-    return JSON.stringify({
-      version: '2.0',
-      entity_type: 'spark',
-      exported_at: new Date().toISOString(),
-      entities: []
-    }, null, 2)
-  }
+    try {
+      // Download JSON from Storage
+      const { data: blob } = await supabase.storage
+        .from('documents')
+        .download(`${userId}/sparks/${file.name}`)
 
-  const sparkEntityIds = sparkComponents.map(c => c.entity_id)
+      if (!blob) {
+        console.warn(`[ExportSparks] No blob for ${file.name}`)
+        continue
+      }
 
-  // Fetch all 4 components for spark entities
-  const { data: allComponents } = await supabase
-    .from('components')
-    .select(`
-      id,
-      entity_id,
-      component_type,
-      data,
-      created_at,
-      updated_at
-    `)
-    .in('entity_id', sparkEntityIds)
+      const sparkData = JSON.parse(await blob.text())
 
-  if (!allComponents) {
-    return JSON.stringify({
-      version: '2.0',
-      entity_type: 'spark',
-      exported_at: new Date().toISOString(),
-      entities: []
-    }, null, 2)
-  }
+      // Write JSON to vault .rhizome subfolder (portable format, hidden)
+      await fs.writeFile(
+        path.join(rhizomeDir, file.name),
+        JSON.stringify(sparkData, null, 2)
+      )
 
-  // Group components by entity_id
-  const entityMap = new Map<string, any>()
-  for (const comp of allComponents) {
-    if (!entityMap.has(comp.entity_id)) {
-      entityMap.set(comp.entity_id, {
-        entity_id: comp.entity_id,
-        components: {}
-      })
-    }
-    entityMap.get(comp.entity_id).components[comp.component_type] = {
-      data: comp.data,
-      created_at: comp.created_at,
-      updated_at: comp.updated_at
+      // Generate and write Markdown to main folder (readable format)
+      const markdown = generateSparkMarkdown(sparkData)
+      const mdFilename = file.name.replace('.json', '.md')
+      await fs.writeFile(
+        path.join(sparksDir, mdFilename),
+        markdown
+      )
+
+      exported++
+    } catch (error) {
+      console.error(`[ExportSparks] Failed to export ${file.name}:`, error)
     }
   }
 
-  // Convert to array and sort by creation time
-  const entities = Array.from(entityMap.values())
-    .sort((a, b) => {
-      const aTime = a.components.Temporal?.data.createdAt || a.components.Spark?.created_at
-      const bTime = b.components.Temporal?.data.createdAt || b.components.Spark?.created_at
-      return new Date(aTime).getTime() - new Date(bTime).getTime()
+  console.log(`[ExportSparks] ✓ Exported ${exported} sparks`)
+  return { exported }
+}
+
+function generateSparkMarkdown(sparkData: any): string {
+  const components = sparkData.components || {}
+  const spark = components.Spark?.data || {}
+  const content = components.Content?.data || {}
+  const temporal = components.Temporal?.data || {}
+  const chunkRef = components.ChunkRef?.data || {}
+
+  let md = `# ${spark.title || sparkData.data?.title || 'Untitled Spark'}\n\n`
+  md += `**Created**: ${new Date(temporal.createdAt || sparkData.data?.createdAt).toLocaleDateString()}\n`
+
+  if (content.tags && content.tags.length > 0) {
+    md += `**Tags**: ${content.tags.map((t: string) => `#${t}`).join(' ')}\n`
+  }
+
+  if (chunkRef.documentTitle) {
+    md += `**From**: [[${chunkRef.documentTitle}]]\n`
+  }
+
+  md += `\n---\n\n`
+  md += `${content.note || sparkData.data?.content}\n\n`
+
+  if (spark.selections && spark.selections.length > 0) {
+    md += `## Selections\n\n`
+    spark.selections.forEach((sel: any) => {
+      md += `> "${sel.text}"\n\n`
+      if (chunkRef.documentTitle) {
+        md += `*From [[${chunkRef.documentTitle}]]*\n\n`
+      }
     })
-
-  // Build final JSON structure
-  const exportData = {
-    version: '2.0',
-    entity_type: 'spark',
-    exported_at: new Date().toISOString(),
-    document_id: documentId,
-    entities
   }
 
-  return JSON.stringify(exportData, null, 2)
+  return md
 }

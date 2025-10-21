@@ -127,6 +127,45 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
+  'export_vault_sparks': async (supabase: any, job: any) => {
+    const { userId, vaultPath } = job.input_data
+
+    const { exportSparksToVault } = await import('./lib/vault-export-sparks.js')
+    const result = await exportSparksToVault(userId, vaultPath, supabase)
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: {
+          success: true,
+          sparksExported: result.exported,
+          location: 'Rhizome/Sparks/'
+        }
+      })
+      .eq('id', job.id)
+  },
+  'import_vault_sparks': async (supabase: any, job: any) => {
+    const { userId, vaultPath } = job.input_data
+
+    const { importSparksFromVault } = await import('./lib/vault-import-sparks.js')
+    const result = await importSparksFromVault(vaultPath, userId, supabase)
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: {
+          success: true,
+          sparksImported: result.imported,
+          errors: result.errors,
+          location: 'Rhizome/Sparks/'
+        }
+      })
+      .eq('id', job.id)
+  },
 }
 
 let isShuttingDown = false

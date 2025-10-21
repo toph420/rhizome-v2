@@ -14,7 +14,8 @@ import { generateConnectionsMarkdown } from '../lib/connection-graph.js'
 import { generateHighlightsMarkdown } from '../lib/highlights-generator.js'
 import { generateSparksMarkdown } from '../lib/sparks-generator.js'
 import { exportAnnotationsToJson } from '../lib/vault-export-annotations.js'
-import { exportSparksToJson } from '../lib/vault-export-sparks.js'
+// NOTE: Sparks are now exported globally, not per-document
+// See: exportSparksToVault() in vault-export-sparks.ts
 import { exportConnectionsToJson } from '../lib/vault-export-connections.js'
 
 /**
@@ -248,13 +249,8 @@ export async function exportToObsidian(
       console.log(`[Obsidian Export] .rhizome/annotations.json written`)
     }
 
-    // 11. Export sparks.json (machine-readable ECS entities)
-    if (obsidianSettings.exportSparks !== false) {
-      const sparksJson = await exportSparksToJson(documentId, supabase)
-      const sparksJsonPath = path.join(docFolderPath, '.rhizome', 'sparks.json')
-      await fs.writeFile(sparksJsonPath, sparksJson, 'utf-8')
-      console.log(`[Obsidian Export] .rhizome/sparks.json written`)
-    }
+    // NOTE: Sparks are now exported globally to Rhizome/Sparks/
+    // Per-document spark export removed - sparks are user-level entities
 
     // 12. Export connections.json (machine-readable connection rows)
     if (obsidianSettings.exportConnections !== false) {

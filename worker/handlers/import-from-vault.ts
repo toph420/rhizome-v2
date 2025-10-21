@@ -16,7 +16,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { scanVaultDocuments, readVaultDocumentData } from '../lib/vault-reader.js'
 import { importAnnotationsFromVault } from '../lib/vault-import-annotations.js'
-import { importSparksFromVault } from '../lib/vault-import-sparks.js'
+// NOTE: Sparks now imported globally via separate mechanism (vault-import-sparks.ts)
 import { importConnectionsFromVault } from '../lib/vault-import-connections.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
 import * as path from 'path'
@@ -338,34 +338,10 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
       console.log(`[ImportFromVault] No annotations.json found or import failed: ${error.message}`)
     }
 
-    // ✅ STEP 8: IMPORT SPARKS (85%)
-    await updateProgress(supabase, job.id, 85, 'importing_sparks', 'processing', 'Importing sparks')
-
-    const sparksJsonPath = path.join(doc.folderPath, '.rhizome', 'sparks.json')
+    // NOTE: Sparks are now imported globally from Rhizome/Sparks/, not per-document
+    // Per-document spark import removed - sparks are user-level entities
+    // See: worker/lib/vault-import-sparks.ts for global import
     let sparksResult = { imported: 0, recovered: 0 }
-
-    try {
-      await fs.access(sparksJsonPath)
-      const { data: currentChunks } = await supabase
-        .from('chunks')
-        .select('id, chunk_index, start_offset, end_offset, content')
-        .eq('document_id', documentId)
-        .eq('is_current', true)
-
-      if (currentChunks && currentChunks.length > 0) {
-        sparksResult = await importSparksFromVault(
-          documentId,
-          sparksJsonPath,
-          docData.markdown,
-          currentChunks,
-          supabase,
-          userId
-        )
-        console.log(`[ImportFromVault] Sparks: ${sparksResult.imported} imported, ${sparksResult.recovered} recovered`)
-      }
-    } catch (error: any) {
-      console.log(`[ImportFromVault] No sparks.json found or import failed: ${error.message}`)
-    }
 
     // ✅ STEP 9: IMPORT CONNECTIONS (88%)
     await updateProgress(supabase, job.id, 88, 'importing_connections', 'processing', 'Importing connections')

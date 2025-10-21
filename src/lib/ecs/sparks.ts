@@ -24,25 +24,36 @@ import { createHash } from 'crypto';
 // ============================================
 
 export interface CreateSparkInput {
+  /** Spark title (auto-generated if not provided) */
+  title?: string;
+
   /** User's spark thought/note */
   content: string;
+
   /** Text selections (can be empty array for thought-only sparks) */
   selections?: SparkSelection[];
+
   /** Tags extracted from content */
   tags?: string[];
+
   /** Chunk connections */
   connections: SparkConnection[];
 
-  // ChunkRef data
+  // ALL CONTEXT FIELDS NOW OPTIONAL (sparks can be created without document context)
+
   /** Primary/origin chunk ID */
-  chunkId: string;
+  chunkId?: string | null;
+
   /** All visible chunk IDs (includes primary + viewport chunks + selection chunks) */
   chunkIds?: string[];
-  /** Document ID */
-  documentId: string;
 
-  // For recovery
-  /** First 500 chars of origin chunk content */
+  /** Document ID */
+  documentId?: string | null;
+
+  /** Document title (denormalized for orphan detection) */
+  documentTitle?: string | null;
+
+  /** First 500 chars of origin chunk content (for recovery) */
   originChunkContent?: string;
 }
 
@@ -99,8 +110,10 @@ export class SparkOperations {
       ? createHash('sha256').update(input.originChunkContent).digest('hex')
       : undefined;
 
-    const entityId = await this.ecs.createEntity(this.userId, {
+    // Build components object
+    const components: Record<string, any> = {
       Spark: {
+        title: input.title || 'Untitled',
         selections,
         connections: input.connections,
         originalChunkContent: input.originChunkContent?.slice(0, 500),
@@ -114,17 +127,23 @@ export class SparkOperations {
         createdAt: now,
         updatedAt: now,
       },
-      ChunkRef: {
-        chunkId: input.chunkId,
-        chunk_id: input.chunkId, // For ECS filtering
-        chunkIds: input.chunkIds || [input.chunkId],
-        chunkPosition: hasSelections ? selections[0].startOffset : 0,
-        documentId: input.documentId,
-        document_id: input.documentId, // For ECS filtering
-        hasSelections,
-      },
-    });
+    };
 
+    // Only add ChunkRef if context provided
+    if (input.documentId || input.chunkId) {
+      components.ChunkRef = {
+        documentId: input.documentId || null,
+        document_id: input.documentId || null,
+        documentTitle: input.documentTitle || null,
+        chunkId: input.chunkId || null,
+        chunk_id: input.chunkId || null,
+        chunkIds: input.chunkIds || (input.chunkId ? [input.chunkId] : []),
+        chunkPosition: hasSelections ? selections[0].startOffset : 0,
+        hasSelections,
+      };
+    }
+
+    const entityId = await this.ecs.createEntity(this.userId, components, 'spark');
     return entityId;
   }
 

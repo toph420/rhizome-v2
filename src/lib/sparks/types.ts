@@ -61,11 +61,11 @@ export interface SparkStorageJson {
   user_id: string
   component_type: 'spark'
   data: SparkComponent
-  context: SparkContext
+  context: SparkContext | null  // Nullable - sparks can be created without document context
   source: {
     chunk_id: string
     document_id: string
-  }
+  } | null  // Nullable - sparks can be created without document context
 }
 
 // Cache table row (optional, for queries)

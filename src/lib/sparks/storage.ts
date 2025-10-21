@@ -155,7 +155,19 @@ export async function verifyCacheFreshness(userId: string): Promise<{
   for (const cache of cached || []) {
     try {
       const sparkData = await downloadSparkFromStorage(userId, cache.entity_id)
-      const storageUpdated = new Date(sparkData.data.updated_at || sparkData.data.created_at)
+
+      // Handle both old and new storage formats
+      // Old: sparkData.data.createdAt
+      // New: sparkData.components?.Temporal?.data.createdAt
+      const temporal = (sparkData as any).components?.Temporal?.data
+      const storageTimestamp = temporal?.updatedAt || temporal?.createdAt || (sparkData.data as any).createdAt
+
+      if (!storageTimestamp) {
+        console.warn(`[Sparks] No timestamp found for ${cache.entity_id}, skipping stale check`)
+        continue
+      }
+
+      const storageUpdated = new Date(storageTimestamp)
       const cacheUpdated = new Date(cache.cached_at)
 
       if (storageUpdated > cacheUpdated) {

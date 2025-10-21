@@ -31,16 +31,18 @@ export class ECS {
    * Create a new entity with components.
    * @param userId - The user ID who owns this entity.
    * @param components - Object with component types as keys and data as values.
+   * @param entityType - Optional entity type (defaults to 'unknown').
    * @returns The created entity ID.
    */
   async createEntity(
     userId: string,
-    components: Record<string, ComponentData>
+    components: Record<string, ComponentData>,
+    entityType: string = 'unknown'
   ): Promise<string> {
     // Create the entity first
     const { data: entity, error: entityError } = await this.supabase
       .from('entities')
-      .insert({ user_id: userId })
+      .insert({ user_id: userId, entity_type: entityType })
       .select()
       .single()
 

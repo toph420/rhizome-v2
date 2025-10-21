@@ -69,12 +69,14 @@ export interface TemporalComponent {
 }
 
 export interface ChunkRefComponent {
+  // ALL FIELDS NOW OPTIONAL (sparks can be created without context)
+
   /** Chunk ID this annotation/spark relates to */
-  chunkId: string;
+  chunkId?: string | null;
   /** Chunk ID (duplicate for ECS filtering) */
-  chunk_id: string;
+  chunk_id?: string | null;
   /** Position within the chunk */
-  chunkPosition: number;
+  chunkPosition?: number;
 
   // Multi-chunk annotation support (migration 030)
   /** Array of chunk IDs for annotations spanning multiple chunks */
@@ -82,9 +84,11 @@ export interface ChunkRefComponent {
 
   // Document reference (NEW - for sparks and future entities)
   /** Document ID (application use) */
-  documentId?: string;
+  documentId?: string | null;
   /** Document ID (duplicate for ECS filtering) */
-  document_id?: string;
+  document_id?: string | null;
+  /** Document title (denormalized for orphan detection) */
+  documentTitle?: string | null;
 
   // Selection tracking (NEW - for selection-based sparks)
   /** Whether this entity has text selections */
@@ -140,6 +144,8 @@ export interface SparkConnection {
 
 /** Spark component data (spark-specific) */
 export interface SparkComponent {
+  /** Human-readable title (AI-generated or user-provided) */
+  title?: string;
   /** Multiple text selections (can be empty for thought-only sparks) */
   selections: SparkSelection[];
   /** Connections to other chunks */
@@ -198,7 +204,10 @@ export interface AnnotationEntity {
 
 /**
  * Complete spark entity with all components
- * 4-component pattern: Spark, Content, Temporal, ChunkRef
+ * 3-4 component pattern: Spark, Content, Temporal, [ChunkRef optional]
+ *
+ * ChunkRef is optional - sparks can be created without document context
+ * (e.g., global capture, thought-only sparks)
  */
 export interface SparkEntity {
   /** Entity ID */
@@ -214,7 +223,7 @@ export interface SparkEntity {
     Spark: SparkComponent;
     Content: ContentComponent;
     Temporal: TemporalComponent;
-    ChunkRef: ChunkRefComponent;
+    ChunkRef?: ChunkRefComponent;  // Optional: only if context provided
   };
 }
 
