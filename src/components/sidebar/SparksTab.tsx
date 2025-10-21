@@ -49,7 +49,7 @@ export function SparksTab({ documentId }: SparksTabProps) {
 
   useEffect(() => {
     loadSparks() // Initial load with loading state
-  }, [])
+  }, [documentId])
 
   // Refetch when spark panel closes (after create/update)
   useEffect(() => {
@@ -64,7 +64,7 @@ export function SparksTab({ documentId }: SparksTabProps) {
     }
     setError(null)
     try {
-      const data = await getRecentSparks(50, 0)
+      const data = await getRecentSparks(50, 0, documentId)
       setSparks(data)
     } catch (error) {
       console.error('[Sparks] Failed to load:', error)

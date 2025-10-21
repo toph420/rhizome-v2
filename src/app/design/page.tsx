@@ -3,6 +3,7 @@ import { TypographyShowcase } from '@/components/design/TypographyShowcase'
 import { ColorPalette } from '@/components/design/ColorPalette'
 import { ComponentShowcase } from '@/components/design/ComponentShowcase'
 import { ExperimentalPlayground } from '@/components/design/ExperimentalPlayground'
+import { BrutalismPlayground } from '@/components/design/BrutalismPlayground'
 
 /**
  * Design guide page showcasing typography, colors, components, and experimental styles.
@@ -20,14 +21,20 @@ export default function DesignGuidePage() {
       </div>
 
       {/* Tabs Navigation */}
-      <Tabs defaultValue="typography" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:w-auto">
+      <Tabs defaultValue="brutalism" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-6 lg:w-auto">
+          <TabsTrigger value="brutalism">Brutalism</TabsTrigger>
           <TabsTrigger value="typography">Typography</TabsTrigger>
           <TabsTrigger value="colors">Colors</TabsTrigger>
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="experimental">Experimental</TabsTrigger>
           <TabsTrigger value="spacing">Spacing</TabsTrigger>
         </TabsList>
+
+        {/* Brutalism Playground */}
+        <TabsContent value="brutalism" className="space-y-6">
+          <BrutalismPlayground />
+        </TabsContent>
 
         {/* Typography Section */}
         <TabsContent value="typography" className="space-y-6">

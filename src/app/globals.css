@@ -4,6 +4,7 @@
 @import "../styles/experimental.css";
 @import "../styles/tactical.css";
 @import "../styles/brutalist.css";
+@import "../styles/neobrutalism.css";
 
 @custom-variant dark (&:is(.dark *));
 

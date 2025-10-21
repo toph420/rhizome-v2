@@ -245,6 +245,7 @@ export function VirtualizedReader() {
     // This fixes the issue where multi-chunk annotations cause selection to expand
     clearSelection()
 
+    // First, update optimistic annotations state
     setOptimisticAnnotations((prev) => {
       const next = new Map(prev)
 
@@ -269,56 +270,58 @@ export function VirtualizedReader() {
             next.delete(id)
           }
         })
-
-        // Add to Zustand store for permanent storage and editing
-        const storedAnnotation: AnnotationEntity = {
-          id: annotation.id,
-          user_id: '',
-          created_at: annotation.created_at,
-          updated_at: annotation.created_at,
-          components: {
-            Position: {
-              documentId: annotation.document_id,
-              document_id: annotation.document_id,
-              startOffset: annotation.start_offset,
-              endOffset: annotation.end_offset,
-              originalText: annotation.text,
-              textContext: annotation.text_context,
-              recoveryConfidence: 1.0,
-              recoveryMethod: 'exact',
-              needsReview: false,
-            },
-            Visual: {
-              type: 'highlight',
-              color: annotation.color,
-            },
-            Content: {
-              note: annotation.note,
-              tags: annotation.tags || [],
-            },
-            Temporal: {
-              createdAt: annotation.created_at,
-              updatedAt: annotation.created_at,
-            },
-            ChunkRef: {
-              chunkId: annotation.chunk_ids[0],
-              chunk_id: annotation.chunk_ids[0],
-              chunkIds: annotation.chunk_ids,
-              chunkPosition: 0,
-              documentId: annotation.document_id,
-              document_id: annotation.document_id,
-            },
-          },
-        }
-
-        // Add to store (avoids duplicates via store logic)
-        if (documentId) {
-          addAnnotation(documentId, storedAnnotation)
-        }
       }
 
       return next
     })
+
+    // Then, separately update the Zustand store (must be outside setOptimisticAnnotations)
+    // This prevents "Cannot update component while rendering" React error
+    if (!annotation.id.startsWith('temp-') && documentId) {
+      // Build annotation entity for store
+      const storedAnnotation: AnnotationEntity = {
+        id: annotation.id,
+        user_id: '',
+        created_at: annotation.created_at,
+        updated_at: annotation.created_at,
+        components: {
+          Position: {
+            documentId: annotation.document_id,
+            document_id: annotation.document_id,
+            startOffset: annotation.start_offset,
+            endOffset: annotation.end_offset,
+            originalText: annotation.text,
+            textContext: annotation.text_context,
+            recoveryConfidence: 1.0,
+            recoveryMethod: 'exact',
+            needsReview: false,
+          },
+          Visual: {
+            type: 'highlight',
+            color: annotation.color,
+          },
+          Content: {
+            note: annotation.note,
+            tags: annotation.tags || [],
+          },
+          Temporal: {
+            createdAt: annotation.created_at,
+            updatedAt: annotation.created_at,
+          },
+          ChunkRef: {
+            chunkId: annotation.chunk_ids[0],
+            chunk_id: annotation.chunk_ids[0],
+            chunkIds: annotation.chunk_ids,
+            chunkPosition: 0,
+            documentId: annotation.document_id,
+            document_id: annotation.document_id,
+          },
+        },
+      }
+
+      // Add to store (avoids duplicates via store logic)
+      addAnnotation(documentId, storedAnnotation)
+    }
   }, [documentId, addAnnotation, clearSelection])
 
   // Handle annotation updates (for editing existing annotations)
