@@ -1,0 +1,231 @@
+================================================================================
+                 WORKER DIRECTORY REFACTORING ANALYSIS SUMMARY
+================================================================================
+
+CODEBASE SIZE: 64,647 total lines across handlers, processors, and engines
+
+┌─ HANDLER DUPLICATION ISSUES ──────────────────────────────────────────────┐
+│ Location: /worker/handlers/ (14 handlers, 6,581 lines)                     │
+│                                                                             │
+│ Problem 1: updateProgress() functions                                       │
+│   ├─ 8 handlers define own updateProgress()                                │
+│   ├─ Lines duplicated: ~120                                                │
+│   ├─ Variations in signature and logic                                     │
+│   └─ Priority: HIGH                                                        │
+│                                                                             │
+│ Problem 2: Job completion patterns                                          │
+│   ├─ 14 instances of job completion code                                   │
+│   ├─ Lines duplicated: ~210                                                │
+│   ├─ Pattern: status='completed' + progress + output_data                  │
+│   └─ Priority: HIGH                                                        │
+│                                                                             │
+│ Problem 3: Error handling                                                   │
+│   ├─ 12+ catch blocks with similar patterns                                │
+│   ├─ Lines duplicated: ~180                                                │
+│   ├─ Missing: Standardized error response handler                          │
+│   └─ Priority: HIGH                                                        │
+│                                                                             │
+│ Problem 4: Resume state checking                                            │
+│   ├─ 4+ handlers check resume_count + metadata                             │
+│   ├─ Lines duplicated: ~100                                                │
+│   └─ Priority: MEDIUM                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ PROCESSOR DUPLICATION ISSUES ────────────────────────────────────────────┐
+│ Location: /worker/processors/ (8 processors)                               │
+│                                                                             │
+│ Problem 1: Duplicated imports                                              │
+│   ├─ PDF, EPUB, Web all import same chunking libs                          │
+│   ├─ Lines duplicated: ~90                                                 │
+│   └─ Priority: MEDIUM                                                      │
+│                                                                             │
+│ Problem 2: 10-stage pipeline duplication                                   │
+│   ├─ PDF & EPUB both implement identical stages                            │
+│   ├─ Lines duplicated: ~400                                                │
+│   ├─ Stages: extract → cleanup → chunk → enrich → embed                    │
+│   └─ Priority: HIGH                                                        │
+│                                                                             │
+│ Problem 3: Metadata enrichment                                              │
+│   ├─ Identical code in PDF & EPUB processors                               │
+│   ├─ Lines duplicated: ~300                                                │
+│   ├─ Pattern: extractMetadataBatch() → logChunkStatistics() → generateEmbeddings()
+│   └─ Priority: MEDIUM                                                      │
+│                                                                             │
+│ Problem 4: Base class methods underutilized                                 │
+│   ├─ SourceProcessor defines: startHeartbeat, stopHeartbeat, updateProgress │
+│   ├─ But repeated code in each processor's process()                       │
+│   └─ Priority: LOW (infrastructure solid, needs composition)               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ ORCHESTRATOR & ENGINE ISSUES ────────────────────────────────────────────┐
+│ Location: /worker/engines/ (~1,500 lines total)                           │
+│                                                                             │
+│ Problem 1: Function-based vs class-based inconsistency                      │
+│   ├─ Orchestrator is function-based                                        │
+│   ├─ BaseEngine exists but isn't used by implementations                   │
+│   ├─ Each engine is standalone function                                    │
+│   └─ Priority: MEDIUM                                                      │
+│                                                                             │
+│ Problem 2: Hard-coded engine configuration                                 │
+│   ├─ detect-connections.ts: ENGINE_CONFIG (lines 44-62)                    │
+│   ├─ reprocess-connections.ts: identical ENGINE_CONFIG (lines 245-263)     │
+│   ├─ Lines duplicated: ~40                                                 │
+│   └─ Priority: LOW                                                         │
+│                                                                             │
+│ Problem 3: No engine registry or factory                                   │
+│   ├─ Orchestrator directly imports all 4 engines                           │
+│   ├─ Hard-coded if/else for local vs cloud mode                            │
+│   └─ Priority: MEDIUM                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STORAGE & DATABASE PATTERNS ─────────────────────────────────────────────┐
+│                                                                             │
+│ Storage Operations (20+ instances)                                          │
+│   ├─ Download: supabase.storage.from('documents').download(path)           │
+│   ├─ Upload: supabase.storage.from('documents').upload(path, blob)         │
+│   ├─ Lines duplicated: ~200                                                │
+│   └─ Priority: MEDIUM (abstraction needed)                                 │
+│                                                                             │
+│ Database Updates (14+ instances)                                            │
+│   ├─ Same pattern: status update + timestamp + progress + output_data      │
+│   ├─ Pattern: supabase.from('background_jobs').update({...}).eq('id', id)  │
+│   └─ Priority: HIGH (needs centralization)                                 │
+│                                                                             │
+│ Error Handling (45+ uses)                                                   │
+│   ├─ classifyError() and getUserFriendlyError() imported everywhere        │
+│   └─ Priority: MEDIUM (infrastructure solid, needs orchestration)          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ COUPLING ANALYSIS ───────────────────────────────────────────────────────┐
+│                                                                             │
+│ Handler ↔ Processor Coupling                                               │
+│   ├─ Handler directly instantiates processors via router                   │
+│   ├─ Handler knows processor result format & progress percentages          │
+│   ├─ Handler duplicates caching logic                                      │
+│   └─ Level: TIGHT                                                          │
+│                                                                             │
+│ Handler ↔ Database Coupling                                                │
+│   ├─ All handlers directly interact with background_jobs, documents, etc.  │
+│   ├─ Missing: Repository pattern / data access layer                       │
+│   └─ Level: TIGHT                                                          │
+│                                                                             │
+│ Handler ↔ Storage Coupling                                                 │
+│   ├─ Processors directly call supabase.storage                             │
+│   ├─ Missing: Storage abstraction layer                                    │
+│   └─ Level: TIGHT                                                          │
+│                                                                             │
+│ Orchestrator ↔ Engines Coupling                                            │
+│   ├─ Hard-coded engine imports in orchestrator                             │
+│   ├─ No registry pattern                                                   │
+│   ├─ Hard-coded local vs cloud decision                                    │
+│   └─ Level: TIGHT                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+                            REFACTORING OPPORTUNITIES
+================================================================================
+
+HIGH PRIORITY (Target: -1,050 lines, 16% reduction)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Extract HandlerJobManager utility class         -200 lines
+   ├─ Consolidate updateProgress() (8x)
+   ├─ Standardize job completion flow
+   └─ Implement: worker/lib/handler-job-manager.ts
+
+2. Extract processor pipeline methods              -400 lines
+   ├─ Move 10-stage pipeline to base class
+   ├─ Move metadata enrichment to base class
+   ├─ Move embeddings generation to base class
+   └─ Implement: SourceProcessor.runChonkiePipeline(), enrichMetadata(), generateChunkEmbeddings()
+
+3. Extract storage abstraction layer               -150 lines
+   ├─ Consolidate 20+ storage operations
+   ├─ Centralized error handling
+   └─ Implement: worker/lib/storage-client.ts
+
+4. Consolidate error handling                      -100 lines
+   ├─ Create unified handleHandlerError()
+   ├─ Standardize error responses
+   └─ Implement: worker/lib/handler-error-handler.ts
+
+5. Orchestrator engine registry                    -200 lines
+   ├─ Replace function-based with class-based
+   ├─ Implement engine registry pattern
+   ├─ Remove hard-coded local/cloud logic
+   └─ Implement: worker/engines/engine-registry.ts
+
+MEDIUM PRIORITY (Target: -400 lines, 6% reduction)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. Move engine configuration to constants          -40 lines
+   └─ Implement: worker/engines/engine-config.ts
+
+7. Align engines with BaseEngine                   -150 lines
+   ├─ Make engines extend BaseEngine
+   ├─ Use abstract methods
+   └─ Add caching/metrics
+
+8. Create repository pattern for database          -200 lines
+   ├─ BackgroundJobRepository
+   ├─ DocumentRepository
+   ├─ ChunkRepository
+   ├─ ConnectionRepository
+   └─ Implement: worker/lib/repositories/
+
+LOW PRIORITY (Structural improvements)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. Create pipeline abstraction
+   └─ Represent 10-stage pipeline as composable stages
+
+10. Add request/response interceptors
+    └─ Logging, metrics, error handling
+
+================================================================================
+                              STATISTICS SUMMARY
+================================================================================
+
+Pattern Type                    Count    Lines     Priority   Impact
+─────────────────────────────────────────────────────────────────────────
+updateProgress() functions        8       120      HIGH       Must-fix
+Job completion patterns          14       210      HIGH       Must-fix
+Error handling blocks           12+       180      HIGH       Must-fix
+Pipeline duplication             3        400      HIGH       Must-fix
+Metadata enrichment              3        300      MEDIUM     Should-fix
+Storage operations              20+       200      MEDIUM     Should-fix
+Resume state checks              4+       100      MEDIUM     Should-fix
+Engine config                    2         40      LOW        Nice-to-fix
+─────────────────────────────────────────────────────────────────────────
+TOTAL DUPLICATED CODE                    1,550              23.4% of handlers
+
+================================================================================
+                              IMPLEMENTATION ROADMAP
+================================================================================
+
+Week 1: Quick Wins
+├─ Extract HandlerJobManager (-200 lines)
+├─ Consolidate engine configs (-40 lines)
+└─ Extract storage abstraction (-150 lines)
+
+Week 2: Processor Consolidation
+├─ Extract processor pipeline methods (-400 lines)
+└─ Move metadata enrichment to base class (-200 lines)
+
+Week 3: Orchestration Refactor
+├─ Implement engine registry pattern
+├─ Refactor handlers to use HandlerJobManager
+└─ Add repository pattern for database access
+
+Week 4: Testing & Refinement
+├─ Add tests for extracted utilities
+├─ Update CLAUDE.md documentation
+└─ Verify backward compatibility
+
+Expected Outcome:
+• 1,550+ lines of duplicated code removed (23.4% reduction in handlers)
+• Consistent patterns across all handlers
+• Better separation of concerns
+• Easier to test and maintain
+• Foundation for future extensions
+
+================================================================================
+
+Full Analysis: /home/user/rhizome-v2/docs/WORKER_REFACTORING_ANALYSIS.md
