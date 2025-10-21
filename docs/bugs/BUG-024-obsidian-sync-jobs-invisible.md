@@ -1,9 +1,11 @@
 # BUG-024: Obsidian Sync Jobs Not Visible in UI
 
-**Status**: Open
+**Status**: ✅ RESOLVED
 **Priority**: P2 (Medium)
 **Discovered**: 2025-10-16
-**Affects**: ProcessingDock, JobsTab (if not polling DB directly)
+**Resolved**: 2025-10-20
+**Affects**: ProcessingDock, JobsTab
+**Resolution**: Migration 060 + code standardization
 
 ---
 
@@ -11,9 +13,20 @@
 
 When Obsidian sync operations are triggered, the background job runs successfully in the worker but is **invisible in the UI** (ProcessingDock and potentially Jobs tab).
 
-## Root Cause
+## Actual Root Cause (Corrected)
 
-The `/api/obsidian/sync/route.ts` creates background jobs directly in the database:
+**Naming convention mismatch** between database inserts and UI expectations:
+
+- **Database**: Used kebab-case (`'obsidian-sync'`, `'detect-connections'`)
+- **UI Components**: Expected snake_case (`'obsidian_sync'`, `'detect_connections'`)
+
+The auto-discovery mechanism was working correctly, but jobs weren't displayed because the switch statements in `ProcessingDock.tsx` and `JobList.tsx` didn't match the kebab-case job types.
+
+**Original hypothesis** (auto-discovery not working) was incorrect - the store WAS finding the jobs, but the UI couldn't recognize them due to the naming mismatch.
+
+## ~~Original Root Cause~~ (Incorrect)
+
+~~The `/api/obsidian/sync/route.ts` creates background jobs directly in the database:~~
 
 ```typescript
 // src/app/api/obsidian/sync/route.ts:69-79
@@ -154,6 +167,36 @@ supabase
 
 ## Notes
 
-- Same issue likely affects other job types created via API routes
-- ProcessingDock correctly handles `obsidian-sync` job type (lines 147-148, 174-175)
-- The display name and icon are already implemented, just need the job to be in the store
+- Same issue affected ALL kebab-case job types: `detect-connections`, `obsidian-export`, `obsidian-sync`, `readwise-import`, `scan-vault`, `import-from-vault`
+- ProcessingDock and JobList already had correct snake_case switch statements
+- The display names and icons were already implemented correctly
+
+---
+
+## Resolution (2025-10-20)
+
+**Fixed by standardizing all job types to snake_case:**
+
+**Files Updated:**
+1. `supabase/migrations/060_standardize_job_type_naming.sql` - Database migration (28 jobs updated)
+2. `worker/index.ts` - JOB_HANDLERS keys (11 job types)
+3. `worker/handlers/process-document.ts` - Query + insert
+4. `worker/handlers/continue-processing.ts` - Query + insert
+5. `src/app/actions/integrations.ts` - 5 job type inserts
+6. `scripts/trigger-connection-detection.ts` - Query + insert
+7. `tests/integration/database/background-jobs.test.ts` - Test data
+8. `src/stores/admin/background-jobs.ts` - Added missing job types to TypeScript interface
+
+**Migration Results:**
+- Updated 2 `detect-connections` → `detect_connections`
+- Updated 13 `scan-vault` → `scan_vault`
+- Updated 13 `import-from-vault` → `import_from_vault`
+
+**Verification:**
+All job types now use consistent snake_case naming throughout the entire stack:
+- Database: `detect_connections`, `obsidian_export`, etc.
+- Worker: Same
+- Frontend: Same
+- Tests: Same
+
+Jobs are now **immediately visible** in both ProcessingDock and Admin Panel with proper names, icons, and controls.

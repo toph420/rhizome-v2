@@ -110,46 +110,40 @@ export async function deleteDocument(documentId: string) {
     const chunkIds = chunks?.map(c => c.id) || []
     console.log(`[deleteDocument] Found ${chunkIds.length} chunks to delete`)
 
-    // 2. Delete ECS entities related to chunks (annotations, flashcards, etc.)
-    if (chunkIds.length > 0) {
-      // Get entity IDs from components that reference these chunks
-      // Query components where data JSONB contains chunk_id matching our list
-      const { data: components, error: componentsError } = await supabase
+    // 2. Delete ECS entities related to document (annotations, sparks, etc.)
+    // Use documentId filter - works even if chunks are already deleted!
+    const { data: chunkRefComponents, error: chunkRefError } = await supabase
+      .from('components')
+      .select('entity_id')
+      .eq('component_type', 'ChunkRef')
+      .eq('data->>documentId', documentId)
+
+    if (chunkRefError) throw chunkRefError
+
+    const entityIds = [...new Set(chunkRefComponents?.map(c => c.entity_id) || [])]
+
+    if (entityIds.length > 0) {
+      console.log(`[deleteDocument] Deleting ${entityIds.length} ECS entities (annotations, sparks, etc.)`)
+
+      // Delete all components for these entities
+      const { error: deleteComponentsError } = await supabase
         .from('components')
-        .select('entity_id, data')
-        .eq('component_type', 'source')
+        .delete()
+        .in('entity_id', entityIds)
 
-      if (componentsError) throw componentsError
+      if (deleteComponentsError) throw deleteComponentsError
 
-      // Filter in JavaScript since PostgREST JSONB filtering is complex
-      const relevantComponents = components?.filter(c => {
-        const chunkId = c.data?.chunk_id
-        return chunkId && chunkIds.includes(chunkId)
-      }) || []
+      // Delete entities
+      const { error: deleteEntitiesError } = await supabase
+        .from('entities')
+        .delete()
+        .in('id', entityIds)
 
-      const entityIds = [...new Set(relevantComponents.map(c => c.entity_id))]
+      if (deleteEntitiesError) throw deleteEntitiesError
+    }
 
-      if (entityIds.length > 0) {
-        console.log(`[deleteDocument] Deleting ${entityIds.length} ECS entities`)
-
-        // Delete all components for these entities
-        const { error: deleteComponentsError } = await supabase
-          .from('components')
-          .delete()
-          .in('entity_id', entityIds)
-
-        if (deleteComponentsError) throw deleteComponentsError
-
-        // Delete entities
-        const { error: deleteEntitiesError } = await supabase
-          .from('entities')
-          .delete()
-          .in('id', entityIds)
-
-        if (deleteEntitiesError) throw deleteEntitiesError
-      }
-
-      // 3. Delete connections (delete in two passes to avoid complex OR query)
+    // 3. Delete connections (only if chunks exist)
+    if (chunkIds.length > 0) {
       // First delete where these chunks are the source
       const { error: connectionsError1 } = await supabase
         .from('connections')
@@ -165,15 +159,15 @@ export async function deleteDocument(documentId: string) {
         .in('target_chunk_id', chunkIds)
 
       if (connectionsError2) console.warn('[deleteDocument] Error deleting target connections:', connectionsError2)
-
-      // 4. Delete chunks
-      const { error: deleteChunksError } = await supabase
-        .from('chunks')
-        .delete()
-        .eq('document_id', documentId)
-
-      if (deleteChunksError) throw deleteChunksError
     }
+
+    // 4. Delete chunks
+    const { error: deleteChunksError } = await supabase
+      .from('chunks')
+      .delete()
+      .eq('document_id', documentId)
+
+    if (deleteChunksError) throw deleteChunksError
 
     // 5. Delete background jobs (use entity_id, not document_id)
     const { error: jobsError } = await supabase

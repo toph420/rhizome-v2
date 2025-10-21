@@ -124,15 +124,15 @@ The worker supports **10 job types**, each mapped to a specific handler:
 | Job Type | Handler | Purpose |
 |----------|---------|---------|
 | `process_document` | `processDocumentHandler` | Full document processing pipeline |
-| `detect-connections` | `detectConnectionsHandler` | Run 3-engine collision detection |
-| `reprocess-document` | `reprocessDocument` | Full reprocessing with annotation recovery |
+| `detect_connections` | `detectConnectionsHandler` | Run 3-engine collision detection |
+| `reprocess_document` | `reprocessDocument` | Full reprocessing with annotation recovery |
 | `reprocess_connections` | `reprocessConnectionsHandler` | Regenerate connections only (Smart Mode) |
 | `import_document` | `importDocumentHandler` | Import from ZIP with conflict resolution |
 | `export_documents` | `exportDocumentHandler` | Create portable ZIP exports |
-| `obsidian-export` | `exportToObsidian` | Export markdown to Obsidian vault |
-| `obsidian-sync` | `syncFromObsidian` | Import edited markdown from vault |
-| `readwise-import` | `importReadwiseHighlights` | Import Readwise highlights |
-| `continue-processing` | `continueProcessing` | Resume from checkpoint after pause |
+| `obsidian_export` | `exportToObsidian` | Export markdown to Obsidian vault |
+| `obsidian_sync` | `syncFromObsidian` | Import edited markdown from vault |
+| `readwise_import` | `importReadwiseHighlights` | Import Readwise highlights |
+| `continue_processing` | `continueProcessing` | Resume from checkpoint after pause |
 
 **Job Creation Example**:
 ```typescript
@@ -837,7 +837,7 @@ export async function recoverAnnotations(
 
 **Bidirectional sync** with Obsidian vault for external editing workflow.
 
-**Export to Obsidian** (`obsidian-export` job):
+**Export to Obsidian** (`obsidian_export` job):
 ```typescript
 export async function exportToObsidian(documentId: string, userId: string) {
   // 1. Get user's Obsidian settings (vault path)

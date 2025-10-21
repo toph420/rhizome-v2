@@ -4,8 +4,9 @@
 
 **Current Status:**
 - ✅ **IMPLEMENTED**: 10-stage pipeline, 3-engine detection, Storage-First portability, Job v2.0, 7 processors
+- ✅ **IMPLEMENTED**: Annotations (5-component ECS), Sparks (4-component ECS v2.0)
 - 🚧 **90% COMPLETE**: Document reader (missing connection visualization)
-- 🚧 **PARTIAL**: Sparks/Cards tabs (UI only, no backend)
+- 🚧 **PARTIAL**: Cards tab (UI placeholder only, backend not implemented)
 - 📋 **PLANNED**: Study system (FSRS), Threads
 
 ## Core Philosophy

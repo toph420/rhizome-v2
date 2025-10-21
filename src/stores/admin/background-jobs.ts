@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
  */
 export interface JobStatus {
   id: string
-  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'detect_connections' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import'
+  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'detect_connections' | 'reprocess_document' | 'continue_processing' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import' | 'scan_vault' | 'import_from_vault'
   status: 'pending' | 'processing' | 'paused' | 'completed' | 'failed' | 'cancelled'
   progress: number
   details: string
@@ -297,7 +297,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
           try {
             const { data: allActiveJobs, error: discoveryError } = await supabase
               .from('background_jobs')
-              .select('id, job_type, input_data, document_id, created_at')
+              .select('id, job_type, input_data, entity_id, entity_type, created_at')
               .in('status', ['pending', 'processing', 'paused'])
               .order('created_at', { ascending: false })
               .limit(50) // Last 50 active jobs
@@ -310,11 +310,13 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
 
                   // Get document title for better display
                   let title = 'Unknown'
-                  if (dbJob.document_id) {
+                  const documentId = dbJob.entity_type === 'document' ? dbJob.entity_id : (dbJob.input_data as any)?.document_id
+
+                  if (documentId) {
                     const { data: doc } = await supabase
                       .from('documents')
                       .select('title')
-                      .eq('id', dbJob.document_id)
+                      .eq('id', documentId)
                       .single()
 
                     if (doc) {
@@ -325,7 +327,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                   // Register the newly discovered job
                   registerJob(dbJob.id, dbJob.job_type as any, {
                     title,
-                    documentId: dbJob.document_id,
+                    documentId,
                   })
                 }
               }

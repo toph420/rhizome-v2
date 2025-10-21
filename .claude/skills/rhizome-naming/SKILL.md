@@ -1,11 +1,11 @@
 ---
 name: Rhizome Naming Conventions
-description: Three-tier naming system - PostgreSQL columns use snake_case, JSONB contents use camelCase (to match frontend), TypeScript uses camelCase for variables and PascalCase for types, files use kebab-case. ALL JSONB output_data must be validated with Zod schemas. Use when creating migrations, JSONB schemas, types, or files. Trigger keywords: snake_case, camelCase, kebab-case, PascalCase, JSONB, output_data, naming convention, CREATE TABLE, Zod validation, worker/types/job-schemas.
+description: Four-tier naming system - PostgreSQL columns use snake_case, JSONB contents use camelCase (to match frontend), TypeScript uses camelCase for variables and PascalCase for types, files use kebab-case. String literal values (job_type, status) use snake_case for code identifiers. ALL JSONB output_data must be validated with Zod schemas. Use when creating migrations, JSONB schemas, types, job types, or files. Trigger keywords: snake_case, camelCase, kebab-case, PascalCase, JSONB, output_data, job_type, naming convention, CREATE TABLE, Zod validation, worker/types/job-schemas.
 ---
 
 # Rhizome Naming Conventions
 
-Three-tier naming system for fullstack consistency.
+Four-tier naming system for fullstack consistency.
 
 ## Instructions
 
@@ -45,6 +45,34 @@ interface BackgroundJob { }
 // annotation-store.ts
 \`\`\`
 
+### Tier 4: String Literal Values (Code Identifiers)
+
+**Rule**: Use `snake_case` for enum-like string values that act as code identifiers
+
+\`\`\`typescript
+// ✅ Correct: job_type values use snake_case
+job_type: 'detect_connections'
+job_type: 'process_document'
+job_type: 'obsidian_export'
+
+// ❌ Wrong: kebab-case causes UI mismatch
+job_type: 'detect-connections'
+job_type: 'obsidian-export'
+\`\`\`
+
+**Why**: TypeScript interfaces and UI switch statements expect snake_case, so database values must match:
+
+\`\`\`typescript
+// TypeScript interface
+type JobType = 'detect_connections' | 'process_document'
+
+// UI component (must match exactly)
+switch (job.type) {
+  case 'detect_connections':  // Must match DB value!
+    return <DetectIcon />
+}
+\`\`\`
+
 ### Zod Validation
 
 \`\`\`typescript
@@ -77,6 +105,12 @@ CREATE TABLE documents (
   documentId UUID,    // Should be document_id
   createdAt TIMESTAMP // Should be created_at
 );
+
+// Wrong: kebab-case for job_type values
+await supabase.from('background_jobs').insert({
+  job_type: 'detect-connections',  // Should be 'detect_connections'
+  status: 'pending'
+})
 
 // Wrong: PascalCase for files
 // AnnotationStore.ts  (Should be annotation-store.ts)

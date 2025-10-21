@@ -94,7 +94,7 @@ async function triggerDetection(documentId?: string) {
     const { data: existingJobs } = await supabase
       .from('background_jobs')
       .select('id, status')
-      .eq('job_type', 'detect-connections')
+      .eq('job_type', 'detect_connections')
       .contains('input_data', { document_id: doc.id })
 
     if (existingJobs && existingJobs.length > 0) {
@@ -109,7 +109,7 @@ async function triggerDetection(documentId?: string) {
       .from('background_jobs')
       .insert({
         user_id: doc.user_id,  // Required field in background_jobs table
-        job_type: 'detect-connections',
+        job_type: 'detect_connections',
         status: 'pending',
         input_data: {
           document_id: doc.id,

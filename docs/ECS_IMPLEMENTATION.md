@@ -5,7 +5,7 @@
 **Implementation Status**:
 - ✅ **Core ECS System**: Fully implemented with factory pattern
 - ✅ **Annotations**: Complete **5-component pattern** (Position + Visual + Content + Temporal + ChunkRef) with AnnotationOperations wrapper class
-- ✅ **Sparks**: Complete 4-component pattern (Spark + Content + Temporal + ChunkRef) - **NEEDS WRAPPER CLASS** for consistency
+- ✅ **Sparks**: Complete **4-component pattern** (Spark + Content + Temporal + ChunkRef) with SparkOperations wrapper class - **v2.0 Production Ready**
 - 📋 **Flashcards/Study**: UI placeholder only, backend not implemented
 
 **BREAKING CHANGE** (2025-10-19): Annotation system migrated from 3-component lowercase (annotation, position, source) to 5-component PascalCase (Position, Visual, Content, Temporal, ChunkRef). See `docs/ANNOTATIONS_SYSTEM.md` for details.
@@ -44,8 +44,8 @@ The Entity Component System (ECS) is the core data architecture for Rhizome V2. 
 src/lib/ecs/
 ├── ecs.ts                 # Core ECS class
 ├── components.ts          # Shared component types
-├── annotations.ts         # AnnotationOperations wrapper ✅ CORRECT
-├── sparks.ts             # SparkOperations wrapper ⚠️ TODO
+├── annotations.ts         # AnnotationOperations wrapper ✅ IMPLEMENTED
+├── sparks.ts             # SparkOperations wrapper ✅ IMPLEMENTED
 └── flashcards.ts         # FlashcardOperations wrapper (future)
 ```
 
@@ -121,11 +121,14 @@ export async function create{EntityName}(input: Create{EntityName}Input) {
 - Clean, type-safe API with full recovery system
 - See `docs/ANNOTATIONS_SYSTEM.md` for complete documentation
 
-**❌ Sparks (INCORRECT - NEEDS FIX):**
-- Missing `src/lib/ecs/sparks.ts`
-- Server actions use raw ECS calls
-- Uses 4-component pattern (Spark, Content, Temporal, ChunkRef)
-- **TODO**: Create SparkOperations wrapper class matching AnnotationOperations pattern
+**✅ Sparks (CORRECT PATTERN - 4-component):**
+- Has `src/lib/ecs/sparks.ts` with `SparkOperations` class
+- Uses 4-component structure: Spark, Content, Temporal, ChunkRef
+- Server actions use the wrapper (`src/app/actions/sparks.ts`)
+- Clean, type-safe API with 2-mode recovery (selection-based + semantic)
+- Storage-first with automatic export
+- Version 2.0 (Production Ready)
+- See `docs/SPARK_SYSTEM.md` for complete documentation
 
 ### For Future Entities
 
@@ -356,9 +359,35 @@ const annotationId = await ops.create({
 // - Temporal: { createdAt, updatedAt }
 // - ChunkRef: { documentId, document_id, chunkId, chunk_id, chunkIds, chunkPosition }
 
-// 2. SPARK (✅ IMPLEMENTED - 4-component pattern, NEEDS WRAPPER CLASS)
-// QuickSparkModal (⌘K) creates sparks directly
-// TODO: Create SparkOperations wrapper class for consistency
+// 2. SPARK (✅ IMPLEMENTED - 4-component pattern with SparkOperations)
+// Use SparkOperations wrapper class, NOT raw ecs.createEntity()
+import { SparkOperations } from '@/lib/ecs/sparks'
+
+const sparkOps = new SparkOperations(ecs, userId)
+const sparkId = await sparkOps.create({
+  content: "My quick thought",
+  selections: [{
+    text: "Important insight",
+    chunkId: chunkId,
+    startOffset: 100,
+    endOffset: 200,
+    textContext: { before: "...", after: "..." }
+  }],
+  tags: ["idea", "architecture"],
+  connections: [{
+    type: 'origin',
+    chunkId: chunkId,
+    metadata: { relationship: 'origin' },
+    strength: 1
+  }],
+  chunkId: chunkId,
+  chunkIds: [chunkId],
+  documentId: documentId,
+  originChunkContent: "First 500 chars for recovery..."
+})
+
+// OLD WAY (deprecated - use SparkOperations instead):
+/*
 const sparkId = await ecs.createEntity(userId, {
   Spark: {
     selections: [{
@@ -396,6 +425,7 @@ const sparkId = await ecs.createEntity(userId, {
     hasSelections: true
   }
 })
+*/
 
 // 3. FLASHCARD (NOT YET IMPLEMENTED - UI placeholder only)
 // FlashcardsTab exists in RightPanel but backend is TODO

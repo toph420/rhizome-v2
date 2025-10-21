@@ -115,7 +115,7 @@ describe('Background Jobs Database Operations', () => {
       
       const job = factories.job.create({
         user_id: userId,
-        job_type: 'detect-connections',
+        job_type: 'detect_connections',
         entity_type: 'deck',
         entity_id: deckId,
         status: 'pending',
@@ -140,7 +140,7 @@ describe('Background Jobs Database Operations', () => {
       expect(result.error).toBeNull()
       expect(mockSupabase.from('background_jobs').insert).toHaveBeenCalledWith(
         expect.objectContaining({
-          job_type: 'detect-connections',
+          job_type: 'detect_connections',
           entity_type: 'deck',
           input_data: expect.objectContaining({
             deck_id: deckId,
@@ -326,7 +326,7 @@ describe('Background Jobs Database Operations', () => {
       // Arrange
       const user1Jobs = [
         factories.job.create({ user_id: testUsers[0], job_type: 'process-document' }),
-        factories.job.create({ user_id: testUsers[0], job_type: 'detect-connections' })
+        factories.job.create({ user_id: testUsers[0], job_type: 'detect_connections' })
       ]
       
       const user2Jobs = [
@@ -391,10 +391,10 @@ describe('Background Jobs Database Operations', () => {
           job_type: 'process-document',
           created_at: new Date(Date.now() - 3000).toISOString() // 3 seconds ago
         }),
-        factories.job.create({ 
-          user_id: testUsers[0], 
+        factories.job.create({
+          user_id: testUsers[0],
           status: 'pending',
-          job_type: 'detect-connections',
+          job_type: 'detect_connections',
           created_at: new Date(Date.now() - 1000).toISOString() // 1 second ago
         })
       ]
@@ -421,18 +421,18 @@ describe('Background Jobs Database Operations', () => {
       expect(result.error).toBeNull()
       expect(result.data).toHaveLength(2)
       expect(result.data[0].job_type).toBe('process-document') // Older job first
-      expect(result.data[1].job_type).toBe('detect-connections')
+      expect(result.data[1].job_type).toBe('detect_connections')
       
       pendingJobs.forEach(job => testJobs.push(job.id))
     })
 
     it('should handle concurrent job processing', async () => {
       // Arrange
-      const concurrentJobs = Array.from({ length: 5 }, (_, i) => 
+      const concurrentJobs = Array.from({ length: 5 }, (_, i) =>
         factories.job.create({
           user_id: testUsers[0],
           status: 'pending',
-          job_type: i % 2 === 0 ? 'process-document' : 'detect-connections'
+          job_type: i % 2 === 0 ? 'process-document' : 'detect_connections'
         })
       )
 

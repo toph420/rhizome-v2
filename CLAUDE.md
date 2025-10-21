@@ -64,11 +64,24 @@ Rhizome V2 is an **AI-first document processing system** with **3-engine collisi
 - QuickSparkModal (⌘K quick capture)
 - CorrectionModePanel (chunk quality workflow)
 
-#### Annotations System
+#### Annotations System (5-Component ECS)
+- 5-component pattern: Position, Visual, Content, Temporal, ChunkRef
 - Text selection → ECS persistence
 - AnnotationsList with fuzzy matching recovery
 - Server actions in `src/app/actions/annotations.ts`
 - Annotation review with validation workflow
+- PascalCase component naming
+
+#### Spark System (4-Component ECS)
+- 4-component pattern: Spark, Content, Temporal, ChunkRef
+- Quick capture (Cmd+K) with QuickSparkCapture component
+- Multiple text selections per spark
+- Automatic connections to chunks
+- 2-mode recovery (selection-based + semantic)
+- Server actions in `src/app/actions/sparks.ts`
+- SparkOperations class in `src/lib/ecs/sparks.ts`
+- Storage-first with automatic export
+- Version 2.0 (Production Ready)
 
 #### Connection Display
 - RightPanel with 6 tabs:
@@ -114,14 +127,7 @@ Rhizome V2 is an **AI-first document processing system** with **3-engine collisi
 
 ### 📋 NOT STARTED (Priority Order)
 
-#### 1. Spark System (UP NEXT!)
-- Convert QuickSparkModal (⌘K) to use ECS "spark" component
-- Sparks are lightweight annotations without text selection
-- Simplified structure: idea, tags, color, source
-- Currently saves as annotations with `tags: ['spark']` workaround
-- **Note**: SparksTab UI exists in RightPanel, backend TODO
-
-#### 2. Study System
+#### 1. Study System
 - Flashcard creation from selections (ECS backend)
 - FSRS spaced repetition algorithm
 - Study mode interface
@@ -198,15 +204,21 @@ Dropped from 7 engines to 3 focused engines:
 
 ### 5. ECS (Entity-Component-System) ✅
 
-Everything is an entity with flexible components.
+Everything is an entity with flexible components using **PascalCase** naming.
 
 **Location**: `src/lib/ecs/` (factory pattern via `createECS()`)
 
-**Implemented Components**: annotation, position, source
-**Planned Components**: spark (UP NEXT), flashcard, study, embedding, themes, connections
+**Implemented Systems**:
+- **Annotations** (5-component pattern): Position, Visual, Content, Temporal, ChunkRef
+- **Sparks** (4-component pattern): Spark, Content, Temporal, ChunkRef
 
-**Example**:
+**Shared Components**: Content, Temporal, ChunkRef (reused across entity types)
+
+**Planned Components**: Flashcard, Study, Embedding, Themes, Connections
+
+**Annotation Example** (5-component pattern):
 ```typescript
+import { AnnotationOperations } from '@/lib/ecs/annotations'
 import { createECS } from '@/lib/ecs'
 import { getCurrentUser } from '@/lib/auth'
 
@@ -214,34 +226,56 @@ const user = await getCurrentUser()
 if (!user) throw new Error('Not authenticated')
 
 const ecs = createECS() // Create instance per request
+const ops = new AnnotationOperations(ecs, user.id)
 
-// Create annotation (3-component pattern)
-const entityId = await ecs.createEntity(user.id, {
-  annotation: {
-    text: "Important insight",
-    note: "My thoughts...",
-    color: "yellow",
-    tags: ["architecture"],
-    range: { startOffset: 100, endOffset: 250, chunkIds: [chunkId] },
-    textContext: { before: "...", content: "text", after: "..." }
-  },
-  position: {
-    chunkIds: [chunkId],
-    startOffset: 100,
-    endOffset: 250,
-    confidence: 1.0,
-    method: 'exact',
-    textContext: { before: "...", after: "..." }
-  },
-  source: {
-    chunk_id: chunkId,
-    chunk_ids: [chunkId],
-    document_id: documentId
-  }
+// Create annotation with 5 components (Position, Visual, Content, Temporal, ChunkRef)
+const entityId = await ops.create({
+  documentId: documentId,
+  text: "Important insight",
+  note: "My thoughts...",
+  color: "yellow",
+  tags: ["architecture"],
+  chunkIds: [chunkId],
+  startOffset: 100,
+  endOffset: 150,
+  textContext: { before: "...", after: "..." },
+  chunkPosition: 0
 })
 ```
 
-**See**: `docs/ECS_IMPLEMENTATION.md` for complete guide
+**Spark Example** (4-component pattern):
+```typescript
+import { SparkOperations } from '@/lib/ecs/sparks'
+
+const sparkOps = new SparkOperations(ecs, user.id)
+
+// Create spark with 4 components (Spark, Content, Temporal, ChunkRef)
+const sparkId = await sparkOps.create({
+  content: "Quick thought about this passage",
+  selections: [{
+    text: "highlighted text",
+    chunkId: chunkId,
+    startOffset: 100,
+    endOffset: 150,
+    textContext: { before: "...", after: "..." }
+  }],
+  tags: ["insight"],
+  connections: [],
+  chunkId: chunkId,
+  chunkIds: [chunkId],
+  documentId: documentId,
+  originChunkContent: "First 500 chars for recovery..."
+})
+```
+
+**Key Differences**:
+- **Annotations**: Have Position component (text location), used for precise highlights
+- **Sparks**: Have Spark component (selections array), lightweight quick capture
+- **Shared**: Both use Content (note/tags), Temporal (timestamps), ChunkRef (location)
+
+**Component Naming**: Always use **PascalCase** (Position, Spark, Content) not lowercase (position, spark, content)
+
+**See**: `docs/ANNOTATIONS_SYSTEM.md`, `docs/SPARK_SYSTEM.md`, and `docs/ECS_IMPLEMENTATION.md` for complete guides
 
 ### 6. Hybrid Storage Strategy ✅
 
@@ -525,6 +559,8 @@ Production metrics (p95 latency, cache hit rates) don't matter for one user.
 - **React Guidelines**: `docs/lib/REACT_GUIDELINES.md` - Server/Client components
 - **UI Patterns**: `docs/UI_PATTERNS.md` - No modals, persistent UI
 - **ECS Implementation**: `docs/ECS_IMPLEMENTATION.md` - Entity-Component-System
+- **Annotations System**: `docs/ANNOTATIONS_SYSTEM.md` - 5-component ECS pattern, recovery, UI integration
+- **Spark System**: `docs/SPARK_SYSTEM.md` - 4-component ECS pattern, quick capture, multi-selection
 - **Storage Patterns**: `docs/STORAGE_PATTERNS.md` - Hybrid storage strategy
 - **Storage-First Portability**: `docs/STORAGE_FIRST_PORTABILITY_GUIDE.md` - Complete guide
 
