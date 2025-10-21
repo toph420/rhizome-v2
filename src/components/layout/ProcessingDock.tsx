@@ -141,6 +141,9 @@ export function ProcessingDock() {
       case 'detect_connections':
         return title ? `Detecting: ${title}` : 'Detecting connections'
 
+      case 'continue_processing':
+        return title ? `Continue: ${title}` : 'Continuing processing'
+
       case 'obsidian_export':
         return 'Obsidian Export'
 
@@ -170,6 +173,8 @@ export function ProcessingDock() {
         return <Network className="size-4 text-orange-600" />
       case 'detect_connections':
         return <GitBranch className="size-4 text-pink-600" />
+      case 'continue_processing':
+        return <Play className="size-4 text-teal-600" />
       case 'obsidian_export':
       case 'obsidian_sync':
         return <RefreshCw className="size-4 text-indigo-600" />

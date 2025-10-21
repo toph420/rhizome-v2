@@ -27,12 +27,13 @@ interface SparkStorageJson {
 
 /**
  * List all spark files in Storage for a user
+ * Returns filenames (which are the sparkIds)
  */
 async function listUserSparks(
   supabase: SupabaseClient,
   userId: string
 ): Promise<string[]> {
-  const { data: folders, error } = await supabase.storage
+  const { data: files, error } = await supabase.storage
     .from('documents')
     .list(`${userId}/sparks`, {
       limit: 1000,
@@ -43,19 +44,25 @@ async function listUserSparks(
     throw new Error(`Failed to list sparks: ${error.message}`)
   }
 
-  // Return folder names (each folder is a sparkId)
-  return (folders || []).map(f => f.name)
+  // Return filenames (each file is a spark JSON)
+  // Filter out .rhizome directory if it exists
+  return (files || [])
+    .filter(f => f.name !== '.rhizome' && f.name.endsWith('.json'))
+    .map(f => f.name)
 }
 
 /**
  * Download spark from Storage
+ * Uses flat structure: {userId}/sparks/{filename}.json
+ * Filename is the sparkId (e.g., "2025-10-21-spark-title.json")
  */
 async function downloadSparkFromStorage(
   supabase: SupabaseClient,
   userId: string,
   sparkId: string
 ): Promise<SparkStorageJson> {
-  const jsonPath = `${userId}/sparks/${sparkId}/content.json`
+  // Flat structure: files are directly in sparks/ folder
+  const jsonPath = `${userId}/sparks/${sparkId}`
 
   try {
     const data = await readFromStorage<SparkStorageJson>(supabase, jsonPath)
@@ -124,7 +131,7 @@ export async function rebuildSparksCache(
           document_id: sparkData.source.document_id,
           tags: sparkData.data.tags,
           embedding,
-          storage_path: `${userId}/sparks/${sparkId}/content.json`,
+          storage_path: `${userId}/sparks/${sparkId}`,
           cached_at: new Date().toISOString()
         })
 
@@ -171,7 +178,7 @@ export async function updateSparkCache(
     document_id: sparkData.source.document_id,
     tags: sparkData.data.tags,
     embedding,
-    storage_path: `${userId}/sparks/${sparkId}/content.json`,
+    storage_path: `${userId}/sparks/${sparkId}`,
     cached_at: new Date().toISOString()
   })
 

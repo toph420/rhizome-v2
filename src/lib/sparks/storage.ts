@@ -4,7 +4,7 @@ import type { SparkStorageJson } from './types'
 
 /**
  * Upload spark to Storage (source of truth)
- * Path: {userId}/sparks/{sparkId}/content.json
+ * Path: {userId}/sparks/{sparkId}.json (flat structure)
  *
  * Pattern: Like documents, sparks are exported to Storage for portability.
  * Database is queryable cache, Storage is source of truth.
@@ -18,7 +18,8 @@ export async function uploadSparkToStorage(
 ): Promise<string> {
   // Use admin client to bypass Storage RLS
   const supabase = createAdminClient()
-  const jsonPath = `${userId}/sparks/${sparkId}/content.json`
+  // Flat structure: files directly in sparks/ folder
+  const jsonPath = `${userId}/sparks/${sparkId}`
 
   // Use Blob wrapper to preserve JSON formatting (from storage-helpers pattern)
   const jsonBlob = new Blob([JSON.stringify(sparkData, null, 2)], {
@@ -50,7 +51,8 @@ export async function downloadSparkFromStorage(
   sparkId: string
 ): Promise<SparkStorageJson> {
   const supabase = createAdminClient()
-  const jsonPath = `${userId}/sparks/${sparkId}/content.json`
+  // Flat structure: files directly in sparks/ folder
+  const jsonPath = `${userId}/sparks/${sparkId}`
 
   // Create signed URL
   const { data: signedUrlData, error: urlError } = await supabase.storage
@@ -76,11 +78,12 @@ export async function downloadSparkFromStorage(
 /**
  * List all spark files in Storage for a user
  * Uses admin client to bypass Storage RLS.
+ * Returns filenames (which are the sparkIds)
  */
 export async function listUserSparks(userId: string): Promise<string[]> {
   const supabase = createAdminClient()
 
-  const { data: folders, error } = await supabase.storage
+  const { data: files, error } = await supabase.storage
     .from('documents')
     .list(`${userId}/sparks`, {
       limit: 1000,
@@ -91,8 +94,11 @@ export async function listUserSparks(userId: string): Promise<string[]> {
     throw new Error(`Failed to list sparks: ${error.message}`)
   }
 
-  // Return folder names (each folder is a sparkId)
-  return (folders || []).map(f => f.name)
+  // Return filenames (each file is a spark JSON)
+  // Filter out .rhizome directory if it exists
+  return (files || [])
+    .filter(f => f.name !== '.rhizome' && f.name.endsWith('.json'))
+    .map(f => f.name)
 }
 
 /**

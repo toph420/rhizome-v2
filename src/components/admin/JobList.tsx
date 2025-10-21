@@ -22,6 +22,8 @@ import {
   RotateCw,
   Trash2,
   PauseCircle,
+  Search,
+  FolderInput,
 } from 'lucide-react'
 import { type JobStatus } from '@/stores/admin/background-jobs'
 import { pauseJob, resumeJob, retryJob, deleteJob } from '@/app/actions/admin'
@@ -41,9 +43,13 @@ const jobTypeLabels: Record<JobStatus['type'], string> = {
   export_documents: 'Export',
   reprocess_connections: 'Connections',
   detect_connections: 'Detecting',
+  continue_processing: 'Continue',
+  reprocess_document: 'Reprocess',
   obsidian_export: 'Obsidian Export',
   obsidian_sync: 'Obsidian Sync',
   readwise_import: 'Readwise Import',
+  scan_vault: 'Scan Vault',
+  import_from_vault: 'Import Vault',
 }
 
 const jobTypeIcons: Record<JobStatus['type'], React.ReactNode> = {
@@ -52,9 +58,13 @@ const jobTypeIcons: Record<JobStatus['type'], React.ReactNode> = {
   export_documents: <FileText className="size-4 text-purple-600" />,
   reprocess_connections: <Network className="size-4 text-orange-600" />,
   detect_connections: <GitBranch className="size-4 text-pink-600" />,
+  continue_processing: <Play className="size-4 text-teal-600" />,
+  reprocess_document: <RefreshCw className="size-4 text-amber-600" />,
   obsidian_export: <RefreshCw className="size-4 text-indigo-600" />,
   obsidian_sync: <RefreshCw className="size-4 text-indigo-600" />,
   readwise_import: <BookOpen className="size-4 text-green-600" />,
+  scan_vault: <Search className="size-4 text-slate-600" />,
+  import_from_vault: <FolderInput className="size-4 text-cyan-600" />,
 }
 
 const getStatusIcon = (status: JobStatus['status']) => {
@@ -277,6 +287,12 @@ function getJobDisplayName(job: JobStatus): string {
 
     case 'detect_connections':
       return title ? `Detecting: ${title}` : 'Detecting connections'
+
+    case 'continue_processing':
+      return title ? `Continue: ${title}` : 'Continuing processing'
+
+    case 'reprocess_document':
+      return title ? `Reprocess: ${title}` : 'Reprocessing document'
 
     case 'obsidian_export':
       return 'Obsidian Export'
