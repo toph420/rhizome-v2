@@ -4,216 +4,334 @@ description: Resume work from handoff document with context analysis
 
 # Resume Handoff
 
-Resume work from the provided handoff document. This loads context, validates current state, and continues work.
+Resume work from the provided handoff document. **Action-first approach**: Read context, extract next steps, START DOING THEM.
+
+## Core Philosophy
+
+**DO, don't just analyze.** The handoff already contains the analysis - your job is to **pick up where it left off** and make progress.
 
 ## Usage
 
-1. Read the handoff document FULLY
-2. Read any plan documents it references
-3. Spawn agents to analyze current state
-4. Propose next actions
+```bash
+/rhizome:resume-handoff thoughts/handoffs/2025-10-21_feature-name.md
+```
 
 If no path provided, list available handoffs and ask which to resume.
 
-## Process
+---
 
-### Step 1: Read Handoff and Referenced Documents
+## Process (Action-First)
 
-**Read handoff completely:**
-- Use Read tool WITHOUT limit/offset
-- Extract all sections (tasks, changes, learnings, artifacts, next steps)
-- Note git commit and branch
-- Identify referenced files and plans
+### Step 1: Load Context Quickly
 
-**Read all referenced plans and artifacts:**
-- Read plan documents from `thoughts/plans/`
-- Read any research documents mentioned
-- Do NOT use sub-agents for these critical files
-- Get full context before spawning research tasks
+**Read the handoff completely** (no limit/offset):
+- Extract **Next Steps** section (this is your TODO)
+- Extract **Learnings** section (reference during implementation)
+- Extract **Recent Changes** section (file:line references)
+- Note git commit/branch from frontmatter
+- Identify referenced plan documents
 
-### Step 2: Spawn Research Tasks to Verify Current State
+**Read referenced plans** (if any):
+- Check handoff for `thoughts/plans/` references
+- Read those plans directly (no agents)
+- Get full context before acting
 
-Based on handoff content, spawn parallel agent tasks:
-
-**Task 1 - Verify Recent Changes (codebase-analyzer):**
+**Verify git state**:
+```bash
+git status && git branch
 ```
-Analyze the files mentioned in "Recent Changes" section:
-- [file:line references from handoff]
+- Compare current branch to handoff branch
+- Note any uncommitted changes
 
-Verify:
-1. Do these changes still exist?
-2. Have they been modified since the handoff?
-3. Are there any conflicts or regressions?
+### Step 2: Create Action Plan from Next Steps
 
-Return: Status of each change (present/missing/modified) with details
-```
+**Extract actionable items** from "Next Steps" section:
+- Immediate priority tasks
+- Medium priority tasks
+- Low priority / future items
 
-**Task 2 - Locate Related Components (codebase-locator):**
-```
-Based on the handoff's task description, find all relevant files:
-- Module: [Main App / Worker / Both from handoff]
-- Feature area: [from handoff topic]
-
-Search for:
-1. Components mentioned in learnings
-2. Files related to the feature being worked on
-3. Test files for affected code
-
-Return: List of relevant files with brief descriptions
+**Use TodoWrite** to create task list:
+```typescript
+TodoWrite({
+  todos: [
+    { content: "First immediate task from handoff", status: "pending", activeForm: "Working on first task" },
+    { content: "Second immediate task", status: "pending", activeForm: "Working on second task" },
+    // ... medium and low priority
+  ]
+})
 ```
 
-**Task 3 - Find Similar Patterns (codebase-pattern-finder):**
+**Present brief summary**:
 ```
-Based on the patterns discovered in "Learnings" section:
-- [Pattern 1 from handoff]
-- [Pattern 2 from handoff]
+Resuming from [date] handoff: [topic]
 
-Find:
-1. Where these patterns are used in the codebase
-2. Any new code that might have used these patterns
-3. Changes to the pattern implementations
+Git: [current branch] (handoff was on [handoff branch])
 
-Return: Pattern usage locations and any changes
+Created [N] tasks from Next Steps. Starting with:
+1. [First task]
+
+Referenced learnings loaded. Ready to proceed.
 ```
 
-**Wait for ALL agent tasks to complete** before proceeding.
+### Step 3: START IMPLEMENTATION
 
-### Step 3: Read Critical Files Identified
+**Mark first task as in_progress and BEGIN**:
+- Reference "Learnings" section when encountering similar patterns
+- Reference "Recent Changes" to see what files were modified
+- Apply documented patterns from handoff
+- Update TodoWrite as you complete tasks
 
-After agents return:
-- Read files from "Learnings" section completely
-- Read files from "Recent changes" to verify modifications
-- Read any new related files discovered by agents
+**Only verify current state if needed**:
+- If you encounter unexpected errors → check if files changed
+- If patterns don't match → verify with quick Grep
+- If stuck → spawn codebase-analyzer for specific issue
+- **Don't do upfront verification "just in case"**
 
-### Step 4: Synthesize and Present Analysis
+**Keep momentum**:
+- Don't stop to ask permission for obvious next steps
+- Don't present analysis unless something is unclear
+- Don't spawn agents unless you need specific info
+- **Focus on making progress, not documenting progress**
 
-Present comprehensive analysis:
+---
 
-```
-Handoff Analysis from [date]
+## When to Pause and Ask
 
-Git Context:
-- Handoff commit: [commit from handoff]
-- Handoff branch: [branch from handoff]
-- Current branch: [current branch]
+**DO pause and ask if**:
+- Next step is ambiguous (multiple valid approaches)
+- You encounter breaking changes (handoff assumptions invalid)
+- Learnings contradict current code state
+- Major architectural decision needed
 
-Original Tasks:
-- [Task 1]: [Status from handoff] → [Current verified state]
-- [Task 2]: [Status from handoff] → [Current verified state]
+**DON'T pause and ask if**:
+- Next step is clear and documented
+- You're following established patterns
+- You're completing partially-finished work
+- You're fixing bugs mentioned in handoff
 
-Rhizome Architecture from Handoff:
-- Module: [Main/Worker/Both]
-- Storage: [Database/Storage/Both]
-- Migration: [Latest migration number]
-- Pipeline Stages: [Which stages affected]
-- Engines: [Which engines modified]
+---
 
-Agent Findings:
+## Using Handoff Sections
 
-Recent Changes Verification:
-- [file:line] - Present / Missing / Modified
+### Next Steps (Your TODO)
+This is your task list. Extract and execute.
 
-Related Components Found:
-- [component files discovered]
+```markdown
+## Next Steps
 
-Pattern Usage:
-- [pattern locations and status]
+### Immediate
+1. Fix webhook validation bug in auth.ts:45
+2. Add tests for edge case
+3. Update documentation
 
-Key Learnings Still Valid:
-- [Learning 1 with file:line] - Verified / Changed
-- [Pattern] - Still applicable / Modified
-
-Recommended Next Actions:
-1. [Most logical next step based on handoff + current state]
-2. [Second priority]
-3. [Additional tasks discovered]
-
-Potential Issues:
-- [Any conflicts, regressions, or blockers]
-
-Proceed with [action 1]?
+### Medium Priority
+4. Refactor error handling
+...
 ```
 
-Get confirmation before proceeding.
+**Action**: Create TodoWrite from this, start with #1.
 
-### Step 5: Create Action Plan
+### Learnings (Reference Guide)
+These are insights discovered during implementation. Reference when you encounter similar situations.
 
-Use TodoWrite to create task list:
-- Convert action items from handoff
-- Add new tasks discovered during analysis
-- Include any fixes needed for conflicts/regressions
-- Prioritize based on dependencies
+```markdown
+## Learnings
 
-Present:
-```
-Task list created based on handoff analysis:
-
-[Show todo list]
-
-Ready to begin with: [first task]?
+### 1. Storage Upload RLS Issue
+**Problem**: Storage uploads failed with RLS error
+**Solution**: Use admin client for server-side operations
+**File**: src/app/actions/sparks.ts:117-129
 ```
 
-### Step 6: Begin Implementation
+**Action**: When working with Storage uploads, reference this learning.
 
-- Start with first approved task
-- Reference learnings from handoff
-- Apply documented patterns
-- Update progress as tasks complete
+### Recent Changes (What Was Done)
+Files modified with line numbers. Shows what already exists.
 
-## Guidelines
+```markdown
+## Recent Changes
 
-**Use Agents Effectively:**
-- Spawn multiple agents in parallel for efficiency
-- Use codebase-analyzer for understanding code state
-- Use codebase-locator for finding related files
-- Use codebase-pattern-finder for pattern verification
-- Wait for all agents before synthesizing findings
+1. **src/app/actions/sparks.ts:116-135**
+   - Added admin client for Storage uploads
+   - Added upsert: true to prevent duplicates
+```
 
-**Be Thorough:**
-- Read entire handoff first
-- Verify ALL changes via agents
-- Check for regressions
-- Read all referenced files directly (no agents for critical docs)
+**Action**: Read these files if you need to understand what was implemented.
 
-**Leverage Handoff Wisdom:**
-- Pay attention to "Learnings" section
-- Apply documented patterns
-- Avoid repeating mistakes
-- Build on discovered solutions
+### Artifacts (Created/Modified Files)
+List of files that were created or modified.
 
-**Validate Before Acting:**
-- Never assume handoff = current state
-- Use agents to verify current state
-- Check for breaking changes
-- Confirm patterns still valid
+**Action**: These are the files you'll likely continue working with.
+
+---
 
 ## Common Scenarios
 
-**Clean Continuation:**
-- All changes present (verified by codebase-analyzer)
-- No conflicts found
-- Clear next steps
-→ Proceed with actions
+### Scenario 1: Clean Continuation
+**Handoff**: "Next step: Add validation tests"
+**Your action**:
+```
+TodoWrite: Add validation tests
+Start writing tests immediately
+```
 
-**Diverged Codebase:**
-- codebase-analyzer finds changes missing/modified
-- codebase-locator finds new related code
-- Need to reconcile differences
-→ Adapt plan based on findings
+### Scenario 2: Incomplete Work
+**Handoff**: "Task in_progress: Webhook validation partially implemented"
+**Your action**:
+```
+Read the incomplete implementation
+TodoWrite: Complete webhook validation
+Finish the implementation
+```
 
-**Incomplete Work:**
-- Tasks marked "in_progress"
-- Partial implementations found
-- Complete unfinished work first
-→ Focus on completion
+### Scenario 3: Ambiguous Next Steps
+**Handoff**: "Consider refactoring auth system OR adding OAuth"
+**Your action**:
+```
+Present options to user:
+"The handoff suggests two approaches:
+1. Refactor existing auth system
+2. Add OAuth integration
 
-**Pattern Evolution:**
-- codebase-pattern-finder shows pattern changed
-- New pattern implementations found
-- Need to update approach
-→ Adapt to new patterns
+Which would you prefer?"
+```
 
-## Example Flow
+### Scenario 4: Breaking Changes Detected
+**Your action during implementation**:
+```
+"I'm trying to implement [task] but the auth pattern from the handoff has changed.
+
+Handoff expected: AnnotationOperations pattern
+Current code: Using SparkOperations pattern
+
+Should I:
+1. Adapt to new pattern
+2. Verify this is intentional
+3. Rollback to handoff state"
+```
+
+---
+
+## Anti-Patterns (Don't Do These)
+
+❌ **Reading the handoff back to the user**
+```
+"The handoff from 2025-10-21 was about fixing Admin Panel issues.
+It completed 6 tasks including Storage upload fixes and vault structure updates.
+The next steps are to test the import tab and upload documents.
+Should I proceed?"
+```
+
+✅ **Acting on the handoff**
+```
+"Resuming Admin Panel fixes. Created 3 tasks from Next Steps.
+
+Starting with: Test Admin Panel Import Tab
+
+[Immediately begins testing]"
+```
+
+---
+
+❌ **Spawning agents to verify everything**
+```
+[Spawns 3 agents to analyze files]
+[Waits for all to complete]
+[Presents 50-line analysis]
+"Everything looks good, shall I proceed?"
+```
+
+✅ **Verifying only when needed**
+```
+[Starts implementation]
+[Encounters error: pattern mismatch]
+[Spawns codebase-analyzer for specific issue]
+[Gets answer, continues]
+```
+
+---
+
+❌ **Asking permission for obvious next steps**
+```
+"The handoff says to add tests. Should I add tests?"
+```
+
+✅ **Just doing obvious next steps**
+```
+"Adding validation tests as documented in Next Steps..."
+[Writes tests]
+```
+
+---
+
+## Quick Reference
+
+**Read**:
+- Handoff completely
+- Referenced plans
+- Git status
+
+**Extract**:
+- Next Steps → TodoWrite
+- Learnings → Keep in mind
+- Recent Changes → Know what exists
+
+**Do**:
+- Start first task immediately
+- Reference learnings when relevant
+- Update todos as you progress
+
+**Ask only if**:
+- Ambiguous next steps
+- Breaking changes found
+- Major decisions needed
+
+---
+
+## Listing Available Handoffs
+
+If no path provided:
+
+```bash
+# List handoffs
+ls -lt thoughts/handoffs/*.md | head -10
+
+# Show with descriptions
+grep -h "^topic:" thoughts/handoffs/*.md | head -10
+```
+
+Present to user:
+```
+Available recent handoffs:
+
+1. 2025-10-21: Admin Panel Fixes & Spark Portability
+2. 2025-10-20: UUID Preservation Fix
+3. 2025-10-18: Spark System ECS Migration
+
+Which would you like to resume? (or provide path)
+```
+
+---
+
+## Example Interaction (Good)
 
 ```
-User: /rhizome:resume-handoff thoughts/handoffs/2025-10-17_cached-chunks.md
+User: /rhizome:resume-handoff thoughts/handoffs/2025-10-21_admin-panel-fixes.md
+
+User: /resume_handoff /rhizome:resume-handoff thoughts/handoffs/2025-10-17_cached-chunks.md
+Assistant: Let me read and analyze that handoff document...
+
+[Reads handoff completely]
+[Spawns research tasks]
+[Waits for completion]
+[Reads identified files]
+
+I've analyzed the handoff from [date]. Here's the current situation...
+
+[Presents analysis]
+
+Shall I proceed with implementing the webhook validation fix, or would you like to adjust the approach?
+
+User: Yes, proceed with the webhook validation
+Assistant: [Creates todo list and begins implementation]
+```
