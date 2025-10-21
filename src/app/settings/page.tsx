@@ -55,7 +55,14 @@ export default function SettingsPage() {
       }
 
       if (result.settings) {
-        setSettings(result.settings)
+        setSettings({
+          vaultName: result.settings.vaultName || '',
+          vaultPath: result.settings.vaultPath || '',
+          rhizomePath: result.settings.rhizomePath || 'Rhizome/',
+          syncAnnotations: result.settings.syncAnnotations ?? true,
+          exportSparks: result.settings.exportSparks ?? true,
+          exportConnections: result.settings.exportConnections ?? true,
+        })
       }
     } catch (error) {
       console.error('Error loading settings:', error)

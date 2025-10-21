@@ -4,11 +4,10 @@ description: Resume work from handoff document with context analysis
 
 # Resume Handoff
 
-Resume work from a handoff document. This loads context, validates current state, and continues work.
+Resume work from the provided handoff document. This loads context, validates current state, and continues work.
 
 ## Usage
 
-When invoked with a handoff path, immediately:
 1. Read the handoff document FULLY
 2. Read any plan documents it references
 3. Spawn agents to analyze current state

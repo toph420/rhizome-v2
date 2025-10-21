@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getCurrentUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createECS } from '@/lib/ecs'
 import { SparkOperations } from '@/lib/ecs/sparks'
 import {
@@ -10,12 +11,14 @@ import {
   buildSparkConnections,
   extractTags,
 } from '@/lib/sparks'
+import { generateSparkTitle, generateSparkFilename } from '@/lib/sparks/title-generator'
 import type { SparkContext, SparkStorageJson, SparkSelection } from '@/lib/sparks/types'
 
 interface CreateSparkInput {
+  title?: string  // Optional - AI-generated if not provided
   content: string
-  selections?: SparkSelection[]  // NEW - multiple selections
-  context: SparkContext
+  selections?: SparkSelection[]
+  context?: SparkContext  // Optional - can create sparks without document context
 }
 
 /**
@@ -36,81 +39,116 @@ export async function createSpark(input: CreateSparkInput) {
 
   const supabase = await createClient()
 
-  // 1. Extract metadata from content
+  // 1. Generate title if not provided
+  const title = input.title || await generateSparkTitle(input.content)
+
+  // 2. Get document title if documentId provided (for denormalization)
+  let documentTitle: string | undefined
+  if (input.context?.documentId) {
+    const { data: doc } = await supabase
+      .from('documents')
+      .select('title')
+      .eq('id', input.context.documentId)
+      .single()
+    documentTitle = doc?.title
+  }
+
+  // 3. Extract metadata from content
   const tags = extractTags(input.content)
-  const connections = await buildSparkConnections(
-    input.content,
-    input.context.originChunkId,
-    user.id
-  )
+  const connections = input.context?.originChunkId
+    ? await buildSparkConnections(input.content, input.context.originChunkId, user.id)
+    : []
 
-  // 2. Get origin chunk content for recovery
-  const { data: originChunk } = await supabase
-    .from('chunks')
-    .select('content')
-    .eq('id', input.context.originChunkId)
-    .single()
+  // 4. Get origin chunk content for recovery (if context provided)
+  let originChunkContent: string | undefined
+  if (input.context?.originChunkId) {
+    const { data: originChunk } = await supabase
+      .from('chunks')
+      .select('content')
+      .eq('id', input.context.originChunkId)
+      .single()
+    originChunkContent = originChunk?.content?.slice(0, 500)
+  }
 
-  // 3. Create ECS entity using SparkOperations (4-component pattern)
+  // 5. Create ECS entity using SparkOperations (3-4 component pattern)
   const ecs = createECS()
   const ops = new SparkOperations(ecs, user.id)
 
   const sparkId = await ops.create({
+    title,
     content: input.content,
     selections: input.selections || [],
     tags,
     connections,
-    chunkId: input.context.originChunkId,
-    chunkIds: input.context.visibleChunks,
-    documentId: input.context.documentId,
-    originChunkContent: originChunk?.content?.slice(0, 500),
+    // Optional fields (only if context provided)
+    chunkId: input.context?.originChunkId,
+    chunkIds: input.context?.visibleChunks,
+    documentId: input.context?.documentId,
+    documentTitle,  // Denormalized for orphan detection
+    originChunkContent,
   })
 
-  console.log(`[Sparks] ✓ Created ECS entity: ${sparkId}`)
+  console.log(`[Sparks] ✓ Created ECS entity: ${sparkId} with title: "${title}"`)
 
-  // 4. Build complete Storage JSON
+  // 6. Generate filename with title
+  const filename = generateSparkFilename(title)
+
+  // 7. Build complete Storage JSON (with title)
   const sparkData: SparkStorageJson = {
     entity_id: sparkId,
     user_id: user.id,
     component_type: 'spark',
     data: {
+      title,  // Include title
       content: input.content,
       createdAt: new Date().toISOString(),
       tags,
       connections,
       selections: input.selections || [],
     },
-    context: input.context,
-    source: {
+    context: input.context || null,
+    source: input.context ? {
       chunk_id: input.context.originChunkId,
       document_id: input.context.documentId,
-    },
+    } : null,
   }
 
-  // 5. Upload to Storage (source of truth)
+  // 8. Upload to Storage with NEW naming convention (using admin client to bypass RLS)
   try {
-    const storagePath = await uploadSparkToStorage(user.id, sparkId, sparkData)
-    console.log(`[Sparks] ✓ Uploaded to Storage: ${storagePath}`)
+    const adminClient = createAdminClient()
+    const { error: uploadError } = await adminClient.storage
+      .from('documents')
+      .upload(`${user.id}/sparks/${filename}`, JSON.stringify(sparkData, null, 2), {
+        contentType: 'application/json',
+        upsert: true, // Allow overwriting existing files
+      })
+
+    if (uploadError) {
+      throw uploadError
+    }
+
+    console.log(`[Sparks] ✓ Uploaded to Storage: ${user.id}/sparks/${filename}`)
   } catch (error) {
-    console.error(`[Sparks] Storage upload failed:`, error)
+    console.error(`[Sparks] ⚠️ Storage upload failed:`, error)
     // Continue - Storage can be rebuilt from ECS if needed
+    // But this should be investigated if it happens frequently
   }
 
-  // 6. Update query cache (optional, non-fatal)
+  // 9. Update query cache (optional, non-fatal)
   try {
     await supabase.from('sparks_cache').insert({
       entity_id: sparkId,
       user_id: user.id,
       content: input.content,
       created_at: new Date().toISOString(),
-      origin_chunk_id: input.context.originChunkId,
-      document_id: input.context.documentId,
+      origin_chunk_id: input.context?.originChunkId || null,
+      document_id: input.context?.documentId || null,
       tags,
       connections,
       selections: input.selections || [],
-      annotation_refs: [],  // ✅ Initialize empty - will be filled when annotations are linked
-      embedding: null, // TODO: Generate via background job
-      storage_path: `${user.id}/sparks/${sparkId}/content.json`,
+      annotation_refs: [],
+      embedding: null,
+      storage_path: `${user.id}/sparks/${filename}`,  // NEW path
       cached_at: new Date().toISOString(),
     })
     console.log(`[Sparks] ✓ Updated query cache`)
@@ -118,11 +156,13 @@ export async function createSpark(input: CreateSparkInput) {
     console.error(`[Sparks] Cache update failed (non-critical):`, error)
   }
 
-  // 7. Revalidate paths
+  // 10. Revalidate paths
   revalidatePath('/sparks')
-  revalidatePath(`/read/${input.context.documentId}`)
+  if (input.context?.documentId) {
+    revalidatePath(`/read/${input.context.documentId}`)
+  }
 
-  return { success: true, sparkId }
+  return { success: true, sparkId, title }
 }
 
 interface UpdateSparkInput {

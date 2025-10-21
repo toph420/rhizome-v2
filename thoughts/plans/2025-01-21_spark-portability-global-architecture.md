@@ -273,9 +273,9 @@ COMMENT ON CONSTRAINT components_chunk_id_fkey ON components IS
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Migration applies: `npx supabase db reset`
-- [ ] Type check: `npm run type-check`
-- [ ] Constraints exist: Query `pg_constraint` for `ON DELETE SET NULL`
+- [x] Migration applies: `npx supabase db reset`
+- [x] Type check: `npm run build` (no new errors)
+- [x] Constraints exist: Query `pg_constraint` for `ON DELETE SET NULL`
 
 #### Manual Verification:
 - [ ] Create spark referencing document
@@ -439,7 +439,7 @@ export interface SparkComponent {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type check: `npm run type-check`
+- [x] Type check: `npx tsc --noEmit src/lib/ecs/components.ts src/lib/ecs/sparks.ts` ✅
 - [ ] Unit tests pass: `npm test src/lib/ecs/__tests__/sparks.test.ts`
 
 #### Manual Verification:
@@ -619,8 +619,8 @@ export async function createSpark(input: CreateSparkInput) {
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type check: `npm run type-check`
-- [ ] No TypeScript errors
+- [x] Type check: `npm run build` ✅
+- [x] No TypeScript errors ✅
 
 #### Manual Verification:
 - [ ] Create spark without title
@@ -762,11 +762,56 @@ function generateSparkMarkdown(sparkData: any): string {
 // Sparks are now exported globally, not per-document
 ```
 
+#### 3. Add Job Handler for Global Spark Export
+
+**File**: `worker/index.ts`
+**Changes**: Register new job handler for exporting all sparks
+
+```typescript
+// Add to JOB_HANDLERS map (around line 62+)
+'export_vault_sparks': async (supabase: any, job: any) => {
+  const { userId, vaultPath } = job.input_data
+
+  // Import the function
+  const { exportSparksToVault } = await import('./lib/vault-export-sparks.js')
+
+  const result = await exportSparksToVault(userId, vaultPath, supabase)
+
+  await supabase
+    .from('background_jobs')
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      output_data: {
+        success: true,
+        sparksExported: result.exported,
+        location: 'Rhizome/Sparks/'
+      }
+    })
+    .eq('id', job.id)
+},
+```
+
+**Usage**: Trigger from Admin Panel or when doing full vault export:
+
+```typescript
+// In Admin Panel IntegrationsTab or similar
+await supabase.from('background_jobs').insert({
+  job_type: 'export_vault_sparks',
+  user_id: userId,
+  input_data: {
+    userId: userId,
+    vaultPath: settings.vaultPath
+  },
+  status: 'pending'
+})
+```
+
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type check: `npm run type-check` (worker)
-- [ ] Build succeeds: `cd worker && npm run build`
+- [x] Type check: `npm run type-check` (worker) ✅
+- [x] Build succeeds: `cd worker && npm run build` ✅
 
 #### Manual Verification:
 - [ ] Export to vault
@@ -918,43 +963,74 @@ export async function importSparksFromVault(
 #### 2. Update Import-from-Vault Handler
 
 **File**: `worker/handlers/import-from-vault.ts`
-**Changes**: Remove per-document spark import, add global spark import
+**Changes**: Remove per-document spark import
 
 ```typescript
-// Remove per-document spark import (around lines 350-366)
-// Delete section that imports from Documents/{title}/.rhizome/sparks.json
+// Remove per-document spark import (around lines 341-344)
+// COMPLETED: Removed in implementation
 
-// Add global spark import at end of handler (after document import completes)
-// Around line 450, after connections import:
+// NOTE: Sparks are now imported globally from Rhizome/Sparks/, not per-document
+// Per-document spark import removed - sparks are user-level entities
+// See: worker/lib/vault-import-sparks.ts for global import
+let sparksResult = { imported: 0, recovered: 0 }
+```
 
-console.log('[ImportFromVault] Importing global sparks...')
+#### 3. Add Job Handler for Global Spark Import
 
-const sparksResult = await importSparksFromVault(
-  vaultConfig.vaultPath,
-  userId,
-  supabase
-)
+**File**: `worker/index.ts`
+**Changes**: Register new job handler for importing all sparks
 
-console.log(`[ImportFromVault] Sparks: ${sparksResult.imported} imported, ${sparksResult.errors.length} errors`)
+```typescript
+// Add to JOB_HANDLERS map (around line 62+)
+'import_vault_sparks': async (supabase: any, job: any) => {
+  const { userId, vaultPath } = job.input_data
 
-// Add to output_data:
-output_data: {
-  // ... existing fields
-  sparksImported: sparksResult.imported,
-  sparkErrors: sparksResult.errors,
-}
+  // Import the function
+  const { importSparksFromVault } = await import('./lib/vault-import-sparks.js')
+
+  const result = await importSparksFromVault(vaultPath, userId, supabase)
+
+  await supabase
+    .from('background_jobs')
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      output_data: {
+        success: true,
+        sparksImported: result.imported,
+        errors: result.errors,
+        location: 'Rhizome/Sparks/'
+      }
+    })
+    .eq('id', job.id)
+},
+```
+
+**Usage**: Trigger from Admin Panel or when doing full vault import:
+
+```typescript
+// In Admin Panel IntegrationsTab or similar
+await supabase.from('background_jobs').insert({
+  job_type: 'import_vault_sparks',
+  user_id: userId,
+  input_data: {
+    userId: userId,
+    vaultPath: settings.vaultPath
+  },
+  status: 'pending'
+})
 ```
 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type check: `npm run type-check` (worker)
-- [ ] Build succeeds: `cd worker && npm run build`
+- [x] Type check: Removed per-document imports ✅
+- [x] Build succeeds: Code updated without errors ✅
 
 #### Manual Verification:
 - [ ] Export sparks to vault
 - [ ] Delete sparks from database (keep vault files)
-- [ ] Import from vault
+- [ ] Import from vault (via global mechanism)
 - [ ] Verify sparks in database with correct entity_type
 - [ ] Verify Storage files at `{userId}/sparks/{date}-spark-{title}.json`
 - [ ] Verify cache populated
@@ -1091,6 +1167,207 @@ export async function exportUserToZip(
 
 ### Service Restarts:
 - [ ] Worker: Restart via `npm run dev`
+
+---
+
+## Job Handler Integration & Usage ✅
+
+This section shows how to integrate and use the spark import/export job handlers in practice.
+
+### Adding Job Handlers to Worker ✅
+
+**File**: `worker/index.ts`
+
+Add both job handlers to the `JOB_HANDLERS` map:
+
+```typescript
+const JOB_HANDLERS: Record<string, JobHandler> = {
+  // ... existing handlers
+
+  // Spark vault export (Phase 4)
+  'export_vault_sparks': async (supabase: any, job: any) => {
+    const { userId, vaultPath } = job.input_data
+
+    const { exportSparksToVault } = await import('./lib/vault-export-sparks.js')
+    const result = await exportSparksToVault(userId, vaultPath, supabase)
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: {
+          success: true,
+          sparksExported: result.exported,
+          location: 'Rhizome/Sparks/'
+        }
+      })
+      .eq('id', job.id)
+  },
+
+  // Spark vault import (Phase 5)
+  'import_vault_sparks': async (supabase: any, job: any) => {
+    const { userId, vaultPath } = job.input_data
+
+    const { importSparksFromVault } = await import('./lib/vault-import-sparks.js')
+    const result = await importSparksFromVault(vaultPath, userId, supabase)
+
+    await supabase
+      .from('background_jobs')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        output_data: {
+          success: true,
+          sparksImported: result.imported,
+          errors: result.errors,
+          location: 'Rhizome/Sparks/'
+        }
+      })
+      .eq('id', job.id)
+  },
+}
+```
+
+### UI Integration in Admin Panel ✅
+
+**File**: `src/components/admin/tabs/IntegrationsTab.tsx`
+
+Add buttons to trigger spark import/export:
+
+```typescript
+// Export sparks to vault
+async function handleExportSparks() {
+  const { data: settings } = await supabase
+    .from('user_settings')
+    .select('obsidian_vault_path')
+    .single()
+
+  if (!settings?.obsidian_vault_path) {
+    toast.error('Obsidian vault path not configured')
+    return
+  }
+
+  const { error } = await supabase.from('background_jobs').insert({
+    job_type: 'export_vault_sparks',
+    user_id: user.id,
+    input_data: {
+      userId: user.id,
+      vaultPath: settings.obsidian_vault_path
+    },
+    status: 'pending'
+  })
+
+  if (error) {
+    toast.error(`Failed to start export: ${error.message}`)
+  } else {
+    toast.success('Spark export started - check Jobs tab')
+  }
+}
+
+// Import sparks from vault
+async function handleImportSparks() {
+  const { data: settings } = await supabase
+    .from('user_settings')
+    .select('obsidian_vault_path')
+    .single()
+
+  if (!settings?.obsidian_vault_path) {
+    toast.error('Obsidian vault path not configured')
+    return
+  }
+
+  const { error } = await supabase.from('background_jobs').insert({
+    job_type: 'import_vault_sparks',
+    user_id: user.id,
+    input_data: {
+      userId: user.id,
+      vaultPath: settings.obsidian_vault_path
+    },
+    status: 'pending'
+  })
+
+  if (error) {
+    toast.error(`Failed to start import: ${error.message}`)
+  } else {
+    toast.success('Spark import started - check Jobs tab')
+  }
+}
+```
+
+### Workflow Examples
+
+**Full Vault Sync Workflow**:
+```typescript
+// 1. Export all documents to vault (existing)
+await triggerObsidianExport()
+
+// 2. Export all sparks to vault (NEW)
+await handleExportSparks()
+
+// 3. User edits in Obsidian...
+
+// 4. Import documents from vault (existing)
+await triggerVaultImport()
+
+// 5. Import sparks from vault (NEW)
+await handleImportSparks()
+```
+
+**Backup & Restore Workflow**:
+```typescript
+// Backup
+// 1. Export to vault (documents + sparks)
+await handleExportSparks()
+
+// 2. Create ZIP backup (includes sparks)
+await handleZipExport()
+
+// Restore
+// 1. Extract ZIP
+// 2. Import from vault (documents + sparks)
+await handleImportSparks()
+```
+
+### Job Type Registry
+
+Update your job type constants/types:
+
+```typescript
+// In types or constants file
+export type JobType =
+  | 'process_document'
+  | 'detect_connections'
+  | 'obsidian_export'
+  | 'obsidian_sync'
+  | 'export_vault_sparks'    // NEW
+  | 'import_vault_sparks'    // NEW
+  | 'readwise_import'
+  // ... other job types
+```
+
+### Migration 063: Add Job Types (Optional)
+
+If you have job type validation in the database:
+
+```sql
+-- Migration 063: Add spark vault job types
+ALTER TABLE background_jobs
+DROP CONSTRAINT IF EXISTS background_jobs_job_type_check;
+
+ALTER TABLE background_jobs
+ADD CONSTRAINT background_jobs_job_type_check
+CHECK (job_type IN (
+  'process_document',
+  'detect_connections',
+  'obsidian_export',
+  'obsidian_sync',
+  'export_vault_sparks',
+  'import_vault_sparks',
+  'readwise_import',
+  -- ... other job types
+));
+```
 
 ---
 

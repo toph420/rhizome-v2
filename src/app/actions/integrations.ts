@@ -528,3 +528,174 @@ export async function importReadwiseHighlights(
     return { success: false, error: message }
   }
 }
+
+// ============================================================================
+// SPARK VAULT OPERATIONS
+// ============================================================================
+
+/**
+ * Result of spark export operation
+ */
+export interface SparkExportResult {
+  success: boolean
+  jobId?: string
+  sparksExported?: number
+  location?: string
+  error?: string
+}
+
+/**
+ * Result of spark import operation
+ */
+export interface SparkImportResult {
+  success: boolean
+  jobId?: string
+  sparksImported?: number
+  errors?: string[]
+  location?: string
+  error?: string
+}
+
+/**
+ * Export all user sparks to global Rhizome/Sparks/ folder in vault.
+ * Creates both .md (readable) and .json (portable) files.
+ *
+ * @returns Result with job ID for tracking
+ *
+ * @example
+ * ```typescript
+ * const result = await exportSparksToVault()
+ * if (result.success) {
+ *   // Track job progress with result.jobId
+ *   // On completion, check vault for Rhizome/Sparks/ folder
+ * }
+ * ```
+ */
+export async function exportSparksToVault(): Promise<SparkExportResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const user = await getCurrentUser()
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // Get vault settings
+    const { data: settings, error: settingsError } = await supabase
+      .from('user_settings')
+      .select('obsidian_settings')
+      .eq('user_id', user.id)
+      .single()
+
+    if (settingsError || !settings?.obsidian_settings?.vaultPath) {
+      return { success: false, error: 'Vault not configured. Please configure vault path in Settings.' }
+    }
+
+    const vaultConfig = settings.obsidian_settings
+
+    console.log(`[exportSparksToVault] Creating export job for user: ${user.id}`)
+
+    // Create background job for spark export
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .insert({
+        user_id: user.id,
+        job_type: 'export_vault_sparks',
+        input_data: {
+          userId: user.id,
+          vaultPath: vaultConfig.vaultPath
+        }
+      })
+      .select()
+      .single()
+
+    if (jobError) {
+      console.error('[exportSparksToVault] Failed to create job:', jobError)
+      return { success: false, error: `Job creation failed: ${jobError.message}` }
+    }
+
+    console.log(`[exportSparksToVault] Job created: ${job.id}`)
+
+    return {
+      success: true,
+      jobId: job.id
+    }
+
+  } catch (error) {
+    console.error('[exportSparksToVault] Unexpected error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Import sparks from global Rhizome/Sparks/ folder in vault.
+ * Reads JSON files, creates ECS entities, and uploads to Storage.
+ *
+ * @returns Result with job ID for tracking
+ *
+ * @example
+ * ```typescript
+ * const result = await importSparksFromVault()
+ * if (result.success) {
+ *   // Track job progress with result.jobId
+ *   // On completion, check output_data for import stats
+ * }
+ * ```
+ */
+export async function importSparksFromVault(): Promise<SparkImportResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const user = await getCurrentUser()
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // Get vault settings
+    const { data: settings, error: settingsError } = await supabase
+      .from('user_settings')
+      .select('obsidian_settings')
+      .eq('user_id', user.id)
+      .single()
+
+    if (settingsError || !settings?.obsidian_settings?.vaultPath) {
+      return { success: false, error: 'Vault not configured. Please configure vault path in Settings.' }
+    }
+
+    const vaultConfig = settings.obsidian_settings
+
+    console.log(`[importSparksFromVault] Creating import job for user: ${user.id}`)
+
+    // Create background job for spark import
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .insert({
+        user_id: user.id,
+        job_type: 'import_vault_sparks',
+        input_data: {
+          userId: user.id,
+          vaultPath: vaultConfig.vaultPath
+        }
+      })
+      .select()
+      .single()
+
+    if (jobError) {
+      console.error('[importSparksFromVault] Failed to create job:', jobError)
+      return { success: false, error: `Job creation failed: ${jobError.message}` }
+    }
+
+    console.log(`[importSparksFromVault] Job created: ${job.id}`)
+
+    return {
+      success: true,
+      jobId: job.id
+    }
+
+  } catch (error) {
+    console.error('[importSparksFromVault] Unexpected error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}

@@ -7,12 +7,16 @@ import {
   importReadwiseHighlights,
   scanVault,
   importFromVault,
+  exportSparksToVault,
+  importSparksFromVault,
   type ObsidianExportResult,
   type ObsidianSyncResult,
   type ReadwiseImportResult,
   type VaultScanResult,
   type VaultImportResult,
   type VaultDocument,
+  type SparkExportResult,
+  type SparkImportResult,
 } from '@/app/actions/integrations'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -138,7 +142,7 @@ export function IntegrationsTab() {
       const { data, error } = await supabase
         .from('background_jobs')
         .select('id, job_type, status, error_message, created_at, output_data')
-        .in('job_type', ['obsidian-export', 'obsidian-sync', 'readwise-import', 'import-from-vault'])
+        .in('job_type', ['obsidian_export', 'obsidian_sync', 'readwise_import', 'import_from_vault', 'export_vault_sparks', 'import_vault_sparks'])
         .order('created_at', { ascending: false })
         .limit(10)
 
@@ -423,6 +427,68 @@ export function IntegrationsTab() {
   }
 
   // ============================================================================
+  // SPARK VAULT OPERATIONS
+  // ============================================================================
+
+  const handleExportSparks = async () => {
+    setIsOperating(true)
+    setMessage(null)
+
+    try {
+      const result: SparkExportResult = await exportSparksToVault()
+
+      if (result.success) {
+        setMessage({
+          type: 'success',
+          text: 'Spark export started. Check operation history for status.',
+        })
+        setTimeout(() => loadOperationHistory(), 1000)
+      } else {
+        setMessage({
+          type: 'error',
+          text: result.error || 'Failed to start spark export',
+        })
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      })
+    } finally {
+      setIsOperating(false)
+    }
+  }
+
+  const handleImportSparks = async () => {
+    setIsOperating(true)
+    setMessage(null)
+
+    try {
+      const result: SparkImportResult = await importSparksFromVault()
+
+      if (result.success) {
+        setMessage({
+          type: 'success',
+          text: 'Spark import started. Check operation history for status.',
+        })
+        setTimeout(() => loadOperationHistory(), 1000)
+      } else {
+        setMessage({
+          type: 'error',
+          text: result.error || 'Failed to start spark import',
+        })
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      })
+    } finally {
+      setIsOperating(false)
+    }
+  }
+
+  // ============================================================================
   // VAULT IMPORT OPERATIONS
   // ============================================================================
 
@@ -476,14 +542,18 @@ export function IntegrationsTab() {
 
   const getJobTypeLabel = (jobType: string): string => {
     switch (jobType) {
-      case 'obsidian-export':
+      case 'obsidian_export':
         return 'Export to Obsidian'
-      case 'obsidian-sync':
+      case 'obsidian_sync':
         return 'Sync from Obsidian'
-      case 'readwise-import':
+      case 'readwise_import':
         return 'Import Readwise'
-      case 'import-from-vault':
+      case 'import_from_vault':
         return 'Import from Vault'
+      case 'export_vault_sparks':
+        return 'Export Sparks to Vault'
+      case 'import_vault_sparks':
+        return 'Import Sparks from Vault'
       default:
         return jobType
     }
@@ -824,6 +894,77 @@ export function IntegrationsTab() {
       {!loading && (
         <>
           {documents.length > 0 && <Separator />}
+
+          {/* Sparks Section - Always Visible (works without documents) */}
+          <div className="border rounded-lg p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Upload className="size-5" />
+              <h4 className="text-md font-semibold">Sparks</h4>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Export all your sparks to vault or import sparks back to the database. Works independently of documents - perfect for syncing quick notes.
+            </p>
+
+            <div className="flex gap-3">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleExportSparks}
+                    disabled={isOperating}
+                    variant="default"
+                  >
+                    {isOperating ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Working...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="mr-2 size-4" />
+                        Export Sparks to Vault
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Export all sparks to Rhizome/Sparks/ folder (.md + .json)</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleImportSparks}
+                    disabled={isOperating}
+                    variant="outline"
+                  >
+                    {isOperating ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Working...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 size-4" />
+                        Import Sparks from Vault
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Import sparks from Rhizome/Sparks/ JSON files</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>• <strong>Export</strong>: Creates both .md (readable) and .json (portable) files in Rhizome/Sparks/</p>
+              <p>• <strong>Import</strong>: Reads JSON files from Rhizome/Sparks/ and restores to database</p>
+              <p>• Global location - not tied to specific documents</p>
+            </div>
+          </div>
+
+          <Separator />
 
           {/* Vault Import Section - Always Visible */}
           <div className="border rounded-lg p-4 space-y-4">

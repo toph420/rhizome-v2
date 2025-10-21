@@ -17,13 +17,14 @@ import { useAnnotationStore } from '@/stores/annotation-store'
 import { useTextSelection } from '@/hooks/useTextSelection'
 
 interface QuickSparkCaptureProps {
-  documentId: string
-  documentTitle: string
-  currentChunkId: string
-  visibleChunks: string[]
-  connections: any[]
-  engineWeights: { semantic: number; contradiction: number; bridge: number }
-  chunks: any[] // For text selection hook
+  // All props optional - sparks can be created anywhere without document context
+  documentId?: string
+  documentTitle?: string
+  currentChunkId?: string
+  visibleChunks?: string[]
+  connections?: any[]
+  engineWeights?: { semantic: number; contradiction: number; bridge: number }
+  chunks?: any[] // For text selection hook
 }
 
 /**
@@ -75,10 +76,10 @@ export function QuickSparkCapture({
   // Annotation store for hybrid loading
   const annotations = useAnnotationStore(state => state.annotations)
 
-  // Text selection when panel is open (only enabled when panel is open)
+  // Text selection when panel is open (only enabled when panel is open AND chunks available)
   const { selection, clearSelection } = useTextSelection({
-    chunks,
-    enabled: isOpen,
+    chunks: chunks || [],
+    enabled: isOpen && !!chunks && chunks.length > 0,
     debounceMs: 50, // Faster response, less chance of expansion
   })
 
@@ -223,21 +224,22 @@ export function QuickSparkCapture({
         console.log('[Sparks] ✓ Updated successfully')
       } else {
         // Create new spark
-        const sparkContext: SparkContext = {
+        // Only provide context if we have document information
+        const sparkContext: SparkContext | undefined = documentId ? {
           documentId,
-          documentTitle,
-          originChunkId: currentChunkId || visibleChunks[0] || '',
-          visibleChunks,
+          documentTitle: documentTitle || '',
+          originChunkId: currentChunkId || visibleChunks?.[0] || '',
+          visibleChunks: visibleChunks || [],
           scrollPosition: window.scrollY,
           activeConnections: connections || [],
-          engineWeights,
+          engineWeights: engineWeights || { semantic: 0.25, contradiction: 0.40, bridge: 0.35 },
           selection: selection ? {
             text: selection.text,
-            chunkId: selection.range.chunkIds[0] || currentChunkId,
+            chunkId: selection.range.chunkIds[0] || currentChunkId || '',
             startOffset: selection.range.startOffset,
             endOffset: selection.range.endOffset
           } : undefined
-        }
+        } : undefined
 
         const result = await createSpark({
           content: content.trim(),
@@ -518,12 +520,20 @@ export function QuickSparkCapture({
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1">
-                      <Link className="w-3 h-3" />
-                      <span className="truncate max-w-[200px]" title={documentTitle}>
-                        {documentTitle}
-                      </span>
-                    </div>
+                    {documentTitle && (
+                      <div className="flex items-center gap-1">
+                        <Link className="w-3 h-3" />
+                        <span className="truncate max-w-[200px]" title={documentTitle}>
+                          {documentTitle}
+                        </span>
+                      </div>
+                    )}
+                    {!documentTitle && (
+                      <div className="flex items-center gap-1">
+                        <Zap className="w-3 h-3" />
+                        <span>Global Spark</span>
+                      </div>
+                    )}
                     {connections && connections.length > 0 && (
                       <div className="flex items-center gap-1">
                         <Tag className="w-3 h-3" />

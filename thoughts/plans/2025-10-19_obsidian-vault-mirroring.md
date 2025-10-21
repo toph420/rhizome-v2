@@ -38,8 +38,18 @@ Before implementing the phases, we completed the foundational infrastructure:
 - **Phase 1**: ✅ Complete - Vault structure tested and working
 - **Phase 2**: ✅ Complete - Export creates full vault structure with all files
 - **Phase 3**: ✅ Complete - Import with UUID preservation, annotations survive round-trips
-- **Phase 4**: Not started - Bi-directional sync with conflict detection
+- **Phase 4**: Not started - Bi-directional sync with conflict detection (includes spark files)
 - **Phase 5**: Not started - Auto-sync and polish
+
+### 🔄 Architecture Update (2025-01-21)
+
+**Spark Portability Refactor** (See: `thoughts/plans/2025-01-21_spark-portability-global-architecture.md`):
+- ✅ **Changed**: Sparks now use individual files instead of daily aggregation
+- ✅ **New Structure**: `Rhizome/Sparks/{date}-spark-{title}.{md,json}`
+- ✅ **Old Structure**: ~~`Sparks/{date}.md`~~ (daily aggregation) - DEPRECATED
+- ✅ **Dual Format**: Both .md (readable) and .json (portable) per spark
+- ✅ **Impact**: Phase 4 must handle spark file conflicts individually
+- ✅ **Benefit**: Better portability, easier linking, ECS-aligned
 
 ### 🔧 Phase 3 Completion Sessions (2025-10-20)
 
@@ -358,9 +368,18 @@ Build a complete bi-directional sync system between Supabase Storage and Obsidia
 │       ├── contradictions.md
 │       └── thematic.md
 │
-├── Sparks/
-│   ├── 2025-10-19.md                     # Daily sparks
-│   └── 2025-10-18.md
+├── Rhizome/
+│   ├── Sparks/                           # Individual spark files (NEW STRUCTURE)
+│   │   ├── 2025-01-20-spark-privacy-concerns.md      # Readable format
+│   │   ├── 2025-01-20-spark-privacy-concerns.json    # Portable format (source of truth)
+│   │   ├── 2025-01-20-spark-architecture-insight.md
+│   │   └── 2025-01-20-spark-architecture-insight.json
+│   └── Documents/                        # Per-document metadata
+│       └── {document-title}/
+│           └── .rhizome/
+│               ├── chunks.json
+│               ├── metadata.json
+│               └── connections.json
 │
 └── Index/
     ├── README.md                         # Vault overview
@@ -609,7 +628,7 @@ export interface VaultConfig {
 export interface VaultStructure {
   documents: string      // Rhizome/Documents/
   connections: string    // Rhizome/Connections/
-  sparks: string        // Rhizome/Sparks/
+  sparks: string        // Rhizome/Sparks/ (individual files: {date}-spark-{title}.{md,json})
   index: string         // Rhizome/Index/
 }
 
@@ -717,7 +736,10 @@ This vault is automatically synced from Rhizome V2.
 
 - **Documents/**: All processed documents with annotations and connections
 - **Connections/**: Global connection graphs (by theme and type)
-- **Sparks/**: Daily quick captures and thoughts
+- **Sparks/**: Individual spark files (quick captures, thoughts, insights)
+  - Each spark has both .md (readable) and .json (portable) formats
+  - Naming: `{date}-spark-{title}.{md,json}`
+  - Example: `2025-01-20-spark-privacy-concerns.md`
 - **Index/**: Navigation and overview files
 
 ## Editing
@@ -2545,6 +2567,155 @@ const handleConflictResolve = async (resolution: 'use_vault' | 'use_storage') =>
 />
 ```
 
+#### 5. Spark Conflict Detection (NEW)
+
+**File**: `worker/lib/vault-spark-conflict.ts` (NEW)
+**Changes**: Detect conflicts for individual spark files
+
+```typescript
+import { promises as fs } from 'fs'
+import * as path from 'path'
+import { createHash } from 'crypto'
+import { SupabaseClient } from '@supabase/supabase-js'
+
+interface SparkConflict {
+  filename: string
+  sparkId: string
+  hasConflict: boolean
+  vaultHash: string
+  storageHash: string
+  lastSyncHash: string | null
+}
+
+/**
+ * Check for conflicts in spark files
+ * Compares .json files (source of truth) between vault and Storage
+ */
+export async function checkSparkConflicts(
+  userId: string,
+  vaultPath: string,
+  supabase: SupabaseClient
+): Promise<SparkConflict[]> {
+  const vaultSparksDir = path.join(vaultPath, 'Rhizome/Sparks')
+
+  // Check if directory exists
+  try {
+    await fs.access(vaultSparksDir)
+  } catch {
+    console.log('[SparkConflict] No Rhizome/Sparks/ directory in vault')
+    return []
+  }
+
+  const files = await fs.readdir(vaultSparksDir)
+  const jsonFiles = files.filter(f => f.endsWith('.json'))
+
+  const conflicts: SparkConflict[] = []
+
+  for (const file of jsonFiles) {
+    const vaultFilePath = path.join(vaultSparksDir, file)
+    const storageFilePath = `${userId}/sparks/${file}`
+
+    // Read vault file
+    const vaultContent = await fs.readFile(vaultFilePath, 'utf-8')
+    const vaultHash = hashContent(vaultContent)
+
+    // Read storage file
+    let storageHash = ''
+    try {
+      const { data: blob } = await supabase.storage
+        .from('documents')
+        .download(storageFilePath)
+
+      if (blob) {
+        const storageContent = await blob.text()
+        storageHash = hashContent(storageContent)
+      }
+    } catch (error) {
+      console.warn(`[SparkConflict] Storage file missing: ${file}`)
+      // Storage missing = no conflict, vault will be synced
+      continue
+    }
+
+    // Get sync state
+    const { data: syncState } = await supabase
+      .from('obsidian_sync_state')
+      .select('vault_hash, storage_hash')
+      .eq('user_id', userId)
+      .eq('file_path', `Rhizome/Sparks/${file}`)
+      .single()
+
+    const vaultChanged = syncState?.vault_hash !== vaultHash
+    const storageChanged = syncState?.storage_hash !== storageHash
+    const hasConflict = vaultChanged && storageChanged
+
+    if (hasConflict) {
+      // Extract spark ID from filename
+      const sparkData = JSON.parse(vaultContent)
+
+      conflicts.push({
+        filename: file,
+        sparkId: sparkData.entity_id || 'unknown',
+        hasConflict: true,
+        vaultHash,
+        storageHash,
+        lastSyncHash: syncState?.vault_hash || null
+      })
+    }
+  }
+
+  return conflicts
+}
+
+function hashContent(content: string): string {
+  return createHash('sha256')
+    .update(content.trim())
+    .digest('hex')
+    .substring(0, 16)
+}
+```
+
+**Usage**: Call during full vault sync to detect spark conflicts
+
+```typescript
+// In sync handler or IntegrationsTab
+const sparkConflicts = await checkSparkConflicts(userId, vaultPath, supabase)
+
+if (sparkConflicts.length > 0) {
+  console.warn(`[Sync] ${sparkConflicts.length} spark conflicts detected`)
+  // Show conflict resolution UI for each spark
+  // User chooses: "Use Vault" or "Use Storage" for each conflict
+}
+```
+
+**Sync State Tracking**:
+
+Update `obsidian_sync_state` table to track spark files:
+
+```sql
+-- Insert/update sync state for spark files
+INSERT INTO obsidian_sync_state (
+  user_id,
+  file_path,
+  vault_hash,
+  storage_hash,
+  last_sync_at,
+  last_sync_direction
+) VALUES (
+  $1,
+  'Rhizome/Sparks/2025-01-20-spark-privacy-concerns.json',
+  $2,
+  $3,
+  NOW(),
+  'vault_to_storage'
+) ON CONFLICT (user_id, file_path) DO UPDATE SET
+  vault_hash = EXCLUDED.vault_hash,
+  storage_hash = EXCLUDED.storage_hash,
+  last_sync_at = EXCLUDED.last_sync_at,
+  last_sync_direction = EXCLUDED.last_sync_direction
+```
+
+**Note**: The existing `obsidian_sync_state` table already supports non-document files via the `file_path` column, so no migration needed.
+
 ### Success Criteria
 
 #### Automated Verification:
@@ -2562,6 +2733,9 @@ const handleConflictResolve = async (resolution: 'use_vault' | 'use_storage') =>
 - [ ] Timestamps shown correctly
 - [ ] Hashes updated after resolution
 - [ ] Fuzzy annotation recovery triggers after vault sync
+- [ ] **Sparks**: Edit spark .json in vault, edit in Rhizome → Conflict detected
+- [ ] **Sparks**: Resolve spark conflict → Correct version wins
+- [ ] **Sparks**: Sync state tracks individual spark files
 
 **Implementation Note**: Test conflict workflow:
 1. Export document to vault
@@ -2744,8 +2918,8 @@ After deployment, configure vault path on Mac:
 
 ```bash
 # Mac: Update worker/.env
-VAULT_PATH=/Users/topher/Obsidian/MyVault
-VAULT_NAME=MyVault
+VAULT_PATH=/Users/topher/Tophs Vault
+VAULT_NAME=Tophs Vault
 RHIZOME_PATH=Rhizome/
 
 # Restart worker
