@@ -310,28 +310,3 @@ Available recent handoffs:
 
 Which would you like to resume? (or provide path)
 ```
-
----
-
-## Example Interaction (Good)
-
-```
-User: /rhizome:resume-handoff thoughts/handoffs/2025-10-21_admin-panel-fixes.md
-
-User: /resume_handoff /rhizome:resume-handoff thoughts/handoffs/2025-10-17_cached-chunks.md
-Assistant: Let me read and analyze that handoff document...
-
-[Reads handoff completely]
-[Spawns research tasks]
-[Waits for completion]
-[Reads identified files]
-
-I've analyzed the handoff from [date]. Here's the current situation...
-
-[Presents analysis]
-
-Shall I proceed with implementing the webhook validation fix, or would you like to adjust the approach?
-
-User: Yes, proceed with the webhook validation
-Assistant: [Creates todo list and begins implementation]
-```
