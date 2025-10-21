@@ -21,11 +21,7 @@ import { GEMINI_MODEL } from '../lib/model-config.js'
 // Chonkie Integration
 import { chunkWithChonkie } from '../lib/chonkie/chonkie-chunker.js'
 import type { ChonkieStrategy } from '../lib/chonkie/types.js'
-// Local metadata enrichment
-import { extractMetadataBatch, type ChunkInput } from '../lib/chunking/pydantic-metadata.js'
-// Local embeddings
-import { generateEmbeddingsLocal } from '../lib/local/embeddings-local.js'
-import { generateEmbeddings } from '../lib/embeddings.js'
+// Phase 3: Local metadata enrichment and embeddings handled by base class
 // Storage
 import { hashMarkdown } from '../lib/cached-chunks.js'
 // Statistics
@@ -186,126 +182,22 @@ ${article.textContent}`
       logChunkStatistics(chunkingStats, 'Web Article Chunks (After Chonkie)')
 
       // Stage 5: Metadata Enrichment (50-75%)
+      // Phase 3: Use shared method from base class
       console.log('[WebProcessor] Stage 5: Starting local metadata enrichment (PydanticAI + Ollama)')
-      await this.updateProgress(53, 'metadata', 'processing', 'Extracting structured metadata')
+      finalChunks = await this.enrichMetadataBatch(finalChunks, 50, 75, {
+        onError: 'warn'  // Web processor just warns on errors
+      })
 
-      try {
-        const BATCH_SIZE = 10
-        const enrichedChunks: ProcessedChunk[] = []
-
-        for (let i = 0; i < finalChunks.length; i += BATCH_SIZE) {
-          const batch = finalChunks.slice(i, i + BATCH_SIZE)
-
-          const batchInput: ChunkInput[] = batch.map(chunk => ({
-            id: `${this.job.document_id}-${chunk.chunk_index}`,
-            content: chunk.content
-          }))
-
-          console.log(`[WebProcessor] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(finalChunks.length / BATCH_SIZE)}`)
-
-          const metadataMap = await extractMetadataBatch(batchInput, {
-            onProgress: (processed, _total) => {
-              const overallProgress = 53 + Math.floor(((i + processed) / finalChunks.length) * 22)
-              this.updateProgress(overallProgress, 'metadata', 'processing', `Enriching chunk ${i + processed}/${finalChunks.length}`)
-            }
-          })
-
-          for (const chunk of batch) {
-            const chunkId = `${this.job.document_id}-${chunk.chunk_index}`
-            const metadata = metadataMap.get(chunkId)
-
-            if (metadata) {
-              enrichedChunks.push({
-                ...chunk,
-                themes: metadata.themes,
-                importance_score: metadata.importance,
-                summary: metadata.summary,
-                emotional_metadata: {
-                  polarity: metadata.emotional.polarity,
-                  primaryEmotion: metadata.emotional.primaryEmotion as any,
-                  intensity: metadata.emotional.intensity
-                },
-                conceptual_metadata: {
-                  concepts: metadata.concepts as any
-                },
-                domain_metadata: {
-                  primaryDomain: metadata.domain as any,
-                  confidence: 0.8
-                },
-                metadata_extracted_at: new Date().toISOString()
-              })
-            } else {
-              console.warn(`[WebProcessor] Metadata extraction failed for chunk ${chunk.chunk_index} - using defaults`)
-              enrichedChunks.push(chunk)
-            }
-          }
-
-          const progress = 53 + Math.floor(((i + batch.length) / finalChunks.length) * 22)
-          await this.updateProgress(progress, 'metadata', 'processing', `Batch ${Math.floor(i / BATCH_SIZE) + 1} complete`)
-        }
-
-        finalChunks = enrichedChunks
-
-        console.log(`[WebProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
-        await this.updateProgress(75, 'metadata', 'complete', 'Metadata enrichment done')
-
-        // Checkpoint 3: Save enriched chunks (no final flag - not final output)
-        await this.saveStageResult('metadata', finalChunks)
-
-      } catch (error: any) {
-        console.error(`[WebProcessor] Metadata enrichment failed: ${error.message}`)
-        console.warn('[WebProcessor] Continuing with default metadata')
-        await this.updateProgress(75, 'metadata', 'fallback', 'Using default metadata')
-      }
+      // Checkpoint 3: Save enriched chunks (no final flag - not final output)
+      await this.saveStageResult('metadata', finalChunks)
 
       // Stage 6: Local Embeddings (75-90%)
+      // Phase 3: Use shared method from base class (no metadata enhancement for web articles)
       console.log('[WebProcessor] Stage 6: Starting local embeddings generation (Transformers.js)')
-      await this.updateProgress(78, 'embeddings', 'processing', 'Generating local embeddings')
-
-      try {
-        const chunkTexts = finalChunks.map(chunk => chunk.content)
-
-        console.log(`[WebProcessor] Generating embeddings for ${chunkTexts.length} chunks (Xenova/all-mpnet-base-v2)`)
-
-        const startTime = Date.now()
-        const embeddings = await generateEmbeddingsLocal(chunkTexts)
-        const embeddingTime = Date.now() - startTime
-
-        console.log(`[WebProcessor] Local embeddings complete: ${embeddings.length} vectors (768d) in ${(embeddingTime / 1000).toFixed(1)}s`)
-
-        if (embeddings.length !== finalChunks.length) {
-          throw new Error(`Embedding count mismatch: expected ${finalChunks.length}, got ${embeddings.length}`)
-        }
-
-        finalChunks = finalChunks.map((chunk, idx) => ({
-          ...chunk,
-          embedding: embeddings[idx]
-        }))
-
-        console.log('[WebProcessor] Embeddings attached to all chunks')
-        await this.updateProgress(90, 'embeddings', 'complete', 'Local embeddings generated')
-
-      } catch (error: any) {
-        console.error(`[WebProcessor] Local embeddings failed: ${error.message}`)
-        console.warn('[WebProcessor] Falling back to Gemini embeddings')
-
-        try {
-          const chunkContents = finalChunks.map(chunk => chunk.content)
-          const embeddings = await generateEmbeddings(chunkContents)
-
-          finalChunks = finalChunks.map((chunk, idx) => ({
-            ...chunk,
-            embedding: embeddings[idx]
-          }))
-
-          console.log('[WebProcessor] Gemini embeddings fallback successful')
-          await this.updateProgress(90, 'embeddings', 'fallback', 'Using Gemini embeddings')
-
-        } catch (fallbackError: any) {
-          console.error(`[WebProcessor] Gemini embeddings also failed: ${fallbackError.message}`)
-          await this.updateProgress(90, 'embeddings', 'failed', 'Embeddings generation failed')
-        }
-      }
+      finalChunks = await this.generateChunkEmbeddings(finalChunks, 75, 90, {
+        enhanceWithMetadata: false,  // Web articles don't have structural metadata
+        onError: 'warn'  // Web processor just warns on errors
+      })
 
       // Stage 7: Finalize (90-100%)
       console.log('[WebProcessor] Stage 7: Finalizing document processing')
