@@ -115,7 +115,8 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
   'continue_processing': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
     const skipAiCleanup = (job.input_data as any).skipAiCleanup || false
-    const result = await continueProcessing(documentId, userId, job.id, skipAiCleanup)  // Pass jobId for progress tracking
+    const chunkerStrategy = (job.input_data as any).chunkerStrategy || 'recursive'
+    const result = await continueProcessing(documentId, userId, job.id, skipAiCleanup, chunkerStrategy)  // Pass jobId for progress tracking
 
     await supabase
       .from('background_jobs')

@@ -10,6 +10,8 @@ import { FileText, Eye, Loader2, Trash2, Pause, Play, ExternalLink } from 'lucid
 import Link from 'next/link'
 import { deleteDocument } from '@/app/actions/delete-document'
 import { exportToObsidian } from '@/app/actions/integrations'
+import { continueDocumentProcessing, getJobStatus } from '@/app/actions/documents'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -34,6 +36,7 @@ export function DocumentList() {
   const [userId, setUserId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [processing, setProcessing] = useState<string | null>(null)
+  const { registerJob } = useBackgroundJobsStore()
   const router = useRouter()
 
   useEffect(() => {
@@ -205,19 +208,21 @@ export function DocumentList() {
     setProcessing(documentId)
 
     try {
-      // Start job
-      const response = await fetch('/api/obsidian/continue-processing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId, skipAiCleanup })
-      })
+      // Start job using Server Action
+      const result = await continueDocumentProcessing(documentId, skipAiCleanup)
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || 'Failed to start processing')
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to start processing')
       }
 
-      const { jobId } = await response.json()
+      const jobId = result.jobId
+
+      // Register job with background-jobs store so it shows in ProcessingDock/Admin Panel
+      const doc = documents.find(d => d.id === documentId)
+      registerJob(jobId, 'continue_processing', {
+        title: doc?.title,
+        documentId
+      })
 
       toast.info('Processing Started', {
         description: skipAiCleanup
@@ -249,15 +254,18 @@ export function DocumentList() {
     const intervalMs = 2000 // 2 seconds
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const response = await fetch(`/api/obsidian/status/${jobId}`)
-      const data = await response.json()
+      const result = await getJobStatus(jobId)
 
-      if (data.status === 'completed') {
-        return data.result
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to get job status')
       }
 
-      if (data.status === 'failed') {
-        throw new Error(data.error || 'Job failed')
+      if (result.status === 'completed') {
+        return result.output_data
+      }
+
+      if (result.status === 'failed') {
+        throw new Error(result.error || 'Job failed')
       }
 
       // Wait before next poll

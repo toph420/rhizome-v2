@@ -38,6 +38,12 @@ export {
   getDocumentJob
 } from './jobs'
 
+// Processing actions
+export {
+  continueDocumentProcessing,
+  getJobStatus
+} from './continue-processing'
+
 // Types
 export type {
   JobProgress,
