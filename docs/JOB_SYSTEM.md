@@ -25,7 +25,7 @@
 
 The Rhizome V2 background job system provides robust, fault-tolerant processing for long-running document operations. Built on PostgreSQL and Supabase, it supports:
 
-- **7 Job Types**: Document processing, imports, exports, connection detection, and integrations
+- **12 Job Types**: Document processing, imports, exports, connection detection, reprocessing, and integrations (Obsidian, Readwise)
 - **Real-time Progress**: Updates every 5-10 seconds with detailed status
 - **Pause & Resume**: Checkpoint-based pause/resume with integrity validation
 - **Automatic Retry**: Intelligent error classification with exponential backoff
@@ -107,9 +107,10 @@ The Rhizome V2 background job system provides robust, fault-tolerant processing 
 **Core Fields:**
 ```sql
 id                UUID PRIMARY KEY
-job_type          TEXT NOT NULL  -- 'process_document', 'import_document', etc.
+job_type          TEXT NOT NULL  -- 'process_document', 'detect_connections', etc. (snake_case)
 status            TEXT NOT NULL  -- 'pending', 'processing', 'paused', 'completed', 'failed', 'cancelled'
-document_id       UUID           -- Associated document
+entity_type       TEXT           -- 'document', 'deck', etc.
+entity_id         UUID           -- Associated entity (document, deck, etc.)
 user_id           UUID NOT NULL
 created_at        TIMESTAMPTZ
 started_at        TIMESTAMPTZ
@@ -144,8 +145,8 @@ checkpoint_hash        TEXT          -- SHA-256 hash (first 16 chars) for valida
 **Indexes:**
 ```sql
 idx_background_jobs_status           ON (status)
-idx_background_jobs_document_id      ON (document_id)
-idx_background_jobs_user_id          ON (user_id)
+idx_background_jobs_entity           ON (entity_type, entity_id)
+idx_background_jobs_user             ON (user_id)
 idx_background_jobs_paused           ON (status) WHERE status = 'paused'
 idx_background_jobs_checkpoint       ON (last_checkpoint_path) WHERE last_checkpoint_path IS NOT NULL
 ```
@@ -1450,6 +1451,24 @@ npx supabase migration up
 
 ---
 
-**Last Updated**: 2025-10-15
-**Version**: 2.0 (Enhanced with Pause/Resume + Auto-Retry)
+## Recent Changes
+
+### 2025-10-20: Job Type Naming Standardization (Migration 060)
+
+**Fixed**: Standardized all job_type values from mixed kebab-case/snake_case to consistent snake_case.
+
+**Issue**: Some job types used kebab-case (`'detect-connections'`, `'obsidian-export'`) while UI expected snake_case, causing jobs to be invisible in ProcessingDock and Admin Panel.
+
+**Resolution**:
+- Migration 060 updated 28 existing jobs in database
+- Updated 8 code files (worker, actions, scripts, tests)
+- Fixed auto-discovery query schema mismatch (entity_id vs document_id)
+- All job types now use snake_case: `detect_connections`, `obsidian_export`, etc.
+
+**Impact**: Jobs now immediately visible in UI with proper names, icons, and controls.
+
+---
+
+**Last Updated**: 2025-10-20
+**Version**: 2.1 (Job Type Naming Standardization)
 **Status**: Production Ready ✅
