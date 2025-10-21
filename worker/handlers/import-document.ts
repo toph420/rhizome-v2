@@ -78,6 +78,58 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
     }
     console.log(`✓ Schema version validated: ${chunksData.version}`)
 
+    // ✅ STEP 2.5: ENSURE DOCUMENT EXISTS (30%)
+    // Check if document exists in database, create if missing (for deleted documents)
+    await updateProgress(supabase, job.id, 30, 'checking_document', 'processing', 'Verifying document exists')
+
+    const { data: existingDoc } = await supabase
+      .from('documents')
+      .select('id')
+      .eq('id', document_id)
+      .single()
+
+    if (!existingDoc) {
+      console.log(`📄 Document not found in database, creating from metadata...`)
+
+      // Read metadata.json for document details
+      let metadata: any = {}
+      try {
+        const metadataPath = `${storage_path}/metadata.json`
+        metadata = await readFromStorage<any>(supabase, metadataPath)
+      } catch (error) {
+        console.warn(`⚠️ Could not read metadata.json, using defaults:`, error)
+      }
+
+      // Create document record with metadata or defaults
+      const { error: createError } = await supabase
+        .from('documents')
+        .insert({
+          id: document_id,
+          user_id: job.user_id,
+          title: metadata.title || `Imported Document (${document_id.substring(0, 8)})`,
+          storage_path: storage_path,
+          source_type: metadata.source_type || 'unknown',
+          source_url: metadata.source_url || null,
+          processing_status: 'completed',
+          chunker_type: metadata.chunker_type || 'recursive',
+          document_type: metadata.document_type || null,
+          author: metadata.author || null,
+          publication_year: metadata.publication_year || null,
+          publisher: metadata.publisher || null,
+          cover_image_url: metadata.cover_image_url || null,
+          detected_metadata: metadata.detected_metadata || null,
+          created_at: metadata.created_at || new Date().toISOString()
+        })
+
+      if (createError) {
+        throw new Error(`Failed to create document record: ${createError.message}`)
+      }
+
+      console.log(`✓ Created document record from Storage metadata`)
+    } else {
+      console.log(`✓ Document exists in database`)
+    }
+
     // ✅ STEP 3: APPLY STRATEGY (40-60%)
     const importedCount = await applyStrategy(
       supabase,

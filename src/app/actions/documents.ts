@@ -532,9 +532,12 @@ export async function scanStorage(): Promise<ScanResult> {
     const results: DocumentScanResult[] = []
 
     // Filter to only directories (folders don't have metadata)
-    const folders = (storageFolders || []).filter(item => !item.metadata)
+    // Exclude non-document folders like 'sparks'
+    const folders = (storageFolders || []).filter(item =>
+      !item.metadata && item.name !== 'sparks'
+    )
 
-    console.log(`[scanStorage] Found ${folders.length} folders in Storage`)
+    console.log(`[scanStorage] Found ${folders.length} document folders in Storage (excluded sparks/)`)
 
     for (const folder of folders) {
       const documentId = folder.name
