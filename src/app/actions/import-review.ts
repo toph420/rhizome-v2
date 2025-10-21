@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUser } from '@/lib/auth'
 import { createECS } from '@/lib/ecs'
+import { AnnotationOperations } from '@/lib/ecs/annotations'
 
 // ============================================================================
 // TYPES
@@ -175,41 +176,23 @@ export async function acceptImport(
     }
     const color = colorMap[highlight.color || 'yellow'] || 'yellow'
 
-    // Create annotation entity with ECS
-    const entityId = await ecs.createEntity(user.id, {
-      annotation: {
-        text: match.text,
-        note: highlight.note,
-        tags: ['readwise-import'],
-        color,
-        range: {
-          startOffset: match.startOffset,
-          endOffset: match.endOffset,
-          chunkIds: [containingChunk.id]
-        },
-        textContext: {
-          before: '',
-          content: match.text,
-          after: ''
-        }
+    // Create annotation entity with ECS (5-component pattern via AnnotationOperations)
+    const ops = new AnnotationOperations(ecs, user.id)
+    const entityId = await ops.create({
+      documentId: pending.document_id,
+      startOffset: match.startOffset,
+      endOffset: match.endOffset,
+      originalText: match.text,
+      chunkIds: [containingChunk.id],
+      type: 'highlight',
+      color: color,
+      note: highlight.note,
+      tags: ['readwise-import'],
+      textContext: {
+        before: '',
+        after: '',
       },
-      position: {
-        chunkIds: [containingChunk.id],
-        startOffset: match.startOffset,
-        endOffset: match.endOffset,
-        confidence: match.confidence,
-        method: match.method,
-        textContext: {
-          before: '',
-          after: ''
-        },
-        originalChunkIndex: containingChunk.chunk_index
-      },
-      source: {
-        chunk_id: containingChunk.id,
-        chunk_ids: [containingChunk.id],
-        document_id: pending.document_id
-      }
+      originalChunkIndex: containingChunk.chunk_index,
     })
 
     // Update pending import status
