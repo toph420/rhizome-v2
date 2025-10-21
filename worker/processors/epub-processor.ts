@@ -706,9 +706,6 @@ export class EPUBProcessor extends SourceProcessor {
         console.log(`[EPUBProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(90, 'metadata', 'complete', 'Metadata enrichment done')
 
-        // Checkpoint 4: Save enriched chunks with metadata (final version before embeddings)
-        await this.saveStageResult('metadata', finalChunks, { final: true })
-
       } catch (error: any) {
         console.error(`[EPUBProcessor] Metadata enrichment failed: ${error.message}`)
         console.warn('[EPUBProcessor] Continuing with default metadata')
@@ -826,6 +823,39 @@ export class EPUBProcessor extends SourceProcessor {
     await this.saveStageResult('markdown', { content: markdown }, { final: true })
     await this.saveStageResult('chunks', finalChunks, { final: true })
 
+    // Build ProcessResult for return
+    const result: ProcessResult = {
+      markdown,
+      chunks: finalChunks,
+      metadata: {
+        title: metadata.title,
+        author: metadata.author,
+        extra: {
+          isbn: metadata.isbn,
+          publisher: metadata.publisher,
+          publication_date: metadata.publicationDate || metadata.publicationDate,
+          language: metadata.language,
+          description: metadata.description,
+          cover_image_url: coverImage ? `${storagePath}/cover.jpg` : undefined
+        }
+      },
+      wordCount: markdown.split(/\s+/).length
+    }
+
+    // Checkpoint 5.5: Save document-level metadata to metadata.json
+    const publicationYear = metadata.publicationDate
+      ? parseInt(metadata.publicationDate.split('-')[0]) || null
+      : null
+
+    const metadataExport = this.buildMetadataExport(result, {
+      page_count: null,  // EPUBs don't have page numbers
+      isbn: metadata.isbn || null,
+      genre: null,  // Could enhance with genre detection
+      publication_year: publicationYear,
+      language: metadata.language || 'en'
+    })
+    await this.saveStageResult('metadata', metadataExport, { final: true })
+
     // Checkpoint 6: Save manifest.json with processing metadata
     const manifestData = {
       document_id: this.job.document_id,
@@ -833,7 +863,7 @@ export class EPUBProcessor extends SourceProcessor {
       source_type: 'epub',
       files: {
         'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
-        'metadata.json': { size: JSON.stringify(markdown).length, type: 'final' },
+        'metadata.json': { size: JSON.stringify(metadataExport).length, type: 'final' },
         'manifest.json': { size: 0, type: 'final' },
         ...(isLocalMode && doclingChunks ? {
           'cached_chunks.json': { size: JSON.stringify(doclingChunks).length, type: 'final' }
@@ -855,23 +885,7 @@ export class EPUBProcessor extends SourceProcessor {
     // - Metadata transfer via overlap detection (70-90% coverage expected)
     // - EPUBs have NO page numbers/bboxes (always null, sections used instead)
 
-    return {
-      markdown,
-      chunks: finalChunks,
-      metadata: {
-        title: metadata.title,
-        author: metadata.author,
-        extra: {
-          isbn: metadata.isbn,
-          publisher: metadata.publisher,
-          publication_date: metadata.publicationDate || metadata.publicationDate,
-          language: metadata.language,
-          description: metadata.description,
-          cover_image_url: coverImage ? `${storagePath}/cover.jpg` : undefined
-        }
-      },
-      wordCount: markdown.split(/\s+/).length
-    }
+    return result
   }
 
   /**

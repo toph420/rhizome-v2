@@ -332,7 +332,60 @@ export abstract class SourceProcessor {
    */
   protected getStoragePath(): string {
     const inputData = this.job.input_data || {}
-    return (inputData as any).storage_path || `dev-user-123/${this.job.document_id}`
+    return (inputData as any).storage_path || `dev-user-123/${this.job.input_data.document_id}`
+  }
+
+  /**
+   * Builds document-level metadata export for metadata.json.
+   * Combines job data, ProcessResult metadata, and format-specific fields.
+   *
+   * @param result - ProcessResult from processor
+   * @param formatSpecificData - Optional format-specific fields (page_count, isbn, etc.)
+   * @returns MetadataExport object ready for saveStageResult('metadata')
+   */
+  protected buildMetadataExport(
+    result: ProcessResult,
+    formatSpecificData?: {
+      page_count?: number | null
+      isbn?: string | null
+      genre?: string | null
+      publication_year?: number | null
+      language?: string
+    }
+  ): Record<string, any> {
+    return {
+      version: "1.0",
+      document_id: this.job.input_data.document_id,
+
+      // Document identification
+      title: result.metadata?.title || null,
+      author: result.metadata?.author || null,
+
+      // Content metrics
+      word_count: result.wordCount || 0,
+      page_count: formatSpecificData?.page_count || null,
+
+      // Classification
+      language: formatSpecificData?.language || 'en',
+      genre: formatSpecificData?.genre || null,
+      publication_year: formatSpecificData?.publication_year || null,
+      isbn: formatSpecificData?.isbn || null,
+
+      // Source information
+      source_type: this.job.input_data.source_type || 'unknown',
+      original_filename: (this.job.input_data as any).original_filename || null,
+      source_url: result.metadata?.sourceUrl || this.job.input_data.source_url || null,
+
+      // Format-specific metadata (YouTube timestamps, etc.)
+      source_metadata: result.metadata?.source_metadata || null,
+
+      // Additional metadata
+      extra: result.metadata?.extra || {},
+
+      // Timestamps
+      created_at: this.job.created_at || new Date().toISOString(),
+      processing_completed_at: new Date().toISOString()
+    }
   }
 
   /**
@@ -413,7 +466,7 @@ export abstract class SourceProcessor {
         ? {
             chunks: data,  // Wrap array in chunks property
             version: "1.0",
-            document_id: this.job.document_id,
+            document_id: this.job.input_data.document_id,
             stage: stage,
             timestamp: new Date().toISOString(),
             final: options?.final ?? false
@@ -421,7 +474,7 @@ export abstract class SourceProcessor {
         : {
             ...data,  // Objects can be spread normally
             version: data.version || "1.0",
-            document_id: this.job.document_id,
+            document_id: this.job.input_data.document_id,
             stage: stage,
             timestamp: new Date().toISOString(),
             final: options?.final ?? false

@@ -220,8 +220,8 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
         console.log(`[MarkdownAsIsProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(70, 'metadata', 'complete', 'Metadata enrichment done')
 
-        // Checkpoint 3: Save enriched chunks
-        await this.saveStageResult('metadata', finalChunks, { final: true })
+        // Checkpoint 3: Save enriched chunks (no final flag - not final output)
+        await this.saveStageResult('metadata', finalChunks)
 
       } catch (error: any) {
         console.error(`[MarkdownAsIsProcessor] Metadata enrichment failed: ${error.message}`)
@@ -291,32 +291,13 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
       // Checkpoint 4: Save final chunks with embeddings
       await this.saveStageResult('chunks', finalChunks, { final: true })
 
-      // Checkpoint 5: Save manifest.json
-      const manifestData = {
-        document_id: this.job.document_id,
-        processing_mode: 'local',
-        source_type: 'markdown_asis',
-        files: {
-          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
-          'metadata.json': { size: markdown.length, type: 'final' },
-          'manifest.json': { size: 0, type: 'final' }
-        },
-        chunk_count: finalChunks.length,
-        word_count: markdown.split(/\s+/).length,
-        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
-        markdown_hash: hashMarkdown(markdown),
-        chunker_strategy: chunkerStrategy
-      }
-      await this.saveStageResult('manifest', manifestData, { final: true })
-
-      await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
-
       // Extract basic metadata
       const wordCount = markdown.split(/\s+/).length
       const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
       const outline = headingMatches.slice(0, 10).map(h => h.replace(/^#+\s+/, ''))
 
-      return {
+      // Build ProcessResult for return
+      const result: ProcessResult = {
         markdown,
         chunks: finalChunks,
         wordCount,
@@ -333,6 +314,35 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
           }
         }
       }
+
+      // Checkpoint 4.5: Save document-level metadata to metadata.json
+      const metadataExport = this.buildMetadataExport(result, {
+        page_count: null,  // Markdown doesn't have pages
+        language: 'en'
+      })
+      await this.saveStageResult('metadata', metadataExport, { final: true })
+
+      // Checkpoint 5: Save manifest.json
+      const manifestData = {
+        document_id: this.job.document_id,
+        processing_mode: 'local',
+        source_type: 'markdown_asis',
+        files: {
+          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+          'metadata.json': { size: JSON.stringify(metadataExport).length, type: 'final' },
+          'manifest.json': { size: 0, type: 'final' }
+        },
+        chunk_count: finalChunks.length,
+        word_count: markdown.split(/\s+/).length,
+        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+        markdown_hash: hashMarkdown(markdown),
+        chunker_strategy: chunkerStrategy
+      }
+      await this.saveStageResult('manifest', manifestData, { final: true })
+
+      await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
+
+      return result
     } finally {
       // Always stop heartbeat
       this.stopHeartbeat()
@@ -544,8 +554,8 @@ export class MarkdownCleanProcessor extends SourceProcessor {
         console.log(`[MarkdownCleanProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(70, 'metadata', 'complete', 'Metadata enrichment done')
 
-        // Checkpoint 3: Save enriched chunks
-        await this.saveStageResult('metadata', finalChunks, { final: true })
+        // Checkpoint 3: Save enriched chunks (no final flag - not final output)
+        await this.saveStageResult('metadata', finalChunks)
 
       } catch (error: any) {
         console.error(`[MarkdownCleanProcessor] Metadata enrichment failed: ${error.message}`)
@@ -609,27 +619,6 @@ export class MarkdownCleanProcessor extends SourceProcessor {
       // Checkpoint 4: Save final chunks
       await this.saveStageResult('chunks', finalChunks, { final: true })
 
-      // Checkpoint 5: Save manifest
-      const manifestData = {
-        document_id: this.job.document_id,
-        processing_mode: 'local',
-        source_type: 'markdown_clean',
-        files: {
-          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
-          'metadata.json': { size: markdown.length, type: 'final' },
-          'manifest.json': { size: 0, type: 'final' }
-        },
-        chunk_count: finalChunks.length,
-        word_count: markdown.split(/\s+/).length,
-        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
-        markdown_hash: hashMarkdown(markdown),
-        chunker_strategy: chunkerStrategy,
-        was_cleaned: true
-      }
-      await this.saveStageResult('manifest', manifestData, { final: true })
-
-      await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
-
       // Extract enhanced metadata
       const wordCount = markdown.split(/\s+/).length
       const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
@@ -652,7 +641,8 @@ export class MarkdownCleanProcessor extends SourceProcessor {
 
       const avgImportance = finalChunks.reduce((sum, chunk) => sum + (chunk.importance_score || 0), 0) / finalChunks.length
 
-      return {
+      // Build ProcessResult for return
+      const result: ProcessResult = {
         markdown,
         chunks: finalChunks,
         wordCount,
@@ -672,6 +662,36 @@ export class MarkdownCleanProcessor extends SourceProcessor {
           }
         }
       }
+
+      // Checkpoint 4.5: Save document-level metadata to metadata.json
+      const metadataExport = this.buildMetadataExport(result, {
+        page_count: null,  // Markdown doesn't have pages
+        language: 'en'
+      })
+      await this.saveStageResult('metadata', metadataExport, { final: true })
+
+      // Checkpoint 5: Save manifest
+      const manifestData = {
+        document_id: this.job.document_id,
+        processing_mode: 'local',
+        source_type: 'markdown_clean',
+        files: {
+          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+          'metadata.json': { size: JSON.stringify(metadataExport).length, type: 'final' },
+          'manifest.json': { size: 0, type: 'final' }
+        },
+        chunk_count: finalChunks.length,
+        word_count: markdown.split(/\s+/).length,
+        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+        markdown_hash: hashMarkdown(markdown),
+        chunker_strategy: chunkerStrategy,
+        was_cleaned: true
+      }
+      await this.saveStageResult('manifest', manifestData, { final: true })
+
+      await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
+
+      return result
     } finally {
       // Always stop heartbeat
       this.stopHeartbeat()

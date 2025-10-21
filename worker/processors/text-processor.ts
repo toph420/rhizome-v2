@@ -209,8 +209,8 @@ export class TextProcessor extends SourceProcessor {
         console.log(`[TextProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(70, 'metadata', 'complete', 'Metadata enrichment done')
 
-        // Checkpoint 3: Save enriched chunks
-        await this.saveStageResult('metadata', finalChunks, { final: true })
+        // Checkpoint 3: Save enriched chunks (no final flag - not final output)
+        await this.saveStageResult('metadata', finalChunks)
 
       } catch (error: any) {
         console.error(`[TextProcessor] Metadata enrichment failed: ${error.message}`)
@@ -274,28 +274,6 @@ export class TextProcessor extends SourceProcessor {
       // Checkpoint 4: Save final chunks
       await this.saveStageResult('chunks', finalChunks, { final: true })
 
-      // Checkpoint 5: Save manifest
-      const manifestData = {
-        document_id: this.job.document_id,
-        processing_mode: 'local',
-        source_type: 'txt',
-        files: {
-          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
-          'metadata.json': { size: markdown.length, type: 'final' },
-          'manifest.json': { size: 0, type: 'final' }
-        },
-        chunk_count: finalChunks.length,
-        word_count: markdown.split(/\s+/).length,
-        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
-        markdown_hash: hashMarkdown(markdown),
-        chunker_strategy: chunkerStrategy,
-        converted_from: 'plain_text',
-        original_size_kb: textKB
-      }
-      await this.saveStageResult('manifest', manifestData, { final: true })
-
-      await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
-
       // Extract metadata
       const wordCount = markdown.split(/\s+/).length
       const headingMatches = markdown.match(/^#{1,6}\s+.+$/gm) || []
@@ -316,7 +294,8 @@ export class TextProcessor extends SourceProcessor {
         .slice(0, 5)
         .map(([theme]) => theme)
 
-      return {
+      // Build ProcessResult for return
+      const result: ProcessResult = {
         markdown,
         chunks: finalChunks,
         wordCount,
@@ -336,6 +315,37 @@ export class TextProcessor extends SourceProcessor {
           }
         }
       }
+
+      // Checkpoint 4.5: Save document-level metadata to metadata.json
+      const metadataExport = this.buildMetadataExport(result, {
+        page_count: null,  // Text files don't have pages
+        language: 'en'
+      })
+      await this.saveStageResult('metadata', metadataExport, { final: true })
+
+      // Checkpoint 5: Save manifest
+      const manifestData = {
+        document_id: this.job.document_id,
+        processing_mode: 'local',
+        source_type: 'txt',
+        files: {
+          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+          'metadata.json': { size: JSON.stringify(metadataExport).length, type: 'final' },
+          'manifest.json': { size: 0, type: 'final' }
+        },
+        chunk_count: finalChunks.length,
+        word_count: markdown.split(/\s+/).length,
+        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+        markdown_hash: hashMarkdown(markdown),
+        chunker_strategy: chunkerStrategy,
+        converted_from: 'plain_text',
+        original_size_kb: textKB
+      }
+      await this.saveStageResult('manifest', manifestData, { final: true })
+
+      await this.updateProgress(100, 'finalize', 'complete', 'Processing complete')
+
+      return result
     } finally {
       // Always stop heartbeat
       this.stopHeartbeat()

@@ -249,8 +249,8 @@ ${article.textContent}`
         console.log(`[WebProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
         await this.updateProgress(75, 'metadata', 'complete', 'Metadata enrichment done')
 
-        // Checkpoint 3: Save enriched chunks
-        await this.saveStageResult('metadata', finalChunks, { final: true })
+        // Checkpoint 3: Save enriched chunks (no final flag - not final output)
+        await this.saveStageResult('metadata', finalChunks)
 
       } catch (error: any) {
         console.error(`[WebProcessor] Metadata enrichment failed: ${error.message}`)
@@ -314,27 +314,6 @@ ${article.textContent}`
       // Checkpoint 4: Save final chunks
       await this.saveStageResult('chunks', finalChunks, { final: true })
 
-      // Checkpoint 5: Save manifest
-      const manifestData = {
-        document_id: this.job.document_id,
-        processing_mode: 'local',
-        source_type: 'web_url',
-        source_url: sourceUrl,
-        files: {
-          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
-          'metadata.json': { size: markdown.length, type: 'final' },
-          'manifest.json': { size: 0, type: 'final' }
-        },
-        chunk_count: finalChunks.length,
-        word_count: markdown.split(/\s+/).length,
-        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
-        markdown_hash: hashMarkdown(markdown),
-        chunker_strategy: chunkerStrategy
-      }
-      await this.saveStageResult('manifest', manifestData, { final: true })
-
-      await this.updateProgress(100, 'complete', 'success', 'Web article processed successfully')
-
       // Collect document themes
       const themeFrequency = new Map<string, number>()
       finalChunks.forEach(chunk => {
@@ -350,27 +329,55 @@ ${article.textContent}`
         .slice(0, 5)
         .map(([theme]) => theme)
 
-      // Prepare metadata
-      const metadata = {
-        title: article.title,
-        author: article.byline || undefined,
-        site_name: article.siteName || undefined,
-        language: article.lang || 'en',
-        excerpt: article.excerpt || undefined,
-        source_url: sourceUrl,
-        chunk_count: finalChunks.length,
-        word_count: markdown.split(/\s+/).length,
-        extra: {
-          document_themes: documentThemes.length > 0 ? documentThemes : undefined,
-          chunker_strategy: chunkerStrategy
+      // Build ProcessResult for return
+      const result: ProcessResult = {
+        markdown,
+        chunks: finalChunks,
+        metadata: {
+          title: article.title,
+          author: article.byline || undefined,
+          site_name: article.siteName || undefined,
+          language: article.lang || 'en',
+          excerpt: article.excerpt || undefined,
+          source_url: sourceUrl,
+          chunk_count: finalChunks.length,
+          word_count: markdown.split(/\s+/).length,
+          extra: {
+            document_themes: documentThemes.length > 0 ? documentThemes : undefined,
+            chunker_strategy: chunkerStrategy
+          }
         }
       }
 
-      return {
-        markdown,
-        chunks: finalChunks,
-        metadata
+      // Checkpoint 4.5: Save document-level metadata to metadata.json
+      const metadataExport = this.buildMetadataExport(result, {
+        page_count: null,  // Web articles don't have pages
+        language: article.lang || 'en'
+      })
+      await this.saveStageResult('metadata', metadataExport, { final: true })
+
+      // Checkpoint 5: Save manifest
+      const manifestData = {
+        document_id: this.job.document_id,
+        processing_mode: 'local',
+        source_type: 'web_url',
+        source_url: sourceUrl,
+        files: {
+          'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
+          'metadata.json': { size: JSON.stringify(metadataExport).length, type: 'final' },
+          'manifest.json': { size: 0, type: 'final' }
+        },
+        chunk_count: finalChunks.length,
+        word_count: markdown.split(/\s+/).length,
+        processing_time: Date.now() - (this.job.created_at ? new Date(this.job.created_at).getTime() : Date.now()),
+        markdown_hash: hashMarkdown(markdown),
+        chunker_strategy: chunkerStrategy
       }
+      await this.saveStageResult('manifest', manifestData, { final: true })
+
+      await this.updateProgress(100, 'complete', 'success', 'Web article processed successfully')
+
+      return result
     } catch (error: any) {
       // Log error details for debugging
       console.error('❌ Web processing failed:', {

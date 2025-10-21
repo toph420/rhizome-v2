@@ -493,9 +493,6 @@ export class PDFProcessor extends SourceProcessor {
       console.log(`[PDFProcessor] Local metadata enrichment complete: ${finalChunks.length} chunks enriched`)
       await this.updateProgress(90, 'metadata', 'complete', 'Metadata enrichment done')
 
-      // Checkpoint 4: Save enriched chunks with metadata (final version before embeddings)
-      await this.saveStageResult('metadata', finalChunks, { final: true })
-
     } catch (error: any) {
       console.error(`[PDFProcessor] Metadata enrichment failed: ${error.message}`)
       console.warn('[PDFProcessor] Continuing with default metadata')
@@ -613,6 +610,25 @@ export class PDFProcessor extends SourceProcessor {
     await this.saveStageResult('markdown', { content: markdown }, { final: true })
     await this.saveStageResult('chunks', finalChunks, { final: true })
 
+    // Build ProcessResult for return
+    const result: ProcessResult = {
+      markdown,
+      chunks: finalChunks,
+      metadata: {
+        sourceUrl: this.job.metadata?.source_url
+        // Phase 2: Structure info is stored in job.metadata.cached_extraction (local mode)
+        // Phase 4: Matching stats stored in job.metadata.matchingWarnings (local mode)
+      },
+      wordCount: markdown.split(/\s+/).length
+    }
+
+    // Checkpoint 5.5: Save document-level metadata to metadata.json
+    const metadataExport = this.buildMetadataExport(result, {
+      page_count: extractionResult.structure?.total_pages || null,
+      language: 'en'  // Could enhance with language detection
+    })
+    await this.saveStageResult('metadata', metadataExport, { final: true })
+
     // Checkpoint 6: Save manifest.json with processing metadata
     const manifestData = {
       document_id: this.job.document_id,
@@ -620,7 +636,7 @@ export class PDFProcessor extends SourceProcessor {
       source_type: 'pdf',
       files: {
         'chunks.json': { size: JSON.stringify(finalChunks).length, type: 'final' },
-        'metadata.json': { size: JSON.stringify(markdown).length, type: 'final' },
+        'metadata.json': { size: JSON.stringify(metadataExport).length, type: 'final' },
         'manifest.json': { size: 0, type: 'final' },
         ...(isLocalMode && extractionResult.chunks ? {
           'cached_chunks.json': { size: JSON.stringify(extractionResult.chunks).length, type: 'final' }
@@ -641,16 +657,7 @@ export class PDFProcessor extends SourceProcessor {
     // In cloud mode, chunks have AI-extracted metadata only
     // Both modes produce ProcessedChunk[] with compatible structure
 
-    return {
-      markdown,
-      chunks: finalChunks,
-      metadata: {
-        sourceUrl: this.job.metadata?.source_url
-        // Phase 2: Structure info is stored in job.metadata.cached_extraction (local mode)
-        // Phase 4: Matching stats stored in job.metadata.matchingWarnings (local mode)
-      },
-      wordCount: markdown.split(/\s+/).length
-    }
+    return result
   } finally {
     // Always stop heartbeat when processing ends (success or error)
     this.stopHeartbeat()
