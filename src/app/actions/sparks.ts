@@ -290,7 +290,8 @@ export async function deleteSpark(sparkId: string) {
   const ops = new SparkOperations(ecs, user.id)
 
   // 1. Delete from Storage
-  const storagePath = `${user.id}/sparks/${sparkId}/content.json`
+  // Flat structure: files directly in sparks/ folder
+  const storagePath = `${user.id}/sparks/${sparkId}`
   try {
     await supabase.storage.from('documents').remove([storagePath])
   } catch (error) {
