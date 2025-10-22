@@ -22,6 +22,9 @@ Expected output:
 import asyncio
 import json
 import sys
+import argparse
+import importlib.util
+from pathlib import Path
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
@@ -65,29 +68,43 @@ class ChunkMetadata(BaseModel):
         description="Primary domain or subject area (e.g., 'technology', 'philosophy', 'fiction')"
     )
 
-# Initialize PydanticAI Agent with Ollama model
-# CRITICAL: Use OpenAI-compatible provider format with provider='ollama'
-# Pattern from: https://ai.pydantic.dev/models/openai/#ollama
+def load_prompt_version(version_id: str) -> str:
+    """Load prompt from version file."""
+    # Construct path relative to worker/ directory
+    worker_dir = Path(__file__).parent.parent
+    prompt_path = worker_dir / 'lib' / 'prompts' / 'metadata-extraction' / f'{version_id}.py'
+
+    if not prompt_path.exists():
+        raise ValueError(f'Prompt version not found: {version_id} at {prompt_path}')
+
+    # Load module dynamically
+    spec = importlib.util.spec_from_file_location("prompt_module", prompt_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f'Failed to load prompt module: {version_id}')
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # Call get_prompt() function
+    if not hasattr(module, 'get_prompt'):
+        raise ValueError(f'Prompt module missing get_prompt() function: {version_id}')
+
+    return module.get_prompt()
+
+# Initialize Ollama model (agent created in main() with dynamic prompt)
+# CRITICAL: Use OllamaProvider for proper configuration
+import os
+from pydantic_ai.providers.ollama import OllamaProvider
+
+ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
+
+# Create OllamaProvider with base URL
+ollama_provider = OllamaProvider(base_url=ollama_base_url)
+
+# Use OpenAIChatModel with Ollama provider
 ollama_model = OpenAIChatModel(
-    model_name='qwen2.5:32b',  # Use Ollama's model name format (with colons)
-    provider='ollama'  # PydanticAI knows about Ollama provider (connects to http://localhost:11434/v1)
-)
-
-agent = Agent(
-    model=ollama_model,  # Pass OpenAIChatModel instance
-    output_type=ChunkMetadata,  # Correct parameter name in PydanticAI
-    retries=3,  # Auto-retry if validation fails
-    system_prompt="""You are a metadata extraction expert. Extract structured information from text chunks.
-
-For each chunk, identify:
-- **themes**: Main topics (1-5 items, e.g., ["machine learning", "AI ethics"])
-- **concepts**: Key concepts with importance (1-10 items, e.g., [{"text": "neural networks", "importance": 0.9}])
-- **importance**: Overall significance (0.0 to 1.0)
-- **summary**: Brief overview (20-200 chars)
-- **emotional**: Emotional tone (e.g., {"polarity": 0.5, "primaryEmotion": "curious", "intensity": 0.7})
-- **domain**: Subject area (e.g., "technology", "philosophy")
-
-Be precise and concise. Follow the schema exactly."""
+    model_name='qwen2.5:32b',
+    provider=ollama_provider
 )
 
 def get_fallback_metadata() -> Dict:
@@ -105,7 +122,7 @@ def get_fallback_metadata() -> Dict:
         'domain': 'general'
     }
 
-async def process_chunks():
+async def process_chunks(agent: Agent):
     """Process chunks from stdin and write metadata to stdout."""
 
     # Read chunks from stdin, one JSON per line
@@ -165,7 +182,30 @@ async def process_chunks():
 
 def main():
     """Entry point for the script."""
-    asyncio.run(process_chunks())
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Extract metadata with PydanticAI')
+    parser.add_argument('--prompt-version', default='v1-baseline',
+                       help='Prompt version to use (e.g., v1-baseline, v2-philosophy)')
+    args = parser.parse_args()
+
+    # Load prompt version
+    try:
+        system_prompt = load_prompt_version(args.prompt_version)
+        print(f'[Metadata] Using prompt version: {args.prompt_version}', file=sys.stderr)
+    except Exception as e:
+        print(f'[Metadata] ERROR loading prompt: {e}', file=sys.stderr)
+        sys.exit(1)
+
+    # Create agent with dynamic prompt
+    agent = Agent(
+        model=ollama_model,
+        output_type=ChunkMetadata,
+        retries=3,
+        system_prompt=system_prompt  # Now loaded from file
+    )
+
+    # Process chunks with the configured agent
+    asyncio.run(process_chunks(agent))
 
 if __name__ == '__main__':
     main()
