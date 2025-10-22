@@ -233,12 +233,9 @@ Configure neobrutalism component registry, install base components, verify `neob
     "lib": "@/lib",
     "hooks": "@/hooks"
   },
-  "registries": [
-    {
-      "name": "@neobrutalism",
-      "url": "https://neobrutalism.dev/r"
-    }
-  ]
+  "registries": {
+    "@neobrutalism": "https://v3.neobrutalism.dev/r/{name}.json"
+  }
 }
 ```
 
