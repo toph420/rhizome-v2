@@ -711,12 +711,12 @@ For detailed information, see:
 - `docs/UI_PATTERNS.md` - Look at for component layout decisions
 - `docs/STORAGE_PATTERNS.md` - Hybrid storage details
 - `docs/ECS_IMPLEMENTATION.md` - Entity-Component-System guide, Check when creating/querying entities
-- `docs/lib/REACT_GUIDELINES.md` - Consult for ALL React/Next.js decisions
+- `docs/rEACT_GUIDELINES.md` - Consult for ALL React/Next.js decisions
 
 
 ### When to Check REACT_GUIDELINES.md
 
-**ALWAYS consult `docs/lib/REACT_GUIDELINES.md` when:**
+**ALWAYS consult `docs/rEACT_GUIDELINES.md` when:**
 - Creating new components (Server vs Client decision)
 - Adding interactivity (needs 'use client'?)
 - Fetching data (Server Component vs Server Action)
@@ -727,22 +727,22 @@ For detailed information, see:
 
 **Quick Decision References:**
 ```
-Need onClick/onChange? → Check `docs/lib/REACT_GUIDELINES.md` Client Components section
-Need to fetch data? → Check `docs/lib/REACT_GUIDELINES.md` Server Components section  
-Need to save data? → Check `docs/lib/REACT_GUIDELINES.md` Server Actions section
+Need onClick/onChange? → Check `docs/rEACT_GUIDELINES.md` Client Components section
+Need to fetch data? → Check `docs/rEACT_GUIDELINES.md` Server Components section  
+Need to save data? → Check `docs/rEACT_GUIDELINES.md` Server Actions section
 Need a modal? → NO! Check `docs/UI_PATTERNS.md` for alternatives
 ```
 
 ### Document Priority Order
 
-1. **For React/Component questions**: `docs/lib/REACT_GUIDELINES.md` → `docs/UI_PATTERNS.md`
-2. **For data operations**: `docs/ECS_IMPLEMENTATION.md` → `docs/lib/REACT_GUIDELINES.md` (Server Actions)
+1. **For React/Component questions**: `docs/rEACT_GUIDELINES.md` → `docs/UI_PATTERNS.md`
+2. **For data operations**: `docs/ECS_IMPLEMENTATION.md` → `docs/rEACT_GUIDELINES.md` (Server Actions)
 3. **For auth issues**: `docs/SUPABASE_AUTH_RULES.md`
 4. **For architecture questions**: `docs/ARCHITECTURE.md` → `/CLAUDE.md`
 
 ## Critical Rule
 If there's ANY doubt about Server vs Client Components, Server Actions, or React patterns:
-**STOP and read `docs/lib/REACT_GUIDELINES.md` first**
+**STOP and read `docs/rEACT_GUIDELINES.md` first**
 
 
 ## Current Implementation Status

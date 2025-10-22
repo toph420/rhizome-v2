@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, Settings, Library, Brain, Palette, Database } from 'lucide-react'
+import { Menu, Settings, Library, Brain, Palette, Database, FlaskConical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +22,11 @@ const navigation = [
     href: '/study',
     icon: Brain,
     disabled: true,
+  },
+  {
+    name: 'Experiments',
+    href: '/experiments/prompts',
+    icon: FlaskConical,
   },
   {
     name: 'Design Guide',

@@ -8,6 +8,7 @@ import {
   Settings,
   Brain,
   Palette,
+  FlaskConical,
 } from 'lucide-react'
 import {
   Sheet,
@@ -32,6 +33,11 @@ const navigation = [
     href: '/study',
     icon: Brain,
     disabled: true,
+  },
+  {
+    name: 'Experiments',
+    href: '/experiments/prompts',
+    icon: FlaskConical,
   },
   {
     name: 'Design Guide',

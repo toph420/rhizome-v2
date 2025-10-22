@@ -139,5 +139,5 @@ export async function saveData(input: Input) {
 
 ## Related Documentation
 
-- `docs/lib/REACT_GUIDELINES.md` - Full React 19 patterns
+- `docs/rEACT_GUIDELINES.md` - Full React 19 patterns
 - `docs/ARCHITECTURE.md` - Complete system architecture

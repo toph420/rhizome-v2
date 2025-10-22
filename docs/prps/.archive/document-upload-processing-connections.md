@@ -985,7 +985,7 @@ export async function retryProcessing(documentId: string): Promise<{
 **References:**
 - Supabase client: `/src/lib/supabase/server.ts`
 - Auth helper: `/src/lib/auth/index.ts`
-- Pattern: Server Actions from `/docs/lib/REACT_GUIDELINES.md`
+- Pattern: Server Actions from `/docs/rEACT_GUIDELINES.md`
 
 ---
 
@@ -1069,7 +1069,7 @@ npx supabase storage ls documents
 **Documentation:**
 - Architecture: `/docs/ARCHITECTURE.md`
 - UI Patterns: `/docs/UI_PATTERNS.md` (ProcessingDock lines 606-737)
-- React Guidelines: `/docs/lib/REACT_GUIDELINES.md`
+- React Guidelines: `/docs/rEACT_GUIDELINES.md`
 - Storage Patterns: `/docs/STORAGE_PATTERNS.md`
 - ECS Guide: `/docs/ECS_IMPLEMENTATION.md`
 

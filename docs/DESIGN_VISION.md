@@ -371,7 +371,7 @@ We maintain **TWO color palettes** for experimentation and flexibility:
   - No modals philosophy (persistent UI only)
   - Docks, panels, overlays
 
-- **React Guidelines**: `docs/lib/REACT_GUIDELINES.md`
+- **React Guidelines**: `docs/rEACT_GUIDELINES.md`
   - Server Components by default
   - Client component patterns
 

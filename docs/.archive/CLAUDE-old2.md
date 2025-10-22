@@ -1365,7 +1365,7 @@ const { data: crossDoc } = await supabase
 - **Code Examples**: `docs/CODE_EXAMPLES.md` - Practical implementation patterns
 
 ### Development Guides
-- **React Guidelines**: `docs/lib/REACT_GUIDELINES.md` - Server/Client components, patterns
+- **React Guidelines**: `docs/rEACT_GUIDELINES.md` - Server/Client components, patterns
 - **UI Patterns**: `docs/UI_PATTERNS.md` - No modals, persistent UI patterns
 - **ECS Implementation**: `docs/ECS_IMPLEMENTATION.md` - Entity-Component-System guide
 - **Storage Patterns**: `docs/STORAGE_PATTERNS.md` - Hybrid storage strategy

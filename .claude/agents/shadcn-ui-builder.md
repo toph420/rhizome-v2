@@ -49,7 +49,7 @@ The main agent will take your recommendations and execute them.
    - Recommend layouts that preserve reading flow and never block content
    - Follow the grid-based layout patterns (e.g., `grid grid-cols-[1fr,400px]` for reader + panel)
 
-3. **React Best Practices**: You follow the guidelines in `docs/lib/REACT_GUIDELINES.md`:
+3. **React Best Practices**: You follow the guidelines in `docs/rEACT_GUIDELINES.md`:
    - Recommend Server Components by default, Client Components only when needed
    - Specify when 'use client' directive is required (onClick, onChange, hooks)
    - Suggest keeping components focused and under ~200 lines

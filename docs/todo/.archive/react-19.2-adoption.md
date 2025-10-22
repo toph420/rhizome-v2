@@ -550,7 +550,7 @@ useEffect(() => {
 
 After adoption, update these docs:
 
-1. **`docs/lib/REACT_GUIDELINES.md`**
+1. **`docs/rEACT_GUIDELINES.md`**
    - Add `useEffectEvent` pattern
    - Add `<Activity />` usage guidelines
 

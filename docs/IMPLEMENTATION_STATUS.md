@@ -303,7 +303,7 @@ graph LR
 
 - **Project Vision**: `docs/APP_VISION.md`
 - **Architecture**: `docs/ARCHITECTURE.md`
-- **React Patterns**: `docs/lib/REACT_GUIDELINES.md`
+- **React Patterns**: `docs/rEACT_GUIDELINES.md`
 - **UI Patterns**: `docs/UI_PATTERNS.md`
 - **Worker Module**: `worker/README.md`
 

@@ -199,7 +199,7 @@ Build a document reader with inline annotation system and live weight tuning int
   why: UI architecture patterns (no-modal, panel layouts)
   critical: Right Panel (lines 749-810), Quick Capture (lines 822-942), Annotation Layer (lines 1228-1816)
 
-- file: /Users/topher/Code/rhizome-v2/docs/lib/REACT_GUIDELINES.md
+- file: /Users/topher/Code/rhizome-v2/docs/rEACT_GUIDELINES.md
   why: Server vs Client Component rules, Server Action patterns
   critical: Server Component (lines 12-63), Server Action (lines 127-201), Storage rules (lines 204-233)
 

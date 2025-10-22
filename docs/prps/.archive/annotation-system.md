@@ -863,6 +863,6 @@ npm run test:e2e -- annotation-flow.spec.ts
 - **Task Breakdown**: `docs/tasks/annotation-system.md` - 30 detailed implementation tasks with dependencies, acceptance criteria, and validation steps
 - **Implementation Plan**: `docs/todo/complete-annotation-system.md` - 30-page detailed plan with code examples
 - **ECS Guide**: `docs/ECS_IMPLEMENTATION.md` - Entity-Component-System patterns
-- **React Guidelines**: `docs/lib/REACT_GUIDELINES.md` - Server/Client component patterns
+- **React Guidelines**: `docs/rEACT_GUIDELINES.md` - Server/Client component patterns
 - **UI Patterns**: `docs/UI_PATTERNS.md` - No modals, persistent UI philosophy
 - **Testing Strategy**: `docs/testing/TESTING_README.md` - Test categorization and patterns
