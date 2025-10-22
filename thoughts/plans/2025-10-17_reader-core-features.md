@@ -1930,7 +1930,7 @@ return (
     <BottomPanel documentId={documentId} />
 
     {/* ... modals */}
-  </div>
+  </div>  
 )
 ```
 
