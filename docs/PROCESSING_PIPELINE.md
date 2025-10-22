@@ -1,8 +1,9 @@
 # Rhizome V2 - Document Processing Pipeline
 
-**Last Updated**: 2025-10-15
+**Last Updated**: 2025-10-22
 **Pipeline Version**: Chonkie Integration (Unified Pipeline)
 **Status**: ✅ Fully Operational
+**Recent Improvements**: Worker module refactored (Oct 2025) - eliminated 1,265 lines of duplication across handlers and processors
 
 ---
 

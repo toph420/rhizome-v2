@@ -26,6 +26,29 @@ Each component has exactly one responsibility:
 - **Engines**: Detect connections between chunks
 - **Library**: Utility functions and shared services
 
+### Recent Improvements (October 2025)
+
+The worker module was recently refactored to eliminate **1,265 lines of duplicate code** across 3 phases:
+
+**Phase 1 - Handler Consolidation** (-265 lines):
+- Created `HandlerJobManager` utility class for centralized job state management
+- Standardized progress tracking, completion, and error handling across all handlers
+- Eliminated duplicate `updateProgress()`, `markComplete()`, and `markFailed()` implementations
+
+**Phase 2 & 3 - Processor Consolidation** (-725 lines):
+- Extended `SourceProcessor` base class with shared pipeline methods:
+  - `enrichMetadataBatch()`: Metadata extraction with PydanticAI + Ollama
+  - `generateChunkEmbeddings()`: Local embeddings with Transformers.js + Gemini fallback
+- Migrated all 7 document processors (PDF, EPUB, YouTube, Web, Text, Paste, Markdown)
+- Eliminated 990 lines of duplicate metadata enrichment and embeddings generation code
+
+**Impact**:
+- **7× Easier Maintenance**: Update pipeline logic in 1 place instead of 7
+- **Consistent Behavior**: All processors use identical enrichment and embedding strategies
+- **Better Extensibility**: Adding new processors requires <50 lines of format-specific code
+
+📖 See `thoughts/plans/complete-worker-refactoring-summary.md` for complete details.
+
 ## Directory Structure
 
 ```
@@ -153,39 +176,61 @@ The `processDocumentHandler` orchestrates the complete document processing flow:
 
 ```typescript
 // handlers/process-document.ts
+import { HandlerJobManager } from '../lib/handler-job-manager'
+
 async function processDocumentHandler(supabase, job) {
+  // NEW: Use HandlerJobManager for job state management
+  const jobManager = new HandlerJobManager(supabase, job.id)
   const { documentId, sourceType } = job.input_data
 
-  // Stage 1: Route to appropriate processor
-  const processor = ProcessorRouter.getProcessor(sourceType)
+  try {
+    // Stage 1: Route to appropriate processor
+    await jobManager.updateProgress(10, 'routing', 'Selecting processor')
+    const processor = ProcessorRouter.getProcessor(sourceType)
 
-  // Stage 2: Processor transforms data (NO I/O)
-  const result = await processor.process()
-  // Returns: { markdown, chunks, metadata, wordCount, outline }
+    // Stage 2: Processor transforms data (NO I/O)
+    await jobManager.updateProgress(20, 'processing', 'Running processor')
+    const result = await processor.process()
+    // Returns: { markdown, chunks, metadata, wordCount, outline }
 
-  // Stage 3: Handler performs all I/O operations
-  await storage.upload(`${documentId}/content.md`, result.markdown)
-  await supabase.from('documents').update({
-    title: result.metadata.title,
-    word_count: result.wordCount,
-    markdown_available: true
-  })
+    // Stage 3: Handler performs all I/O operations
+    await jobManager.updateProgress(60, 'storage', 'Saving markdown')
+    await storage.upload(`${documentId}/content.md`, result.markdown)
+    await supabase.from('documents').update({
+      title: result.metadata.title,
+      word_count: result.wordCount,
+      markdown_available: true
+    })
 
-  // Stage 4: Generate embeddings (local or cloud)
-  const chunksWithEmbeddings = await embeddings.generate(result.chunks)
+    // Stage 4: Generate embeddings (local or cloud)
+    await jobManager.updateProgress(70, 'embeddings', 'Generating embeddings')
+    const chunksWithEmbeddings = await embeddings.generate(result.chunks)
 
-  // Stage 5: Save chunks to database
-  await supabase.from('chunks').insert(chunksWithEmbeddings)
-  await supabase.from('documents').update({ embeddings_available: true })
+    // Stage 5: Save chunks to database
+    await jobManager.updateProgress(80, 'database', 'Saving chunks')
+    await supabase.from('chunks').insert(chunksWithEmbeddings)
+    await supabase.from('documents').update({ embeddings_available: true })
 
-  // Stage 6: Run 3-engine collision detection
-  await orchestrator.processDocument(documentId, {
-    enabledEngines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge']
-  })
+    // Stage 6: Run 3-engine collision detection
+    await jobManager.updateProgress(90, 'connections', 'Detecting connections')
+    await orchestrator.processDocument(documentId, {
+      enabledEngines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge']
+    })
+
+    // NEW: Mark job complete with HandlerJobManager
+    await jobManager.markComplete({
+      documentId,
+      chunkCount: result.chunks.length,
+      wordCount: result.wordCount
+    })
+  } catch (error) {
+    // NEW: Automatic error classification and retry logic
+    await jobManager.markFailed(error)
+  }
 }
 ```
 
-**Progress Tracking**: Each stage reports progress to UI via job.progress updates (0-100%)
+**Progress Tracking**: HandlerJobManager provides `updateProgress(percent, stage, details)` for consistent UI updates across all handlers
 
 ### 4. Processor Pattern
 
@@ -195,25 +240,36 @@ All processors extend `SourceProcessor` base class and ONLY transform data:
 // processors/pdf-processor.ts
 export class PDFProcessor extends SourceProcessor {
   async process(): Promise<ProcessResult> {
-    // Download from Storage
+    // 1. Download from Storage
     const blob = await this.downloadBlob()
 
-    // Extract via Docling (local) or Gemini (cloud)
+    // 2. Extract via Docling (local) or Gemini (cloud)
     const extracted = await this.extractPDF(blob)
 
-    // Convert to clean markdown
+    // 3. Convert to clean markdown
     const markdown = await this.toMarkdown(extracted)
 
-    // Create semantic chunks (via Chonkie)
-    const chunks = await this.createChunks(markdown)
+    // 4. Create semantic chunks (via Chonkie)
+    let chunks = await this.createChunks(markdown)
 
-    // Extract metadata (title, author, dates, etc.)
+    // NEW: 5. Enrich with metadata using shared base class method
+    chunks = await this.enrichMetadataBatch(chunks, 77, 90, {
+      onError: 'mark_review'  // Mark document for review on error
+    })
+
+    // NEW: 6. Generate embeddings using shared base class method
+    chunks = await this.generateChunkEmbeddings(chunks, 90, 95, {
+      enhanceWithMetadata: true,  // PDF has structural metadata (headings, pages)
+      onError: 'mark_review'
+    })
+
+    // 7. Extract document-level metadata (title, author, dates, etc.)
     const metadata = await this.extractMetadata(markdown, extracted)
 
     // Return transformed data (NO storage/DB operations)
     return {
       markdown,
-      chunks,      // ProcessedChunk[] with text, metadata, order
+      chunks,      // ProcessedChunk[] with embeddings and enriched metadata
       metadata,    // DocumentMetadata
       wordCount: this.countWords(markdown),
       outline: this.generateOutline(markdown)  // Optional
