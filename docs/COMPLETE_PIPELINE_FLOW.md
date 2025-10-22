@@ -1,8 +1,9 @@
 # Complete Pipeline Flow: Upload to Connections
 
-**Last Updated**: 2025-10-15
+**Last Updated**: 2025-10-22
 **Pipeline Version**: Unified Chonkie Pipeline (10 stages)
 **Status**: Current implementation
+**Recent Improvements**: Worker refactored (Oct 2025) - Stages 8 & 9 now use shared base class methods
 
 This document traces the complete flow from "user drops a PDF" to "connections surface in the reader."
 
@@ -414,6 +415,26 @@ for (const chonkieChunk of chonkieChunks) {
 ### Purpose
 Extract themes, concepts, emotional tone, importance scores.
 
+### Implementation (Oct 2025 Refactoring)
+**All 7 processors** (PDF, EPUB, YouTube, Web, Text, Paste, Markdown) now use the shared base class method:
+
+```typescript
+// processors/pdf-processor.ts (and all other processors)
+export class PDFProcessor extends SourceProcessor {
+  async process(): Promise<ProcessResult> {
+    // ... earlier stages ...
+
+    // Stage 8: Use shared method from base class
+    chunks = await this.enrichMetadataBatch(chunks, 77, 90, {
+      batchSize: 10,
+      onError: 'mark_review'
+    })
+  }
+}
+```
+
+This replaced **480 lines of duplicate code** across all processors with a single shared implementation.
+
 ### Processing (LOCAL Mode - PydanticAI + Ollama)
 ```typescript
 // worker/lib/chunking/pydantic-metadata.ts
@@ -461,6 +482,25 @@ const enrichedChunks = await executePythonScript(pythonScript, {
 
 ## Stage 9: Embeddings Generation (90-95%)
 
+### Implementation (Oct 2025 Refactoring)
+**All 7 processors** now use the shared base class method with configurable metadata enhancement:
+
+```typescript
+// processors/pdf-processor.ts (PDF & EPUB have structural metadata)
+chunks = await this.generateChunkEmbeddings(chunks, 90, 95, {
+  enhanceWithMetadata: true,  // Prepend heading_path to embeddings
+  onError: 'mark_review'
+})
+
+// processors/youtube-processor.ts (YouTube transcripts have no structure)
+chunks = await this.generateChunkEmbeddings(chunks, 75, 90, {
+  enhanceWithMetadata: false,  // Plain text embeddings
+  onError: 'warn'
+})
+```
+
+This replaced **460 lines of duplicate code** with automatic local/cloud fallback logic.
+
 ### Processing (LOCAL Mode - Transformers.js)
 ```typescript
 // worker/lib/local/embeddings-local.ts
@@ -471,7 +511,7 @@ const embedder = await pipeline('feature-extraction',
   { pooling: 'mean', normalize: true }
 )
 
-// Metadata-enhanced embeddings
+// Metadata-enhanced embeddings (when enhanceWithMetadata: true)
 const embeddings = await Promise.all(
   chunks.map(async chunk => {
     // Prepend heading context for 15-25% retrieval quality improvement
