@@ -556,7 +556,7 @@ Production metrics (p95 latency, cache hit rates) don't matter for one user.
 - **Bulletproof Metadata**: `docs/processing-pipeline/bulletproof-metadata-extraction.md`
 
 ### Development Guides
-- **React Guidelines**: `docs/lib/REACT_GUIDELINES.md` - Server/Client components
+- **React Guidelines**: `docs/rEACT_GUIDELINES.md` - Server/Client components
 - **UI Patterns**: `docs/UI_PATTERNS.md` - No modals, persistent UI
 - **ECS Implementation**: `docs/ECS_IMPLEMENTATION.md` - Entity-Component-System
 - **Annotations System**: `docs/ANNOTATIONS_SYSTEM.md` - 5-component ECS pattern, recovery, UI integration
@@ -650,9 +650,40 @@ ExportJobOutputSchema.parse(outputData)
 
 ---
 
+## Schema Safety Rules (CRITICAL)
+
+**Problem**: When refactoring or creating new code, it's easy to assume database fields exist when they don't.
+
+### Before Writing Any Insert/Update Code
+
+1. **Check the schema first**:
+   ```bash
+   psql postgresql://postgres:postgres@localhost:54322/postgres -c "\d table_name"
+   ```
+
+2. **Verify field names and types** - Common mistakes:
+   - ❌ `chunks.user_id` - Doesn't exist (user comes via RLS from documents)
+   - ❌ `documents.chunk_count` - Doesn't exist (not stored)
+   - ❌ `documents.processed_at` - Wrong name (use `processing_completed_at`)
+   - ❌ `processing_status: 'processed'` - Wrong value (UI expects `'completed'`)
+   - ❌ Missing flags - Always set `markdown_available` and `embeddings_available` to `true`
+   - ✅ Check migration files in `supabase/migrations/` for latest schema
+
+3. **Required fields for common operations**:
+   - **Chunks insert**: `document_id`, `content`, `chunk_index`, `chunker_type`, `token_count`
+   - **Chunks optional**: All metadata fields, `heading_path`, `page_start/end`, `bboxes`, position fields, Chonkie metadata
+   - **Documents update**: Use `processing_completed_at` (not `processed_at`), include `outline` and `metadata` JSONB fields
+   - **Connections insert**: `source_chunk_id`, `target_chunk_id`, `connection_type`, `strength`, `auto_detected`, `discovered_at`
+
+4. **When in doubt**: Run `./scripts/schema-audit.sh` to catch common issues
+
+**See**: `docs/SCHEMA_SAFETY_GUIDELINES.md` for complete prevention strategy
+
+---
+
 ## Miscellaneous Rules
 
-- **Latest Migration**: `052_job_pause_resume.sql` (see `supabase/migrations/`)
+- **Latest Migration**: `062_spark_portability_orphan_survival.sql` (see `supabase/migrations/`)
 - **Migration Format**: `NNN_descriptive_name.sql` where NNN is zero-padded number
 - **EPUB Support**: Supported as source type alongside PDF - handle both when implementing
 - **Cached Chunks**: `cached_chunks` table stores original Docling chunks for zero-cost LOCAL reprocessing (migration 046)
