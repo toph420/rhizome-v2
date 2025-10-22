@@ -17,6 +17,8 @@ import { importFromVaultHandler } from './handlers/import-from-vault.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
 import { retryLoop, classifyError, recordJobFailure } from './lib/retry-manager.js'
+import { engineRegistry } from './engines/engine-registry.js'
+import { registerAllEngines } from './engines/adapters.js'
 
 // ES modules compatibility: get __dirname equivalent
 const __filename = fileURLToPath(import.meta.url)
@@ -284,6 +286,10 @@ process.on('SIGTERM', () => {
 
 async function main() {
   console.log('🚀 Background worker started')
+
+  // Initialize engine registry
+  registerAllEngines(engineRegistry)
+  console.log('✅ Engine registry initialized')
 
   // Start annotation export cron job (runs hourly)
   startAnnotationExportCron()

@@ -1,16 +1,20 @@
 /**
- * Engine Orchestrator V2
- * Coordinates all 3 collision detection engines
+ * Engine Orchestrator V3 (Registry-based)
+ * Coordinates all 3 collision detection engines using EngineRegistry pattern
  *
  * Execution: Sequential (can be parallelized later if needed)
  * Output: Aggregated connection results from all engines
+ *
+ * Changes from V2:
+ * - Uses EngineRegistry instead of hard-coded imports
+ * - Engines are retrieved dynamically from registry
+ * - Easy to add/remove/swap engines without changing orchestrator code
  */
 
-import { runSemanticSimilarity, saveChunkConnections } from './semantic-similarity';
-import { runContradictionDetection } from './contradiction-detection';
-import { runThematicBridge } from './thematic-bridge';
-import { runThematicBridgeQwen } from './thematic-bridge-qwen';
-import { ChunkConnection } from './semantic-similarity';
+import { engineRegistry } from './engine-registry'
+import { saveChunkConnections } from './semantic-similarity'
+import { ChunkConnection } from './semantic-similarity'
+import { DEFAULT_ENGINE_CONFIG } from './engine-config'
 
 export interface OrchestratorConfig {
   enabledEngines?: ('semantic_similarity' | 'contradiction_detection' | 'thematic_bridge')[];
@@ -56,53 +60,42 @@ export async function processDocument(
   const allConnections: ChunkConnection[] = [];
   const byEngine: Record<string, number> = {};
 
-  // Run engines in sequence (can parallelize later if needed)
-  if (enabledEngines.includes('semantic_similarity')) {
-    console.log('\n[Orchestrator] Running SemanticSimilarity...');
-    await onProgress?.(25, 'semantic-similarity', 'Finding semantic similarities');
-    const connections = await runSemanticSimilarity(documentId, {
-      ...config.semanticSimilarity,
-      targetDocumentIds,
-      reprocessingBatch
-    });
-    allConnections.push(...connections);
-    byEngine.semantic_similarity = connections.length;
+  // Progress stages for each engine (distribute 0-90% across engines)
+  const progressStages = {
+    'semantic_similarity': { start: 0, end: 30, label: 'Finding semantic similarities' },
+    'contradiction_detection': { start: 30, end: 60, label: 'Detecting contradictions' },
+    'thematic_bridge': { start: 60, end: 90, label: 'Finding thematic bridges' },
   }
 
-  if (enabledEngines.includes('contradiction_detection')) {
-    console.log('\n[Orchestrator] Running ContradictionDetection...');
-    await onProgress?.(50, 'contradiction-detection', 'Detecting contradictions');
-    const connections = await runContradictionDetection(documentId, {
-      ...config.contradictionDetection,
+  // Run engines in sequence using registry
+  for (const engineName of enabledEngines) {
+    console.log(`\n[Orchestrator] Running ${engineName}...`)
+
+    // Get engine from registry
+    const engine = engineRegistry.get(engineName)
+
+    // Update progress
+    const stage = progressStages[engineName]
+    if (stage) {
+      await onProgress?.(stage.start, engineName.replace('_', '-'), stage.label)
+    }
+
+    // Prepare engine-specific config
+    const engineConfig: any = {
       targetDocumentIds,
-      reprocessingBatch
-    });
-    allConnections.push(...connections);
-    byEngine.contradiction_detection = connections.length;
-  }
+      reprocessingBatch,
+      ...DEFAULT_ENGINE_CONFIG[engineName as keyof typeof DEFAULT_ENGINE_CONFIG],
+      ...config[engineName as keyof OrchestratorConfig],
+    }
 
-  if (enabledEngines.includes('thematic_bridge')) {
-    console.log('\n[Orchestrator] Running ThematicBridge...');
-    await onProgress?.(75, 'thematic-bridge', 'Finding thematic bridges');
+    // Run engine
+    const connections = await engine.run(documentId, engineConfig, onProgress)
 
-    // Use Qwen for local mode, Gemini otherwise
-    const useLocalMode = process.env.PROCESSING_MODE === 'local';
-    console.log(`[Orchestrator] ThematicBridge mode: ${useLocalMode ? 'LOCAL (Qwen)' : 'CLOUD (Gemini)'}`);
+    // Aggregate results
+    allConnections.push(...connections)
+    byEngine[engineName] = connections.length
 
-    const connections = useLocalMode
-      ? await runThematicBridgeQwen(documentId, {
-          ...config.thematicBridge,
-          targetDocumentIds,
-          reprocessingBatch
-        }, onProgress)
-      : await runThematicBridge(documentId, {
-          ...config.thematicBridge,
-          targetDocumentIds,
-          reprocessingBatch
-        }, onProgress);
-
-    allConnections.push(...connections);
-    byEngine.thematic_bridge = connections.length;
+    console.log(`[Orchestrator] ${engineName}: Found ${connections.length} connections`)
   }
 
   // Debug: Check for duplicates before saving

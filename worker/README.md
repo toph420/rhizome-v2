@@ -26,9 +26,9 @@ Each component has exactly one responsibility:
 - **Engines**: Detect connections between chunks
 - **Library**: Utility functions and shared services
 
-### Recent Improvements (October 2025)
+### Recent Improvements (October 2025 - January 2026)
 
-The worker module was recently refactored to eliminate **1,265 lines of duplicate code** across 3 phases:
+The worker module has been refactored over 4 phases to eliminate duplicate code and improve architecture:
 
 **Phase 1 - Handler Consolidation** (-265 lines):
 - Created `HandlerJobManager` utility class for centralized job state management
@@ -42,12 +42,23 @@ The worker module was recently refactored to eliminate **1,265 lines of duplicat
 - Migrated all 7 document processors (PDF, EPUB, YouTube, Web, Text, Paste, Markdown)
 - Eliminated 990 lines of duplicate metadata enrichment and embeddings generation code
 
+**Phase 4 - Engine Registry & Storage Abstraction** (January 2026):
+- Created `EngineRegistry` for dynamic engine management
+  - No more hard-coded engine imports in orchestrator
+  - Easy to add/remove/swap engines without modifying orchestrator code
+  - Engines registered at worker startup via `registerAllEngines()`
+- Created `StorageClient` for unified storage operations
+  - Single abstraction for all Supabase Storage operations (upload, download, remove, etc.)
+  - Consistent error handling and logging across storage operations
+  - Type-safe interfaces for all storage methods
+
 **Impact**:
 - **7× Easier Maintenance**: Update pipeline logic in 1 place instead of 7
 - **Consistent Behavior**: All processors use identical enrichment and embedding strategies
 - **Better Extensibility**: Adding new processors requires <50 lines of format-specific code
+- **Dynamic Engine Management**: Add new collision detection engines without changing orchestrator
 
-📖 See `thoughts/plans/complete-worker-refactoring-summary.md` for complete details.
+📖 See `thoughts/plans/complete-worker-refactoring-summary.md` for Phases 1-3 details.
 
 ## Directory Structure
 
@@ -75,8 +86,11 @@ worker/
 │   ├── export-document.ts # Create portable ZIP exports
 │   ├── import-document.ts # Import from ZIP with conflict resolution
 │   └── continue-processing.ts # Resume from checkpoint after failure
-├── engines/             [8 files] 3-engine collision detection system
-│   ├── orchestrator.ts  # Coordinates all 3 engines
+├── engines/             [11 files] 3-engine collision detection system
+│   ├── orchestrator.ts  # Coordinates all 3 engines (registry-based V3)
+│   ├── engine-registry.ts # Dynamic engine registration (NEW Phase 4)
+│   ├── adapters.ts      # Engine wrapper classes (NEW Phase 4)
+│   ├── engine-config.ts # Default engine configuration
 │   ├── semantic-similarity.ts # Embedding cosine distance (25%)
 │   ├── contradiction-detection.ts # Metadata-based tensions (40%)
 │   ├── thematic-bridge.ts # AI concept mapping via Gemini (35%)
@@ -84,10 +98,12 @@ worker/
 │   ├── base-engine.ts   # Abstract base class
 │   ├── scoring.ts       # Confidence calculation
 │   └── types.ts         # Interface definitions
-├── lib/                 [29+ files] Core utilities and services
+├── lib/                 [31+ files] Core utilities and services
+│   ├── handler-job-manager.ts # Centralized job state management (Phase 1)
+│   ├── storage-client.ts # Complete storage abstraction (NEW Phase 4)
+│   ├── storage-helpers.ts # JSON storage operations
 │   ├── ai-client.ts     # Gemini API client
 │   ├── embeddings.ts    # Embedding generation (cloud)
-│   ├── storage-helpers.ts # Supabase Storage operations
 │   ├── fuzzy-matching.ts # 4-tier annotation recovery
 │   ├── weight-config.ts # Engine weight configuration
 │   ├── retry-manager.ts # Error classification & retry
@@ -360,6 +376,121 @@ export async function processDocument(documentId: string, config: OrchestratorCo
 - Semantic: Top 10 per chunk, similarity >0.82
 - Contradiction: Min opposition 0.6, concept overlap >0.3
 - Thematic: Batch processing, cache shared concepts
+
+### 7. Engine Registry Pattern (NEW - Phase 4)
+
+The **orchestrator V3** now uses a registry pattern for dynamic engine management:
+
+```typescript
+// worker/engines/engine-registry.ts
+import { engineRegistry } from './engine-registry'
+
+// At worker startup (worker/index.ts)
+registerAllEngines(engineRegistry)
+console.log('✅ Engine registry initialized')
+
+// In orchestrator
+for (const engineName of enabledEngines) {
+  const engine = engineRegistry.get(engineName)  // Get from registry
+  const connections = await engine.run(documentId, config, onProgress)
+  allConnections.push(...connections)
+}
+```
+
+**Benefits**:
+- ✅ **No hard-coded imports**: Engines retrieved dynamically from registry
+- ✅ **Easy to add engines**: Just register them, no orchestrator changes
+- ✅ **Easy to swap engines**: Replace implementation without modifying orchestrator
+- ✅ **Better testability**: Mock registry for testing
+
+**Adding a New Engine**:
+```typescript
+// 1. Create engine class (worker/engines/my-engine.ts)
+export class MyEngine implements DocumentEngine {
+  readonly name = 'my_engine'
+
+  async run(documentId: string, config: any): Promise<ChunkConnection[]> {
+    // Your detection logic here
+    return connections
+  }
+}
+
+// 2. Register in adapters.ts
+export function registerAllEngines(registry: EngineRegistry): void {
+  registry.register('semantic_similarity', new SemanticSimilarityEngine())
+  registry.register('contradiction_detection', new ContradictionDetectionEngine())
+  registry.register('thematic_bridge', new ThematicBridgeEngine())
+  registry.register('my_engine', new MyEngine())  // Add your engine
+}
+
+// 3. Use in orchestrator - no code changes needed!
+await processDocument(documentId, {
+  enabledEngines: ['semantic_similarity', 'my_engine']  // Just include it
+})
+```
+
+### 8. Storage Client Pattern (NEW - Phase 4)
+
+Unified abstraction for all Supabase Storage operations:
+
+```typescript
+// worker/lib/storage-client.ts
+import { StorageClient } from './lib/storage-client'
+
+const storage = new StorageClient(supabase, 'documents')
+
+// Upload file
+await storage.upload('userId/documentId/content.md', markdownBlob, {
+  contentType: 'text/markdown',
+  upsert: true
+})
+
+// Download file
+const blob = await storage.download('userId/documentId/content.md')
+const text = await blob.text()
+
+// Create signed URL
+const url = await storage.createSignedUrl('userId/documentId/file.pdf', 3600)
+
+// Remove files
+await storage.remove(['userId/documentId/file1.pdf', 'userId/documentId/file2.json'])
+
+// List files in directory
+const files = await storage.list('userId/documentId')
+files.forEach(f => console.log(`${f.name}: ${f.size} bytes`))
+
+// Check if file exists
+if (await storage.exists('userId/documentId/content.md')) {
+  console.log('File exists!')
+}
+
+// Move/copy files
+await storage.move('old/path.pdf', 'new/path.pdf')
+await storage.copy('source.pdf', 'backup.pdf')
+```
+
+**Benefits**:
+- ✅ **Consistent error handling**: All operations throw on error with detailed messages
+- ✅ **Comprehensive logging**: Automatic logging of all storage operations
+- ✅ **Type-safe interfaces**: TypeScript interfaces for all methods
+- ✅ **Single source of truth**: All storage operations go through one client
+
+**Before (scattered across codebase)**:
+```typescript
+// 87 different places with:
+const { data, error } = await supabase.storage.from('documents').download(path)
+if (error) throw new Error(...)
+
+const { error: uploadError } = await supabase.storage.from('documents').upload(...)
+if (uploadError) throw new Error(...)
+```
+
+**After (centralized)**:
+```typescript
+const storage = new StorageClient(supabase)
+const blob = await storage.download(path)  // Throws on error automatically
+await storage.upload(path, blob)           // Consistent logging
+```
 
 ## Key Components
 
