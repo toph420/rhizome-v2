@@ -51,8 +51,8 @@ export interface ResumeState {
  */
 export class HandlerJobManager {
   constructor(
-    private supabase: any,
-    private jobId: string
+    protected supabase: any,
+    protected jobId: string
   ) {}
 
   /**

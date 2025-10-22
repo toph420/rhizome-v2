@@ -135,7 +135,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
     // ✅ STEP 3: APPLY STRATEGY (40-60%)
     const importedCount = await applyStrategy(
       supabase,
-      job.id,
+      jobManager,
       document_id,
       strategy,
       chunksData.chunks
@@ -160,24 +160,18 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
       // Generate embeddings
       const chunkTexts = chunksWithoutEmbeddings.map((c: any) => c.content)
 
-      await updateProgress(
-        supabase,
-        job.id,
+      await jobManager.updateProgress(
         65,
         'embeddings',
-        'processing',
         `Generating embeddings for ${chunkTexts.length} chunks...`
       )
 
       const embeddings = await generateEmbeddings(chunkTexts)
       console.log(`✓ Generated ${embeddings.length} embeddings`)
 
-      await updateProgress(
-        supabase,
-        job.id,
+      await jobManager.updateProgress(
         75,
         'embeddings',
-        'processing',
         `Updating ${chunksWithoutEmbeddings.length} chunks with embeddings`
       )
 
@@ -195,12 +189,9 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
         // Update progress every 10 chunks
         if ((i + 1) % 10 === 0 || i === chunksWithoutEmbeddings.length - 1) {
           const percent = 75 + Math.floor((i + 1) / chunksWithoutEmbeddings.length * 15) // 75-90%
-          await updateProgress(
-            supabase,
-            job.id,
+          await jobManager.updateProgress(
             percent,
             'embeddings',
-            'processing',
             `Updated ${i + 1} of ${chunksWithoutEmbeddings.length} chunk embeddings`
           )
         }
@@ -237,7 +228,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
  * Apply import strategy (skip, replace, merge_smart).
  *
  * @param supabase - Supabase client
- * @param jobId - Job ID for progress tracking
+ * @param jobManager - Job manager for progress tracking
  * @param documentId - Document ID to import
  * @param strategy - Import strategy
  * @param chunks - Chunks to import
@@ -245,7 +236,7 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
  */
 async function applyStrategy(
   supabase: any,
-  jobId: string,
+  jobManager: HandlerJobManager,
   documentId: string,
   strategy: ConflictStrategy,
   chunks: any[]
@@ -253,14 +244,14 @@ async function applyStrategy(
 
   if (strategy === 'skip') {
     // ✅ SKIP: No-op, preserve existing data
-    await updateProgress(supabase, jobId, 40, 'skip', 'processing', 'Skipping import (preserving existing data)')
+    await jobManager.updateProgress(40, 'skip', 'Skipping import (preserving existing data)')
     console.log(`⏭️  Skip strategy - no changes made`)
     return 0
   }
 
   if (strategy === 'replace') {
     // ✅ REPLACE: DELETE all existing chunks, INSERT from Storage
-    await updateProgress(supabase, jobId, 40, 'replace', 'processing', 'Deleting existing chunks')
+    await jobManager.updateProgress(40, 'replace', 'Deleting existing chunks')
     console.log(`🗑️  Replace strategy - deleting existing chunks`)
 
     const { error: deleteError } = await supabase
@@ -273,7 +264,7 @@ async function applyStrategy(
     }
     console.log(`✓ Deleted existing chunks`)
 
-    await updateProgress(supabase, jobId, 50, 'inserting', 'processing', 'Inserting chunks from Storage')
+    await jobManager.updateProgress(50, 'inserting', 'Inserting chunks from Storage')
     console.log(`💾 Inserting ${chunks.length} chunks from Storage`)
 
     // Check if chunks have IDs (for UUID preservation)
@@ -326,14 +317,14 @@ async function applyStrategy(
     }
 
     console.log(`✓ Inserted ${chunksToInsert.length} chunks`)
-    await updateProgress(supabase, jobId, 60, 'replace_complete', 'processing', 'Replace strategy completed')
+    await jobManager.updateProgress(60, 'replace_complete', 'Replace strategy completed')
 
     return chunksToInsert.length
   }
 
   if (strategy === 'merge_smart') {
     // ✅ MERGE SMART: UPDATE metadata only, preserve IDs and annotations
-    await updateProgress(supabase, jobId, 40, 'merge_smart', 'processing', 'Updating metadata (preserving IDs)')
+    await jobManager.updateProgress(40, 'merge_smart', 'Updating metadata (preserving IDs)')
     console.log(`🔄 Merge Smart strategy - updating metadata, preserving IDs`)
 
     let updatedCount = 0
@@ -364,21 +355,19 @@ async function applyStrategy(
       // Update progress every 10 chunks
       if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
         const percent = 40 + Math.floor((i + 1) / chunks.length * 20) // 40-60%
-        await updateProgress(
-          supabase,
-          jobId,
+        await jobManager.updateProgress(
           percent,
           'merge_smart',
-          'processing',
           `Updated ${i + 1} of ${chunks.length} chunk metadata`
         )
       }
     }
 
     console.log(`✓ Updated metadata for ${updatedCount}/${chunks.length} chunks`)
-    await updateProgress(supabase, jobId, 60, 'merge_complete', 'processing', 'Merge Smart strategy completed')
+    await jobManager.updateProgress(60, 'merge_complete', 'Merge Smart strategy completed')
 
     return updatedCount
   }
 
   throw new Error(`Unknown import strategy: ${strategy}`)
+}

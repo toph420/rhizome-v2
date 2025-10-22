@@ -348,23 +348,43 @@ export class DocumentProcessingManager extends HandlerJobManager {
   private async saveChunksToDatabase(documentId: string, userId: string, result: ProcessResult): Promise<void> {
     // Prepare chunks for insertion
     const chunksToInsert = result.chunks.map((chunk, index) => ({
-      id: chunk.id,
       document_id: documentId,
-      user_id: userId,
-      content: chunk.text || chunk.content,
-      chunk_index: chunk.order_index ?? index,
+      content: chunk.content,
+      chunk_index: chunk.chunk_index ?? index,
+      start_offset: chunk.start_offset,
+      end_offset: chunk.end_offset,
       word_count: chunk.word_count,
-      embedding: chunk.embedding,
+
+      // AI metadata
       themes: chunk.themes,
       importance_score: chunk.importance_score,
       summary: chunk.summary,
       emotional_metadata: chunk.emotional_metadata,
       conceptual_metadata: chunk.conceptual_metadata,
       domain_metadata: chunk.domain_metadata,
+      metadata_extracted_at: chunk.metadata_extracted_at,
+
+      // Docling structural metadata (PDF/EPUB)
       heading_path: chunk.heading_path,
       heading_level: chunk.heading_level,
       section_marker: chunk.section_marker,
-      metadata_extracted_at: chunk.metadata_extracted_at
+      page_start: chunk.page_start,
+      page_end: chunk.page_end,
+      bboxes: (chunk as any).bboxes,
+      position_confidence: (chunk as any).position_confidence,
+      position_method: (chunk as any).position_method,
+      position_validated: (chunk as any).position_validated,
+
+      // Chonkie metadata (from metadata transfer)
+      chunker_type: (chunk as any).chunker_type,
+      token_count: (chunk as any).token_count,
+      metadata_overlap_count: (chunk as any).metadata_overlap_count,
+      metadata_confidence: (chunk as any).metadata_confidence,
+      metadata_interpolated: (chunk as any).metadata_interpolated
+
+      // Note: user_id comes from documents table via RLS, not stored in chunks
+      // Note: embedding added later in pipeline
+      // Note: is_current defaults to true
     }))
 
     // Insert chunks
@@ -393,12 +413,15 @@ export class DocumentProcessingManager extends HandlerJobManager {
     await this.supabase
       .from('documents')
       .update({
-        title: result.metadata.title,
-        author: result.metadata.author,
+        title: result.metadata?.title,
+        author: result.metadata?.author,
         word_count: result.wordCount,
-        chunk_count: result.chunks.length,
-        processed_at: new Date().toISOString(),
-        processing_status: 'processed'
+        outline: result.outline,
+        metadata: result.metadata,
+        processing_completed_at: new Date().toISOString(),
+        processing_status: 'completed',
+        markdown_available: true,
+        embeddings_available: true
       })
       .eq('id', documentId)
   }
@@ -420,16 +443,4 @@ export class DocumentProcessingManager extends HandlerJobManager {
     }
   }
 
-  /**
-   * Get current job data.
-   */
-  private async getJob(): Promise<any> {
-    const { data } = await this.supabase
-      .from('background_jobs')
-      .select('*')
-      .eq('id', this.jobId)
-      .single()
-
-    return data
-  }
 }

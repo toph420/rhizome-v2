@@ -1,8 +1,6 @@
 /**
  * Export Document Background Job Handler
  * REFACTORED: Now uses HandlerJobManager
- */
- * Export Document Background Job Handler
  *
  * Generates downloadable ZIP bundles containing all document files from Storage.
  *
@@ -57,6 +55,8 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
   console.log(`   - Include annotations: ${includeAnnotations || false}`)
   console.log(`   - Format: ${format || 'zip'}`)
 
+  const jobManager = new HandlerJobManager(supabase, job.id)
+
   try {
     // Get user_id from job
     const userId = job.user_id
@@ -96,12 +96,9 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
       const doc = documents[i]
       const docProgress = 10 + Math.round(progressPerDoc * (i + 0.5))
 
-      await updateProgress(
-        supabase,
-        job.id,
+      await jobManager.updateProgress(
         docProgress,
         'processing_documents',
-        'processing',
         `Processing document ${i + 1} of ${documents.length}: ${doc.title}`
       )
 
@@ -303,8 +300,6 @@ export async function exportDocumentHandler(supabase: any, job: any): Promise<vo
     console.log(`✓ Created signed URL (expires in 24 hours)`)
 
     // ✅ STEP 8: MARK JOB COMPLETE (100%)
-    await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Export completed successfully')
-
     // Prepare output data with camelCase (matches frontend expectations)
     const outputData = {
       success: true,
