@@ -52,13 +52,33 @@ The worker module has been refactored over 4 phases to eliminate duplicate code 
   - Consistent error handling and logging across storage operations
   - Type-safe interfaces for all storage methods
 
+**Phase 5 - Handler-Specific Managers** (January 2026):
+- Created specialized manager classes extending `HandlerJobManager`:
+  - `DocumentProcessingManager`: Orchestrates complete document processing workflow
+  - `ConnectionDetectionManager`: Manages connection detection and reprocessing
+- Extracted complex handler logic into testable manager classes
+- Handlers reduced from 70-730 lines to 20-60 lines each
+- Clear separation: handlers extract parameters, managers execute workflow
+
+**Phase 6 - Error Handling Consolidation** (January 2026):
+- Created centralized error handler (`handler-error.ts`)
+  - Automatic error classification (transient, permanent, validation, etc.)
+  - Structured error logging with full context
+  - Automatic retry scheduling with exponential backoff
+  - User-friendly error messages
+- Enhanced `HandlerJobManager.markFailed()` to use centralized handler
+- Eliminated 12+ duplicate catch blocks with different patterns
+
 **Impact**:
-- **7× Easier Maintenance**: Update pipeline logic in 1 place instead of 7
-- **Consistent Behavior**: All processors use identical enrichment and embedding strategies
+- **8× Easier Maintenance**: Update logic in 1 place instead of 8+
+- **Consistent Behavior**: All processors, engines, and error handling standardized
 - **Better Extensibility**: Adding new processors requires <50 lines of format-specific code
 - **Dynamic Engine Management**: Add new collision detection engines without changing orchestrator
+- **Handler Simplification**: Handlers now focus on parameters, managers handle workflow
+- **Consistent Error Handling**: All errors classified, logged, and retried consistently
 
 📖 See `thoughts/plans/complete-worker-refactoring-summary.md` for Phases 1-3 details.
+📖 See `thoughts/handoffs/2026-01-22_worker-refactoring-phase-4-handoff.md` for Phase 4-6 details.
 
 ## Directory Structure
 
@@ -98,8 +118,12 @@ worker/
 │   ├── base-engine.ts   # Abstract base class
 │   ├── scoring.ts       # Confidence calculation
 │   └── types.ts         # Interface definitions
-├── lib/                 [31+ files] Core utilities and services
+├── lib/                 [35+ files] Core utilities and services
+│   ├── managers/        [2 files] Handler workflow managers (NEW Phase 5)
+│   │   ├── document-processing-manager.ts # Complete doc processing workflow
+│   │   └── connection-detection-manager.ts # Connection detection & reprocessing
 │   ├── handler-job-manager.ts # Centralized job state management (Phase 1)
+│   ├── handler-error.ts # Centralized error handling (NEW Phase 6)
 │   ├── storage-client.ts # Complete storage abstraction (NEW Phase 4)
 │   ├── storage-helpers.ts # JSON storage operations
 │   ├── ai-client.ts     # Gemini API client

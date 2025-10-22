@@ -8,6 +8,7 @@
  */
 
 import { classifyError, getUserFriendlyError } from './errors.js'
+import { handleHandlerError, extractErrorContext } from './handler-error.js'
 import type { ErrorType } from '../types/multi-format.js'
 
 /**
@@ -118,35 +119,67 @@ export class HandlerJobManager {
 
   /**
    * Mark job as failed with error classification and user-friendly message.
-   * Automatically classifies error type and generates helpful message.
+   * Automatically classifies error type, generates helpful message, and schedules retries.
+   *
+   * ENHANCED (Phase 6): Now uses centralized error handler for consistent error handling,
+   * automatic retry scheduling, and comprehensive error logging.
    *
    * @param error - Error that caused the failure
-   * @param customErrorType - Optional override for error type classification
+   * @param options - Optional configuration for error handling
    *
    * @example
    * try {
    *   await processDocument()
    * } catch (error: any) {
-   *   await jobManager.markFailed(error)
+   *   await jobManager.markFailed(error, {
+   *     entityId: documentId,
+   *     autoRetry: true
+   *   })
    *   throw error
    * }
    */
   async markFailed(
     error: Error,
-    customErrorType?: ErrorType
+    options?: {
+      customErrorType?: ErrorType
+      entityId?: string
+      autoRetry?: boolean
+      maxRetries?: number
+    }
   ): Promise<void> {
-    const errorType = customErrorType || classifyError(error)
-    const userMessage = getUserFriendlyError(error)
+    // Extract options
+    const {
+      customErrorType,
+      entityId,
+      autoRetry = true,
+      maxRetries = 3
+    } = options || {}
 
-    await this.supabase
-      .from('background_jobs')
-      .update({
-        status: 'failed',
-        last_error: userMessage,
-        error_type: errorType,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', this.jobId)
+    // If custom error type provided, use simple implementation (backward compatibility)
+    if (customErrorType) {
+      const userMessage = getUserFriendlyError(error)
+      await this.supabase
+        .from('background_jobs')
+        .update({
+          status: 'failed',
+          last_error: userMessage,
+          error_type: customErrorType,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', this.jobId)
+      return
+    }
+
+    // Use centralized error handler (Phase 6)
+    const errorContext = extractErrorContext(error)
+
+    await handleHandlerError(this.supabase, error, {
+      jobId: this.jobId,
+      entityId,
+      autoRetry,
+      maxRetries,
+      context: errorContext
+    })
   }
 
   /**
