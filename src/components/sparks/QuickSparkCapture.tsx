@@ -269,11 +269,14 @@ export function QuickSparkCapture({
     }
   }
 
-  // Handle Cmd+Enter to submit
+  // Handle Cmd+Enter to submit and Escape to close
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      closeSparkCapture()
     }
   }
 
