@@ -190,14 +190,14 @@ vercel --prod
 
 Test from iPad: Open Safari, navigate to URL, verify you can see the UI.
 
-#### 2.5 Enable Password Protection (1 minute)
+#### 2.5 Enable Temporary Password Protection (1 minute)
 
-Since this is a personal tool with no auth system, protect it with Vercel's password protection:
+**Quick protection for initial deployment:**
 
 **Vercel Dashboard** → Settings → Deployment Protection
 
 1. Enable **"Password Protection"**
-2. Set a strong password (save to 1Password/password manager)
+2. Set a temporary password
 3. Click "Save"
 
 **Test the protection:**
@@ -208,15 +208,7 @@ Since this is a personal tool with no auth system, protect it with Vercel's pass
 # Should see: Password prompt before accessing app
 ```
 
-**On your devices:**
-
-- **iPad**: Open Safari → Enter URL → Login with password → Stays logged in
-- **iPhone**: Open Safari → Enter URL → Login with password → Stays logged in
-- **Mac**: Use regular browser → Login once → Cookie persists
-
-**Result**: Only you can access the app. No complex auth system needed, no RLS policies, just simple password protection.
-
-**Security note**: This provides basic protection for a personal tool. The password is stored in browser cookies, so you'll need to login once per device/browser. For a single-user app, this is perfectly adequate.
+**Note**: This is temporary. We'll replace it with proper Supabase Auth in Phase 4 for better UX across devices.
 
 ---
 
@@ -325,6 +317,235 @@ tail -f /Users/topher/Code/rhizome-v2-worktree-1/worker/worker.log
 ```
 
 **Now**: Worker starts automatically on Mac login, keeps running in background.
+
+---
+
+### Phase 5: Upgrade to Supabase Auth (15 minutes) - RECOMMENDED
+
+Replace Vercel password protection with proper authentication for better UX.
+
+#### 5.1 Enable Supabase Auth
+
+Your migrations already support this! Just enable it:
+
+```bash
+# Verify auth is available
+npx supabase db remote --project-ref <ref> sql \
+  "SELECT * FROM auth.users LIMIT 1;"
+
+# Should work (empty result is fine)
+```
+
+#### 5.2 Create Login Page
+
+Create `src/app/login/page.tsx`:
+
+```typescript
+'use client'
+
+import { useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+
+export default function LoginPage() {
+  const [email, setEmail] = useState('')
+  const [sent, setSent] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const supabase = createClient()
+  const router = useRouter()
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`
+      }
+    })
+
+    if (error) {
+      alert(error.message)
+    } else {
+      setSent(true)
+    }
+    setLoading(false)
+  }
+
+  if (sent) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="max-w-md rounded-lg border p-8 text-center">
+          <h1 className="text-2xl font-bold mb-4">Check your email</h1>
+          <p className="text-muted-foreground">
+            We sent a magic link to <strong>{email}</strong>
+          </p>
+          <p className="text-sm text-muted-foreground mt-4">
+            Click the link to sign in. You can close this tab.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="max-w-md w-full rounded-lg border p-8">
+        <h1 className="text-2xl font-bold mb-6">Sign in to Rhizome</h1>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium mb-2">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full rounded-md border px-3 py-2"
+              placeholder="you@example.com"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+          >
+            {loading ? 'Sending...' : 'Send Magic Link'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+```
+
+#### 5.3 Create Auth Callback Handler
+
+Create `src/app/auth/callback/route.ts`:
+
+```typescript
+import { createClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+
+export async function GET(request: Request) {
+  const { searchParams, origin } = new URL(request.url)
+  const code = searchParams.get('code')
+
+  if (code) {
+    const supabase = await createClient()
+    await supabase.auth.exchangeCodeForSession(code)
+  }
+
+  // Redirect to home page
+  return NextResponse.redirect(`${origin}/`)
+}
+```
+
+#### 5.4 Protect Routes with Middleware
+
+Create/update `src/middleware.ts`:
+
+```typescript
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+
+export async function middleware(request: NextRequest) {
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  })
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return request.cookies.get(name)?.value
+        },
+        set(name: string, value: string, options: any) {
+          response.cookies.set({
+            name,
+            value,
+            ...options,
+          })
+        },
+        remove(name: string, options: any) {
+          response.cookies.set({
+            name,
+            value: '',
+            ...options,
+          })
+        },
+      },
+    }
+  )
+
+  const { data: { session } } = await supabase.auth.getSession()
+
+  // Redirect to login if not authenticated
+  if (!session && !request.nextUrl.pathname.startsWith('/login') &&
+      !request.nextUrl.pathname.startsWith('/auth/callback')) {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  // Redirect to home if already logged in and trying to access login
+  if (session && request.nextUrl.pathname === '/login') {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+
+  return response
+}
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+}
+```
+
+#### 5.5 Disable Vercel Password Protection
+
+**Vercel Dashboard** → Settings → Deployment Protection → Disable
+
+#### 5.6 Deploy Updated Code
+
+```bash
+git add src/app/login src/app/auth src/middleware.ts
+git commit -m "feat: add Supabase Auth with magic links"
+git push origin main
+
+# Vercel auto-deploys
+```
+
+#### 5.7 Test End-to-End
+
+```bash
+# Incognito window
+1. Visit https://rhizome-v2-xxxxx.vercel.app
+2. Should redirect to /login
+3. Enter your email
+4. Check email → Click magic link
+5. Should redirect to app (logged in)
+6. Close browser → Reopen
+7. Should still be logged in ✅
+```
+
+**Benefits You Get:**
+
+✅ **Device-specific sessions**: Each device has its own login
+✅ **No password to remember**: Magic links only
+✅ **Auto-refresh**: Sessions last 30 days, auto-renew
+✅ **Revoke access**: Can logout specific devices
+✅ **Better UX**: No re-entering passwords
+
+**What about RLS?**
+
+You can still keep RLS disabled (single-user mode). Supabase Auth just handles login/sessions. Your worker still uses service role key to bypass RLS.
 
 ---
 
@@ -575,10 +796,10 @@ await fetch('https://ntfy.sh/rhizome-jobs', {
 ```
 PUBLIC (accessible from internet):
 ├─ Vercel app (https://rhizome-v2-xxx.vercel.app)
-│  └─ Protected by: Vercel Password Protection
+│  └─ Protected by: Supabase Auth (magic links)
 ├─ Supabase API (https://xxx.supabase.co)
 │  └─ Protected by: Service role key (in env vars)
-└─ Access control: Password required at Vercel edge
+└─ Access control: Email-based authentication
 
 PRIVATE (only accessible from Mac):
 ├─ Ollama (localhost:11434)
@@ -590,40 +811,43 @@ PRIVATE (only accessible from Mac):
 
 For this personal tool deployment:
 
-**No Auth System**: RLS is disabled (see `003_disable_rls_for_dev.sql`)
-- No user accounts or login flow
-- No session management
-- No JWT tokens
+**Auth System**: Supabase Auth (single user)
+- Magic link authentication (no password to remember)
+- Device-specific sessions (30-day auto-refresh)
+- Can revoke access per device
+- Built-in email verification
 
-**Protection Layer**: Vercel Password Protection
-- Password required before accessing any page
-- Stored in browser cookies (stays logged in)
-- Simple but effective for single-user apps
+**RLS Disabled**: No multi-user policies needed
+- Only one user (you)
+- Simpler queries and code
+- Worker uses service role key to bypass RLS
+- If you want multi-user later: Enable RLS policies
 
 **Database Access**: Service role key
 - Worker uses `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS)
 - Key stored in environment variables only
 - Never exposed to client/browser
 
-**Result**: Password protection at the edge (Vercel) prevents unauthorized access. Once inside, you have full access to all data (because you're the only user).
+**Result**: Magic link authentication prevents unauthorized access. Device sessions stay logged in for weeks. No passwords to manage.
 
-### Why No RLS for Personal Use?
+### Auth Comparison
 
 ```
-Traditional Multi-User App:
-├─ User auth (login/signup)
-├─ RLS policies (user_id checks)
-├─ Session management
-└─ Complex but necessary
+Vercel Password (Phase 2.5):
+├─ Single shared password
+├─ Re-enter on cookie expiry
+├─ No device management
+└─ Quick to deploy ✅
 
-Single-User Personal Tool:
-├─ Password at edge (Vercel)
-├─ No RLS needed (only one user)
-├─ Simpler codebase
-└─ Adequate security for personal use
+Supabase Auth (Phase 5):
+├─ Email magic links
+├─ Device-specific sessions
+├─ 30-day auto-refresh
+├─ Can revoke per device
+└─ Better UX ✅✅
 ```
 
-**If you later want multi-user**: Enable RLS with migration `056_enable_production_rls.sql` and add Supabase Auth.
+**Recommendation**: Start with Vercel password for quick deployment, upgrade to Supabase Auth after testing (takes 15 minutes).
 
 ---
 
@@ -642,17 +866,28 @@ Single-User Personal Tool:
 - [ ] Ollama running on Mac
 - [ ] Worker tested locally (polls cloud jobs)
 
-**After deploying:**
+**After deploying (with Vercel password):**
 
 - [ ] Test password protection (incognito window)
 - [ ] Test upload from Vercel web UI (after login)
 - [ ] Verify worker picks up job (check logs)
-- [ ] Login from iPad Safari (save password)
-- [ ] Login from iPhone Safari (save password)
+- [ ] Login from iPad Safari
+- [ ] Login from iPhone Safari
 - [ ] Upload test document end-to-end
 - [ ] Verify connection detection works
+
+**After upgrading to Supabase Auth (Phase 5):**
+
+- [ ] Create login page and auth callback
+- [ ] Add middleware protection
+- [ ] Disable Vercel password protection
+- [ ] Deploy auth updates
+- [ ] Test magic link flow (incognito)
+- [ ] Test from iPad (click magic link)
+- [ ] Test from iPhone (click magic link)
+- [ ] Verify sessions persist across browser restarts
 - [ ] Set up auto-start (optional)
-- [ ] Document production URLs + password in 1Password
+- [ ] Document production URLs in 1Password
 
 ---
 
