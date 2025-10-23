@@ -1,16 +1,37 @@
 # Reader + Neobrutalism Implementation Plan
 
 **Date**: 2025-10-22
-**Timeline**: 4-5 weeks
-**Focus**: LeftPanel navigation, session tracking, AI "Where Was I?" feature, comprehensive neobrutalist styling
+**Status**: ⚠️ **PAUSED - STRATEGY REVISED**
+**Timeline**: TBD (pending RightPanel refactor completion)
 
 ---
 
-## Overview
+## ⚠️ IMPORTANT: Plan Revision Required
 
-Implement complete reader enhancement with neobrutalist design system: add LeftPanel (Outline/Stats/Heatmap tabs), automatic session tracking with engagement threshold, StatsTab with reading metrics, AI-powered "Where Was I?" context summary in BottomPanel, and comprehensive neobrutalist restyling of all reader components.
+**Decision Made (2025-10-22)**: Start with **RightPanel refactor** instead of LeftPanel implementation.
 
-**Why**: Transform the reader from basic document viewer into sophisticated reading environment with navigation aids, activity tracking, and contextual AI assistance, all wrapped in bold, flat neobrutalist aesthetic.
+**Rationale**:
+- RightPanel has 6 tabs with real functionality (connections, sparks, annotations)
+- More complex = better test of neobrutalism Sidebar component
+- Once proven, patterns can be replicated to LeftPanel and other UI
+- Lower risk to start with working component vs building from scratch
+
+**Action Items**:
+1. ✅ Document lessons learned from initial attempt
+2. ✅ Update CLAUDE.md with component usage rules
+3. ✅ Revert scratch LeftPanel code
+4. 🔄 **NEXT**: Refactor RightPanel using neobrutalism components
+5. ⏸️ **THEN**: Revisit this plan and update phases based on RightPanel learnings
+
+**See**: `thoughts/plans/2025-10-22_LESSONS_LEARNED.md` for detailed analysis
+
+---
+
+## Original Overview (Pre-Revision)
+
+~~Implement complete reader enhancement with neobrutalist design system: add LeftPanel (Outline/Stats/Heatmap tabs), automatic session tracking with engagement threshold, StatsTab with reading metrics, AI-powered "Where Was I?" context summary in BottomPanel, and comprehensive neobrutalist restyling of all reader components.~~
+
+**NEW APPROACH**: Start with RightPanel neobrutalist refactor, then revisit feature implementation order.
 
 ---
 

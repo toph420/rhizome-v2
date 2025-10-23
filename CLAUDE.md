@@ -697,6 +697,116 @@ ExportJobOutputSchema.parse(outputData)
   - Proper TypeScript types
 - **Readwise Import**: Uses review workflow via `import_pending` table before creating documents
 
+### Component Usage Rules (CRITICAL)
+
+**NEVER reinvent components that already exist in component libraries!**
+
+#### 1. Search Before Building
+- ✅ ALWAYS search shadcn, neobrutalism, radix-ui registries FIRST
+- ✅ Use shadcn MCP tools: `mcp__shadcn__search_items_in_registries`
+- ✅ Check component documentation for usage examples
+- ❌ NEVER build custom components without searching first
+- ❌ NEVER build custom collapse/animation/state logic if component has it
+
+#### 2. Component Folder Structure
+- `components/ui/` - **shadcn components ONLY** (installed via `npx shadcn add`)
+- `components/libraries/{name}` - **Custom library components** (download from registry)
+- `components/reader/` - **Custom reader-specific components** (only when no library equivalent)
+- ❌ NEVER mix libraries in same folder
+- ❌ NEVER overwrite existing components
+
+#### 3. Installing Neobrutalism Components
+```bash
+# Step 1: Create brutalist folder if it doesn't exist
+mkdir -p src/components/libraries/neobrutalist
+
+# Step 2: Download component from registry to brutalist folder
+# Use curl + python to extract and save to components/brutalist/
+curl -sL "https://neobrutalism.dev/r/sidebar.json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for file in data['files']:
+    filename = file['path'].split('/')[-1]
+    with open(f'src/components/libraries/neobrutalist/{filename}', 'w') as f:
+        f.write(file['content'].replace('\r\n', '\n'))
+"
+
+# Step 3: Fix imports to use brutalist components
+# Change: from '@/components/ui/button'
+# To: from '@/components/brutalist/button-neo'
+```
+
+#### 4. Using Shadcn MCP Tools
+```typescript
+// Search for components
+await mcp__shadcn__search_items_in_registries({
+  registries: ["@neobrutalism"],
+  query: "sidebar tabs badge"
+})
+
+// View component details
+await mcp__shadcn__view_items_in_registries({
+  items: ["@neobrutalism/sidebar"]
+})
+
+// Get install command
+await mcp__shadcn__get_add_command_for_items({
+  items: ["@neobrutalism/sidebar"]
+})
+```
+
+#### 5. Component Composition Pattern
+✅ **Correct**: Compose existing components
+```typescript
+import { Sidebar, SidebarContent } from '@/components/libraries/neobrutalist/sidebar'
+import { Tabs, TabsContent } from '@/components/libraries/neobrutalist/tabs'
+
+export function LeftPanel() {
+  return (
+    <Sidebar side="left">
+      <SidebarContent>
+        <Tabs>
+          <TabsContent value="outline"><OutlineTab /></TabsContent>
+        </Tabs>
+      </SidebarContent>
+    </Sidebar>
+  )
+}
+```
+
+❌ **Wrong**: Build from scratch
+```typescript
+// DON'T DO THIS - Sidebar component already exists!
+export function LeftPanel() {
+  const [collapsed, setCollapsed] = useState(false)
+  return (
+    <motion.div animate={{ width: collapsed ? 48 : 320 }}>
+      {/* Custom collapse logic, custom animations, etc. */}
+    </motion.div>
+  )
+}
+```
+
+#### 6. Read Documentation First
+Before implementing ANY component:
+1. Visit component documentation page (e.g., https://www.neobrutalism.dev/components/sidebar)
+2. Read installation instructions
+3. Study usage examples
+4. Check props/API
+5. THEN implement
+
+#### 7. Registry Configuration
+Ensure `components.json` has correct registry URL:
+```json
+{
+  "registries": {
+    "@neobrutalism": "https://neobrutalism.dev/r/{name}.json"
+  }
+}
+```
+
+**NOT**: `https://v3.neobrutalism.dev/r/{name}.json` (wrong URL)
+
 ### Library Documentation
 
 - **Virtuoso**: https://virtuoso.dev/ - Virtual scrolling for document reader

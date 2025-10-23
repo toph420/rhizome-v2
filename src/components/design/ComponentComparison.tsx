@@ -11,6 +11,7 @@ import { Input as NeoInput } from '@/components/libraries/neobrutalism/input'
 import { Input as RetroInput } from '@/components/libraries/retroui/Input'
 import { Checkbox as NeoCheckbox } from '@/components/libraries/neobrutalism/checkbox'
 import { Checkbox as RetroCheckbox } from '@/components/libraries/retroui/Checkbox'
+import { NeobrutalismTheme, RetroUITheme } from './ThemeWrappers'
 
 /**
  * Component Comparison - Side-by-side comparison of Neobrutalism vs RetroUI
@@ -34,213 +35,231 @@ export function ComponentComparison() {
       {/* Comparison Grid */}
       <div className="grid grid-cols-2 gap-6">
         {/* Headers */}
-        <div className="neo-card bg-primary/10">
-          <h4 className="text-xl font-bold">Neobrutalism</h4>
-          <p className="text-sm text-muted-foreground mt-1">44 components</p>
-        </div>
-        <div className="neo-card bg-secondary/10">
-          <h4 className="text-xl font-bold">RetroUI</h4>
-          <p className="text-sm text-muted-foreground mt-1">32 components</p>
-        </div>
+        <NeobrutalismTheme>
+          <div className="neo-card bg-primary/10">
+            <h4 className="text-xl font-bold">Neobrutalism</h4>
+            <p className="text-sm text-muted-foreground mt-1">44 components</p>
+          </div>
+        </NeobrutalismTheme>
+        <RetroUITheme>
+          <div className="neo-card bg-secondary/10">
+            <h4 className="text-xl font-bold">RetroUI</h4>
+            <p className="text-sm text-muted-foreground mt-1">32 components</p>
+          </div>
+        </RetroUITheme>
 
         {/* Button Comparison */}
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Button</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Interactive button component with variants
-            </p>
-          </div>
+        <NeobrutalismTheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Button</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Interactive button component with variants
+              </p>
+            </div>
 
-          <div className="space-y-3">
-            <NeoButton onClick={() => setClickCount({ ...clickCount, neo: clickCount.neo + 1 })}>
-              Click me ({clickCount.neo})
-            </NeoButton>
-            <NeoButton variant="secondary">Secondary</NeoButton>
-            <NeoButton variant="outline">Outline</NeoButton>
-            <NeoButton variant="destructive">Destructive</NeoButton>
-            <NeoButton size="sm">Small</NeoButton>
+            <div className="space-y-3">
+              <NeoButton onClick={() => setClickCount({ ...clickCount, neo: clickCount.neo + 1 })}>
+                Click me ({clickCount.neo})
+              </NeoButton>
+              <NeoButton variant="neutral">Neutral</NeoButton>
+              <NeoButton variant="reverse">Reverse</NeoButton>
+              <NeoButton size="sm">Small</NeoButton>
+            </div>
           </div>
-        </div>
+        </NeobrutalismTheme>
 
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Button</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Interactive button component with variants
-            </p>
-          </div>
+        <RetroUITheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Button</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Interactive button component with variants
+              </p>
+            </div>
 
-          <div className="space-y-3">
-            <RetroButton
-              onClick={() => setClickCount({ ...clickCount, retro: clickCount.retro + 1 })}
-            >
-              Click me ({clickCount.retro})
-            </RetroButton>
-            <RetroButton variant="secondary">Secondary</RetroButton>
-            <RetroButton variant="outline">Outline</RetroButton>
-            <RetroButton variant="outline">Destructive</RetroButton>
-            <RetroButton size="sm">Small</RetroButton>
+            <div className="space-y-3">
+              <RetroButton
+                onClick={() => setClickCount({ ...clickCount, retro: clickCount.retro + 1 })}
+              >
+                Click me ({clickCount.retro})
+              </RetroButton>
+              <RetroButton variant="secondary">Secondary</RetroButton>
+              <RetroButton variant="outline">Outline</RetroButton>
+              <RetroButton size="sm">Small</RetroButton>
+            </div>
           </div>
-        </div>
+        </RetroUITheme>
 
         {/* Badge Comparison */}
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Badge</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Small status indicators and labels
-            </p>
-          </div>
+        <NeobrutalismTheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Badge</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Small status indicators and labels
+              </p>
+            </div>
 
-          <div className="flex flex-wrap gap-2">
-            <NeoBadge>Default</NeoBadge>
-            <NeoBadge variant="secondary">Secondary</NeoBadge>
-            <NeoBadge variant="destructive">Destructive</NeoBadge>
-            <NeoBadge variant="outline">Outline</NeoBadge>
+            <div className="flex flex-wrap gap-2">
+              <NeoBadge>Default</NeoBadge>
+              <NeoBadge variant="secondary">Secondary</NeoBadge>
+              <NeoBadge variant="destructive">Destructive</NeoBadge>
+              <NeoBadge variant="outline">Outline</NeoBadge>
+            </div>
           </div>
-        </div>
+        </NeobrutalismTheme>
 
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Badge</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Small status indicators and labels
-            </p>
-          </div>
+        <RetroUITheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Badge</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Small status indicators and labels
+              </p>
+            </div>
 
-          <div className="flex flex-wrap gap-2">
-            <RetroBadge>Default</RetroBadge>
-            <RetroBadge variant="secondary">Secondary</RetroBadge>
-            <RetroBadge variant="outline">Outline</RetroBadge>
-            <RetroBadge variant="solid">Solid</RetroBadge>
+            <div className="flex flex-wrap gap-2">
+              <RetroBadge>Default</RetroBadge>
+              <RetroBadge variant="secondary">Secondary</RetroBadge>
+              <RetroBadge variant="outline">Outline</RetroBadge>
+              <RetroBadge variant="solid">Solid</RetroBadge>
+            </div>
           </div>
-        </div>
+        </RetroUITheme>
 
         {/* Input Comparison */}
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Input</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Text input with brutalist styling
-            </p>
-          </div>
+        <NeobrutalismTheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Input</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Text input with brutalist styling
+              </p>
+            </div>
 
-          <div className="space-y-2">
-            <NeoInput
-              placeholder="Enter text..."
-              value={inputValue.neo}
-              onChange={(e) => setInputValue({ ...inputValue, neo: e.target.value })}
-            />
-            <p className="text-xs text-muted-foreground">
-              {inputValue.neo.length > 0 ? `You typed: ${inputValue.neo}` : 'Type something...'}
-            </p>
+            <div className="space-y-2">
+              <NeoInput
+                placeholder="Enter text..."
+                value={inputValue.neo}
+                onChange={(e) => setInputValue({ ...inputValue, neo: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                {inputValue.neo.length > 0 ? `You typed: ${inputValue.neo}` : 'Type something...'}
+              </p>
+            </div>
           </div>
-        </div>
+        </NeobrutalismTheme>
 
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Input</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Text input with retro styling
-            </p>
-          </div>
+        <RetroUITheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Input</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Text input with retro styling
+              </p>
+            </div>
 
-          <div className="space-y-2">
-            <RetroInput
-              placeholder="Enter text..."
-              value={inputValue.retro}
-              onChange={(e) => setInputValue({ ...inputValue, retro: e.target.value })}
-            />
-            <p className="text-xs text-muted-foreground">
-              {inputValue.retro.length > 0
-                ? `You typed: ${inputValue.retro}`
-                : 'Type something...'}
-            </p>
+            <div className="space-y-2">
+              <RetroInput
+                placeholder="Enter text..."
+                value={inputValue.retro}
+                onChange={(e) => setInputValue({ ...inputValue, retro: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                {inputValue.retro.length > 0
+                  ? `You typed: ${inputValue.retro}`
+                  : 'Type something...'}
+              </p>
+            </div>
           </div>
-        </div>
+        </RetroUITheme>
 
         {/* Checkbox Comparison */}
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Checkbox</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Interactive checkbox component
-            </p>
-          </div>
+        <NeobrutalismTheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Checkbox</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Interactive checkbox component
+              </p>
+            </div>
 
-          <div className="flex items-center space-x-2">
-            <NeoCheckbox
-              id="neo-check"
-              checked={checked.neo}
-              onCheckedChange={(val) => setChecked({ ...checked, neo: !!val })}
-            />
-            <label htmlFor="neo-check" className="text-sm font-medium cursor-pointer">
-              {checked.neo ? 'Checked!' : 'Check me'}
-            </label>
+            <div className="flex items-center space-x-2">
+              <NeoCheckbox
+                id="neo-check"
+                checked={checked.neo}
+                onCheckedChange={(val) => setChecked({ ...checked, neo: !!val })}
+              />
+              <label htmlFor="neo-check" className="text-sm font-medium cursor-pointer">
+                {checked.neo ? 'Checked!' : 'Check me'}
+              </label>
+            </div>
           </div>
-        </div>
+        </NeobrutalismTheme>
 
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Checkbox</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Interactive checkbox component
-            </p>
-          </div>
+        <RetroUITheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Checkbox</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Interactive checkbox component
+              </p>
+            </div>
 
-          <div className="flex items-center space-x-2">
-            <RetroCheckbox
-              id="retro-check"
-              checked={checked.retro}
-              onCheckedChange={(val) => setChecked({ ...checked, retro: !!val })}
-            />
-            <label htmlFor="retro-check" className="text-sm font-medium cursor-pointer">
-              {checked.retro ? 'Checked!' : 'Check me'}
-            </label>
+            <div className="flex items-center space-x-2">
+              <RetroCheckbox
+                id="retro-check"
+                checked={checked.retro}
+                onCheckedChange={(val) => setChecked({ ...checked, retro: !!val })}
+              />
+              <label htmlFor="retro-check" className="text-sm font-medium cursor-pointer">
+                {checked.retro ? 'Checked!' : 'Check me'}
+              </label>
+            </div>
           </div>
-        </div>
+        </RetroUITheme>
 
         {/* Alert Comparison */}
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Alert</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Notification and message displays
-            </p>
-          </div>
+        <NeobrutalismTheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Alert</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Notification and message displays
+              </p>
+            </div>
 
-          <div className="space-y-3">
-            <NeoAlert>
-              <div className="font-bold">Default Alert</div>
-              <div className="text-sm">This is a default alert message</div>
-            </NeoAlert>
-            <NeoAlert variant="destructive">
-              <div className="font-bold">Destructive Alert</div>
-              <div className="text-sm">Something went wrong!</div>
-            </NeoAlert>
+            <div className="space-y-3">
+              <NeoAlert>
+                <div className="font-bold">Default Alert</div>
+                <div className="text-sm">This is a default alert message</div>
+              </NeoAlert>
+            </div>
           </div>
-        </div>
+        </NeobrutalismTheme>
 
-        <div className="neo-card space-y-4">
-          <div>
-            <h5 className="font-bold mb-2">Alert</h5>
-            <p className="text-xs text-muted-foreground mb-4">
-              Notification and message displays
-            </p>
-          </div>
+        <RetroUITheme>
+          <div className="neo-card space-y-4">
+            <div>
+              <h5 className="font-bold mb-2">Alert</h5>
+              <p className="text-xs text-muted-foreground mb-4">
+                Notification and message displays
+              </p>
+            </div>
 
-          <div className="space-y-3">
-            <RetroAlert variant="default">
-              <div className="font-bold">Default Alert</div>
-              <div className="text-sm">This is a default alert message</div>
-            </RetroAlert>
-            <RetroAlert variant="error">
-              <div className="font-bold">Error Alert</div>
-              <div className="text-sm">Something went wrong!</div>
-            </RetroAlert>
+            <div className="space-y-3">
+              <RetroAlert variant="default">
+                <div className="font-bold">Default Alert</div>
+                <div className="text-sm">This is a default alert message</div>
+              </RetroAlert>
+              <RetroAlert status="error">
+                <div className="font-bold">Error Alert</div>
+                <div className="text-sm">Something went wrong!</div>
+              </RetroAlert>
+            </div>
           </div>
-        </div>
+        </RetroUITheme>
       </div>
 
       {/* Summary */}

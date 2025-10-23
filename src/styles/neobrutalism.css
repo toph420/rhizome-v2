@@ -18,9 +18,9 @@
     --neo-shadow-offset-lg: 8px;
 
     /* Hard Shadows (No blur - pure offset) */
-    --neo-shadow-sm: 4px 4px 0px 0px hsl(var(--foreground));
-    --neo-shadow-md: 6px 6px 0px 0px hsl(var(--foreground));
-    --neo-shadow-lg: 8px 8px 0px 0px hsl(var(--foreground));
+    --neo-shadow-sm: 4px 4px 0px 0px var(--foreground);
+    --neo-shadow-md: 6px 6px 0px 0px var(--foreground);
+    --neo-shadow-lg: 8px 8px 0px 0px var(--foreground);
 
     /* Border Radius (Modern, not extreme) */
     --neo-radius-sm: 0.375rem;  /* 6px */
@@ -41,12 +41,19 @@
        Higher saturation for brutalist aesthetic
        ======================================== */
 
-    /* Bold Primary Colors */
-    --neo-primary: oklch(0.55 0.25 240);      /* Bold blue - higher chroma than semantic */
-    --neo-secondary: oklch(0.70 0.20 145);    /* Bold green */
-    --neo-accent: oklch(0.75 0.25 50);        /* Bold orange */
-    --neo-warning: oklch(0.80 0.25 85);       /* Bold yellow */
-    --neo-danger: oklch(0.65 0.30 25);        /* Bold red - highest chroma */
+    /* Bold Primary Colors - Option 1: Higher chroma (original) */
+    /* --neo-primary: oklch(0.55 0.25 240);      Bold blue - higher chroma than semantic */
+    /* --neo-secondary: oklch(0.70 0.20 145);    Bold green */
+    /* --neo-accent: oklch(0.75 0.25 50);        Bold orange */
+    /* --neo-warning: oklch(0.80 0.25 85);       Bold yellow */
+    /* --neo-danger: oklch(0.65 0.30 25);        Bold red - highest chroma */
+
+    /* Bold Primary Colors - Option 2: Authentic Neobrutalism */
+    --neo-primary: oklch(0.4849 0.069 220.07);      /* #2a687a - Ming (Teal Blue) - bold but not neon */
+    --neo-secondary: oklch(0.661 0.1091 136.97);  /* #72a25e - Russian Green (Sage) - earthy pop */
+    --neo-accent: oklch(0.6406 0.2565 8.07);      /* #ff6b35 - Vibrant Orange - high energy */
+    --neo-warning: oklch(0.8133 0.167 80.52);     /* #f9b409 - Spanish Yellow - bright warning */
+    --neo-danger: oklch(0.7045 0.1926 39.23);       /* #ff006e - Hot Pink - vibrant alert color */
 
     /* Bold Primary Foregrounds */
     --neo-primary-foreground: oklch(0.98 0 0);
@@ -89,9 +96,9 @@
   /* Dark Mode Adjustments */
   .dark {
     /* Invert shadow colors for dark mode */
-    --neo-shadow-sm: 4px 4px 0px 0px hsl(var(--background));
-    --neo-shadow-md: 6px 6px 0px 0px hsl(var(--background));
-    --neo-shadow-lg: 8px 8px 0px 0px hsl(var(--background));
+    --neo-shadow-sm: 4px 4px 0px 0px var(--background);
+    --neo-shadow-md: 6px 6px 0px 0px var(--background);
+    --neo-shadow-lg: 8px 8px 0px 0px var(--background);
 
     /* Adjust bold colors for dark mode (slightly desaturated) */
     --neo-primary: oklch(0.60 0.22 240);
@@ -104,168 +111,167 @@
 
 /* ========================================
    UTILITY CLASSES
-   Reusable brutalist patterns
+   Tailwind v4 @utility syntax
    ======================================== */
 
-@layer utilities {
-  /* Border Utilities */
-  .neo-border {
-    border: var(--neo-border-md) solid hsl(var(--foreground));
-  }
+/* Border Utilities */
+@utility neo-border {
+  border: var(--neo-border-md) solid var(--foreground);
+}
 
-  .neo-border-sm {
-    border: var(--neo-border-sm) solid hsl(var(--foreground));
-  }
+@utility neo-border-sm {
+  border: var(--neo-border-sm) solid var(--foreground);
+}
 
-  .neo-border-lg {
-    border: var(--neo-border-lg) solid hsl(var(--foreground));
-  }
+@utility neo-border-lg {
+  border: var(--neo-border-lg) solid var(--foreground);
+}
 
-  /* Border with active palette color */
-  .neo-border-primary {
-    border: var(--neo-border-md) solid hsl(var(--active-primary));
-  }
+@utility neo-border-primary {
+  border: var(--neo-border-md) solid var(--active-primary);
+}
 
-  .neo-border-danger {
-    border: var(--neo-border-md) solid hsl(var(--active-danger));
-  }
+@utility neo-border-danger {
+  border: var(--neo-border-md) solid var(--active-danger);
+}
 
-  /* Shadow Utilities */
-  .neo-shadow {
-    box-shadow: var(--neo-shadow-md);
-  }
+/* Shadow Utilities */
+@utility neo-shadow {
+  box-shadow: var(--neo-shadow-md);
+}
 
-  .neo-shadow-sm {
-    box-shadow: var(--neo-shadow-sm);
-  }
+@utility neo-shadow-sm {
+  box-shadow: var(--neo-shadow-sm);
+}
 
-  .neo-shadow-lg {
-    box-shadow: var(--neo-shadow-lg);
-  }
+@utility neo-shadow-lg {
+  box-shadow: var(--neo-shadow-lg);
+}
 
-  /* Colored Shadows (for strategic emphasis) */
-  .neo-shadow-primary {
-    box-shadow: 6px 6px 0px 0px hsl(var(--active-primary));
-  }
+@utility neo-shadow-primary {
+  box-shadow: 6px 6px 0px 0px var(--active-primary);
+}
 
-  .neo-shadow-danger {
-    box-shadow: 6px 6px 0px 0px hsl(var(--active-danger));
-  }
+@utility neo-shadow-danger {
+  box-shadow: 6px 6px 0px 0px var(--active-danger);
+}
 
-  .neo-shadow-warning {
-    box-shadow: 6px 6px 0px 0px hsl(var(--active-warning));
-  }
+@utility neo-shadow-warning {
+  box-shadow: 6px 6px 0px 0px var(--active-warning);
+}
 
-  .neo-shadow-secondary {
-    box-shadow: 6px 6px 0px 0px hsl(var(--active-secondary));
-  }
+@utility neo-shadow-secondary {
+  box-shadow: 6px 6px 0px 0px var(--active-secondary);
+}
 
-  /* Hover Translation Effect */
-  .neo-hover {
-    transition: all 0.15s ease;
-    cursor: pointer;
-  }
+/* Hover Translation Effect */
+@utility neo-hover {
+  transition: all 0.15s ease;
+  cursor: pointer;
 
-  .neo-hover:hover {
+  &:hover {
     transform: translate(4px, 4px);
-    box-shadow: 2px 2px 0px 0px hsl(var(--foreground));
+    box-shadow: 2px 2px 0px 0px var(--foreground);
   }
 
-  .neo-hover:active {
+  &:active {
     transform: translate(6px, 6px);
-    box-shadow: 0px 0px 0px 0px hsl(var(--foreground));
+    box-shadow: 0px 0px 0px 0px var(--foreground);
   }
+}
 
-  /* Colored Hover Effects */
-  .neo-hover-primary:hover {
-    box-shadow: 2px 2px 0px 0px hsl(var(--active-primary));
+@utility neo-hover-primary {
+  &:hover {
+    box-shadow: 2px 2px 0px 0px var(--active-primary);
   }
+}
 
-  .neo-hover-danger:hover {
-    box-shadow: 2px 2px 0px 0px hsl(var(--active-danger));
+@utility neo-hover-danger {
+  &:hover {
+    box-shadow: 2px 2px 0px 0px var(--active-danger);
   }
+}
 
-  /* Background Colors (Strategic) */
-  .neo-bg-primary {
-    background-color: hsl(var(--active-primary));
-    color: hsl(var(--neo-primary-foreground));
-  }
+/* Background Colors */
+@utility neo-bg-primary {
+  background-color: var(--active-primary);
+  color: var(--neo-primary-foreground);
+}
 
-  .neo-bg-secondary {
-    background-color: hsl(var(--active-secondary));
-    color: hsl(var(--neo-secondary-foreground));
-  }
+@utility neo-bg-secondary {
+  background-color: var(--active-secondary);
+  color: var(--neo-secondary-foreground);
+}
 
-  .neo-bg-accent {
-    background-color: hsl(var(--active-accent));
-    color: hsl(var(--neo-accent-foreground));
-  }
+@utility neo-bg-accent {
+  background-color: var(--active-accent);
+  color: var(--neo-accent-foreground);
+}
 
-  .neo-bg-warning {
-    background-color: hsl(var(--active-warning));
-    color: hsl(var(--neo-warning-foreground));
-  }
+@utility neo-bg-warning {
+  background-color: var(--active-warning);
+  color: var(--neo-warning-foreground);
+}
 
-  .neo-bg-danger {
-    background-color: hsl(var(--active-danger));
-    color: hsl(var(--neo-danger-foreground));
-  }
+@utility neo-bg-danger {
+  background-color: var(--active-danger);
+  color: var(--neo-danger-foreground);
+}
 
-  /* Radius Utilities */
-  .neo-rounded {
-    border-radius: var(--neo-radius-md);
-  }
+/* Radius Utilities */
+@utility neo-rounded {
+  border-radius: var(--neo-radius-md);
+}
 
-  .neo-rounded-sm {
-    border-radius: var(--neo-radius-sm);
-  }
+@utility neo-rounded-sm {
+  border-radius: var(--neo-radius-sm);
+}
 
-  .neo-rounded-lg {
-    border-radius: var(--neo-radius-lg);
-  }
+@utility neo-rounded-lg {
+  border-radius: var(--neo-radius-lg);
+}
 
-  /* Combined Patterns */
-  .neo-card {
-    border: var(--neo-border-md) solid hsl(var(--foreground));
-    box-shadow: var(--neo-shadow-md);
-    border-radius: var(--neo-radius-md);
-    background-color: hsl(var(--background));
-    padding: 1.5rem;
-  }
+/* Combined Patterns */
+@utility neo-card {
+  border: var(--neo-border-md) solid var(--foreground);
+  box-shadow: var(--neo-shadow-md);
+  border-radius: var(--neo-radius-md);
+  background-color: var(--background);
+  padding: 1.5rem;
+}
 
-  .neo-button {
-    border: var(--neo-border-md) solid hsl(var(--foreground));
-    box-shadow: var(--neo-shadow-md);
-    border-radius: var(--neo-radius-md);
-    transition: all 0.15s ease;
-    cursor: pointer;
-    padding-left: 1rem;
-    padding-right: 1rem;
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-    font-weight: 700;
-  }
+@utility neo-button {
+  border: var(--neo-border-md) solid var(--foreground);
+  box-shadow: var(--neo-shadow-md);
+  border-radius: var(--neo-radius-md);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-weight: 700;
 
-  .neo-button:hover {
+  &:hover {
     transform: translate(4px, 4px);
-    box-shadow: 2px 2px 0px 0px hsl(var(--foreground));
+    box-shadow: 2px 2px 0px 0px var(--foreground);
   }
 
-  .neo-button:active {
+  &:active {
     transform: translate(6px, 6px);
-    box-shadow: 0px 0px 0px 0px hsl(var(--foreground));
+    box-shadow: 0px 0px 0px 0px var(--foreground);
   }
+}
 
-  .neo-badge {
-    border: var(--neo-border-md) solid hsl(var(--foreground));
-    border-radius: 9999px;
-    padding-left: 0.75rem;
-    padding-right: 0.75rem;
-    padding-top: 0.25rem;
-    padding-bottom: 0.25rem;
-    font-size: 0.875rem;
-    font-weight: 700;
-  }
+@utility neo-badge {
+  border: var(--neo-border-md) solid var(--foreground);
+  border-radius: 9999px;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 700;
 }
 
 /* ========================================
@@ -275,13 +281,13 @@
 
 @layer base {
   *:focus-visible {
-    outline: 3px solid hsl(var(--active-primary));
+    outline: 3px solid var(--active-primary);
     outline-offset: 2px;
   }
 
   button:focus-visible,
   a:focus-visible {
-    outline: 3px solid hsl(var(--active-primary));
+    outline: 3px solid var(--active-primary);
     outline-offset: 2px;
   }
 }

@@ -84,6 +84,53 @@ export function BrutalismPlayground() {
       </div>
 
       <div className="space-y-12">
+        {/* CSS Utilities Test Section */}
+        <section>
+          <h3 className="text-2xl font-bold mb-6">Neobrutalist CSS Utilities Test</h3>
+          <div className="space-y-6">
+            {/* Test neo-border */}
+            <div className="neo-border p-4 bg-background rounded-lg">
+              <p className="font-bold">Test 1: neo-border class</p>
+              <p className="text-sm text-muted-foreground">This div has neo-border (3px solid)</p>
+            </div>
+
+            {/* Test neo-shadow */}
+            <div className="neo-border neo-shadow p-4 bg-background rounded-lg">
+              <p className="font-bold">Test 2: neo-border + neo-shadow</p>
+              <p className="text-sm text-muted-foreground">This div has neo-border + neo-shadow (6px offset)</p>
+            </div>
+
+            {/* Test neo-hover */}
+            <button className="neo-border neo-shadow neo-hover p-4 bg-background rounded-lg w-full text-left">
+              <p className="font-bold">Test 3: neo-hover interactive effect</p>
+              <p className="text-sm text-muted-foreground">Hover me for translation effect (moves 4px on hover)</p>
+            </button>
+
+            {/* Test neo-card utility */}
+            <div className="neo-card">
+              <p className="font-bold">Test 4: neo-card combined utility</p>
+              <p className="text-sm text-muted-foreground">Uses neo-card class (border + shadow + radius + padding)</p>
+            </div>
+
+            {/* Test neo-button utility */}
+            <button className="neo-button neo-bg-primary">
+              Test 5: neo-button with colored background
+            </button>
+
+            {/* Test colored shadows */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="neo-border neo-shadow-primary p-4 bg-background rounded-lg">
+                <p className="font-bold">Colored Shadow: Primary</p>
+                <p className="text-sm text-muted-foreground">neo-shadow-primary</p>
+              </div>
+              <div className="neo-border neo-shadow-danger p-4 bg-background rounded-lg">
+                <p className="font-bold">Colored Shadow: Danger</p>
+                <p className="text-sm text-muted-foreground">neo-shadow-danger</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Cards Section */}
         <section>
           <h3 className="text-2xl font-bold mb-6">Cards</h3>

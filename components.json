@@ -19,6 +19,6 @@
     "hooks": "@/hooks"
   },
   "registries": {
-    "@neobrutalism": "https://v3.neobrutalism.dev/r/{name}.json"
+    "@neobrutalism": "https://neobrutalism.dev/r/{name}.json"
   }
 }
