@@ -2,8 +2,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TypographyShowcase } from '@/components/design/TypographyShowcase'
 import { ColorPalette } from '@/components/design/ColorPalette'
 import { ComponentShowcase } from '@/components/design/ComponentShowcase'
-import { ExperimentalPlayground } from '@/components/design/ExperimentalPlayground'
 import { BrutalismPlayground } from '@/components/design/BrutalismPlayground'
+import { LibrariesShowcase } from '@/components/design/LibrariesShowcase'
 
 /**
  * Design guide page showcasing typography, colors, components, and experimental styles.
@@ -21,15 +21,20 @@ export default function DesignGuidePage() {
       </div>
 
       {/* Tabs Navigation */}
-      <Tabs defaultValue="brutalism" className="space-y-6">
+      <Tabs defaultValue="libraries" className="space-y-6">
         <TabsList className="grid w-full grid-cols-6 lg:w-auto">
+          <TabsTrigger value="libraries">Libraries</TabsTrigger>
           <TabsTrigger value="brutalism">Brutalism</TabsTrigger>
           <TabsTrigger value="typography">Typography</TabsTrigger>
           <TabsTrigger value="colors">Colors</TabsTrigger>
           <TabsTrigger value="components">Components</TabsTrigger>
-          <TabsTrigger value="experimental">Experimental</TabsTrigger>
           <TabsTrigger value="spacing">Spacing</TabsTrigger>
         </TabsList>
+
+        {/* Libraries Showcase */}
+        <TabsContent value="libraries" className="space-y-6">
+          <LibrariesShowcase />
+        </TabsContent>
 
         {/* Brutalism Playground */}
         <TabsContent value="brutalism" className="space-y-6">
@@ -49,11 +54,6 @@ export default function DesignGuidePage() {
         {/* Components Section */}
         <TabsContent value="components" className="space-y-6">
           <ComponentShowcase />
-        </TabsContent>
-
-        {/* Experimental Playground */}
-        <TabsContent value="experimental" className="space-y-6">
-          <ExperimentalPlayground />
         </TabsContent>
 
         {/* Spacing Section */}
