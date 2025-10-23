@@ -2,27 +2,11 @@
 /* Retro/Neobrutalist aesthetic with playful styling */
 
 @layer base {
-  :root {
-    /* ========================================
-       RETROUI SHADOW SYSTEM
-       Hard shadows with no blur
-       ======================================== */
-
-    --shadow-xs: 1px 1px 0 0 var(--border);
-    --shadow-sm: 2px 2px 0 0 var(--border);
-    --shadow: 3px 3px 0 0 var(--border);
-    --shadow-md: 4px 4px 0 0 var(--border);
-    --shadow-lg: 6px 6px 0 0 var(--border);
-    --shadow-xl: 10px 10px 0 1px var(--border);
-    --shadow-2xl: 16px 16px 0 1px var(--border);
-  }
-
   /* ========================================
-     RETROUI COLOR THEME
-     Based on registry theme configuration
+     RETROUI THEME SCOPE
+     Apply .retroui-theme to container to scope these variables
      ======================================== */
 
-  /* Light mode RetroUI colors */
   .retroui-theme {
     /* Core colors - using HSL for RetroUI */
     --background: 0 0% 100%;
@@ -33,6 +17,12 @@
     /* Primary - Yellow accent */
     --primary: 50 100% 60%;
     --primary-foreground: 0 0% 0%;
+    --primary-hover: 50 100% 55%;
+
+    /* Secondary */
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 0 0% 100%;
+    --secondary-hover: 0 0% 15%;
 
     /* Muted and accents */
     --muted: 0 0% 68%;
@@ -47,8 +37,21 @@
     /* Border - Black for retro look */
     --border: 0 0% 0%;
 
-    /* RetroUI uses flat colors - no gradients */
-    --radius: 0.5rem; /* Slightly rounded for retro feel */
+    /* RetroUI shadow system */
+    --shadow: 3px 3px 0 0 hsl(0 0% 0%);
+    --shadow-sm: 2px 2px 0 0 hsl(0 0% 0%);
+    --shadow-md: 4px 4px 0 0 hsl(0 0% 0%);
+    --shadow-lg: 6px 6px 0 0 hsl(0 0% 0%);
+    --shadow-xs: 1px 1px 0 0 hsl(0 0% 0%);
+    --shadow-xl: 10px 10px 0 1px hsl(0 0% 0%);
+    --shadow-2xl: 16px 16px 0 1px hsl(0 0% 0%);
+
+    /* Fonts */
+    --font-head: var(--font-geist-sans);
+    --font-sans: var(--font-geist-sans);
+
+    /* Radius */
+    --radius: 0.5rem;
   }
 
   /* Dark mode for RetroUI (same as light for authentic retro look) */

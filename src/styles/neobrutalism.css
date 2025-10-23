@@ -2,6 +2,33 @@
 /* Flat Beauty: No gradients, no glowing effects, just geometric clarity */
 
 @layer base {
+  /* ========================================
+     NEOBRUTALISM THEME SCOPE
+     Apply .neobrutalism-theme to container to scope these variables
+     ======================================== */
+
+  .neobrutalism-theme {
+    /* Component-specific variables for Neobrutalism components */
+    --main: oklch(0.205 0 0);
+    --main-foreground: oklch(0.985 0 0);
+    --secondary-background: oklch(0.97 0 0);
+    --border: oklch(0.145 0 0);
+
+    /* Shadow system */
+    --boxShadowX: 4px;
+    --boxShadowY: 4px;
+    --reverseBoxShadowX: -4px;
+    --reverseBoxShadowY: -4px;
+    --shadow: 4px 4px 0px 0px oklch(0.145 0 0);
+
+    /* Fonts */
+    --font-base: var(--font-geist-sans);
+    --font-heading: var(--font-geist-sans);
+
+    /* Border radius */
+    --rounded-base: 0.5rem;
+  }
+
   :root {
     /* ========================================
        BRUTALIST STRUCTURE (Balanced)
