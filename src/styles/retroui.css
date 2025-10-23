@@ -1,0 +1,149 @@
+/* RetroUI Design Tokens */
+/* Retro/Neobrutalist aesthetic with playful styling */
+
+@layer base {
+  :root {
+    /* ========================================
+       RETROUI SHADOW SYSTEM
+       Hard shadows with no blur
+       ======================================== */
+
+    --shadow-xs: 1px 1px 0 0 var(--border);
+    --shadow-sm: 2px 2px 0 0 var(--border);
+    --shadow: 3px 3px 0 0 var(--border);
+    --shadow-md: 4px 4px 0 0 var(--border);
+    --shadow-lg: 6px 6px 0 0 var(--border);
+    --shadow-xl: 10px 10px 0 1px var(--border);
+    --shadow-2xl: 16px 16px 0 1px var(--border);
+  }
+
+  /* ========================================
+     RETROUI COLOR THEME
+     Based on registry theme configuration
+     ======================================== */
+
+  /* Light mode RetroUI colors */
+  .retroui-theme {
+    /* Core colors - using HSL for RetroUI */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+
+    /* Primary - Yellow accent */
+    --primary: 50 100% 60%;
+    --primary-foreground: 0 0% 0%;
+
+    /* Muted and accents */
+    --muted: 0 0% 68%;
+    --muted-foreground: 0 0% 35%;
+    --accent: 50 89% 74%;
+    --accent-foreground: 0 0% 0%;
+
+    /* Destructive */
+    --destructive: 355 78% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Border - Black for retro look */
+    --border: 0 0% 0%;
+
+    /* RetroUI uses flat colors - no gradients */
+    --radius: 0.5rem; /* Slightly rounded for retro feel */
+  }
+
+  /* Dark mode for RetroUI (same as light for authentic retro look) */
+  .retroui-theme.dark {
+    /* RetroUI keeps same aesthetic in dark mode */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --primary: 50 100% 60%;
+    --primary-foreground: 0 0% 0%;
+    --muted: 0 0% 68%;
+    --muted-foreground: 0 0% 35%;
+    --accent: 50 89% 74%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 355 78% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 0%;
+  }
+}
+
+/* ========================================
+   RETROUI UTILITY CLASSES
+   For RetroUI-specific components
+   ======================================== */
+
+@utility retro-shadow {
+  box-shadow: var(--shadow);
+}
+
+@utility retro-shadow-sm {
+  box-shadow: var(--shadow-sm);
+}
+
+@utility retro-shadow-md {
+  box-shadow: var(--shadow-md);
+}
+
+@utility retro-shadow-lg {
+  box-shadow: var(--shadow-lg);
+}
+
+@utility retro-shadow-xl {
+  box-shadow: var(--shadow-xl);
+}
+
+@utility retro-card {
+  border: 2px solid var(--border);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+  background-color: var(--background);
+  padding: 1rem;
+}
+
+@utility retro-button {
+  border: 2px solid var(--border);
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+
+  &:hover {
+    transform: translate(1px, 1px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  &:active {
+    transform: translate(2px, 2px);
+    box-shadow: var(--shadow-xs);
+  }
+}
+
+/* ========================================
+   DESIGN NOTES
+   ======================================== */
+
+/*
+  RETROUI PHILOSOPHY:
+  - Playful retro/neobrutalist aesthetic
+  - Yellow primary color for vintage feel
+  - Black borders for strong contrast
+  - Hard shadows (no blur)
+  - Flat colors (no gradients)
+  - Slightly softer than full brutalism
+
+  USAGE:
+  - Add .retroui-theme class to container for RetroUI styling
+  - Components automatically use RetroUI shadow system
+  - Charts use RetroUI color palette
+
+  DIFFERENCES FROM NEOBRUTALISM:
+  - Softer shadows (2-4px vs 4-6px)
+  - Yellow accent vs blue/teal
+  - More compact spacing
+  - Vintage retro feel vs pure brutalism
+*/

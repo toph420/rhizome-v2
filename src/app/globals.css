@@ -1,10 +1,8 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @import "tw-animate-css";
-@import "../styles/experimental.css";
-@import "../styles/tactical.css";
-@import "../styles/brutalist.css";
 @import "../styles/neobrutalism.css";
+@import "../styles/retroui.css";
 
 @custom-variant dark (&:is(.dark *));
 
