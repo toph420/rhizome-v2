@@ -11,6 +11,13 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Neobrutalism colors - reference scoped variables with fallbacks */
+  --color-main: var(--main, var(--primary));
+  --color-main-foreground: var(--main-foreground, var(--primary-foreground));
+  --color-secondary-background: var(--secondary-background, var(--secondary));
+
+  /* Sidebar colors */
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -19,11 +26,15 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+
+  /* Chart colors */
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+
+  /* Standard colors */
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -40,10 +51,27 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* Radius - reference scoped variables with fallbacks */
+  --radius-base: var(--rounded-base, var(--radius));
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Shadows - reference scoped variables with fallbacks */
+  --shadow-shadow: var(--shadow, 4px 4px 0px 0px hsl(var(--border)));
+
+  /* Translate values for animations - reference scoped variables */
+  --translate-boxShadowX: var(--boxShadowX, 4px);
+  --translate-boxShadowY: var(--boxShadowY, 4px);
+  --translate-reverseBoxShadowX: var(--reverseBoxShadowX, -4px);
+  --translate-reverseBoxShadowY: var(--reverseBoxShadowY, -4px);
+
+  /* Fonts - reference scoped variables */
+  --font-base: var(--font-base, var(--font-geist-sans));
+  --font-heading: var(--font-heading, var(--font-geist-sans));
+  --font-head: var(--font-head, var(--font-geist-sans));
 }
 
 :root {
