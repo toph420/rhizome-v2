@@ -164,7 +164,7 @@ Tailwind v4 uses different configuration syntax than v3.
 
 **Question**: Are we using the correct Tailwind v4 syntax for custom values?
 
-Tailwind v4 docs: https://tailwindcss.com/docs/v4-beta
+Tailwind v4 docs: https://tailwindcss.com/docs/theme
 
 ---
 

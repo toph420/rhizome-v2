@@ -1,80 +1,93 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @import "tw-animate-css";
-@import "../styles/retroui.css";
 @import "../styles/neobrutalism.css";
+@import "../styles/retroui.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-
-  /* Neobrutalism colors - reference scoped variables with fallbacks */
-  --color-main: var(--main, var(--primary));
-  --color-main-foreground: var(--main-foreground, var(--primary-foreground));
-  --color-secondary-background: var(--secondary-background, var(--secondary));
-
-  /* Sidebar colors */
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-
-  /* Chart colors */
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-
-  /* Standard colors */
-  --color-ring: var(--ring);
-  --color-input: var(--input);
+  /* Core app utilities - reference runtime variables */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
   --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+
+  /* Neobrutalism utilities - reference runtime variables */
+  --color-main: var(--main);
+  --color-main-foreground: var(--main-fg);
+  --color-secondary-background: var(--secondary-bg);
+
+  /* RetroUI utilities - reference runtime variables */
   --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
+  --color-primary-foreground: var(--primary-fg);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-fg);
+  --color-secondary-hover: var(--secondary-hover);
   --color-card: var(--card);
+  --color-card-foreground: var(--card-fg);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-fg);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-fg);
 
-  /* Radius - reference scoped variables with fallbacks */
-  --radius-base: var(--rounded-base, var(--radius));
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Border radius - reference runtime variables */
+  --radius-base: var(--radius-val);
 
-  /* Shadows - reference scoped variables with fallbacks */
-  --shadow-shadow: var(--shadow, 4px 4px 0px 0px hsl(var(--border)));
+  /* Shadows - reference runtime variables */
+  --shadow-shadow: var(--shadow-val);
+  --shadow-md: var(--shadow-md-val);
+  --shadow-primary: var(--shadow-primary-val);
 
-  /* Translate values for animations - reference scoped variables */
-  --translate-boxShadowX: var(--boxShadowX, 4px);
-  --translate-boxShadowY: var(--boxShadowY, 4px);
-  --translate-reverseBoxShadowX: var(--reverseBoxShadowX, -4px);
-  --translate-reverseBoxShadowY: var(--reverseBoxShadowY, -4px);
+  /* Translate values - reference runtime variables */
+  --translate-boxShadowX: var(--translateX);
+  --translate-boxShadowY: var(--translateY);
+  --translate-reverseBoxShadowX: var(--translateRevX);
+  --translate-reverseBoxShadowY: var(--translateRevY);
 
-  /* Fonts - reference scoped variables */
-  --font-base: var(--font-base, var(--font-geist-sans));
-  --font-heading: var(--font-heading, var(--font-geist-sans));
-  --font-head: var(--font-head, var(--font-geist-sans));
+  /* Fonts - reference runtime variables */
+  --font-base: var(--font-val);
+  --font-head: var(--font-head-val);
 }
 
 :root {
+  /* Runtime variables - defaults for the app */
+  --bg: #fff;
+  --fg: #0a0a0a;
+  --border: #e5e5e5;
+  --ring: #a3a3a3;
+  --main: #1a1a1a;
+  --main-fg: #fafafa;
+  --secondary-bg: #f5f5f5;
+  --primary: #333;
+  --primary-fg: #fff;
+  --primary-hover: #1a1a1a;
+  --secondary: #666;
+  --secondary-fg: #fff;
+  --secondary-hover: #333;
+  --card: #fff;
+  --card-fg: #0a0a0a;
+  --muted: #f5f5f5;
+  --muted-fg: #666;
+  --accent: #f5f5f5;
+  --accent-fg: #0a0a0a;
+  --destructive: #dc2626;
+  --destructive-fg: #fff;
+  --radius-val: 0.5rem;
+  --shadow-val: 4px 4px 0 0 #000;
+  --shadow-md-val: 4px 4px 0 0 #000;
+  --shadow-primary-val: 3px 3px 0 0 #333;
+  --translateX: 4px;
+  --translateY: 4px;
+  --translateRevX: -4px;
+  --translateRevY: -4px;
+  --font-val: system-ui, sans-serif;
+  --font-head-val: system-ui, sans-serif;
+
+  /* Legacy variables for existing styles */
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

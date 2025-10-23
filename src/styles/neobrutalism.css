@@ -8,25 +8,34 @@
      ======================================== */
 
   .neobrutalism-theme {
-    /* Component-specific variables for Neobrutalism components */
-    --main: oklch(0.205 0 0);
-    --main-foreground: oklch(0.985 0 0);
-    --secondary-background: oklch(0.97 0 0);
-    --border: oklch(0.145 0 0);
+    /* Custom Neobrutalism theme - light mode */
+    --bg: oklch(96.79% 0.0654 102.26);
+    --secondary-bg: oklch(100% 0 0);
+    --fg: oklch(0% 0 0);
+    --main-fg: oklch(0% 0 0);
+    --main: oklch(86.03% 0.176 92.36);
+    --border: oklch(0% 0 0);
+    --ring: oklch(0% 0 0);
+    --shadow-val: 4px 4px 0px 0px oklch(0% 0 0);
+    --translateX: 4px;
+    --translateY: 4px;
+    --translateRevX: -4px;
+    --translateRevY: -4px;
+    --radius-val: 10px;
+    --font-val: var(--font-geist-sans);
+    --font-head-val: var(--font-geist-sans);
+  }
 
-    /* Shadow system */
-    --boxShadowX: 4px;
-    --boxShadowY: 4px;
-    --reverseBoxShadowX: -4px;
-    --reverseBoxShadowY: -4px;
-    --shadow: 4px 4px 0px 0px oklch(0.145 0 0);
-
-    /* Fonts */
-    --font-base: var(--font-geist-sans);
-    --font-heading: var(--font-geist-sans);
-
-    /* Border radius */
-    --rounded-base: 0.5rem;
+  .neobrutalism-theme.dark {
+    /* Custom Neobrutalism theme - dark mode */
+    --bg: oklch(29.28% 0.0373 94.38);
+    --secondary-bg: oklch(23.93% 0 0);
+    --fg: oklch(92.49% 0 0);
+    --main-fg: oklch(0% 0 0);
+    --main: oklch(79.36% 0.1624 92.49);
+    --border: oklch(0% 0 0);
+    --ring: oklch(100% 0 0);
+    --shadow-val: 4px 4px 0px 0px oklch(0% 0 0);
   }
 
   :root {

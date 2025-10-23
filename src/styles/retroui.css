@@ -8,50 +8,49 @@
      ======================================== */
 
   .retroui-theme {
-    /* Core colors - using HSL for RetroUI */
-    --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 0%;
+    /* Custom RetroUI theme - light mode */
+    --bg: #fff;
+    --fg: #000;
+    --card: #fff;
+    --card-fg: #000;
+    --primary: #ffdb33;
+    --primary-hover: #ffcc00;
+    --primary-fg: #000;
+    --secondary: #000;
+    --secondary-fg: #fff;
+    --muted: #cccccc;
+    --muted-fg: #5a5a5a;
+    --accent: #fae583;
+    --accent-fg: #000;
+    --destructive: #e63946;
+    --destructive-fg: #fff;
+    --border: #000;
+    --radius-val: 0.5rem;
+    --shadow-val: 3px 3px 0 0 #000;
+    --shadow-md-val: 4px 4px 0 0 #000;
+    --shadow-primary-val: 3px 3px 0 0 #ffdb33;
+    --font-val: var(--font-geist-sans);
+    --font-head-val: var(--font-geist-sans);
+  }
 
-    /* Primary - Yellow accent */
-    --primary: 50 100% 60%;
-    --primary-foreground: 0 0% 0%;
-    --primary-hover: 50 100% 55%;
-
-    /* Secondary */
-    --secondary: 0 0% 20%;
-    --secondary-foreground: 0 0% 100%;
-    --secondary-hover: 0 0% 15%;
-
-    /* Muted and accents */
-    --muted: 0 0% 68%;
-    --muted-foreground: 0 0% 35%;
-    --accent: 50 89% 74%;
-    --accent-foreground: 0 0% 0%;
-
-    /* Destructive */
-    --destructive: 355 78% 56%;
-    --destructive-foreground: 0 0% 100%;
-
-    /* Border - Black for retro look */
-    --border: 0 0% 0%;
-
-    /* RetroUI shadow system */
-    --shadow: 3px 3px 0 0 hsl(0 0% 0%);
-    --shadow-sm: 2px 2px 0 0 hsl(0 0% 0%);
-    --shadow-md: 4px 4px 0 0 hsl(0 0% 0%);
-    --shadow-lg: 6px 6px 0 0 hsl(0 0% 0%);
-    --shadow-xs: 1px 1px 0 0 hsl(0 0% 0%);
-    --shadow-xl: 10px 10px 0 1px hsl(0 0% 0%);
-    --shadow-2xl: 16px 16px 0 1px hsl(0 0% 0%);
-
-    /* Fonts */
-    --font-head: var(--font-geist-sans);
-    --font-sans: var(--font-geist-sans);
-
-    /* Radius */
-    --radius: 0.5rem;
+  .retroui-theme.dark {
+    /* Custom RetroUI theme - dark mode */
+    --bg: #1a1a1a;
+    --fg: #f5f5f5;
+    --card: #242424;
+    --card-fg: #f5f5f5;
+    --primary: #ffdb33;
+    --primary-hover: #ffcc00;
+    --primary-fg: #000;
+    --secondary: #3a3a3a;
+    --secondary-fg: #f5f5f5;
+    --muted: #3f3f46;
+    --muted-fg: #a0a0a0;
+    --accent: #fae583;
+    --accent-fg: #000;
+    --destructive: #e63946;
+    --destructive-fg: #fff;
+    --border: #5c5c5c;
   }
 
   /* Dark mode for RetroUI (same as light for authentic retro look) */
