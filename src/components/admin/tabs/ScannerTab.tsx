@@ -11,12 +11,12 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@/components/rhizome/table'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@/components/rhizome/tooltip'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info, Trash2 } from 'lucide-react'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
 import { useAdminPanelStore } from '@/stores/admin/admin-panel'

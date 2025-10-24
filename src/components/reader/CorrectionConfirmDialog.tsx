@@ -9,7 +9,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
+} from '@/components/rhizome/dialog'
 import { AlertCircle, ArrowRight, CheckCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateChunkOffsets } from '@/app/actions/chunks'

@@ -7,8 +7,8 @@ import {
 } from '@/app/actions/documents'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/rhizome/checkbox'
+import { Label } from '@/components/rhizome/label'
 import {
   Table,
   TableBody,
@@ -16,7 +16,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@/components/rhizome/table'
 import { Loader2, Download, Info, Trash2 } from 'lucide-react'
 import { ConflictResolutionDialog } from '@/components/admin/ConflictResolutionDialog'
 import type { ImportConflict } from '@/types/storage'
@@ -24,7 +24,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@/components/rhizome/tooltip'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { JobList } from '@/components/admin/JobList'

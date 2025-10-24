@@ -3,11 +3,11 @@
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/rhizome/input'
-import { Label } from '@/components/ui/label'
+import { Label } from '@/components/rhizome/label'
 import { toast } from 'sonner'
 import { Loader2, Save, FolderOpen, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Switch } from '@/components/ui/switch'
+import { Alert, AlertDescription } from '@/components/rhizome/alert'
+import { Switch } from '@/components/rhizome/switch'
 import {
   getObsidianSettings,
   saveObsidianSettings,

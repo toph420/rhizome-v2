@@ -1,7 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/rhizome/hover-card'
 import { Badge } from '@/components/ui/badge'
 import { Info, TrendingUp, CheckCircle, AlertTriangle } from 'lucide-react'
 import type { Chunk } from '@/types/annotations'

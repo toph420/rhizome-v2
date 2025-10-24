@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@/components/rhizome/tooltip'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { JobList } from '@/components/admin/JobList'
 

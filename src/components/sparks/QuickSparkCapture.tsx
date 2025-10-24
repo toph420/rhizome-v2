@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Textarea } from '@/components/ui/textarea'
+import { Textarea } from '@/components/rhizome/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter } from 'lucide-react'
 import { createSpark, updateSpark, linkAnnotationToSpark } from '@/app/actions/sparks'

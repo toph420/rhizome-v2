@@ -4,17 +4,17 @@ import { useEffect, useState } from 'react'
 import { reprocessConnections, type ReprocessMode, type EngineType } from '@/app/actions/documents'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Progress } from '@/components/ui/progress'
+import { Label } from '@/components/rhizome/label'
+import { RadioGroup, RadioGroupItem } from '@/components/rhizome/radio-group'
+import { Checkbox } from '@/components/rhizome/checkbox'
+import { Progress } from '@/components/rhizome/progress'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from '@/components/rhizome/select'
 import { Loader2, Play, AlertCircle, CheckCircle2, Info } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { serializeSupabaseError, getErrorMessage } from '@/lib/supabase/error-helpers'
@@ -23,7 +23,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@/components/rhizome/tooltip'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 
 // Types for document with connection stats

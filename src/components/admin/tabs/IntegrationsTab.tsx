@@ -19,7 +19,7 @@ import {
   type SparkImportResult,
 } from '@/app/actions/integrations'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
+import { Label } from '@/components/rhizome/label'
 import {
   Table,
   TableBody,
@@ -27,7 +27,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@/components/rhizome/table'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, FileText, RefreshCw, Upload, CheckCircle2, AlertCircle, XCircle, Info } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -37,7 +37,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@/components/rhizome/tooltip'
 
 interface Document {
   id: string

@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
+import { Progress } from '@/components/rhizome/progress'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Loader2,

@@ -9,8 +9,8 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from '@/components/ui/accordion'
-import { Skeleton } from '@/components/ui/skeleton'
+} from '@/components/rhizome/accordion'
+import { Skeleton } from '@/components/rhizome/skeleton'
 import { useChunkStats } from '@/hooks/use-chunk-stats'
 import { useUnvalidatedChunks } from '@/hooks/use-unvalidated-chunks'
 import { CheckCircle, AlertTriangle, FileText, Wrench } from 'lucide-react'

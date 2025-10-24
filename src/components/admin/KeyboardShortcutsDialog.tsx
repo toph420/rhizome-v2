@@ -6,7 +6,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
+} from '@/components/rhizome/dialog'
 
 interface KeyboardShortcutsDialogProps {
   isOpen: boolean

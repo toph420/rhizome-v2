@@ -15,14 +15,14 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@/components/rhizome/sheet"
+import { Skeleton } from "@/components/rhizome/skeleton"
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip"
+} from "@/components/rhizome/tooltip"
 
 import { cn } from "@/lib/utils"
 

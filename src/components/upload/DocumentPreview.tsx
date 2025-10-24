@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { Input } from '@/components/rhizome/input'
-import { Label } from '@/components/ui/label'
+import { Label } from '@/components/rhizome/label'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -10,13 +10,13 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+} from '@/components/rhizome/select'
+import { RadioGroup, RadioGroupItem } from '@/components/rhizome/radio-group'
 import { Upload, X, Sparkles, Info } from 'lucide-react'
 import Image from 'next/image'
 import type { DetectedMetadata, DocumentType } from '@/types/metadata'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Checkbox } from '@/components/rhizome/checkbox'
+import { Alert, AlertDescription } from '@/components/rhizome/alert'
 import type { ChunkerType } from '@/types/chunker'
 import { chunkerDescriptions, chunkerTimeEstimates, chunkerLabels } from '@/types/chunker'
 

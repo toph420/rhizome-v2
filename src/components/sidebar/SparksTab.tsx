@@ -10,7 +10,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { useUIStore } from '@/stores/ui-store'
 import { useSparkStore } from '@/stores/spark-store'
 import type { SparkConnection, SparkContext } from '@/lib/sparks/types'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/rhizome/collapsible'
 
 // Constant empty array to prevent infinite loops from new references
 const EMPTY_SPARKS: any[] = []

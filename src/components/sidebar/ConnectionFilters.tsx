@@ -1,7 +1,7 @@
 'use client'
 
 import { Badge } from '@/components/rhizome/badge'
-import { Label } from '@/components/ui/label'
+import { Label } from '@/components/rhizome/label'
 import { Slider } from '@/components/rhizome/slider'
 import { useConnectionStore } from '@/stores/connection-store'
 import type { SynthesisEngine } from '@/types/annotations'

@@ -1,7 +1,7 @@
 'use client'
 
 import { Slider } from '@/components/rhizome/slider'
-import { Label } from '@/components/ui/label'
+import { Label } from '@/components/rhizome/label'
 import { Button } from '@/components/rhizome/button'
 import { Separator } from '@/components/ui/separator'
 import { useConnectionStore } from '@/stores/connection-store'

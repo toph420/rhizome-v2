@@ -2,8 +2,8 @@
 
 import { WeightTuning } from './WeightTuning'
 import { Separator } from '@/components/ui/separator'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/rhizome/label'
+import { Switch } from '@/components/rhizome/switch'
 import { useUIStore } from '@/stores/ui-store'
 
 /**

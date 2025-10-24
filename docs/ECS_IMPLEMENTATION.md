@@ -386,46 +386,7 @@ const sparkId = await sparkOps.create({
   originChunkContent: "First 500 chars for recovery..."
 })
 
-// OLD WAY (deprecated - use SparkOperations instead):
-/*
-const sparkId = await ecs.createEntity(userId, {
-  Spark: {
-    selections: [{
-      text: "Important insight",
-      chunkId: chunkId,
-      startOffset: 100,
-      endOffset: 200,
-      textContext: { before: "...", after: "..." }
-    }],
-    connections: [{
-      type: 'origin',
-      chunkId: chunkId,
-      metadata: { relationship: 'origin' },
-      strength: 1
-    }],
-    annotationRefs: [annotationId], // Links to related annotations
-    originalChunkHash: "...",
-    originalChunkContent: "..."
-  },
-  Content: {
-    note: "My quick thought",
-    tags: ["idea", "architecture"]
-  },
-  Temporal: {
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  ChunkRef: {
-    documentId: documentId,
-    document_id: documentId,
-    chunkId: chunkId,
-    chunk_id: chunkId,
-    chunkIds: [chunkId],
-    chunkPosition: 0,
-    hasSelections: true
-  }
-})
-*/
+
 
 // 3. FLASHCARD (NOT YET IMPLEMENTED - UI placeholder only)
 // FlashcardsTab exists in RightPanel but backend is TODO

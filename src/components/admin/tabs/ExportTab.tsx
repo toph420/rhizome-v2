@@ -3,9 +3,9 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { exportDocuments, type ExportOptions } from '@/app/actions/documents'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
-import { Progress } from '@/components/ui/progress'
+import { Checkbox } from '@/components/rhizome/checkbox'
+import { Label } from '@/components/rhizome/label'
+import { Progress } from '@/components/rhizome/progress'
 import {
   Table,
   TableBody,
@@ -13,7 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from '@/components/rhizome/table'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Download, Package, CheckCircle2, AlertCircle, Info } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -22,7 +22,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@/components/rhizome/tooltip'
 
 interface Document {
   id: string
