@@ -17,19 +17,32 @@
 import { GoogleGenAI } from '@google/genai'
 import { HandlerJobManager } from '../lib/handler-job-manager.js'
 import { GenerateFlashcardsOutputSchema } from '../types/job-schemas.js'
+import { renderTemplate } from '../lib/template-renderer.js'
+import { createSourceLoader } from '../lib/source-loaders.js'
+import { extractClozeDeletions, renderClozeQuestion, isClozeContent } from '../lib/cloze-parser.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 interface GenerateFlashcardsInput {
-  sourceType: 'document' | 'chunks' | 'selection'
-  sourceIds: string[]  // document IDs or chunk IDs
+  sourceType: 'document' | 'chunks' | 'selection' | 'annotation' | 'connection'  // All 5 types
+  sourceIds: string[]  // document IDs, chunk IDs, or entity IDs
+  selectionData?: {  // For selection type
+    text: string
+    documentId: string
+    startOffset: number
+    endOffset: number
+  }
   cardCount: number
   userId: string
   deckId: string  // Where to add generated cards
+  promptTemplateId?: string  // Optional custom prompt (uses default if not provided)
+  customInstructions?: string  // Optional user instructions
 }
 
 interface GeneratedCard {
+  type?: 'basic' | 'cloze'  // Default to basic if not specified
   question: string
   answer: string
+  content?: string  // For cloze cards - the original with {{c1::}} markers
   confidence?: number
   keywords?: string[]
 }
@@ -41,9 +54,9 @@ export async function generateFlashcardsHandler(
   supabase: SupabaseClient,
   job: { id: string; input_data: GenerateFlashcardsInput }
 ): Promise<void> {
-  const { sourceType, sourceIds, cardCount, userId, deckId } = job.input_data
+  const { sourceType, sourceIds, selectionData, cardCount, userId, deckId, promptTemplateId, customInstructions } = job.input_data
 
-  console.log(`[GenerateFlashcards] Starting for ${sourceIds.length} ${sourceType}(s)`)
+  console.log(`[GenerateFlashcards] Starting for ${sourceIds.length} ${sourceType}(s), prompt: ${promptTemplateId || 'default'}`)
 
   const jobManager = new HandlerJobManager(supabase, job.id)
   const startTime = Date.now()
@@ -52,82 +65,62 @@ export async function generateFlashcardsHandler(
     // ✅ STEP 1: LOAD SOURCE CONTENT (10%)
     await jobManager.updateProgress(10, 'loading', 'Loading source content')
 
-    let sourceContent = ''
-    let chunkContext: any[] = []
-
-    if (sourceType === 'document') {
-      // Load full document markdown + chunks for matching
-      const { data: docs } = await supabase
-        .from('documents')
-        .select('id, title, markdown_available')
-        .in('id', sourceIds)
-
-      for (const doc of docs || []) {
-        if (doc.markdown_available) {
-          // Download cleaned markdown from Storage (stored as content.md)
-          const { data: signedUrl } = await supabase.storage
-            .from('documents')
-            .createSignedUrl(`${userId}/documents/${doc.id}/content.md`, 3600)
-
-          if (signedUrl?.signedUrl) {
-            const response = await fetch(signedUrl.signedUrl)
-            const markdown = await response.text()
-            sourceContent += `\n\n# ${doc.title}\n\n${markdown}`
-          }
-        }
-
-        // Load chunks for matching
-        const { data: chunks } = await supabase
-          .from('chunks')
-          .select('id, content, chunk_index, document_id, embedding')
-          .eq('document_id', doc.id)
-          .eq('is_current', true)
-          .order('chunk_index')
-
-        chunkContext.push(...(chunks || []))
-      }
-    } else if (sourceType === 'chunks') {
-      // Load specific chunks
-      const { data: chunks } = await supabase
-        .from('chunks')
-        .select('id, content, chunk_index, document_id, embedding')
-        .in('id', sourceIds)
-        .order('chunk_index')
-
-      chunkContext = chunks || []
-      sourceContent = chunks?.map(c => c.content).join('\n\n') || ''
-    }
+    // Use source loader abstraction (supports all 5 types)
+    const loader = createSourceLoader(sourceType, sourceIds, selectionData)
+    const { content: sourceContent, chunks: chunkContext } = await loader.load(supabase, userId)
 
     console.log(`✓ Loaded ${sourceContent.length} chars from ${chunkContext.length} chunks`)
 
-    // ✅ STEP 2: CALL GEMINI AI (20-70%)
+    // ✅ STEP 2: LOAD & RENDER PROMPT TEMPLATE (15-20%)
+    await jobManager.updateProgress(15, 'loading', 'Loading prompt template')
+
+    // Load prompt template (use default if not specified)
+    let template
+    if (promptTemplateId) {
+      const { data } = await supabase
+        .from('prompt_templates')
+        .select('*')
+        .eq('id', promptTemplateId)
+        .eq('user_id', userId)
+        .single()
+
+      template = data
+    } else {
+      // Get default template
+      const { data } = await supabase
+        .from('prompt_templates')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_default', true)
+        .single()
+
+      template = data
+    }
+
+    if (!template) {
+      throw new Error('No prompt template found')
+    }
+
+    console.log(`✓ Using prompt template: ${template.name}`)
+
+    // Render template with variables
+    const prompt = renderTemplate(template.template, {
+      count: cardCount.toString(),
+      content: sourceContent.slice(0, 50000),
+      chunks: JSON.stringify(chunkContext.slice(0, 10).map(c => ({
+        id: c.id,
+        preview: c.content.slice(0, 200)
+      }))),
+      custom: customInstructions || 'None'
+    })
+
+    // Track usage
+    await supabase.rpc('increment_prompt_usage', { prompt_id: template.id })
+
+    // ✅ STEP 3: CALL GEMINI AI (20-70%)
     await jobManager.updateProgress(20, 'generating', 'Generating flashcards with AI')
 
     const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! })
-
-    const prompt = `Generate ${cardCount} high-quality flashcards from this content.
-
-Content:
-${sourceContent.slice(0, 50000)}
-
-Requirements:
-- Focus on key concepts, important details, and connections
-- Questions should be clear and specific
-- Answers should be concise but complete (1-3 sentences)
-- Each card should test understanding, not just recall
-- Include keywords from the source text for each card
-
-Output format (JSON array):
-[
-  {
-    "question": "What is...",
-    "answer": "...",
-    "confidence": 0.85,
-    "keywords": ["concept1", "concept2"]
-  }
-]
-
-Generate exactly ${cardCount} flashcards in JSON format. Return ONLY the JSON array, no other text.`
 
     const result = await genAI.models.generateContent({
       model: 'gemini-2.0-flash',
@@ -153,7 +146,7 @@ Generate exactly ${cardCount} flashcards in JSON format. Return ONLY the JSON ar
 
     console.log(`✓ Generated ${generatedCards.length} flashcards`)
 
-    // ✅ STEP 3: CREATE ECS ENTITIES (70-95%)
+    // ✅ STEP 4: CREATE ECS ENTITIES (70-95%)
     await jobManager.updateProgress(70, 'creating', 'Creating flashcard entities')
 
     const flashcardIds: string[] = []
@@ -182,74 +175,162 @@ Generate exactly ${cardCount} flashcards in JSON format. Return ONLY the JSON ar
         }
       }
 
-      // Create ECS entity
-      const { data: entity } = await supabase
-        .from('entities')
-        .insert({
-          user_id: userId,
-          entity_type: 'flashcard',
-        })
-        .select()
-        .single()
+      // Check if this is a cloze card
+      const isCloze = card.type === 'cloze' && card.content && isClozeContent(card.content)
 
-      if (!entity) {
-        console.warn(`Failed to create entity for card ${i + 1}`)
-        continue
+      if (isCloze) {
+        // Extract cloze deletions and create one card per deletion
+        const deletions = extractClozeDeletions(card.content!)
+        const parentEntityId = `parent_${Date.now()}_${i}`  // Temporary ID for grouping
+
+        console.log(`✓ Found ${deletions.length} cloze deletions in card ${i + 1}`)
+
+        for (const deletion of deletions) {
+          const question = renderClozeQuestion(card.content!, deletion.index)
+
+          // Create ECS entity for this deletion
+          const { data: entity } = await supabase
+            .from('entities')
+            .insert({
+              user_id: userId,
+              entity_type: 'flashcard',
+            })
+            .select()
+            .single()
+
+          if (!entity) {
+            console.warn(`Failed to create cloze entity ${deletion.index}`)
+            continue
+          }
+
+          // Add components
+          await supabase.from('components').insert([
+            {
+              entity_id: entity.id,
+              user_id: userId,
+              component_type: 'Card',
+              data: {
+                type: 'cloze',
+                question: question,
+                answer: deletion.text,
+                content: card.content,  // Original with all {{c1::}} markers
+                clozeIndex: deletion.index,
+                clozeCount: deletions.length,
+                status: 'draft',
+                srs: null,
+                deckId: deckId,
+                deckAddedAt: new Date().toISOString(),
+                parentCardId: parentEntityId,
+                generatedBy: 'ai',
+                generationPromptVersion: template.name,
+              }
+            },
+            {
+              entity_id: entity.id,
+              user_id: userId,
+              component_type: 'Content',
+              data: {
+                tags: card.keywords || [],
+                note: deletion.hint || null,
+              }
+            },
+            {
+              entity_id: entity.id,
+              user_id: userId,
+              component_type: 'Temporal',
+              data: {
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }
+            },
+            {
+              entity_id: entity.id,
+              user_id: userId,
+              component_type: 'ChunkRef',
+              data: {
+                documentId: documentId,
+                document_id: documentId,
+                chunkId: bestChunkId,
+                chunk_id: bestChunkId,
+                chunkIds: bestChunkIds.length > 0 ? bestChunkIds : (bestChunkId ? [bestChunkId] : []),
+                chunkPosition: 0,
+                generationJobId: job.id,
+              }
+            },
+          ])
+
+          flashcardIds.push(entity.id)
+        }
+      } else {
+        // Regular basic card
+        const { data: entity } = await supabase
+          .from('entities')
+          .insert({
+            user_id: userId,
+            entity_type: 'flashcard',
+          })
+          .select()
+          .single()
+
+        if (!entity) {
+          console.warn(`Failed to create entity for card ${i + 1}`)
+          continue
+        }
+
+        // Add components (Card, Content, Temporal, ChunkRef)
+        await supabase.from('components').insert([
+          {
+            entity_id: entity.id,
+            user_id: userId,
+            component_type: 'Card',
+            data: {
+              type: 'basic',
+              question: card.question,
+              answer: card.answer,
+              status: 'draft',
+              srs: null,
+              deckId: deckId,
+              deckAddedAt: new Date().toISOString(),
+              generatedBy: 'ai',
+              generationPromptVersion: template.name,
+            }
+          },
+          {
+            entity_id: entity.id,
+            user_id: userId,
+            component_type: 'Content',
+            data: {
+              tags: card.keywords || [],
+              note: null,
+            }
+          },
+          {
+            entity_id: entity.id,
+            user_id: userId,
+            component_type: 'Temporal',
+            data: {
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }
+          },
+          {
+            entity_id: entity.id,
+            user_id: userId,
+            component_type: 'ChunkRef',
+            data: {
+              documentId: documentId,
+              document_id: documentId,
+              chunkId: bestChunkId,
+              chunk_id: bestChunkId,
+              chunkIds: bestChunkIds.length > 0 ? bestChunkIds : (bestChunkId ? [bestChunkId] : []),
+              chunkPosition: 0,
+              generationJobId: job.id,
+            }
+          },
+        ])
+
+        flashcardIds.push(entity.id)
       }
-
-      // Add components (Card, Content, Temporal, ChunkRef)
-      await supabase.from('components').insert([
-        {
-          entity_id: entity.id,
-          user_id: userId,
-          component_type: 'Card',
-          data: {
-            type: 'basic',
-            question: card.question,
-            answer: card.answer,
-            status: 'draft',
-            srs: null,
-            deckId: deckId,
-            deckAddedAt: new Date().toISOString(),
-            generatedBy: `ai_${sourceType}`,
-            generationPromptVersion: 'v1-default',
-          }
-        },
-        {
-          entity_id: entity.id,
-          user_id: userId,
-          component_type: 'Content',
-          data: {
-            tags: card.keywords || [],
-            note: null,
-          }
-        },
-        {
-          entity_id: entity.id,
-          user_id: userId,
-          component_type: 'Temporal',
-          data: {
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }
-        },
-        {
-          entity_id: entity.id,
-          user_id: userId,
-          component_type: 'ChunkRef',
-          data: {
-            documentId: documentId,
-            document_id: documentId,
-            chunkId: bestChunkId,
-            chunk_id: bestChunkId,
-            chunkIds: bestChunkIds.length > 0 ? bestChunkIds : (bestChunkId ? [bestChunkId] : []),
-            chunkPosition: 0,
-            generationJobId: job.id,
-          }
-        },
-      ])
-
-      flashcardIds.push(entity.id)
 
       // Update progress every 5 cards
       if ((i + 1) % 5 === 0 || i === generatedCards.length - 1) {
@@ -264,7 +345,7 @@ Generate exactly ${cardCount} flashcards in JSON format. Return ONLY the JSON ar
 
     console.log(`✓ Created ${flashcardIds.length} ECS entities`)
 
-    // ✅ STEP 4: COMPLETE (100%)
+    // ✅ STEP 5: COMPLETE (100%)
     const processingTime = Date.now() - startTime
 
     const outputData = {
