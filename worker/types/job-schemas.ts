@@ -105,12 +105,32 @@ export const JobErrorOutputSchema = z.object({
 export type JobErrorOutput = z.infer<typeof JobErrorOutputSchema>
 
 /**
+ * Generate Flashcards Job Output Schema
+ *
+ * Used in: worker/handlers/generate-flashcards.ts
+ * Stored in: background_jobs.output_data (JSONB)
+ * Consumed by: Review panel UI
+ */
+export const GenerateFlashcardsOutputSchema = z.object({
+  success: z.boolean(),
+  flashcardsGenerated: z.number(),
+  flashcardIds: z.array(z.string().uuid()),
+  processingTimeMs: z.number(),
+  aiCost: z.number().optional(),  // Estimated cost in USD
+  averageConfidence: z.number().optional(),  // 0-1 range
+  error: z.string().optional(),
+})
+
+export type GenerateFlashcardsOutput = z.infer<typeof GenerateFlashcardsOutputSchema>
+
+/**
  * Union type for all job outputs
  */
 export type JobOutput =
   | ExportJobOutput
   | ImportJobOutput
   | ReprocessConnectionsOutput
+  | GenerateFlashcardsOutput
   | JobErrorOutput
 
 /**
@@ -126,7 +146,7 @@ export type JobOutput =
  * validateJobOutput('export', outputData) // Throws if invalid
  */
 export function validateJobOutput(
-  jobType: 'export_documents' | 'import_document' | 'reprocess_connections',
+  jobType: 'export_documents' | 'import_document' | 'reprocess_connections' | 'generate_flashcards',
   data: unknown
 ): JobOutput {
   switch (jobType) {
@@ -136,6 +156,8 @@ export function validateJobOutput(
       return ImportJobOutputSchema.parse(data)
     case 'reprocess_connections':
       return ReprocessConnectionsOutputSchema.parse(data)
+    case 'generate_flashcards':
+      return GenerateFlashcardsOutputSchema.parse(data)
     default:
       throw new Error(`Unknown job type: ${jobType}`)
   }
