@@ -16,6 +16,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  TooltipProvider,
 } from '@/components/rhizome/tooltip'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info, Trash2 } from 'lucide-react'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
@@ -187,7 +188,8 @@ export function ScannerTab() {
   }
 
   return (
-    <div className="space-y-6">
+    <TooltipProvider>
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -519,6 +521,7 @@ export function ScannerTab() {
           </Tooltip>
         </div>
       )}
-    </div>
+      </div>
+    </TooltipProvider>
   )
 }
