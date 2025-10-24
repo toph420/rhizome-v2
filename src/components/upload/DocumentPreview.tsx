@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Input } from '@/components/ui/input'
+import { Input } from '@/components/rhizome/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/rhizome/button'
 import { Badge } from '@/components/rhizome/badge'
 import { SparkCard } from '@/components/rhizome/spark-card'
@@ -8,8 +8,12 @@ import { Zap, Tag, Link, Loader2, GitBranch, ChevronDown, ChevronRight, Info } f
 import { getRecentSparks } from '@/app/actions/sparks'
 import { formatDistanceToNow } from 'date-fns'
 import { useUIStore } from '@/stores/ui-store'
+import { useSparkStore } from '@/stores/spark-store'
 import type { SparkConnection, SparkContext } from '@/lib/sparks/types'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+
+// Constant empty array to prevent infinite loops from new references
+const EMPTY_SPARKS: any[] = []
 
 interface SparksTabProps {
   documentId: string
@@ -39,7 +43,14 @@ interface SparkWithContext extends Spark {
  * Auto-refreshes when new sparks are created.
  */
 export function SparksTab({ documentId }: SparksTabProps) {
-  const [sparks, setSparks] = useState<Spark[]>([])
+  // Read from Zustand store for optimistic updates
+  // Use constant empty array reference to prevent infinite loops
+  const sparksFromStore = useSparkStore(state => state.sparks[documentId] || EMPTY_SPARKS)
+  const setSparksInStore = useSparkStore(state => state.setSparks)
+
+  // Track which spark is selected (for keyboard shortcuts)
+  const [selectedSparkId, setSelectedSparkId] = useState<string | null>(null)
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedSpark, setExpandedSpark] = useState<string | null>(null)
@@ -66,7 +77,7 @@ export function SparksTab({ documentId }: SparksTabProps) {
     setError(null)
     try {
       const data = await getRecentSparks(50, 0, documentId)
-      setSparks(data)
+      setSparksInStore(documentId, data as any) // Update Zustand store
     } catch (error) {
       console.error('[Sparks] Failed to load:', error)
       setError('Failed to load sparks. Try refreshing.')
@@ -107,7 +118,7 @@ export function SparksTab({ documentId }: SparksTabProps) {
     )
   }
 
-  if (sparks.length === 0) {
+  if (sparksFromStore.length === 0) {
     return (
       <div className="p-4 text-center">
         <Zap className="w-12 h-12 mx-auto mb-2 text-muted-foreground" />
@@ -119,9 +130,12 @@ export function SparksTab({ documentId }: SparksTabProps) {
 
   return (
     <div className="space-y-3 p-4">
-      {sparks.map(spark => {
+      {sparksFromStore.map((spark: any) => {
         // Map connections to array of chunk IDs for SparkCard
-        const connectionChunkIds = spark.connections?.map(conn => conn.chunkId) || []
+        const connectionChunkIds = spark.connections?.map((conn: any) => conn.chunkId) || []
+
+        // Only the selected spark should be "active" for keyboard shortcuts
+        const isActive = selectedSparkId === spark.entity_id
 
         return (
           <SparkCard
@@ -132,9 +146,22 @@ export function SparksTab({ documentId }: SparksTabProps) {
               tags: spark.tags,
               created_at: spark.created_at,
               selections: spark.selections,
-              connections: connectionChunkIds
+              connections: connectionChunkIds,
+              annotation_refs: spark.annotation_refs
             }}
-            onJump={() => handleSparkClick(spark)}
+            isActive={isActive}
+            documentId={documentId}
+            onJump={() => {
+              setSelectedSparkId(spark.entity_id) // Select this spark
+              handleSparkClick(spark)
+            }}
+            onDeleted={() => {
+              // Clear selection if deleted spark was selected
+              if (selectedSparkId === spark.entity_id) {
+                setSelectedSparkId(null)
+              }
+              loadSparks(false)
+            }}
           />
         )
       })}

@@ -2,37 +2,33 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { ChevronLeft, ChevronRight, Network, Highlighter, Zap, Brain, FileQuestion, Sliders, CheckCircle } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/rhizome/tabs'
+import { Badge } from '@/components/rhizome/badge'
+import { ScrollArea } from '@/components/rhizome/scroll-area'
+import {
+  Network,
+  Highlighter,
+  CheckCircle,
+  Zap,
+  Brain,
+  FileQuestion,
+  Sliders,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+import type { Chunk } from '@/types/annotations'
+import { NeobrutalismTheme } from '@/components/design/ThemeWrappers'
+
+// Tab components
 import { ConnectionsList } from './ConnectionsList'
+import { ConnectionFilters } from './ConnectionFilters'
 import { AnnotationsList } from './AnnotationsList'
+import { ChunkQualityPanel } from './ChunkQualityPanel'
 import { SparksTab } from './SparksTab'
 import { FlashcardsTab } from './FlashcardsTab'
-import { TuneTab } from './TuneTab'
-import { ConnectionFilters } from './ConnectionFilters'
 import { AnnotationReviewTab } from './AnnotationReviewTab'
-import { ChunkQualityPanel } from './ChunkQualityPanel'
-import type { RecoveryResults } from '../../../worker/types/recovery'
-import { cn } from '@/lib/utils'
-
-interface RightPanelProps {
-  documentId: string
-  visibleChunkIds?: string[]
-  reviewResults?: RecoveryResults | null
-  onHighlightAnnotation?: (annotationId: string) => void
-  onAnnotationClick?: (annotationId: string, startOffset: number) => void
-  onNavigateToChunk?: (chunkId: string) => void
-  onConnectionsChange?: (connections: Array<{
-    id: string
-    source_chunk_id: string
-    target_chunk_id: string
-    strength: number
-  }>) => void
-  onActiveConnectionCountChange?: (count: number) => void
-  chunks?: any[]
-}
+import { TuneTab } from './TuneTab'
 
 type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune'
 
@@ -49,30 +45,65 @@ const TABS: Tab[] = [
   { id: 'sparks', icon: Zap, label: 'Sparks' },
   { id: 'cards', icon: Brain, label: 'Cards' },
   { id: 'review', icon: FileQuestion, label: 'Review' },
-  { id: 'tune', icon: Sliders, label: 'Tune' }
+  { id: 'tune', icon: Sliders, label: 'Tune' },
 ]
 
-/**
- * Fixed right panel with 7 icon-only tabs.
- * Follows "Maximum Intelligence, Minimum Friction" philosophy.
- *
- * Tabs:
- * 1. Connections - 3-engine collision detection results
- * 2. Annotations - Highlights with notes
- * 3. Quality - Chunk confidence indicators from local pipeline
- * 4. Sparks - Quick captures with context (placeholder)
- * 5. Cards - Flashcards with FSRS (placeholder)
- * 6. Review - Annotation recovery
- * 7. Tune - Engine weights + settings
- *
- * @param props - Component props.
- * @param props.documentId - Document identifier for filtering.
- * @param props.reviewResults - Recovery results from document reprocessing.
- * @param props.onHighlightAnnotation - Callback to highlight annotation.
- * @param props.onNavigateToChunk - Callback to navigate to chunk.
- * @returns React element with collapsible right panel.
- */
-export function RightPanel({
+interface ReviewResults {
+  success: Array<{
+    id: string
+    text: string
+    startOffset: number
+    endOffset: number
+    textContext?: { before: string; after: string }
+    originalChunkIndex?: number
+  }>
+  needsReview: Array<{
+    annotation: {
+      id: string
+      text: string
+      startOffset: number
+      endOffset: number
+      textContext?: { before: string; after: string }
+      originalChunkIndex?: number
+    }
+    suggestedMatch: {
+      text: string
+      startOffset: number
+      endOffset: number
+      confidence: number
+      method: 'exact' | 'context' | 'chunk_bounded' | 'trigram'
+      contextBefore?: string
+      contextAfter?: string
+    }
+  }>
+  lost: Array<{
+    id: string
+    text: string
+    startOffset: number
+    endOffset: number
+    textContext?: { before: string; after: string }
+    originalChunkIndex?: number
+  }>
+}
+
+interface RightPanelV2Props {
+  documentId: string
+  visibleChunkIds?: string[]
+  reviewResults?: ReviewResults | null
+  onHighlightAnnotation?: (annotationId: string) => void
+  onAnnotationClick?: (annotationId: string, startOffset: number) => void
+  onNavigateToChunk?: (chunkId: string) => void
+  onConnectionsChange?: (connections: Array<{
+    id: string
+    source_chunk_id: string
+    target_chunk_id: string
+    strength: number
+  }>) => void
+  onActiveConnectionCountChange?: (count: number) => void
+  chunks?: Chunk[]
+}
+
+export function RightPanelV2({
   documentId,
   visibleChunkIds = [],
   reviewResults = null,
@@ -81,10 +112,14 @@ export function RightPanel({
   onNavigateToChunk,
   onConnectionsChange,
   onActiveConnectionCountChange,
-  chunks = []
-}: RightPanelProps) {
+  chunks = [],
+}: RightPanelV2Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('connections')
+
+  // Fixed position: TopNav (56px h-14) + DocumentHeader (78px with py-4)
+  // Total: 134px from top
+  const topPosition = 'top-[134px]'
 
   // Auto-switch to review tab when recovery results have items needing review
   useEffect(() => {
@@ -93,39 +128,110 @@ export function RightPanel({
     }
   }, [reviewResults])
 
-  // Badge counts (TODO: fetch real counts from database)
+  // Badge counts
   const badgeCounts: Partial<Record<TabId, number>> = {
-    // annotations: 0, // Will be populated from database
-    // sparks: 0,
-    // cards: 0,
-    review: reviewResults?.needsReview.length || 0
+    review: reviewResults?.needsReview.length || 0,
   }
-  
+
   return (
-    <motion.div
-      className="fixed right-0 top-14 bottom-0 border-l z-40 bg-background"
-      initial={false}
-      animate={{
-        width: collapsed ? 48 : 384 // w-12 : w-96
-      }}
-      transition={{
-        type: 'spring',
-        damping: 25,
-        stiffness: 300
-      }}
-    >
-      {/* Toggle button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute -left-4 top-8 z-50 rounded-full border bg-background shadow-md"
-        onClick={() => setCollapsed(!collapsed)}
-        aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+    <NeobrutalismTheme>
+      <motion.div
+        className={cn(
+          "fixed right-0 bottom-0 border-l-2 border-border z-40 bg-secondary-background",
+          topPosition
+        )}
+        initial={false}
+        animate={{
+          width: collapsed ? 48 : 384 // w-12 : w-96
+        }}
+        transition={{
+          type: 'spring',
+          damping: 25,
+          stiffness: 300
+        }}
       >
-        {collapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-      </Button>
-      
-      {/* Panel content (hidden when collapsed) */}
+      {/* COLLAPSED: Vertical icon stack */}
+      {collapsed && (
+        <motion.div
+          className="flex flex-col gap-2 p-2 h-full"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          {/* Toggle button as first icon */}
+          <motion.button
+            className={cn(
+              "relative p-2 rounded-base border-2 border-border",
+              "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
+              "transition-all shadow-base"
+            )}
+            onClick={() => setCollapsed(!collapsed)}
+            title="Expand panel"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </motion.button>
+
+          {TABS.map((tab) => {
+            const Icon = tab.icon
+            const badgeCount = badgeCounts[tab.id]
+
+            return (
+              <motion.button
+                key={tab.id}
+                className={cn(
+                  "relative p-2 rounded-base border-2 border-border",
+                  "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
+                  "transition-all shadow-base",
+                  activeTab === tab.id && "shadow-none translate-x-1 translate-y-1"
+                )}
+                onClick={() => {
+                  setActiveTab(tab.id)
+                  setCollapsed(false) // Expand on click
+                }}
+                title={tab.label}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Icon className="h-4 w-4" />
+                {badgeCount !== undefined && badgeCount > 0 && (
+                  <Badge
+                    variant="default"
+                    className="absolute -top-1 -right-1 h-4 w-4 p-0 text-xs flex items-center justify-center"
+                  >
+                    {badgeCount}
+                  </Badge>
+                )}
+              </motion.button>
+            )
+          })}
+        </motion.div>
+      )}
+
+      {/* Collapse button - positioned outside expanded panel */}
+      {!collapsed && (
+        <motion.button
+          className={cn(
+            "absolute -left-6 top-4 p-1.5 rounded-base border-2 border-border bg-secondary-background",
+            "hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none",
+            "transition-all shadow-base z-50"
+          )}
+          onClick={() => setCollapsed(true)}
+          title="Collapse panel"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.8 }}
+          transition={{ delay: 0.3 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+        >
+          <ChevronRight className="h-3 w-3" />
+        </motion.button>
+      )}
+
+      {/* EXPANDED: Horizontal tabs */}
       <AnimatePresence>
         {!collapsed && (
           <motion.div
@@ -133,110 +239,100 @@ export function RightPanel({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ delay: 0.3, duration: 0.2 }}
           >
-            {/* Icon-only tabs (7 columns) */}
-            <div className="grid grid-cols-7 border-b p-2 gap-1">
-              {TABS.map(tab => {
-                const Icon = tab.icon
-                const isActive = activeTab === tab.id
-                const badgeCount = badgeCounts[tab.id]
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="h-full flex flex-col">
+              <TabsList className="grid grid-cols-7 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
+                {TABS.map((tab) => {
+                  const Icon = tab.icon
+                  const badgeCount = badgeCounts[tab.id]
 
-                return (
-                  <motion.button
-                    key={tab.id}
-                    className={cn(
-                      'relative p-2 rounded flex flex-col items-center justify-center gap-1 transition-colors',
-                      isActive
-                        ? 'bg-primary/10 text-primary'
-                        : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                    )}
-                    onClick={() => setActiveTab(tab.id)}
-                    title={tab.label}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {badgeCount !== undefined && badgeCount > 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="absolute -top-1 -right-1 h-4 w-4 p-0 text-xs flex items-center justify-center"
-                      >
-                        {badgeCount}
-                      </Badge>
-                    )}
-                  </motion.button>
-                )
-              })}
-            </div>
+                  return (
+                    <TabsTrigger
+                      key={tab.id}
+                      value={tab.id}
+                      className="flex items-center justify-center relative"
+                      title={tab.label}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {badgeCount !== undefined && badgeCount > 0 && (
+                        <Badge
+                          variant="default"
+                          className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center"
+                        >
+                          {badgeCount}
+                        </Badge>
+                      )}
+                    </TabsTrigger>
+                  )
+                })}
+              </TabsList>
 
-            {/* Active tab content */}
-            <div className="flex-1 overflow-hidden">
-              {activeTab === 'connections' && (
-                <div className="h-full flex flex-col">
-                  <div className="border-b flex-shrink-0">
-                    <ConnectionFilters />
-                  </div>
-                  <div className="flex-1 overflow-auto">
-                    <ConnectionsList
+              {/* Tab content - let Tabs component handle switching */}
+              <TabsContent value="connections" className="flex-1 flex flex-col overflow-hidden m-0 h-full">
+                    <div className="border-b-2 border-border flex-shrink-0">
+                      <ConnectionFilters />
+                    </div>
+                    <div className="flex-1 overflow-auto">
+                      <ConnectionsList
+                        documentId={documentId}
+                        visibleChunkIds={visibleChunkIds}
+                        onNavigateToChunk={onNavigateToChunk}
+                        onConnectionsChange={onConnectionsChange}
+                        onActiveConnectionCountChange={onActiveConnectionCountChange}
+                      />
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="annotations" className="flex-1 overflow-hidden m-0 h-full">
+                    <ScrollArea className="h-full">
+                      <AnnotationsList
+                        documentId={documentId}
+                        onAnnotationClick={onAnnotationClick}
+                      />
+                    </ScrollArea>
+                  </TabsContent>
+
+                  <TabsContent value="quality" className="flex-1 overflow-hidden m-0 h-full">
+                    <ScrollArea className="h-full">
+                      <ChunkQualityPanel
+                        documentId={documentId}
+                        onNavigateToChunk={onNavigateToChunk}
+                      />
+                    </ScrollArea>
+                  </TabsContent>
+
+                  <TabsContent value="sparks" className="flex-1 overflow-hidden m-0 h-full">
+                    <ScrollArea className="h-full">
+                      <SparksTab documentId={documentId} />
+                    </ScrollArea>
+                  </TabsContent>
+
+                  <TabsContent value="cards" className="flex-1 overflow-hidden m-0 h-full">
+                    <ScrollArea className="h-full">
+                      <FlashcardsTab documentId={documentId} />
+                    </ScrollArea>
+                  </TabsContent>
+
+                  <TabsContent value="review" className="flex-1 overflow-hidden m-0 h-full">
+                    <AnnotationReviewTab
                       documentId={documentId}
-                      visibleChunkIds={visibleChunkIds}
-                      onNavigateToChunk={onNavigateToChunk}
-                      onConnectionsChange={onConnectionsChange}
-                      onActiveConnectionCountChange={onActiveConnectionCountChange}
+                      results={reviewResults}
+                      onHighlightAnnotation={onHighlightAnnotation}
+                      onAnnotationClick={onAnnotationClick}
                     />
-                  </div>
-                </div>
-              )}
+                  </TabsContent>
 
-              {activeTab === 'annotations' && (
-                <ScrollArea className="h-full">
-                  <AnnotationsList
-                    documentId={documentId}
-                    onAnnotationClick={onAnnotationClick}
-                  />
-                </ScrollArea>
-              )}
-
-              {activeTab === 'quality' && (
-                <ScrollArea className="h-full">
-                  <ChunkQualityPanel
-                    documentId={documentId}
-                    onNavigateToChunk={onNavigateToChunk}
-                  />
-                </ScrollArea>
-              )}
-
-              {activeTab === 'sparks' && (
-                <ScrollArea className="h-full">
-                  <SparksTab documentId={documentId} />
-                </ScrollArea>
-              )}
-
-              {activeTab === 'cards' && (
-                <ScrollArea className="h-full">
-                  <FlashcardsTab documentId={documentId} />
-                </ScrollArea>
-              )}
-
-              {activeTab === 'review' && (
-                <AnnotationReviewTab
-                  documentId={documentId}
-                  results={reviewResults}
-                  onHighlightAnnotation={onHighlightAnnotation}
-                  onAnnotationClick={onAnnotationClick}
-                />
-              )}
-
-              {activeTab === 'tune' && (
+              <TabsContent value="tune" className="flex-1 overflow-hidden m-0 h-full">
                 <ScrollArea className="h-full">
                   <TuneTab />
                 </ScrollArea>
-              )}
-            </div>
+              </TabsContent>
+            </Tabs>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+    </NeobrutalismTheme>
   )
 }

@@ -1,8 +1,8 @@
 'use client'
 
-import { Slider } from '@/components/ui/slider'
+import { Slider } from '@/components/rhizome/slider'
 import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import { Separator } from '@/components/ui/separator'
 import { useConnectionStore } from '@/stores/connection-store'
 import type { EngineWeights } from '@/types/annotations'
@@ -69,28 +69,28 @@ export function WeightTuning() {
         <Label>Presets</Label>
         <div className="grid grid-cols-2 gap-2">
           <Button
-            variant="outline"
+            variant="neutral"
             size="sm"
             onClick={() => applyPreset('max-friction')}
           >
             Max Friction
           </Button>
           <Button
-            variant="outline"
+            variant="neutral"
             size="sm"
             onClick={() => applyPreset('thematic-focus')}
           >
             Thematic Focus
           </Button>
           <Button
-            variant="outline"
+            variant="neutral"
             size="sm"
             onClick={() => applyPreset('balanced')}
           >
             Balanced
           </Button>
           <Button
-            variant="outline"
+            variant="neutral"
             size="sm"
             onClick={() => applyPreset('semantic-only')}
           >

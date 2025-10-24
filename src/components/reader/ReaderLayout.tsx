@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
-import { RightPanel } from '../sidebar/RightPanel'
-import { RightPanelV2 } from '../sidebar/RightPanelV2'
+import { RightPanelV2 as RightPanel } from '../sidebar/RightPanel'
 import { ConnectionHeatmap } from './ConnectionHeatmap'
 import { QuickSparkCapture } from '../sparks/QuickSparkCapture'
 import { CorrectionModePanel } from './CorrectionModePanel'
@@ -473,25 +472,14 @@ export function ReaderLayout({
 
       {/* Right panel with 7 tabs - hidden in Focus mode */}
       {viewMode !== 'focus' && (
-        process.env.NODE_ENV === 'development' ? (
-          <RightPanelV2
-            documentId={documentId}
-            visibleChunkIds={visibleChunks.map(c => c.id)}
-            reviewResults={reviewResults}
-            onAnnotationClick={handleAnnotationClick}
-            onNavigateToChunk={handleNavigateToChunk}
-            chunks={chunks}
-          />
-        ) : (
-          <RightPanel
-            documentId={documentId}
-            visibleChunkIds={visibleChunks.map(c => c.id)}
-            reviewResults={reviewResults}
-            onAnnotationClick={handleAnnotationClick}
-            onNavigateToChunk={handleNavigateToChunk}
-            chunks={chunks}
-          />
-        )
+        <RightPanel
+          documentId={documentId}
+          visibleChunkIds={visibleChunks.map(c => c.id)}
+          reviewResults={reviewResults}
+          onAnnotationClick={handleAnnotationClick}
+          onNavigateToChunk={handleNavigateToChunk}
+          chunks={chunks}
+        />
       )}
 
       {/* Quick Spark Capture (⌘K) - handles own visibility */}

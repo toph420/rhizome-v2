@@ -1,8 +1,8 @@
 'use client'
 
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@/components/rhizome/badge'
 import { Label } from '@/components/ui/label'
-import { Slider } from '@/components/ui/slider'
+import { Slider } from '@/components/rhizome/slider'
 import { useConnectionStore } from '@/stores/connection-store'
 import type { SynthesisEngine } from '@/types/annotations'
 
@@ -43,7 +43,7 @@ export function ConnectionFilters() {
             return (
               <Badge
                 key={engine}
-                variant={isEnabled ? 'default' : 'outline'}
+                variant={isEnabled ? 'default' : 'neutral'}
                 className={`cursor-pointer transition-all ${
                   isEnabled ? ENGINE_COLORS[engine] : ''
                 }`}
