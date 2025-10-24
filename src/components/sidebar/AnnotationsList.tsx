@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Card } from '@/components/rhizome/card'
+import { Badge } from '@/components/rhizome/badge'
+import { Button } from '@/components/rhizome/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
@@ -343,12 +343,12 @@ export function AnnotationsList({
                   ) : (
                     <>
                       {contentData.tags?.filter(tag => tag !== 'readwise-import').map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-xs flex-shrink-0">
+                        <Badge key={tag} variant="neutral" className="text-xs flex-shrink-0">
                           {tag}
                         </Badge>
                       ))}
                       {contentData.tags?.includes('readwise-import') && (
-                        <Badge variant="secondary" className="text-xs flex-shrink-0">
+                        <Badge variant="default" className="text-xs flex-shrink-0">
                           Readwise
                         </Badge>
                       )}
@@ -368,7 +368,7 @@ export function AnnotationsList({
                     {sparkCaptureOpen && (
                       <Button
                         size="icon"
-                        variant="ghost"
+                        variant="noShadow"
                         className={cn(
                           "h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground transition-all flex-shrink-0",
                           linkedAnnotationIds.includes(annotation.id) && "opacity-100 bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400"
@@ -389,7 +389,7 @@ export function AnnotationsList({
                     )}
                     <Button
                       size="icon"
-                      variant="ghost"
+                      variant="noShadow"
                       className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground transition-all flex-shrink-0"
                       onClick={(e) => handleEditClick(annotation, e)}
                       title="Edit annotation"
@@ -398,7 +398,7 @@ export function AnnotationsList({
                     </Button>
                     <Button
                       size="icon"
-                      variant="ghost"
+                      variant="noShadow"
                       className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive transition-all flex-shrink-0"
                       onClick={(e) => handleDelete(annotation.id, e)}
                       disabled={deleting === annotation.id}
@@ -415,7 +415,7 @@ export function AnnotationsList({
                   <div className="flex gap-1 flex-shrink-0">
                     <Button
                       size="icon"
-                      variant="ghost"
+                      variant="noShadow"
                       className="h-6 w-6 hover:bg-green-100 hover:text-green-700"
                       onClick={(e) => {
                         e.stopPropagation()
@@ -428,7 +428,7 @@ export function AnnotationsList({
                     </Button>
                     <Button
                       size="icon"
-                      variant="ghost"
+                      variant="noShadow"
                       className="h-6 w-6 hover:bg-red-100 hover:text-red-700"
                       onClick={(e) => {
                         e.stopPropagation()
@@ -454,7 +454,7 @@ export function AnnotationsList({
                 {/* Show expand button if text is longer than 3 lines (rough estimate: >150 chars) */}
                 {positionData.originalText && positionData.originalText.length > 150 && (
                   <Button
-                    variant="ghost"
+                    variant="noShadow"
                     size="sm"
                     className="h-6 px-2 text-xs -ml-2"
                     onClick={(e) => toggleExpanded(annotation.id, e)}
@@ -500,7 +500,7 @@ export function AnnotationsList({
                   {formatDistanceToNow(new Date(annotation.created_at), { addSuffix: true })}
                 </span>
                 {positionData.recoveryMethod && positionData.recoveryMethod !== 'exact' && !isEditing && positionData.recoveryConfidence !== undefined && (
-                  <Badge variant="outline" className="text-xs flex-shrink-0">
+                  <Badge variant="neutral" className="text-xs flex-shrink-0">
                     {positionData.recoveryMethod} ({(positionData.recoveryConfidence * 100).toFixed(0)}%)
                   </Badge>
                 )}

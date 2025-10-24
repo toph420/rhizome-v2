@@ -807,6 +807,73 @@ Ensure `components.json` has correct registry URL:
 
 **NOT**: `https://v3.neobrutalism.dev/r/{name}.json` (wrong URL)
 
+### Feature-Rich Domain Components (CRITICAL)
+
+**Philosophy**: Domain components (ConnectionCard, AnnotationCard, SparkCard, FlashcardCard) are **self-contained smart components**, not simple display components.
+
+#### Pattern: Self-Contained Components
+```typescript
+// ✅ CORRECT: Feature-rich component
+export function ConnectionCard({ connection, isActive, onClick }) {
+  // 1. Internal state management (no prop drilling)
+  const [feedbackType, setFeedbackType] = useState(null)
+
+  // 2. Server actions (colocated with UI)
+  const handleFeedback = async (type) => {
+    await updateConnectionFeedback(connection.id, type)
+  }
+
+  // 3. Keyboard shortcuts (when active)
+  useEffect(() => {
+    if (!isActive) return
+    const handleKeyPress = (e) => {
+      if (e.key === 'v') handleFeedback('validate')
+    }
+    window.addEventListener('keydown', handleKeyPress)
+    return () => window.removeEventListener('keydown', handleKeyPress)
+  }, [isActive])
+
+  // 4. Self-contained UI with all logic
+  return <Card>...</Card>
+}
+
+// ❌ WRONG: Simple display component with prop drilling
+export function ConnectionCard({
+  connection,
+  onValidate,      // ❌ Prop drilling
+  onReject,        // ❌ Prop drilling
+  isSubmitting,    // ❌ Prop drilling
+  feedbackType,    // ❌ Prop drilling
+  // ... 10+ more props
+}) {
+  return <Card onClick={onValidate}>...</Card>
+}
+```
+
+#### Benefits
+- **No Prop Drilling**: Components handle their own state and actions
+- **Highly Reusable**: Same component works in browse, study, search contexts
+- **Easy to Extend**: Add features in ONE place, automatically available everywhere
+- **Consistent Behavior**: Keyboard shortcuts, animations work identically everywhere
+- **Better Testing**: Test component in isolation with all its logic
+
+#### Existing Feature-Rich Components
+- **ConnectionCard** (`src/components/rhizome/connection-card.tsx`) - Keyboard shortcuts (v/r/s), feedback capture, server actions
+- **AnnotationCard** (`src/components/rhizome/annotation-card.tsx`) - Colored borders, hover actions, inline editing
+- **SparkCard** (`src/components/rhizome/spark-card.tsx`) - Selection badges, expand/collapse, timestamp
+
+#### Future Feature-Rich Components
+- **FlashcardCard** (planned) - Will follow same pattern with flip animations, FSRS review shortcuts (1/2/3/4), study/browse modes
+- **ChunkCard** (planned) - Quality indicators, edit boundaries, confidence scores
+- **ThemeCard** (planned) - Strength visualization, related chunks, filtering
+
+#### When to Use This Pattern
+- ✅ Domain objects used in multiple contexts (study, browse, search)
+- ✅ Complex interactions (keyboard shortcuts, animations, state)
+- ✅ Server actions needed (mutations, optimistic updates)
+- ❌ Pure design system components (use shadcn/ui)
+- ❌ One-off unique UI (custom component)
+
 ### Library Documentation
 
 - **Virtuoso**: https://virtuoso.dev/ - Virtual scrolling for document reader

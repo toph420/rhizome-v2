@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useConnectionStore } from '@/stores/connection-store'
 import { useDebounce } from '@/hooks/useDebounce'
 import { createClient } from '@/lib/supabase/client'
-import { ConnectionCard } from './ConnectionCard'
+import { ConnectionCard } from '@/components/rhizome/connection-card'
 import { CollapsibleSection } from './CollapsibleSection'
 import type { SynthesisEngine } from '@/types/annotations'
 
