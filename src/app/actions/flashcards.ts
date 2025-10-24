@@ -8,7 +8,6 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { uploadFlashcardToStorage } from '@/lib/flashcards/storage'
 import { revalidatePath } from 'next/cache'
-import type { FlashcardStorageJson } from '@/lib/flashcards/types'
 
 // ============================================
 // ZOD SCHEMAS
@@ -73,33 +72,41 @@ export async function createFlashcard(input: z.infer<typeof CreateFlashcardSchem
 
     console.log(`[Flashcards] ✓ Created ECS entity: ${flashcardId}`)
 
-    // 3. Build Storage JSON
-    const flashcardData: FlashcardStorageJson = {
-      entity_id: flashcardId,
-      user_id: user.id,
-      component_type: 'flashcard',
-      data: {
+    // 3. Build Storage JSON (ECS structure)
+    const flashcardData = {
+      entityId: flashcardId,
+      userId: user.id,
+      card: {
         type: validated.type,
         question: validated.question,
         answer: validated.answer,
         content: validated.content,
         clozeIndex: validated.clozeIndex,
         clozeCount: validated.clozeCount,
-        status: 'draft',
+        status: 'draft' as const,
         srs: null,
         deckId: validated.deckId,
         deckAddedAt: new Date().toISOString(),
-        tags: validated.tags || [],
+        generatedBy: 'manual' as const,
+      },
+      content: {
         note: validated.note,
+        tags: validated.tags || [],
+      },
+      temporal: {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      context: validated.documentId || validated.chunkIds ? {
-        documentId: validated.documentId,
-        chunkIds: validated.chunkIds,
+      chunkRef: validated.documentId || validated.chunkIds?.length ? {
+        documentId: validated.documentId || null,
+        document_id: validated.documentId || null,
+        chunkId: validated.chunkIds?.[0] || null,
+        chunk_id: validated.chunkIds?.[0] || null,
+        chunkIds: validated.chunkIds || [],
         connectionId: validated.connectionId,
         annotationId: validated.annotationId,
-      } : null,
+        generationJobId: validated.generationJobId,
+      } : undefined,
     }
 
     // 4. Upload to Storage (async, non-blocking)
@@ -185,33 +192,42 @@ export async function updateFlashcard(
     const temporal = entity.components?.find(c => c.component_type === 'Temporal')?.data
     const chunkRef = entity.components?.find(c => c.component_type === 'ChunkRef')?.data
 
-    // Update Storage (async)
-    const flashcardData: FlashcardStorageJson = {
-      entity_id: flashcardId,
-      user_id: user.id,
-      component_type: 'flashcard',
-      data: {
-        type: card?.type || 'basic',
+    // Update Storage (async) - ECS structure
+    const flashcardData = {
+      entityId: flashcardId,
+      userId: user.id,
+      card: {
+        type: card?.type || 'basic' as const,
         question: card?.question || '',
         answer: card?.answer || '',
         content: card?.content,
         clozeIndex: card?.clozeIndex,
         clozeCount: card?.clozeCount,
-        status: card?.status || 'draft',
+        status: (card?.status || 'draft') as 'draft' | 'active' | 'suspended',
         srs: card?.srs || null,
         deckId: card?.deckId || validated.deckId || '',
         deckAddedAt: card?.deckAddedAt || new Date().toISOString(),
+        generatedBy: card?.generatedBy as 'manual' | 'ai' | 'import' | undefined,
+        generationPromptVersion: card?.generationPromptVersion,
+      },
+      content: {
         tags: content?.tags || [],
         note: content?.note,
+      },
+      temporal: {
         createdAt: temporal?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
-      context: chunkRef ? {
-        documentId: chunkRef.documentId,
-        chunkIds: chunkRef.chunkIds,
+      chunkRef: chunkRef ? {
+        documentId: chunkRef.documentId || null,
+        document_id: chunkRef.documentId || null,
+        chunkId: chunkRef.chunkIds?.[0] || null,
+        chunk_id: chunkRef.chunkIds?.[0] || null,
+        chunkIds: chunkRef.chunkIds || [],
         connectionId: chunkRef.connectionId,
         annotationId: chunkRef.annotationId,
-      } : null,
+        generationJobId: chunkRef.generationJobId,
+      } : undefined,
     }
 
     uploadFlashcardToStorage(user.id, flashcardId, flashcardData).catch(console.error)
@@ -498,6 +514,198 @@ export async function getGenerationJobStatus(jobId: string) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+// ============================================
+// QUERY OPERATIONS
+// ============================================
+
+/**
+ * Get flashcards by document
+ * Uses flashcards_cache for performance
+ */
+export async function getFlashcardsByDocument(
+  documentId: string,
+  status?: 'draft' | 'approved'
+) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  const supabase = createAdminClient()
+
+  let query = supabase
+    .from('flashcards_cache')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('document_id', documentId)
+    .order('created_at', { ascending: false })
+
+  if (status) {
+    query = query.eq('status', status)
+  }
+
+  const { data, error } = await query
+
+  if (error) throw error
+
+  return data || []
+}
+
+// ============================================
+// BATCH OPERATIONS
+// ============================================
+
+/**
+ * Batch approve flashcards
+ * Converts all cards from draft to active status with SRS
+ */
+export async function batchApproveFlashcards(entityIds: string[]) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  try {
+    const ecs = createECS()
+    const ops = new FlashcardOperations(ecs, user.id)
+
+    for (const id of entityIds) {
+      await ops.approve(id)
+    }
+
+    // Rebuild cache
+    const supabase = createAdminClient()
+    await supabase.rpc('rebuild_flashcards_cache', { p_user_id: user.id })
+
+    revalidatePath('/flashcards')
+
+    return { success: true, approvedCount: entityIds.length }
+
+  } catch (error) {
+    console.error('[Flashcards] Batch approve failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+}
+
+/**
+ * Batch delete flashcards
+ * Permanently removes cards from ECS and Storage
+ */
+export async function batchDeleteFlashcards(entityIds: string[]) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  try {
+    const ecs = createECS()
+    const ops = new FlashcardOperations(ecs, user.id)
+
+    for (const id of entityIds) {
+      await ops.delete(id)
+      // Also delete from Storage (fire-and-forget)
+      try {
+        const { deleteFlashcardFromStorage } = await import('@/lib/flashcards/storage')
+        await deleteFlashcardFromStorage(user.id, id)
+      } catch (err) {
+        console.warn(`Failed to delete flashcard ${id} from Storage:`, err)
+      }
+    }
+
+    revalidatePath('/flashcards')
+
+    return { success: true, deletedCount: entityIds.length }
+
+  } catch (error) {
+    console.error('[Flashcards] Batch delete failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+}
+
+/**
+ * Batch add tags to flashcards
+ * Appends tags to existing tags (no duplicates)
+ */
+export async function batchAddTags(entityIds: string[], tags: string[]) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  try {
+    const ecs = createECS()
+
+    for (const entityId of entityIds) {
+      const entity = await ecs.getEntity(entityId, user.id)
+      if (!entity) continue
+
+      const contentComp = entity.components?.find(c => c.component_type === 'Content')
+      if (!contentComp) continue
+
+      const existingTags = contentComp.data.tags || []
+      const newTags = Array.from(new Set([...existingTags, ...tags]))
+
+      await ecs.updateComponent(
+        contentComp.id,
+        { ...contentComp.data, tags: newTags },
+        user.id
+      )
+    }
+
+    const supabase = createAdminClient()
+    await supabase.rpc('rebuild_flashcards_cache', { p_user_id: user.id })
+
+    revalidatePath('/flashcards')
+
+    return { success: true }
+
+  } catch (error) {
+    console.error('[Flashcards] Batch add tags failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+}
+
+/**
+ * Batch move flashcards to a different deck
+ */
+export async function batchMoveToDeck(entityIds: string[], deckId: string) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  try {
+    const ecs = createECS()
+
+    for (const entityId of entityIds) {
+      const entity = await ecs.getEntity(entityId, user.id)
+      if (!entity) continue
+
+      const cardComp = entity.components?.find(c => c.component_type === 'Card')
+      if (!cardComp) continue
+
+      await ecs.updateComponent(
+        cardComp.id,
+        { ...cardComp.data, deckId, deckAddedAt: new Date().toISOString() },
+        user.id
+      )
+    }
+
+    const supabase = createAdminClient()
+    await supabase.rpc('rebuild_flashcards_cache', { p_user_id: user.id })
+
+    revalidatePath('/flashcards')
+
+    return { success: true }
+
+  } catch (error) {
+    console.error('[Flashcards] Batch move failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
     }
   }
 }

@@ -1,32 +1,85 @@
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import type { FlashcardStorageJson } from './types'
+import { z } from 'zod'
 
 /**
- * Upload flashcard to Storage (source of truth)
- * Path: {userId}/flashcards/{cardId}.json (flat structure)
+ * Storage JSON schema (matches 4-component structure)
  *
- * Pattern: Exactly like sparks at src/lib/sparks/storage.ts:14-42
+ * Pattern: Exactly like src/lib/sparks/storage.ts
+ * Storage is source of truth, Database is queryable cache.
+ */
+export const FlashcardStorageSchema = z.object({
+  entityId: z.string().uuid(),
+  userId: z.string().uuid(),
+  card: z.object({
+    type: z.enum(['basic', 'cloze']),
+    question: z.string(),
+    answer: z.string(),
+    content: z.string().optional(),
+    clozeIndex: z.number().optional(),
+    clozeCount: z.number().optional(),
+    status: z.enum(['draft', 'active', 'suspended']).default('draft'),
+    srs: z.object({
+      due: z.string(),
+      stability: z.number(),
+      difficulty: z.number(),
+      elapsed_days: z.number(),
+      scheduled_days: z.number(),
+      learning_steps: z.number(),
+      reps: z.number(),
+      lapses: z.number(),
+      state: z.number(),
+      last_review: z.string().nullable(),
+    }).nullable(),
+    deckId: z.string().uuid(),
+    deckAddedAt: z.string(),
+    parentCardId: z.string().uuid().optional(),
+    generatedBy: z.enum(['manual', 'ai', 'import']).optional(),
+    generationPromptVersion: z.string().optional(),
+  }),
+  content: z.object({
+    note: z.string().optional(),
+    tags: z.array(z.string()),
+  }),
+  temporal: z.object({
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  }),
+  chunkRef: z.object({
+    documentId: z.string().uuid().nullable(),
+    document_id: z.string().uuid().nullable(),
+    chunkId: z.string().uuid().nullable(),
+    chunk_id: z.string().uuid().nullable(),
+    chunkIds: z.array(z.string().uuid()),
+    chunkPosition: z.number().optional(),
+    connectionId: z.string().uuid().optional(),
+    annotationId: z.string().uuid().optional(),
+    generationJobId: z.string().uuid().optional(),
+  }).optional(),
+})
+
+export type FlashcardStorage = z.infer<typeof FlashcardStorageSchema>
+
+/**
+ * Upload flashcard to Storage
+ * Path: {userId}/flashcards/card_{entityId}.json
+ *
+ * Uses admin client to bypass Storage RLS (personal tool pattern).
  */
 export async function uploadFlashcardToStorage(
   userId: string,
-  flashcardId: string,
-  flashcardData: FlashcardStorageJson
+  entityId: string,
+  data: FlashcardStorage
 ): Promise<string> {
-  // Use admin client to bypass Storage RLS (personal tool pattern)
   const supabase = createAdminClient()
+  const path = `${userId}/flashcards/card_${entityId}.json`
 
-  // Flat structure: files directly in flashcards/ folder
-  const jsonPath = `${userId}/flashcards/${flashcardId}.json`
-
-  // Use Blob wrapper to preserve JSON formatting
-  const jsonBlob = new Blob([JSON.stringify(flashcardData, null, 2)], {
+  const jsonBlob = new Blob([JSON.stringify(data, null, 2)], {
     type: 'application/json'
   })
 
   const { error } = await supabase.storage
     .from('documents')
-    .upload(jsonPath, jsonBlob, {
+    .upload(path, jsonBlob, {
       contentType: 'application/json',
       upsert: true
     })
@@ -35,8 +88,8 @@ export async function uploadFlashcardToStorage(
     throw new Error(`Failed to upload flashcard to Storage: ${error.message}`)
   }
 
-  console.log(`[Flashcards] ✓ Uploaded to Storage: ${jsonPath}`)
-  return jsonPath
+  console.log(`[Flashcards] ✓ Uploaded to Storage: ${path}`)
+  return path
 }
 
 /**
@@ -44,35 +97,32 @@ export async function uploadFlashcardToStorage(
  */
 export async function downloadFlashcardFromStorage(
   userId: string,
-  flashcardId: string
-): Promise<FlashcardStorageJson> {
+  entityId: string
+): Promise<FlashcardStorage> {
   const supabase = createAdminClient()
-  const jsonPath = `${userId}/flashcards/${flashcardId}.json`
+  const path = `${userId}/flashcards/card_${entityId}.json`
 
-  // Create signed URL (1 hour expiry)
-  const { data: signedUrlData, error: urlError } = await supabase.storage
+  const { data: signedUrl } = await supabase.storage
     .from('documents')
-    .createSignedUrl(jsonPath, 3600)
+    .createSignedUrl(path, 3600)
 
-  if (urlError || !signedUrlData?.signedUrl) {
-    throw new Error(`Failed to create signed URL for ${jsonPath}`)
+  if (!signedUrl?.signedUrl) {
+    throw new Error(`Failed to create signed URL for ${path}`)
   }
 
-  // Fetch and parse JSON
-  const response = await fetch(signedUrlData.signedUrl)
+  const response = await fetch(signedUrl.signedUrl)
   if (!response.ok) {
-    throw new Error(`Storage read failed for ${jsonPath}: ${response.statusText}`)
+    throw new Error(`Storage read failed for ${path}: ${response.statusText}`)
   }
 
-  const data = await response.json()
-  console.log(`[Flashcards] ✓ Read from Storage: ${jsonPath}`)
+  const json = await response.json()
+  console.log(`[Flashcards] ✓ Read from Storage: ${path}`)
 
-  return data as FlashcardStorageJson
+  return FlashcardStorageSchema.parse(json)
 }
 
 /**
- * List all flashcard files in Storage for a user
- * Returns filenames (which are the flashcardIds)
+ * List all flashcard files for user
  */
 export async function listUserFlashcards(userId: string): Promise<string[]> {
   const supabase = createAdminClient()
@@ -88,39 +138,50 @@ export async function listUserFlashcards(userId: string): Promise<string[]> {
     throw new Error(`Failed to list flashcards: ${error.message}`)
   }
 
-  // Return filenames (filter out directories)
-  return (files || [])
-    .filter(f => f.name.endsWith('.json'))
-    .map(f => f.name.replace('.json', ''))
+  return files
+    .filter(f => f.name.startsWith('card_') && f.name.endsWith('.json'))
+    .map(f => f.name.replace('card_', '').replace('.json', ''))
 }
 
 /**
- * Verify Storage integrity (for diagnostics)
- * Returns true if Storage count matches ECS entity count
+ * Delete flashcard from Storage
  */
-export async function verifyFlashcardsIntegrity(userId: string): Promise<{
-  storageCount: number
-  entityCount: number
-  matched: boolean
-}> {
-  const supabase = await createClient()
+export async function deleteFlashcardFromStorage(
+  userId: string,
+  entityId: string
+): Promise<void> {
+  const supabase = createAdminClient()
+  const path = `${userId}/flashcards/card_${entityId}.json`
 
-  // Count files in Storage
-  const flashcardIds = await listUserFlashcards(userId)
-  const storageCount = flashcardIds.length
+  const { error } = await supabase.storage
+    .from('documents')
+    .remove([path])
 
-  // Count ECS entities with Card component
-  const { data: components } = await supabase
-    .from('components')
-    .select('entity_id')
-    .eq('component_type', 'Card')
-    .eq('user_id', userId)
-
-  const entityCount = components?.length || 0
-
-  return {
-    storageCount,
-    entityCount,
-    matched: storageCount === entityCount
+  if (error) {
+    throw new Error(`Failed to delete from Storage: ${error.message}`)
   }
+
+  console.log(`[Flashcards] ✓ Deleted from Storage: ${path}`)
+}
+
+/**
+ * Verify storage integrity
+ */
+export async function verifyFlashcardsIntegrity(
+  userId: string
+): Promise<{ total: number; valid: number; invalid: string[] }> {
+  const entityIds = await listUserFlashcards(userId)
+  let valid = 0
+  const invalid: string[] = []
+
+  for (const id of entityIds) {
+    try {
+      await downloadFlashcardFromStorage(userId, id)
+      valid++
+    } catch (error) {
+      invalid.push(id)
+    }
+  }
+
+  return { total: entityIds.length, valid, invalid }
 }

@@ -55,6 +55,9 @@ export async function getDecksWithStats() {
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
 
+  // Ensure system decks exist first
+  await ensureSystemDecks()
+
   const supabase = createAdminClient()
 
   // Get all decks
@@ -89,26 +92,66 @@ export async function getDecksWithStats() {
 }
 
 /**
- * Get system decks (Inbox, Archive)
+ * Ensure system decks exist (Inbox, Archive)
+ * Creates them if they don't exist
  */
-export async function getSystemDecks() {
+export async function ensureSystemDecks() {
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
 
   const supabase = createAdminClient()
 
-  const { data, error } = await supabase
+  // Check existing system decks
+  const { data: existing } = await supabase
     .from('decks')
     .select('*')
     .eq('user_id', user.id)
     .eq('is_system', true)
 
-  if (error) throw error
+  const hasInbox = existing?.some(d => d.name === 'Inbox')
+  const hasArchive = existing?.some(d => d.name === 'Archive')
 
-  const inbox = data.find(d => d.name === 'Inbox')
-  const archive = data.find(d => d.name === 'Archive')
+  // Create missing system decks
+  const toCreate = []
+  if (!hasInbox) {
+    toCreate.push({
+      user_id: user.id,
+      name: 'Inbox',
+      description: 'Default deck for new flashcards',
+      is_system: true,
+    })
+  }
+  if (!hasArchive) {
+    toCreate.push({
+      user_id: user.id,
+      name: 'Archive',
+      description: 'Archived flashcards',
+      is_system: true,
+    })
+  }
+
+  if (toCreate.length > 0) {
+    await supabase.from('decks').insert(toCreate)
+  }
+
+  // Return all system decks
+  const { data } = await supabase
+    .from('decks')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('is_system', true)
+
+  const inbox = data?.find(d => d.name === 'Inbox')
+  const archive = data?.find(d => d.name === 'Archive')
 
   return { inbox, archive }
+}
+
+/**
+ * Get system decks (Inbox, Archive)
+ */
+export async function getSystemDecks() {
+  return ensureSystemDecks()
 }
 
 /**

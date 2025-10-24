@@ -361,6 +361,56 @@ export class FlashcardOperations {
   }
 
   /**
+   * Archive flashcard (move to Archive deck)
+   *
+   * @param entityId - Entity ID to archive
+   */
+  async archive(entityId: string): Promise<void> {
+    const { getArchiveDeck } = await import('@/lib/decks/system-decks')
+    const archiveDeck = await getArchiveDeck(this.userId)
+
+    if (!archiveDeck) {
+      throw new Error('Archive deck not found')
+    }
+
+    const entity = await this.ecs.getEntity(entityId, this.userId)
+    if (!entity) {
+      throw new Error('Flashcard not found')
+    }
+
+    const components = this.extractComponents(entity)
+    const cardComp = components.find(c => c.component_type === 'Card')
+
+    if (!cardComp) {
+      throw new Error('Card component not found')
+    }
+
+    // Update Card component with Archive deck
+    await this.ecs.updateComponent(
+      cardComp.id,
+      {
+        ...cardComp.data,
+        deckId: archiveDeck.id,
+        deckAddedAt: new Date().toISOString(),
+      },
+      this.userId
+    )
+
+    // Update Temporal.updatedAt
+    const temporalComponent = components.find(c => c.component_type === 'Temporal')
+    if (temporalComponent) {
+      await this.ecs.updateComponent(
+        temporalComponent.id,
+        {
+          ...temporalComponent.data,
+          updatedAt: new Date().toISOString(),
+        },
+        this.userId
+      )
+    }
+  }
+
+  /**
    * Get flashcards by deck
    *
    * @param deckId - Deck ID to filter by
