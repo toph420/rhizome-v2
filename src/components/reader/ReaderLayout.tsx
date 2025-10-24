@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
 import { RightPanel } from '../sidebar/RightPanel'
+import { RightPanelV2 } from '../sidebar/RightPanelV2'
 import { ConnectionHeatmap } from './ConnectionHeatmap'
 import { QuickSparkCapture } from '../sparks/QuickSparkCapture'
 import { CorrectionModePanel } from './CorrectionModePanel'
@@ -437,8 +438,9 @@ export function ReaderLayout({
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Enhanced document header with reading modes + Quick Spark */}
-      <DocumentHeader
+      {/* Enhanced document header with reading modes + Quick Spark - sticky below TopNav */}
+      <div className="sticky top-14 z-40 bg-background">
+        <DocumentHeader
         documentId={documentId}
         title={documentTitle}
         wordCount={wordCount}
@@ -449,6 +451,7 @@ export function ReaderLayout({
         onViewModeChange={setViewMode}
         onQuickSpark={openSparkCapture}
       />
+      </div>
 
       <div className="flex-1 overflow-hidden relative">
         {/* Connection density heatmap in left margin */}
@@ -468,16 +471,27 @@ export function ReaderLayout({
         />
       </div>
 
-      {/* Right panel with 6 tabs - hidden in Focus mode */}
+      {/* Right panel with 7 tabs - hidden in Focus mode */}
       {viewMode !== 'focus' && (
-        <RightPanel
-          documentId={documentId}
-          visibleChunkIds={visibleChunks.map(c => c.id)}
-          reviewResults={reviewResults}
-          onAnnotationClick={handleAnnotationClick}
-          onNavigateToChunk={handleNavigateToChunk}
-          chunks={chunks}
-        />
+        process.env.NODE_ENV === 'development' ? (
+          <RightPanelV2
+            documentId={documentId}
+            visibleChunkIds={visibleChunks.map(c => c.id)}
+            reviewResults={reviewResults}
+            onAnnotationClick={handleAnnotationClick}
+            onNavigateToChunk={handleNavigateToChunk}
+            chunks={chunks}
+          />
+        ) : (
+          <RightPanel
+            documentId={documentId}
+            visibleChunkIds={visibleChunks.map(c => c.id)}
+            reviewResults={reviewResults}
+            onAnnotationClick={handleAnnotationClick}
+            onNavigateToChunk={handleNavigateToChunk}
+            chunks={chunks}
+          />
+        )
       )}
 
       {/* Quick Spark Capture (⌘K) - handles own visibility */}
