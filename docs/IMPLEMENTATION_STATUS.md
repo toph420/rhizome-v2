@@ -1,20 +1,20 @@
 # Implementation Status
 
-Last Updated: 2025-10-04
+Last Updated: 2025-10-24
 
 ## Quick Reference
 
 | Feature Area | Status | Completion | Notes |
 |-------------|--------|------------|-------|
-| **Document Processing** | ✅ Complete | 100% | All 6 formats working |
+| **Document Processing** | ✅ Complete | 100% | All 7 formats working |
 | **Collision Detection** | ✅ Complete | 100% | 3 engines implemented |
 | **User Preferences** | ✅ Complete | 100% | Weight tuning system |
 | **Worker Module** | ✅ Complete | 100% | Fully tested & documented |
-| **Database Schema** | ✅ Complete | 100% | 30 migrations applied |
+| **Database Schema** | ✅ Complete | 100% | 68 migrations applied |
 | **Document Reader** | 🚧 In Progress | 40% | Markdown rendering + annotations |
 | **Annotation Recovery & Sync** | ✅ Complete | 100% | 4-tier fuzzy matching, Obsidian sync |
 | **Readwise Import** | ✅ Complete | 100% | Fuzzy matching integration |
-| **Study System** | 📋 Planned | 0% | FSRS algorithm chosen |
+| **Study System** | 🚧 In Progress | 60% | Database schema complete, UI in development |
 | **Export System** | ✅ Complete | 100% | Hourly annotation export to JSON |
 
 ## Detailed Implementation Matrix
@@ -40,16 +40,12 @@ Last Updated: 2025-10-04
 - Comprehensive error recovery
 - Progress tracking via background jobs
 
-#### 7-Engine Collision Detection System
+#### 3-Engine Collision Detection System
 | Engine | Purpose | Weight | Status |
 |--------|---------|--------|--------|
 | Semantic Similarity | Embedding-based matching | 25% | ✅ Complete |
-| Conceptual Density | Concept clustering | 20% | ✅ Complete |
-| Structural Pattern | Document structure | 15% | ✅ Complete |
-| Citation Network | Reference graphs | 15% | ✅ Complete |
-| Temporal Proximity | Time-based clustering | 10% | ✅ Complete |
-| Contradiction Detection | Opposing viewpoints | 10% | ✅ Complete |
-| Emotional Resonance | Emotional patterns | 5% | ✅ Complete |
+| Contradiction Detection | Conceptual tensions and opposing viewpoints | 40% | ✅ Complete |
+| Thematic Bridge | AI-powered cross-domain concept matching | 35% | ✅ Complete |
 
 **Supporting Infrastructure:**
 - Orchestrator (`worker/engines/orchestrator.ts`)
@@ -59,14 +55,14 @@ Last Updated: 2025-10-04
 - User preference integration
 
 #### Database & Storage Layer
-| Migration | Description | Status |
-|-----------|------------|--------|
-| 001-003 | Initial schema, RLS, dev user | ✅ Applied |
-| 004-006 | Documents, chunks, components | ✅ Applied |
-| 007-009 | Background jobs, embeddings | ✅ Applied |
-| 010-012 | Metadata, position context | ✅ Applied |
-| 013-015 | Cache, performance indexes | ✅ Applied |
-| 016 | User preferences & weights | ✅ Applied |
+| Migration Range | Key Features | Status |
+|-----------------|--------------|--------|
+| 001-020 | Initial schema, RLS, documents, chunks, background jobs, embeddings | ✅ Applied |
+| 021-040 | Connections system, annotations, EPUB support, fuzzy matching, Obsidian integration | ✅ Applied |
+| 041-060 | Import system, local pipeline, cached chunks, chunk metadata, job controls | ✅ Applied |
+| 061-068 | Study system (decks, flashcards, sessions), prompt templates, entity types | ✅ Applied |
+
+**Latest Migration**: `068_flashcards_cache_rebuild.sql`
 
 **Key Tables:**
 - `entities` - ECS entity storage
@@ -118,16 +114,41 @@ Last Updated: 2025-10-04
 | ProcessingDock | ✅ Done | 100% | - |
 | RightPanel | ✅ Enhanced | 80% | Added review tab with badge counts |
 
+#### Study System (FSRS-based)
+| Component | Status | Completion | Details |
+|-----------|--------|------------|---------|
+| Database Schema | ✅ Complete | 100% | Decks, flashcards_cache, study_sessions, prompt_templates |
+| Flashcard Creation | 🚧 Basic | 40% | Selection-based creation working, AI generation in progress |
+| FSRS Algorithm | 🚧 In Progress | 30% | Core algorithm implemented, needs integration |
+| Study Interface | 🚧 Basic | 30% | Basic UI exists, needs keyboard shortcuts and animations |
+| Progress Tracking | 📋 Planned | 0% | Database ready, UI not started |
+| Custom Study Builder | 🚧 In Progress | 50% | Filter system and deck selector working |
+
+**Database Migrations:**
+- `063_decks_table.sql` - Deck organization for flashcards
+- `064_flashcards_cache.sql` - ECS-based flashcard storage
+- `065_study_sessions.sql` - Session tracking and FSRS state
+- `066_prompt_templates.sql` - AI flashcard generation templates
+- `068_flashcards_cache_rebuild.sql` - Flashcard cache improvements
+
+**Key Features Implemented:**
+- Deck creation and management
+- Flashcard ECS components (Flashcard, Study, Content, Temporal, ChunkRef)
+- Selection-based flashcard creation
+- Manual flashcard editing
+- DeckCard and FlashcardCard feature-rich components
+- EditDeckForm for deck customization
+
+**In Progress:**
+- FSRS spaced repetition integration
+- AI-powered flashcard generation from selections
+- Study session interface with keyboard shortcuts (Space, 1-4)
+- Custom study builder with filters
+- Progress visualization and statistics
+
 ### 📋 PLANNED - Not Started
 
-#### Study System (FSRS-based)
-- Flashcard creation from selections
-- Spaced repetition algorithm
-- Study mode interface
-- Progress tracking
-- Review scheduling
-
-#### Export System
+#### Export System (Enhanced)
 - ZIP bundle generation
 - Markdown export with formatting
 - Annotations as JSON

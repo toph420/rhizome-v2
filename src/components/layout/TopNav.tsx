@@ -99,7 +99,7 @@ export function TopNav({ onMenuClick, onAdminClick }: TopNavProps) {
 
         {/* Admin Panel Button - Always visible */}
         <Button
-          variant="ghost"
+          variant="neutral"
           size="icon"
           onClick={onAdminClick}
           title="Open Admin Panel (Cmd+Shift+A)"

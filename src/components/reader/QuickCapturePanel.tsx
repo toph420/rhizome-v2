@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import { Textarea } from '@/components/rhizome/textarea'
 import { Input } from '@/components/rhizome/input'
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@/components/rhizome/badge'
 import { toast } from 'sonner'
 import { Loader2, X, Tag, Palette, Layers, GripVertical, Zap, Trash2 } from 'lucide-react'
 import { createAnnotation, updateAnnotation, deleteAnnotation } from '@/app/actions/annotations'
@@ -466,9 +466,9 @@ export function QuickCapturePanel({
         disabled={saving}
         title={`${option.label} (click to save, ${option.key} to save & close)`}
         className={cn(
-          'w-8 h-8 rounded-md transition-all flex items-center justify-center border-2',
+          'w-10 h-10 rounded-md transition-all flex items-center justify-center border-2',
           option.bgClass,
-          selectedColor === option.color ? 'ring-2 ring-primary ring-offset-2 scale-110' : 'border-border',
+          selectedColor === option.color ? 'ring-1 ring-primary ring-offset-0 scale-110' : 'border-border',
           saving && 'opacity-50 cursor-not-allowed'
         )}
       >
