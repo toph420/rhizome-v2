@@ -279,7 +279,27 @@ export async function approveFlashcard(flashcardId: string) {
     console.log(`[Flashcards] ✓ Approved: ${flashcardId}`)
 
     // Update cache with new SRS state
-    // (Cache rebuild happens automatically)
+    const adminClient = createAdminClient()
+
+    // Get the updated entity with SRS
+    const entity = await ecs.getEntity(flashcardId, user.id)
+    const card = entity?.components?.find(c => c.component_type === 'Card')?.data
+
+    if (card?.srs) {
+      await adminClient
+        .from('flashcards_cache')
+        .update({
+          status: 'active',
+          next_review: card.srs.due,
+          stability: card.srs.stability,
+          difficulty: card.srs.difficulty,
+          reps: card.srs.reps,
+          lapses: card.srs.lapses,
+          srs_state: card.srs.state,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('entity_id', flashcardId)
+    }
 
     revalidatePath('/flashcards')
 
@@ -426,6 +446,8 @@ const GenerateFlashcardsSchema = z.object({
   sourceIds: z.array(z.string().uuid()).min(1),
   cardCount: z.number().int().min(1).max(50),
   deckId: z.string().uuid(),
+  promptTemplateId: z.string().uuid().optional(),
+  customInstructions: z.string().max(1000).optional(),
 })
 
 /**
@@ -457,6 +479,8 @@ export async function generateFlashcards(input: z.infer<typeof GenerateFlashcard
           cardCount: validated.cardCount,
           userId: user.id,
           deckId: validated.deckId,
+          promptTemplateId: validated.promptTemplateId,
+          customInstructions: validated.customInstructions,
         },
       })
       .select()
@@ -528,7 +552,7 @@ export async function getGenerationJobStatus(jobId: string) {
  */
 export async function getFlashcardsByDocument(
   documentId: string,
-  status?: 'draft' | 'approved'
+  status?: 'draft' | 'active'
 ) {
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')

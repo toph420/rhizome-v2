@@ -1,8 +1,54 @@
 # Flashcard System Documentation
 
-**Status**: ✅ Complete (Phase 1 + Phase 2 Implemented)
+**Status**: ⚠️ Backend Complete, UI Functional (Study Mode Missing)
 **Version**: 1.0
 **Last Updated**: 2025-10-24
+
+---
+
+## Current Implementation Status
+
+### ✅ Fully Implemented (Production Ready)
+
+**Backend (100% Complete)**:
+- ✅ ECS operations (`FlashcardOperations` class)
+- ✅ Storage helpers (Supabase Storage uploads)
+- ✅ System decks (Inbox, Archive auto-creation)
+- ✅ Prompt templates (4 system prompts seeded)
+- ✅ Worker handler (`generate-flashcards.ts`)
+- ✅ Cloze parser (Anki-compatible format)
+- ✅ Template renderer (Mustache-style variables)
+- ✅ Multi-source loaders (5 types: document, chunks, selection, annotation, connection)
+- ✅ Server actions (CRUD + batch operations)
+- ✅ Database schema (decks, prompt_templates, flashcards_cache)
+- ✅ Cache rebuild RPC function
+- ✅ FSRS integration (ts-fsrs library)
+
+**Frontend (80% Complete)**:
+- ✅ FlashcardsTab (2-tab interface in RightPanel)
+- ✅ GenerationPanelClient (AI generation UI)
+- ✅ FlashcardsListClient (card browsing/filtering)
+- ✅ FlashcardCard component (keyboard shortcuts, inline editing)
+- ✅ Flashcard store (Zustand - Pattern 2: Server Actions + Store)
+
+### ❌ Not Implemented Yet
+
+**Frontend Missing**:
+- ❌ Study mode UI (`/flashcards/study` page)
+- ❌ Study session interface (card flip, rating buttons)
+- ❌ Deck management page (browse all decks)
+- ❌ Advanced stats/analytics
+- ❌ Prompt template editor UI
+- ❌ Batch selection toolbar
+
+**Known Issues**:
+- ⚠️ React Query still in dependencies (handoff document proposes removal)
+- ⚠️ Study mode referenced in docs but not implemented
+
+**Recent Fixes** (2025-10-24):
+- ✅ Fixed component inserts in generation handler (removed invalid `user_id` field)
+- ✅ Added automatic cache rebuild after flashcard generation
+- ✅ Cards now appear in UI immediately after generation
 
 ---
 
@@ -22,19 +68,18 @@
 
 ## Overview
 
-The Flashcard System is a comprehensive AI-powered spaced repetition system integrated into Rhizome V2. It allows users to generate flashcards from documents, manage them in decks, and study them with FSRS (Free Spaced Repetition Scheduler) algorithm.
+The Flashcard System is an AI-powered spaced repetition system integrated into Rhizome V2. It allows users to generate flashcards from documents using Gemini AI and manage them with FSRS (Free Spaced Repetition Scheduler) algorithm.
 
 ### Key Features
 
-- **AI-Powered Generation**: Generate flashcards from documents using Gemini AI with customizable prompts
-- **Multi-Source Support**: Create flashcards from documents, chunks, selections, annotations, and connections
-- **4 Prompt Templates**: Pre-configured templates for different learning styles
+- **AI-Powered Generation**: Generate flashcards using Gemini 2.0 Flash with customizable prompts
+- **Multi-Source Support**: Create flashcards from documents, chunks, selections, annotations, connections
+- **4 Prompt Templates**: Pre-configured templates for different learning styles (all system prompts seeded)
 - **Cloze Support**: Anki-compatible cloze deletion format (`{{c1::text}}`)
-- **FSRS Integration**: Evidence-based spaced repetition algorithm
+- **FSRS Integration**: Evidence-based spaced repetition algorithm (ts-fsrs)
 - **ECS Architecture**: 4-component entity system (Card, Content, Temporal, ChunkRef)
 - **Storage-First**: Individual JSON files per card for portability
-- **Batch Operations**: Approve, delete, tag, and move multiple cards at once
-- **System Decks**: Built-in Inbox and Archive decks
+- **System Decks**: Auto-created Inbox and Archive decks
 
 ---
 
@@ -44,7 +89,7 @@ The Flashcard System is a comprehensive AI-powered spaced repetition system inte
 
 **Backend-First Approach**: Build complete, extensible backend architecture first. Add UI incrementally without refactoring.
 
-**Result**: Zero refactoring needed for future features!
+**Data Fetching Pattern**: Uses **Pattern 2 (Zustand + Server Actions)** - consistent with SparksTab and ConnectionsList.
 
 ### 4-Component ECS Structure
 
@@ -143,6 +188,12 @@ CREATE TABLE prompt_templates (
 );
 ```
 
+**4 System Prompts Seeded**:
+1. Comprehensive Concepts (default)
+2. Deep Details
+3. Connections & Synthesis
+4. Contradiction Focus
+
 #### `flashcards_cache` Table
 ```sql
 CREATE TABLE flashcards_cache (
@@ -151,32 +202,39 @@ CREATE TABLE flashcards_cache (
   deck_id UUID NOT NULL,
 
   -- Card data (for quick queries)
-  type TEXT NOT NULL,  -- 'basic' | 'cloze'
+  card_type TEXT NOT NULL,  -- 'basic' | 'cloze'
   question TEXT NOT NULL,
   answer TEXT NOT NULL,
   status TEXT NOT NULL,  -- 'draft' | 'active' | 'suspended'
 
   -- SRS data
   next_review TIMESTAMPTZ,
-  interval_days INTEGER,
+  stability DOUBLE PRECISION,
+  difficulty DOUBLE PRECISION,
+  reps INTEGER,
+  lapses INTEGER,
+  srs_state INTEGER,
 
   -- Source tracking
-  document_ids UUID[],  -- For filtering by document
+  document_id UUID,
+  chunk_ids UUID[],
+  connection_id UUID,
+  annotation_id UUID,
+  generation_job_id UUID,
+
+  -- Content
+  tags TEXT[],
+
+  -- Storage
+  storage_path TEXT NOT NULL,
 
   -- Timestamps
   created_at TIMESTAMPTZ,
-  cached_at TIMESTAMPTZ,
-
-  -- Indexes
-  INDEX idx_flashcards_cache_user (user_id),
-  INDEX idx_flashcards_cache_deck (deck_id),
-  INDEX idx_flashcards_cache_status (user_id, status),
-  INDEX idx_flashcards_cache_due (user_id, next_review),
-  INDEX idx_flashcards_cache_documents (user_id, document_ids)
+  cached_at TIMESTAMPTZ
 );
 ```
 
-**Cache Rebuild**: RPC function `rebuild_flashcards_cache(p_user_id UUID)` regenerates cache from ECS components.
+**Cache Rebuild**: RPC function `rebuild_flashcards_cache(p_user_id UUID)` regenerates cache from ECS components. This function is **automatically called** by the generation handler after creating flashcard entities.
 
 ---
 
@@ -184,126 +242,12 @@ CREATE TABLE flashcards_cache (
 
 ### Backend Components
 
-#### 1. Storage Helpers (`src/lib/flashcards/storage.ts`)
-
-Handles file-level operations in Supabase Storage:
-
-```typescript
-// Upload flashcard to Storage
-uploadFlashcardToStorage(userId, entityId, data): Promise<string>
-
-// Download flashcard from Storage
-downloadFlashcardFromStorage(userId, entityId): Promise<FlashcardStorage>
-
-// List all flashcard files
-listUserFlashcards(userId): Promise<string[]>
-
-// Delete flashcard from Storage
-deleteFlashcardFromStorage(userId, entityId): Promise<void>
-
-// Verify storage integrity
-verifyFlashcardsIntegrity(userId): Promise<{ total, valid, invalid }>
-```
-
-**Pattern**: Exactly like `src/lib/sparks/storage.ts` - fire-and-forget async uploads.
-
-#### 2. Prompt Templates System
-
-**4 Pre-configured Templates**:
-1. **Comprehensive Concepts** (default) - Key definitions, core ideas, concept relationships
-2. **Deep Details** - Specific claims, evidence, precise terminology
-3. **Connections & Synthesis** - How ideas connect, comparisons, applications
-4. **Contradiction Focus** - Conceptual tensions, opposing viewpoints, paradoxes
-
-**Template Rendering**:
-```typescript
-// worker/lib/template-renderer.ts
-renderTemplate(template: string, variables: Record<string, string>): string
-
-// Example
-renderTemplate("Generate {{count}} cards from {{content}}", {
-  count: "5",
-  content: "Document text..."
-})
-// → "Generate 5 cards from Document text..."
-```
-
-**Variables**:
-- `{{count}}` - Number of cards to generate
-- `{{content}}` - Source content (up to 50K chars)
-- `{{chunks}}` - Chunk metadata (JSON, top 10 chunks)
-- `{{custom}}` - Custom user instructions
-
-#### 3. Multi-Source Generation (`worker/lib/source-loaders.ts`)
-
-**5 Source Types**:
-
-```typescript
-// 1. Document - Full document markdown
-new DocumentSourceLoader(documentIds: string[])
-
-// 2. Chunks - Specific chunks by ID
-new ChunksSourceLoader(chunkIds: string[])
-
-// 3. Selection - Text selection from reader
-new SelectionSourceLoader({
-  text: string,
-  documentId: string,
-  startOffset: number,
-  endOffset: number
-})
-
-// 4. Annotation - From annotation entities
-new AnnotationSourceLoader(annotationIds: string[])
-
-// 5. Connection - From connection entities
-new ConnectionSourceLoader(connectionIds: string[])
-
-// Factory
-createSourceLoader(type, ids, selectionData?): SourceLoader
-```
-
-**Interface**:
-```typescript
-interface SourceLoader {
-  load(supabase, userId): Promise<SourceContent>
-}
-
-interface SourceContent {
-  content: string,  // Text for AI generation
-  chunks: ChunkData[]  // Chunks for matching/linking
-}
-```
-
-#### 4. Cloze Support (`worker/lib/cloze-parser.ts`)
-
-Anki-compatible cloze deletion format:
-
-```typescript
-// Extract cloze deletions
-extractClozeDeletions("The {{c1::rhizome}} opposes {{c2::hierarchy}}")
-// → [
-//   { index: 1, text: 'rhizome', hint: null },
-//   { index: 2, text: 'hierarchy', hint: null }
-// ]
-
-// Render question for specific deletion
-renderClozeQuestion("The {{c1::rhizome}} opposes {{c2::hierarchy}}", 1)
-// → "The [...] opposes hierarchy"
-
-// Check if content is cloze
-isClozeContent(content): boolean
-```
-
-**Hint Support**: `{{c1::text::hint}}` → Renders as `[...hint]`
-
-**Multi-Card Generation**: One card per deletion, automatically creates siblings with `parentCardId`.
-
-#### 5. FlashcardOperations (`src/lib/ecs/flashcards.ts`)
+#### 1. FlashcardOperations (`src/lib/ecs/flashcards.ts`)
 
 Type-safe CRUD wrapper over ECS:
 
 ```typescript
+const ecs = createECS()
 const ops = new FlashcardOperations(ecs, userId)
 
 // Create (draft by default)
@@ -343,25 +287,108 @@ await ops.getByDeck(deckId)
 await ops.getDue(limit = 50)
 ```
 
-#### 6. Batch Operations (`src/app/actions/flashcards.ts`)
-
-Server actions for bulk operations:
+#### 2. Storage Helpers (`src/lib/flashcards/storage.ts`)
 
 ```typescript
-// Approve multiple cards
-batchApproveFlashcards(entityIds: string[])
+// Upload flashcard to Storage
+uploadFlashcardToStorage(userId, entityId, data): Promise<string>
 
-// Delete multiple cards
-batchDeleteFlashcards(entityIds: string[])
+// Download flashcard from Storage
+downloadFlashcardFromStorage(userId, entityId): Promise<FlashcardStorage>
 
-// Add tags to multiple cards
-batchAddTags(entityIds: string[], tags: string[])
+// List all flashcard files
+listUserFlashcards(userId): Promise<string[]>
 
-// Move to different deck
-batchMoveToDeck(entityIds: string[], deckId: string)
+// Delete flashcard from Storage
+deleteFlashcardFromStorage(userId, entityId): Promise<void>
+
+// Verify storage integrity
+verifyFlashcardsIntegrity(userId): Promise<{ total, valid, invalid }>
 ```
 
-#### 7. System Deck Helpers (`src/lib/decks/system-decks.ts`)
+**Pattern**: Exactly like `src/lib/sparks/storage.ts` - fire-and-forget async uploads.
+
+#### 3. Prompt Templates System
+
+**4 Pre-configured Templates** (seeded in database):
+1. **Comprehensive Concepts** (default) - Key definitions, core ideas, concept relationships
+2. **Deep Details** - Specific claims, evidence, precise terminology
+3. **Connections & Synthesis** - How ideas connect, comparisons, applications
+4. **Contradiction Focus** - Conceptual tensions, opposing viewpoints, paradoxes
+
+**Template Rendering**:
+```typescript
+// worker/lib/template-renderer.ts
+renderTemplate(template: string, variables: Record<string, string>): string
+
+// Example
+renderTemplate("Generate {{count}} cards from {{content}}", {
+  count: "5",
+  content: "Document text..."
+})
+// → "Generate 5 cards from Document text..."
+```
+
+**Variables**:
+- `{{count}}` - Number of cards to generate
+- `{{content}}` - Source content (up to 50K chars)
+- `{{chunks}}` - Chunk metadata (JSON, top 10 chunks)
+- `{{custom}}` - Custom user instructions
+
+#### 4. Multi-Source Generation (`worker/lib/source-loaders.ts`)
+
+**5 Source Types**:
+
+```typescript
+// 1. Document - Full document markdown
+new DocumentSourceLoader(documentIds: string[])
+
+// 2. Chunks - Specific chunks by ID
+new ChunksSourceLoader(chunkIds: string[])
+
+// 3. Selection - Text selection from reader
+new SelectionSourceLoader({
+  text: string,
+  documentId: string,
+  startOffset: number,
+  endOffset: number
+})
+
+// 4. Annotation - From annotation entities
+new AnnotationSourceLoader(annotationIds: string[])
+
+// 5. Connection - From connection entities
+new ConnectionSourceLoader(connectionIds: string[])
+
+// Factory
+createSourceLoader(type, ids, selectionData?): SourceLoader
+```
+
+#### 5. Cloze Support (`worker/lib/cloze-parser.ts`)
+
+Anki-compatible cloze deletion format:
+
+```typescript
+// Extract cloze deletions
+extractClozeDeletions("The {{c1::rhizome}} opposes {{c2::hierarchy}}")
+// → [
+//   { index: 1, text: 'rhizome', hint: null },
+//   { index: 2, text: 'hierarchy', hint: null }
+// ]
+
+// Render question for specific deletion
+renderClozeQuestion("The {{c1::rhizome}} opposes {{c2::hierarchy}}", 1)
+// → "The [...] opposes hierarchy"
+
+// Check if content is cloze
+isClozeContent(content): boolean
+```
+
+**Hint Support**: `{{c1::text::hint}}` → Renders as `[...hint]`
+
+**Multi-Card Generation**: One card per deletion, automatically creates siblings with `parentCardId`.
+
+#### 6. System Deck Helpers (`src/lib/decks/system-decks.ts`)
 
 ```typescript
 // Auto-creates if doesn't exist
@@ -376,9 +403,85 @@ SYSTEM_DECKS.INBOX = 'Inbox'
 SYSTEM_DECKS.ARCHIVE = 'Archive'
 ```
 
+#### 7. Server Actions (`src/app/actions/flashcards.ts`)
+
+```typescript
+// Create flashcard
+createFlashcard(input: CreateFlashcardInput): Promise<Result>
+
+// Update flashcard
+updateFlashcard(entityId: string, updates: UpdateFlashcardInput): Promise<Result>
+
+// Approve flashcard (draft → active)
+approveFlashcard(entityId: string): Promise<Result>
+
+// Review flashcard (update FSRS)
+reviewFlashcard(entityId: string, review: ReviewCardInput): Promise<Result>
+
+// Delete flashcard
+deleteFlashcard(entityId: string): Promise<Result>
+
+// Archive flashcard
+archiveFlashcard(entityId: string): Promise<Result>
+
+// Get flashcards by document
+getFlashcardsByDocument(documentId: string, status?: 'draft' | 'approved'): Promise<FlashcardCache[]>
+
+// Get due flashcards
+getDueFlashcards(deckId?: string, limit?: number): Promise<FlashcardCache[]>
+
+// Generate flashcards (creates background job)
+generateFlashcards(input: GenerateFlashcardsInput): Promise<Result>
+
+// Batch operations
+batchApproveFlashcards(entityIds: string[]): Promise<Result>
+batchDeleteFlashcards(entityIds: string[]): Promise<Result>
+batchAddTags(entityIds: string[], tags: string[]): Promise<Result>
+batchMoveToDeck(entityIds: string[], deckId: string): Promise<Result>
+```
+
 ### Frontend Components
 
-#### 1. GenerationPanel (`src/components/flashcards/GenerationPanel.tsx`)
+#### 1. FlashcardsTab (`src/components/sidebar/FlashcardsTab.tsx`)
+
+**Pattern 2: Client Component with Zustand Store**
+
+Tabbed interface in RightPanel:
+
+**Tabs**:
+1. **Generate** - Shows GenerationPanelClient
+2. **Cards** - Shows FlashcardsListClient
+
+**Data Flow**:
+```typescript
+useEffect(() => {
+  async function loadData() {
+    // Call Server Actions
+    const [promptsData, decksData, cardsData, dueCardsData] = await Promise.all([
+      getPromptTemplates(),
+      getDecksWithStats(),
+      getFlashcardsByDocument(documentId),
+      getDueFlashcards()
+    ])
+
+    // Store in Zustand
+    setPrompts(promptsData)
+    setDecks(decksData)
+    setCards(documentId, cardsData)
+    setDueCount(dueCardsData.length)
+  }
+  loadData()
+}, [documentId])
+```
+
+**Props**:
+```typescript
+interface FlashcardsTabProps {
+  documentId: string
+}
+```
+
+#### 2. GenerationPanelClient (`src/components/flashcards/GenerationPanelClient.tsx`)
 
 UI for triggering AI generation:
 
@@ -392,12 +495,14 @@ UI for triggering AI generation:
 
 **Props**:
 ```typescript
-interface GenerationPanelProps {
+interface GenerationPanelClientProps {
   documentId: string
 }
 ```
 
-#### 2. FlashcardsList (`src/components/flashcards/FlashcardsList.tsx`)
+**Uses Zustand store** for prompts and decks (Pattern 2).
+
+#### 3. FlashcardsListClient (`src/components/flashcards/FlashcardsListClient.tsx`)
 
 Browse and manage flashcards for a document:
 
@@ -410,39 +515,82 @@ Browse and manage flashcards for a document:
 
 **Props**:
 ```typescript
-interface FlashcardsListProps {
+interface FlashcardsListClientProps {
   documentId: string
 }
 ```
 
-#### 3. FlashcardsTab (`src/components/sidebar/FlashcardsTab.tsx`)
-
-Tabbed interface in RightPanel:
-
-**Tabs**:
-1. **Generate** - Shows GenerationPanel
-2. **Cards** - Shows FlashcardsList
-
-**Props**:
-```typescript
-interface FlashcardsTabProps {
-  documentId: string
-}
-```
+**Uses Zustand store** for cards (Pattern 2).
 
 #### 4. FlashcardCard (`src/components/rhizome/flashcard-card.tsx`)
 
 Feature-rich display component:
 
 **Features**:
-- Keyboard shortcuts (v=validate, r=reject, s=suspend)
-- Inline editing
+- Keyboard shortcuts (e=edit, a=approve, d=delete when active)
+- Inline editing (question/answer)
 - Approve/delete actions
 - Source chunk links
 - Tag display
-- Colored borders based on status
+- Colored borders based on status (draft/active)
+- Server action integration
+- Optimistic updates
 
-**Pattern**: Self-contained smart component (no prop drilling).
+**Pattern**: Self-contained smart component (no prop drilling) - exactly like ConnectionCard.
+
+**Props**:
+```typescript
+interface FlashcardCardProps {
+  flashcard: FlashcardCacheRow
+  isActive: boolean
+  onClick: () => void
+  onApproved?: () => void
+  onDeleted?: () => void
+  onNavigateToChunk?: (chunkId: string) => void
+}
+```
+
+#### 5. Flashcard Store (`src/stores/flashcard-store.ts`)
+
+**Pattern 2: Zustand Store + Server Actions**
+
+```typescript
+interface FlashcardState {
+  // Cards state keyed by documentId for isolation
+  cards: Record<string, FlashcardCacheRow[]>
+
+  // Global state (not document-specific)
+  prompts: PromptTemplate[]
+  decks: Deck[]
+  dueCount: number
+
+  // Loading states
+  loading: Record<string, boolean>
+  globalLoading: boolean
+
+  // Card actions (per-document)
+  setCards: (documentId: string, cards: FlashcardCacheRow[]) => void
+  addCard: (documentId: string, card: FlashcardCacheRow) => void
+  updateCard: (documentId: string, cardId: string, updates: Partial<FlashcardCacheRow>) => void
+  removeCard: (documentId: string, cardId: string) => void
+
+  // Global actions
+  setPrompts: (prompts: PromptTemplate[]) => void
+  setDecks: (decks: Deck[]) => void
+  setDueCount: (count: number) => void
+
+  // Computed selectors
+  getCardsByDocument: (documentId: string) => FlashcardCacheRow[]
+  getCardById: (documentId: string, cardId: string) => FlashcardCacheRow | undefined
+}
+```
+
+**Why Pattern 2?**
+- ✅ Single source of truth (Zustand cache)
+- ✅ Optimistic updates
+- ✅ Server Actions enforce RLS
+- ✅ Consistent with SparksTab, ConnectionsList, AnnotationReviewTab
+- ✅ No QueryProvider setup needed
 
 ---
 
@@ -451,7 +599,7 @@ Feature-rich display component:
 ### 1. AI-Powered Generation
 
 **Workflow**:
-1. User opens FlashcardsTab → "Generate" tab
+1. User opens FlashcardsTab → "Generate" tab appears
 2. Selects prompt template (or uses default "Comprehensive Concepts")
 3. Adjusts card count (1-20)
 4. Adds custom instructions (optional)
@@ -494,33 +642,29 @@ The {{c1::rhizome::plant structure}} opposes {{c2::hierarchy::vertical structure
 
 ### 4. Prompt Templates
 
-**4 Pre-configured Templates**:
+**4 Pre-configured Templates** (seeded in database):
 
 #### Template 1: Comprehensive Concepts (Default)
 **Focus**: Key definitions, core ideas, concept relationships
 **Best for**: Initial understanding, terminology learning
-**Example Output**: "What is the main purpose of X?"
 
 #### Template 2: Deep Details
 **Focus**: Specific claims, evidence, precise terminology
 **Best for**: Detailed retention, technical material
-**Example Output**: "What evidence supports the claim that X?"
 
 #### Template 3: Connections & Synthesis
 **Focus**: How ideas connect, comparisons, applications
 **Best for**: Critical thinking, synthesis
-**Example Output**: "How does concept X relate to concept Y?"
 
 #### Template 4: Contradiction Focus
 **Focus**: Conceptual tensions, opposing viewpoints
 **Best for**: Philosophy, debate preparation
-**Example Output**: "What tension exists between X and Y?"
 
 **Custom Templates**: Users can create custom prompts with variable substitution.
 
 ### 5. FSRS Integration
 
-**Algorithm**: Free Spaced Repetition Scheduler (evidence-based)
+**Algorithm**: Free Spaced Repetition Scheduler (evidence-based) via ts-fsrs
 
 **Review Ratings**:
 - 1 = **Again** (forgot, reset interval)
@@ -598,13 +742,19 @@ srs: {
 
 ### 8. Batch Operations
 
-**Operations**:
+**Operations** (backend complete, UI pending):
 - **Approve All** - Convert multiple drafts to active
 - **Delete All** - Remove multiple cards
 - **Add Tags** - Append tags to multiple cards
 - **Move to Deck** - Bulk deck transfer
 
-**UI Pattern**: Select multiple cards → batch action toolbar appears.
+**Server Actions**:
+```typescript
+batchApproveFlashcards(entityIds: string[]): Promise<Result>
+batchDeleteFlashcards(entityIds: string[]): Promise<Result>
+batchAddTags(entityIds: string[], tags: string[]): Promise<Result>
+batchMoveToDeck(entityIds: string[], deckId: string): Promise<Result>
+```
 
 ---
 
@@ -635,10 +785,15 @@ srs: {
    ├─ Check for cloze type
    │  ├─ If cloze → extract deletions
    │  └─ Create multiple cards (one per deletion)
-   ├─ Create entity with 4 components
-   └─ Upload to Storage (async)
+   ├─ Create entity in entities table
+   ├─ Create components (Card, Content, Temporal, ChunkRef)
+   └─ Upload to Storage (async, fire-and-forget)
 
-5. Complete (100%)
+5. Rebuild Cache (95%)
+   ├─ Call rebuild_flashcards_cache(userId)
+   └─ Populate flashcards_cache table from ECS
+
+6. Complete (100%)
    ├─ Validate output with Zod
    └─ Mark job complete
 ```
@@ -680,12 +835,21 @@ function getCardStatus(card: CardComponent): 'draft' | 'active' | 'suspended' {
 
 ### Cache Rebuild
 
-**When to Rebuild**:
-- After batch approve
+**Automatic Rebuild**: The generation handler automatically calls `rebuild_flashcards_cache()` after creating entities, so cards appear immediately in the UI.
+
+**Manual Rebuild** (when needed):
+- After batch approve operations
 - After batch operations
-- When cache is stale
+- When cache appears stale
+- After manual entity/component modifications
 
 **Function**: `rebuild_flashcards_cache(p_user_id UUID)`
+
+**Usage**:
+```sql
+-- Rebuild cache for user
+SELECT rebuild_flashcards_cache('user-id-here');
+```
 
 **Implementation**:
 ```sql
@@ -701,6 +865,13 @@ JOIN components content ON ...
 WHERE e.user_id = p_user_id
   AND e.entity_type = 'flashcard';
 ```
+
+**How It Works**:
+1. Deletes all cached flashcards for the user
+2. Queries all flashcard entities from ECS
+3. Joins with Card, Content, Temporal, ChunkRef components
+4. Extracts all data into denormalized cache table
+5. Enables fast queries for UI without complex joins
 
 ---
 
@@ -728,12 +899,18 @@ WHERE e.user_id = p_user_id
 1. **Browse Cards**: "Cards" tab in FlashcardsTab
 2. **Filter**: Select "All", "Draft", or "Approved"
 3. **Click Card**: Make active for editing
-4. **Edit** (optional): Click question/answer to edit
+4. **Edit** (optional): Click question/answer to edit inline
 5. **Approve**: Click "Approve" button to add to study rotation
 6. **Study**: Click "Study (N due)" button when ready
 
 #### Studying
 
+**Note**: Study mode UI not yet implemented. Backend supports:
+- `getDueFlashcards()` - Get cards due for review
+- `reviewFlashcard()` - Submit review rating
+- FSRS scheduling - Automatic interval calculation
+
+**Planned Flow** (when implemented):
 1. **Study Mode**: Click "Study" button or navigate to `/flashcards/study`
 2. **Review Card**: Read question, think of answer
 3. **Reveal**: Click "Show Answer"
@@ -853,138 +1030,7 @@ export function createSourceLoader(...) {
 
 ### Server Actions
 
-#### Flashcard Actions (`src/app/actions/flashcards.ts`)
-
-```typescript
-// Create flashcard
-createFlashcard(input: CreateFlashcardInput): Promise<Result>
-
-// Update flashcard
-updateFlashcard(entityId: string, updates: UpdateFlashcardInput): Promise<Result>
-
-// Approve flashcard (draft → active)
-approveFlashcard(entityId: string): Promise<Result>
-
-// Review flashcard (update FSRS)
-reviewFlashcard(entityId: string, review: ReviewCardInput): Promise<Result>
-
-// Delete flashcard
-deleteFlashcard(entityId: string): Promise<Result>
-
-// Archive flashcard
-archiveFlashcard(entityId: string): Promise<Result>
-
-// Get flashcards by document
-getFlashcardsByDocument(documentId: string, status?: 'draft' | 'approved'): Promise<FlashcardCache[]>
-
-// Get due flashcards
-getDueFlashcards(deckId?: string, limit?: number): Promise<FlashcardCache[]>
-
-// Generate flashcards (creates background job)
-generateFlashcards(input: GenerateFlashcardsInput): Promise<Result>
-
-// Batch operations
-batchApproveFlashcards(entityIds: string[]): Promise<Result>
-batchDeleteFlashcards(entityIds: string[]): Promise<Result>
-batchAddTags(entityIds: string[], tags: string[]): Promise<Result>
-batchMoveToDeck(entityIds: string[], deckId: string): Promise<Result>
-```
-
-#### Deck Actions (`src/app/actions/decks.ts`)
-
-```typescript
-// Get all decks with stats
-getDecksWithStats(): Promise<DeckWithStats[]>
-
-// Ensure system decks exist (Inbox, Archive)
-ensureSystemDecks(): Promise<{ inbox: Deck, archive: Deck }>
-
-// Create deck
-createDeck(input: CreateDeckInput): Promise<Result>
-
-// Update deck
-updateDeck(deckId: string, updates: UpdateDeckInput): Promise<Result>
-
-// Delete deck (non-system only)
-deleteDeck(deckId: string): Promise<Result>
-```
-
-#### Prompt Actions (`src/app/actions/prompts.ts`)
-
-```typescript
-// Get all prompt templates
-getPromptTemplates(): Promise<PromptTemplate[]>
-
-// Get default prompt template
-getDefaultPromptTemplate(): Promise<PromptTemplate>
-
-// Create custom prompt template
-createPromptTemplate(input: CreatePromptInput): Promise<Result>
-
-// Update prompt template (custom only)
-updatePromptTemplate(promptId: string, updates: UpdatePromptInput): Promise<Result>
-
-// Delete prompt template (custom only)
-deletePromptTemplate(promptId: string): Promise<Result>
-
-// Set default prompt template
-setDefaultPromptTemplate(promptId: string): Promise<Result>
-```
-
-### TypeScript Types
-
-```typescript
-// CreateFlashcardInput
-interface CreateFlashcardInput {
-  type: 'basic' | 'cloze'
-  question: string
-  answer: string
-  content?: string
-  clozeIndex?: number
-  clozeCount?: number
-  deckId: string
-  tags?: string[]
-  note?: string
-  documentId?: string
-  chunkIds?: string[]
-  connectionId?: string
-  annotationId?: string
-  generationJobId?: string
-  parentCardId?: string
-}
-
-// UpdateFlashcardInput
-interface UpdateFlashcardInput {
-  question?: string
-  answer?: string
-  tags?: string[]
-  note?: string
-  status?: 'draft' | 'active' | 'suspended'
-  deckId?: string
-}
-
-// ReviewCardInput
-interface ReviewCardInput {
-  rating: 1 | 2 | 3 | 4  // Again, Hard, Good, Easy
-  timeSpentMs: number
-}
-
-// GenerateFlashcardsInput
-interface GenerateFlashcardsInput {
-  sourceType: 'document' | 'chunks' | 'selection' | 'annotation' | 'connection'
-  sourceIds: string[]
-  selectionData?: {
-    text: string
-    documentId: string
-    startOffset: number
-    endOffset: number
-  }
-  promptTemplateId?: string
-  cardCount: number
-  deckId: string
-  customInstructions?: string
-}
-```
+See [Core Components](#7-server-actions-srcappactionsflashcardsts) section for full API reference.
 
 ---
 
@@ -996,18 +1042,20 @@ interface GenerateFlashcardsInput {
 
 **Problem**: System decks (Inbox, Archive) not created.
 
-**Solution**: System decks are auto-created when `getDecksWithStats()` is called. Ensure:
+**Solution**: System decks are auto-created by `getDecksWithStats()`. In FlashcardsTab, decks are loaded via useEffect:
 ```typescript
-// In GenerationPanel, decks are loaded via useQuery
-const { data: decks } = useQuery({
-  queryKey: ['decks'],
-  queryFn: getDecksWithStats  // This ensures system decks
-})
+useEffect(() => {
+  async function loadData() {
+    const decksData = await getDecksWithStats()  // Ensures system decks exist
+    setDecks(decksData)
+  }
+  loadData()
+}, [])
 ```
 
 #### 2. "Loaded 0 chars from X chunks"
 
-**Problem**: Markdown not loading from Storage, falling back to chunks didn't work.
+**Problem**: Markdown not loading from Storage, fallback to chunks didn't work.
 
 **Solution**: Check `storage_path` in documents table:
 ```typescript
@@ -1021,25 +1069,14 @@ Verify path format: `{userId}/{documentId}/content.md`
 
 **Problem**: Cache not rebuilt after generation.
 
-**Solution**: Regenerate cache:
+**Solution**: As of 2025-10-24, the generation handler automatically calls `rebuild_flashcards_cache(userId)` after creating entities. If cards still don't appear, manually rebuild:
 ```sql
 SELECT rebuild_flashcards_cache('user-id-here');
 ```
 
-Or use batch approve (triggers rebuild automatically).
+**Note**: This issue was fixed by adding automatic cache rebuild to the generation handler.
 
-#### 4. "No QueryClient set"
-
-**Problem**: React Query not configured.
-
-**Solution**: Ensure `QueryProvider` wraps app in `src/app/layout.tsx`:
-```typescript
-<QueryProvider>
-  <AppShell>{children}</AppShell>
-</QueryProvider>
-```
-
-#### 5. Cloze cards not generating multiple cards
+#### 4. Cloze cards not generating multiple cards
 
 **Problem**: AI not returning cloze type or content format incorrect.
 
@@ -1048,7 +1085,7 @@ Or use batch approve (triggers rebuild automatically).
 - Must have `content` field with `{{c1::text}}` format
 - Handler checks `isClozeContent(card.content)` before parsing
 
-#### 6. Prompt template variables not substituting
+#### 5. Prompt template variables not substituting
 
 **Problem**: Variable names don't match.
 
@@ -1081,65 +1118,61 @@ SELECT rebuild_flashcards_cache('user-id');
 
 ## Future Enhancements
 
-### Planned Features (No Refactoring Needed!)
+### Planned Features (Backend Ready, UI Missing)
 
-The backend architecture supports these features with **zero code changes**:
+The backend architecture supports these features with **minimal code changes**:
 
-#### 1. Deck Management Page
+#### 1. Study Mode Interface ⚠️ **HIGH PRIORITY**
+- Full-page study interface (`/flashcards/study`)
+- Card flip animations
+- Rating buttons (Again/Hard/Good/Easy)
+- Keyboard shortcuts (1/2/3/4)
+- Progress tracking (cards reviewed today)
+
+**Backend Status**: ✅ Complete (`getDueFlashcards`, `reviewFlashcard`, FSRS integration)
+**Frontend Status**: ❌ Not started
+
+#### 2. Deck Management Page
 - Full-page deck browser
 - Nested deck visualization
 - Deck statistics (retention rate, due count)
 - Create/edit/delete UI
 
-#### 2. Command Panel Integration
-- `Cmd+K` shortcuts
-- "Study Due Cards" command
-- "Generate from Document" command
-- "Search Cards..." command
-
-#### 3. Obsidian Sync
-- Export individual card files
-- Sync updates bidirectionally
-- Markdown format conversion
-
-#### 4. Anki Export
-- `.apkg` file generation
-- Deck hierarchy mapping
-- Media attachment support
-
-#### 5. Advanced Stats
-- Retention rate graphs
-- Study time analytics
-- Difficulty distribution
-- Tag-based insights
-
-#### 6. Selection-Based Generation
-- Generate from text selection in reader
-- Context-aware prompts
-- Quick capture workflow
-
-#### 7. Annotation/Connection Generation
-- Generate from annotations
-- Generate from connections
-- Synthesize related content
-
-#### 8. Prompt Template Editor
-- Visual editor for prompts
-- Variable autocomplete
-- Preview rendering
-- Template marketplace
-
-#### 9. Batch Operations Toolbar
+#### 3. Batch Operations Toolbar
 - Select multiple cards in UI
 - Floating action toolbar
 - Keyboard shortcuts
 - Undo/redo support
 
-#### 10. Tag Management
-- Tag autocomplete
-- Tag hierarchy
-- Tag-based filtering in study mode
-- Tag statistics
+**Backend Status**: ✅ Complete (batch server actions exist)
+**Frontend Status**: ❌ Not started
+
+#### 4. Selection-Based Generation
+- Generate from text selection in reader
+- Context-aware prompts
+- Quick capture workflow
+
+#### 5. Prompt Template Editor
+- Visual editor for prompts
+- Variable autocomplete
+- Preview rendering
+- Template marketplace
+
+#### 6. Obsidian Sync
+- Export individual card files
+- Sync updates bidirectionally
+- Markdown format conversion
+
+#### 7. Anki Export
+- `.apkg` file generation
+- Deck hierarchy mapping
+- Media attachment support
+
+#### 8. Advanced Stats
+- Retention rate graphs
+- Study time analytics
+- Difficulty distribution
+- Tag-based insights
 
 ### Architecture Extensions
 
@@ -1246,12 +1279,12 @@ await getFlashcardsByDocument(docId, status)  // Add offset/limit if needed
 
 ### Test Coverage
 
-#### Unit Tests
+#### Unit Tests (Planned)
 - `worker/lib/cloze-parser.ts` - Cloze extraction and rendering
 - `worker/lib/template-renderer.ts` - Variable substitution
 - `src/lib/flashcards/storage.ts` - Storage helpers
 
-#### Integration Tests
+#### Integration Tests (Planned)
 - Generation flow (document → AI → cards)
 - Approval flow (draft → active → FSRS)
 - Study flow (review → rating → schedule update)
@@ -1278,39 +1311,50 @@ await getFlashcardsByDocument(docId, status)  // Add offset/limit if needed
 - [ ] Card has SRS data → next_review set
 - [ ] Study button appears → Shows due count
 
-**Phase 4: Study**
-- [ ] Click Study → Redirects to `/flashcards/study`
+**Phase 4: Study** ⚠️ **NOT IMPLEMENTED**
+- [ ] Click Study → Redirects to `/flashcards/study` (404 currently)
 - [ ] Review card → Question shows first
 - [ ] Show Answer → Reveals answer
 - [ ] Rate 3 (Good) → FSRS updates
 - [ ] Next card → Loads correctly
 
-**Phase 5: Batch**
-- [ ] Select multiple cards → Checkboxes work
-- [ ] Batch approve → All become active
-- [ ] Batch delete → All removed
-- [ ] Batch add tags → Tags added to all
+**Phase 5: Batch** ⚠️ **BACKEND ONLY**
+- [ ] Select multiple cards → UI not implemented
+- [ ] Batch approve → Backend works, no UI
+- [ ] Batch delete → Backend works, no UI
+- [ ] Batch add tags → Backend works, no UI
 
 ---
 
 ## Conclusion
 
-The Flashcard System is a **complete, production-ready** feature with:
+The Flashcard System has:
 
-✅ **Complete Backend** (Phase 1 - 9 tasks)
+✅ **Complete Backend** (100%)
 - Storage helpers
-- Prompt templates (4 defaults)
+- Prompt templates (4 defaults seeded)
 - Multi-source generation (5 types)
 - Cloze support
 - Batch operations
 - System deck helpers
 - Template rendering
 - Generation handler integration
+- FSRS integration
+- Cache rebuild function
 
-✅ **Complete UI** (Phase 2 - 3 tasks)
-- GenerationPanel
-- FlashcardsList
+✅ **Functional UI** (80%)
 - FlashcardsTab
+- GenerationPanelClient
+- FlashcardsListClient
+- FlashcardCard (keyboard shortcuts, inline editing)
+- Flashcard store (Pattern 2: Zustand + Server Actions)
+
+⚠️ **Missing Features** (20%)
+- Study mode interface (backend complete, UI missing)
+- Batch operation toolbar (backend complete, UI missing)
+- Deck management page
+- Advanced stats/analytics
+- Prompt template editor
 
 ✅ **Extensible Architecture**
 - Add new source types without refactoring
@@ -1323,14 +1367,22 @@ The Flashcard System is a **complete, production-ready** feature with:
 - Obsidian sync ready
 
 ✅ **FSRS Spaced Repetition**
-- Evidence-based algorithm
+- Evidence-based algorithm (ts-fsrs)
 - Automatic scheduling
-- Progress tracking
+- Progress tracking (backend ready)
 
-**Result**: Zero refactoring needed for future features! 🎉
+**Next Steps**:
+1. Implement study mode UI (`/flashcards/study` page)
+2. Add batch operation toolbar
+3. Consider removing React Query dependency (see handoff document)
+
+**Recent Improvements** (2025-10-24):
+- ✅ Fixed generation handler component inserts
+- ✅ Added automatic cache rebuild
+- ✅ Cards now appear in UI immediately after generation
 
 ---
 
-**Version**: 1.0
-**Status**: Complete
+**Version**: 1.1
+**Status**: Backend Complete, UI Functional, Generation Fixed (Study Mode Pending)
 **Last Updated**: 2025-10-24

@@ -11,6 +11,10 @@ import { revalidatePath } from 'next/cache'
 
 const StartSessionSchema = z.object({
   deckId: z.string().uuid().optional(),
+  documentId: z.string().uuid().optional(),
+  chunkIds: z.array(z.string().uuid()).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  dueOnly: z.boolean().optional(),
   filters: z.object({
     tags: z.array(z.string()).optional(),
   }).optional(),
@@ -49,19 +53,33 @@ export async function startStudySession(input: z.infer<typeof StartSessionSchema
 
     if (sessionError) throw sessionError
 
-    // Get due cards from cache table (fast)
+    // Get cards from cache table (fast)
     const now = new Date().toISOString()
     let query = supabase
       .from('flashcards_cache')
       .select('*')
       .eq('user_id', user.id)
       .eq('status', 'active')
-      .lte('next_review', now)
       .order('next_review', { ascending: true })
-      .limit(50)
+      .limit(validated.limit || 50)
 
+    // Apply due filter (default: true)
+    if (validated.dueOnly !== false) {
+      query = query.lte('next_review', now)
+    }
+
+    // Apply context filters
     if (validated.deckId) {
       query = query.eq('deck_id', validated.deckId)
+    }
+
+    if (validated.documentId) {
+      query = query.eq('document_id', validated.documentId)
+    }
+
+    if (validated.chunkIds && validated.chunkIds.length > 0) {
+      // Filter for cards that have at least one of the specified chunks
+      query = query.overlaps('chunk_ids', validated.chunkIds)
     }
 
     if (validated.filters?.tags && validated.filters.tags.length > 0) {
@@ -142,7 +160,7 @@ export async function endStudySession(sessionId: string) {
 
     if (error) throw error
 
-    revalidatePath('/flashcards/study')
+    revalidatePath('/study')
     revalidatePath('/flashcards')
 
     console.log(`[Study] ✓ Ended session ${sessionId}`)
