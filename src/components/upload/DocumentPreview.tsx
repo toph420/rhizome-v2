@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react'
 import { Input } from '@/components/rhizome/input'
 import { Label } from '@/components/rhizome/label'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import {
   Select,
   SelectContent,
