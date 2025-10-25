@@ -8,10 +8,8 @@ import { ScrollArea } from '@/components/rhizome/scroll-area'
 import {
   Network,
   Highlighter,
-  CheckCircle,
   Zap,
   Brain,
-  FileQuestion,
   Sliders,
   GraduationCap,
   ChevronLeft,
@@ -20,21 +18,18 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Chunk } from '@/types/annotations'
-import { NeobrutalismTheme } from '@/components/design/ThemeWrappers'
 
 // Tab components
 import { ConnectionsList } from './ConnectionsList'
 import { ConnectionFilters } from './ConnectionFilters'
-import { AnnotationsList } from './AnnotationsList'
-import { ChunkQualityPanel } from './ChunkQualityPanel'
+import { AnnotationsTab } from './AnnotationsTab'
 import { SparksTab } from './SparksTab'
 import { FlashcardsTab } from './FlashcardsTab'
-import { AnnotationReviewTab } from './AnnotationReviewTab'
 import { TuneTab } from './TuneTab'
 import { CompactStudyTab } from './CompactStudyTab'
 import { ChunksTab } from './ChunksTab'
 
-type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune' | 'study' | 'chunks'
+type TabId = 'connections' | 'annotations' | 'sparks' | 'cards' | 'tune' | 'study' | 'chunks'
 
 interface Tab {
   id: TabId
@@ -45,10 +40,8 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'connections', icon: Network, label: 'Connections' },
   { id: 'annotations', icon: Highlighter, label: 'Annotations' },
-  { id: 'quality', icon: CheckCircle, label: 'Quality' },
   { id: 'sparks', icon: Zap, label: 'Sparks' },
   { id: 'cards', icon: Brain, label: 'Cards' },
-  { id: 'review', icon: FileQuestion, label: 'Review' },
   { id: 'tune', icon: Sliders, label: 'Tune' },
   { id: 'study', icon: GraduationCap, label: 'Study' },
   { id: 'chunks', icon: Database, label: 'Chunks' },
@@ -118,7 +111,6 @@ export function RightPanelV2({
   onNavigateToChunk,
   onConnectionsChange,
   onActiveConnectionCountChange,
-  chunks = [],
 }: RightPanelV2Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('connections')
@@ -127,16 +119,16 @@ export function RightPanelV2({
   // Total: 134px from top
   const topPosition = 'top-[134px]'
 
-  // Auto-switch to review tab when recovery results have items needing review
+  // Auto-switch to annotations tab when recovery results have items needing review
   useEffect(() => {
     if (reviewResults && reviewResults.needsReview.length > 0) {
-      setActiveTab('review')
+      setActiveTab('annotations')
     }
   }, [reviewResults])
 
   // Badge counts
   const badgeCounts: Partial<Record<TabId, number>> = {
-    review: reviewResults?.needsReview.length || 0,
+    annotations: reviewResults?.needsReview.length || 0,
   }
 
   return (
@@ -247,7 +239,7 @@ export function RightPanelV2({
             transition={{ delay: 0.3, duration: 0.2 }}
           >
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="h-full flex flex-col">
-              <TabsList className="grid grid-cols-9 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
+              <TabsList className="grid grid-cols-7 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
                 {TABS.map((tab) => {
                   const Icon = tab.icon
                   const badgeCount = badgeCounts[tab.id]
@@ -290,21 +282,12 @@ export function RightPanelV2({
                   </TabsContent>
 
                   <TabsContent value="annotations" className="flex-1 overflow-hidden m-0 h-full">
-                    <ScrollArea className="h-full">
-                      <AnnotationsList
-                        documentId={documentId}
-                        onAnnotationClick={onAnnotationClick}
-                      />
-                    </ScrollArea>
-                  </TabsContent>
-
-                  <TabsContent value="quality" className="flex-1 overflow-hidden m-0 h-full">
-                    <ScrollArea className="h-full">
-                      <ChunkQualityPanel
-                        documentId={documentId}
-                        onNavigateToChunk={onNavigateToChunk}
-                      />
-                    </ScrollArea>
+                    <AnnotationsTab
+                      documentId={documentId}
+                      reviewResults={reviewResults}
+                      onHighlightAnnotation={onHighlightAnnotation}
+                      onAnnotationClick={onAnnotationClick}
+                    />
                   </TabsContent>
 
                   <TabsContent value="sparks" className="flex-1 overflow-hidden m-0 h-full">
@@ -317,15 +300,6 @@ export function RightPanelV2({
                     <ScrollArea className="h-full">
                       <FlashcardsTab documentId={documentId} />
                     </ScrollArea>
-                  </TabsContent>
-
-                  <TabsContent value="review" className="flex-1 overflow-hidden m-0 h-full">
-                    <AnnotationReviewTab
-                      documentId={documentId}
-                      results={reviewResults}
-                      onHighlightAnnotation={onHighlightAnnotation}
-                      onAnnotationClick={onAnnotationClick}
-                    />
                   </TabsContent>
 
               <TabsContent value="tune" className="flex-1 overflow-hidden m-0 h-full">
