@@ -60,10 +60,16 @@ export async function getDecksWithStats() {
 
   const supabase = createAdminClient()
 
-  // Get all decks
+  // Get all decks with parent deck name (if exists)
   const { data: decks, error: decksError } = await supabase
     .from('decks')
-    .select('*')
+    .select(`
+      *,
+      parent:parent_id (
+        id,
+        name
+      )
+    `)
     .eq('user_id', user.id)
     .order('created_at', { ascending: true })
 
@@ -77,14 +83,28 @@ export async function getDecksWithStats() {
 
   if (countsError) throw countsError
 
-  // Calculate stats
+  // Get due card counts (where next_review <= NOW)
+  const { data: dueCounts, error: dueError } = await supabase
+    .from('flashcards_cache')
+    .select('deck_id')
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .lte('next_review', new Date().toISOString())
+
+  if (dueError) throw dueError
+
+  // Calculate stats and flatten parent object
   const deckStats = decks.map(deck => {
     const deckCards = counts.filter(c => c.deck_id === deck.id)
+    const deckDue = dueCounts?.filter(c => c.deck_id === deck.id).length || 0
+
     return {
       ...deck,
+      parent_name: deck.parent ? deck.parent.name : null,
       total_cards: deckCards.length,
       draft_cards: deckCards.filter(c => c.status === 'draft').length,
       active_cards: deckCards.filter(c => c.status === 'active').length,
+      due_cards: deckDue,
     }
   })
 
@@ -229,6 +249,120 @@ export async function deleteDeck(deckId: string) {
 
   } catch (error) {
     console.error('[Decks] Delete failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * Move cards between decks (batch operation)
+ */
+export async function moveCardsToDeck(
+  cardIds: string[],
+  targetDeckId: string
+) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  try {
+    const supabase = createAdminClient()
+    const { createECS } = await import('@/lib/ecs')
+    const ecs = createECS()
+
+    // Update Card component for each flashcard
+    for (const cardId of cardIds) {
+      // Get existing Card component
+      const { data: cardComponent } = await supabase
+        .from('components')
+        .select('*')
+        .eq('entity_id', cardId)
+        .eq('component_type', 'Card')
+        .single()
+
+      if (!cardComponent) continue
+
+      // Update deck_id in component data
+      const updatedData = {
+        ...cardComponent.component_data,
+        deckId: targetDeckId,
+        deckAddedAt: new Date().toISOString(),
+      }
+
+      await supabase
+        .from('components')
+        .update({ component_data: updatedData })
+        .eq('id', cardComponent.id)
+    }
+
+    // Rebuild cache to reflect deck changes
+    await supabase.rpc('rebuild_flashcards_cache', {
+      p_user_id: user.id,
+    })
+
+    revalidatePath('/study')
+    revalidatePath('/flashcards')
+
+    return { success: true, movedCount: cardIds.length }
+
+  } catch (error) {
+    console.error('[Decks] Move cards failed:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * Get deck with detailed stats (retention rate, avg rating, last studied)
+ */
+export async function getDeckWithDetailedStats(deckId: string) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Unauthorized')
+
+  try {
+    const supabase = createAdminClient()
+
+    // Get deck
+    const { data: deck, error: deckError } = await supabase
+      .from('decks')
+      .select('*')
+      .eq('id', deckId)
+      .eq('user_id', user.id)
+      .single()
+
+    if (deckError) throw deckError
+
+    // Get cards for this deck
+    const { data: cards } = await supabase
+      .from('flashcards_cache')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('deck_id', deckId)
+
+    const now = new Date().toISOString()
+
+    const stats = {
+      totalCards: cards?.length || 0,
+      draftCards: cards?.filter(c => c.status === 'draft').length || 0,
+      activeCards: cards?.filter(c => c.status === 'active').length || 0,
+      dueCards: cards?.filter(c => c.status === 'active' && c.next_review && c.next_review <= now).length || 0,
+      avgDifficulty: cards?.length ? cards.reduce((sum, c) => sum + (c.difficulty || 0), 0) / cards.length : 0,
+      // Note: Retention rate requires study_sessions join - calculate from last 30 days of reviews
+      retentionRate: 0,  // TODO: Calculate from sessions
+      lastStudied: null as Date | null,  // TODO: Get from most recent session
+    }
+
+    return {
+      success: true,
+      deck,
+      stats,
+    }
+
+  } catch (error) {
+    console.error('[Decks] Get detailed stats failed:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

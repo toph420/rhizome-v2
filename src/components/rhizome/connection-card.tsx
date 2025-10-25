@@ -23,6 +23,10 @@ interface Connection {
     explanation?: string
     target_document_title?: string
     target_snippet?: string
+    bridge_type?: string
+    source_domain?: string
+    target_domain?: string
+    bridge_concepts?: string[]
     [key: string]: unknown
   }
   weightedStrength?: number
@@ -144,8 +148,9 @@ export function ConnectionCard({
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center gap-2">
+          <div className="flex-1 space-y-2">
+            {/* Engine type, strength, and feedback status */}
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="default" className={engineColors[connection.connection_type]}>
                 {connection.connection_type.replace(/_/g, ' ')}
               </Badge>
@@ -164,7 +169,28 @@ export function ConnectionCard({
                 <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
               )}
             </div>
+
+            {/* Target document title */}
+            {connection.metadata.target_document_title && (
+              <div className="text-sm font-medium text-foreground">
+                → {connection.metadata.target_document_title}
+              </div>
+            )}
+
+            {/* Domain crossover (if available) */}
+            {connection.metadata.source_domain && connection.metadata.target_domain && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="neutral" className="text-xs">
+                  {connection.metadata.source_domain}
+                </Badge>
+                <span>→</span>
+                <Badge variant="neutral" className="text-xs">
+                  {connection.metadata.target_domain}
+                </Badge>
+              </div>
+            )}
           </div>
+
           <Button
             variant="noShadow"
             size="icon"
@@ -178,13 +204,43 @@ export function ConnectionCard({
         </div>
       </CardHeader>
 
-      <CardContent className="pb-3">
-        <p className="text-sm text-muted-foreground line-clamp-2">
-          {connection.metadata.target_snippet || 'No preview available'}
-        </p>
+      <CardContent className="pb-3 space-y-3">
+        {/* Explanation (most important!) */}
+        {connection.metadata.explanation && (
+          <div className="text-sm text-foreground">
+            <p className={isActive ? '' : 'line-clamp-3'}>
+              {connection.metadata.explanation}
+            </p>
+          </div>
+        )}
 
+        {/* Bridge concepts (if available) */}
+        {isActive && connection.metadata.bridge_concepts && connection.metadata.bridge_concepts.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">Bridge concepts:</p>
+            <div className="flex flex-wrap gap-1">
+              {connection.metadata.bridge_concepts.map((concept, idx) => (
+                <Badge key={idx} variant="neutral" className="text-xs">
+                  {concept}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Target snippet (when expanded) */}
+        {isActive && connection.metadata.target_snippet && (
+          <div className="pt-2 border-t space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">Target text:</p>
+            <p className="text-sm text-muted-foreground italic">
+              "{connection.metadata.target_snippet}"
+            </p>
+          </div>
+        )}
+
+        {/* Keyboard shortcuts */}
         {isActive && (
-          <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+          <div className="pt-2 border-t text-xs text-muted-foreground">
             <kbd className="px-1 bg-muted rounded">v</kbd> validate ·{' '}
             <kbd className="px-1 bg-muted rounded">x</kbd> reject ·{' '}
             <kbd className="px-1 bg-muted rounded">s</kbd> star

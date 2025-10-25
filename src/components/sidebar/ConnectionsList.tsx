@@ -24,6 +24,10 @@ interface Connection {
     explanation?: string
     target_document_title?: string
     target_snippet?: string
+    bridge_type?: string
+    source_domain?: string
+    target_domain?: string
+    bridge_concepts?: string[]
     [key: string]: unknown
   }
 }
@@ -134,16 +138,33 @@ export function ConnectionsList({
     }
   }, [connections, filteredConnections, onConnectionsChange, onActiveConnectionCountChange])
 
+  // Deduplicate connections by target_chunk_id (keep highest strength)
+  // When multiple visible chunks connect to same target, show target only once
+  const deduplicatedConnections = useMemo(() => {
+    const targetMap = new Map<string, typeof filteredConnections[0]>()
+
+    filteredConnections.forEach(connection => {
+      const existing = targetMap.get(connection.target_chunk_id)
+
+      // Keep connection with highest strength score
+      if (!existing || connection.strength > existing.strength) {
+        targetMap.set(connection.target_chunk_id, connection)
+      }
+    })
+
+    return Array.from(targetMap.values())
+  }, [filteredConnections])
+
   // Group connections by engine type for sectioned display
   const groupedConnections = useMemo(() => {
-    return filteredConnections.reduce((acc, connection) => {
+    return deduplicatedConnections.reduce((acc, connection) => {
       if (!acc[connection.connection_type]) {
         acc[connection.connection_type] = []
       }
       acc[connection.connection_type].push(connection)
       return acc
-    }, {} as Record<string, typeof filteredConnections>)
-  }, [filteredConnections])
+    }, {} as Record<string, typeof deduplicatedConnections>)
+  }, [deduplicatedConnections])
 
   // Engine type labels mapping for display (3-engine system)
   const engineLabels: Record<SynthesisEngine, string> = {
@@ -169,7 +190,7 @@ export function ConnectionsList({
   }
 
   // Empty state when no connections match filters
-  if (filteredConnections.length === 0) {
+  if (deduplicatedConnections.length === 0) {
     const validChunkIds = visibleChunkIds.filter(id => id !== 'no-chunk')
 
     return (

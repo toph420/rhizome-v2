@@ -32,7 +32,6 @@ export function AppShell({ children }: AppShellProps) {
   })
 
   return (
-    <NeobrutalismTheme>
       <div className="min-h-screen flex flex-col">
         <Navigation open={mobileMenuOpen} onOpenChange={setMobileMenuOpen} />
         <TopNav
@@ -52,6 +51,5 @@ export function AppShell({ children }: AppShellProps) {
           {children}
         </main>
       </div>
-    </NeobrutalismTheme>
   )
 }

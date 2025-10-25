@@ -559,6 +559,561 @@ return (
 )
 ```
 
+## Feature-Rich Domain Components Pattern
+
+**Philosophy**: Domain components (ConnectionCard, AnnotationCard, SparkCard, FlashcardCard, DeckCard) are **self-contained smart components**, not simple display components.
+
+### Why This Pattern?
+
+Traditional approach with prop drilling:
+```tsx
+// ❌ BAD: Simple display component with prop drilling
+export function FlashcardCard({
+  flashcard,
+  onFlip,           // ❌ Prop drilling
+  onReview,         // ❌ Prop drilling
+  onEdit,           // ❌ Prop drilling
+  isFlipped,        // ❌ Prop drilling
+  isSubmitting,     // ❌ Prop drilling
+  feedbackType,     // ❌ Prop drilling
+  // ... 10+ more props
+}) {
+  return (
+    <Card onClick={onFlip}>
+      <p>{flashcard.front}</p>
+      {isFlipped && <p>{flashcard.back}</p>}
+      <button onClick={onReview}>Review</button>
+    </Card>
+  )
+}
+
+// Parent component becomes prop drilling nightmare
+function StudySession() {
+  const [flipped, setFlipped] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [feedback, setFeedback] = useState(null)
+
+  const handleReview = async (rating) => {
+    setSubmitting(true)
+    await reviewFlashcard(card.id, rating)
+    setSubmitting(false)
+  }
+
+  // Pass everything down
+  return <FlashcardCard
+    flashcard={card}
+    onFlip={() => setFlipped(!flipped)}
+    onReview={handleReview}
+    isFlipped={flipped}
+    isSubmitting={submitting}
+    feedbackType={feedback}
+    // ... 10+ props
+  />
+}
+```
+
+**Feature-Rich approach:**
+```tsx
+// ✅ GOOD: Self-contained smart component
+export function FlashcardCard({ flashcard, isActive, onClick }) {
+  // 1. Internal state (no prop drilling)
+  const [flipped, setFlipped] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  // 2. Server actions (colocated with UI)
+  const handleReview = async (rating: number) => {
+    setSubmitting(true)
+    await reviewFlashcard(flashcard.id, rating)
+    setSubmitting(false)
+  }
+
+  // 3. Keyboard shortcuts (when active)
+  useEffect(() => {
+    if (!isActive) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === ' ') setFlipped(!flipped)
+      if (e.key >= '1' && e.key <= '4') {
+        handleReview(Number(e.key))
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [isActive, flipped])
+
+  // 4. Self-contained UI with all logic
+  return (
+    <Card className="relative" onClick={onClick}>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={flipped ? 'back' : 'front'}
+          initial={{ rotateY: 90 }}
+          animate={{ rotateY: 0 }}
+          exit={{ rotateY: -90 }}
+          className="p-6"
+        >
+          {!flipped ? (
+            <div>
+              <p className="text-lg font-medium">{flashcard.front}</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Press Space to reveal
+              </p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">Answer:</p>
+              <p className="text-lg">{flashcard.back}</p>
+
+              {/* Rating buttons with keyboard hints */}
+              <div className="flex gap-2 mt-4">
+                <Button onClick={() => handleReview(1)} disabled={submitting}>
+                  Again <kbd className="ml-1">1</kbd>
+                </Button>
+                <Button onClick={() => handleReview(2)} disabled={submitting}>
+                  Hard <kbd className="ml-1">2</kbd>
+                </Button>
+                <Button onClick={() => handleReview(3)} disabled={submitting}>
+                  Good <kbd className="ml-1">3</kbd>
+                </Button>
+                <Button onClick={() => handleReview(4)} disabled={submitting}>
+                  Easy <kbd className="ml-1">4</kbd>
+                </Button>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      </AnimatePresence>
+    </Card>
+  )
+}
+
+// Parent component is clean and simple
+function StudySession() {
+  const [activeIndex, setActiveIndex] = useState(0)
+
+  return (
+    <div>
+      {cards.map((card, index) => (
+        <FlashcardCard
+          key={card.id}
+          flashcard={card}
+          isActive={index === activeIndex}
+          onClick={() => setActiveIndex(index)}
+        />
+      ))}
+    </div>
+  )
+}
+```
+
+### Benefits of Feature-Rich Components
+
+1. **No Prop Drilling**: Components handle their own state and actions
+2. **Highly Reusable**: Same component works in study, browse, search contexts
+3. **Easy to Extend**: Add features in ONE place, automatically available everywhere
+4. **Consistent Behavior**: Keyboard shortcuts, animations work identically everywhere
+5. **Better Testing**: Test component in isolation with all its logic
+6. **Simpler Parents**: Parent components don't need to manage complex state
+
+### Existing Feature-Rich Components
+
+#### ConnectionCard (`components/rhizome/connection-card.tsx`)
+```tsx
+export function ConnectionCard({ connection, isActive, onClick }) {
+  const [feedbackType, setFeedbackType] = useState(null)
+
+  // Server actions
+  const handleFeedback = async (type: 'validate' | 'reject' | 'skip') => {
+    await updateConnectionFeedback(connection.id, type)
+  }
+
+  // Keyboard shortcuts (v/r/s)
+  useEffect(() => {
+    if (!isActive) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'v') handleFeedback('validate')
+      if (e.key === 'r') handleFeedback('reject')
+      if (e.key === 's') handleFeedback('skip')
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [isActive])
+
+  return (
+    <Card>
+      <p>{connection.explanation}</p>
+      <div className="flex gap-2">
+        <Button onClick={() => handleFeedback('validate')}>
+          Validate <kbd>V</kbd>
+        </Button>
+        <Button onClick={() => handleFeedback('reject')}>
+          Reject <kbd>R</kbd>
+        </Button>
+        <Button onClick={() => handleFeedback('skip')}>
+          Skip <kbd>S</kbd>
+        </Button>
+      </div>
+    </Card>
+  )
+}
+```
+
+**Features:**
+- v/r/s keyboard shortcuts
+- Feedback capture
+- Server actions for mutations
+- Optimistic UI updates
+
+#### AnnotationCard (`components/rhizome/annotation-card.tsx`)
+```tsx
+export function AnnotationCard({ annotation, isActive, onClick }) {
+  const [editing, setEditing] = useState(false)
+  const [note, setNote] = useState(annotation.note)
+
+  const handleSave = async () => {
+    await updateAnnotation(annotation.id, { note })
+    setEditing(false)
+  }
+
+  return (
+    <Card
+      className={cn("border-l-4", {
+        "border-l-yellow-500": annotation.color === "yellow",
+        "border-l-blue-500": annotation.color === "blue",
+        "border-l-green-500": annotation.color === "green",
+      })}
+      onClick={onClick}
+    >
+      <p className="text-sm text-muted-foreground">{annotation.text}</p>
+
+      {editing ? (
+        <div className="mt-2">
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} />
+          <Button onClick={handleSave} size="sm">Save</Button>
+        </div>
+      ) : (
+        <div className="mt-2">
+          <p>{note}</p>
+          {isActive && (
+            <Button onClick={() => setEditing(true)} size="sm">
+              Edit
+            </Button>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+```
+
+**Features:**
+- Colored borders by type
+- Hover actions
+- Inline editing
+- Auto-save on blur
+
+#### SparkCard (`components/rhizome/spark-card.tsx`)
+```tsx
+export function SparkCard({ spark, isActive, onClick }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <Card onClick={onClick}>
+      <div className="flex items-start justify-between">
+        <p>{spark.content}</p>
+        <button onClick={() => setExpanded(!expanded)}>
+          {expanded ? <ChevronUp /> : <ChevronDown />}
+        </button>
+      </div>
+
+      {/* Selection badges */}
+      <div className="flex flex-wrap gap-1 mt-2">
+        {spark.selections.map((sel, i) => (
+          <Badge key={i} variant="outline">
+            Selection {i + 1}
+          </Badge>
+        ))}
+      </div>
+
+      {/* Expanded details */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="mt-2"
+          >
+            {spark.selections.map((sel, i) => (
+              <div key={i} className="p-2 bg-muted rounded text-sm">
+                {sel.text}
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <p className="text-xs text-muted-foreground mt-2">
+        {formatDistanceToNow(spark.created_at)} ago
+      </p>
+    </Card>
+  )
+}
+```
+
+**Features:**
+- Selection badges
+- Expand/collapse
+- Timestamp formatting
+- Smooth animations
+
+#### DeckCard (`components/rhizome/deck-card.tsx`)
+```tsx
+export function DeckCard({ deck, isActive, onClick }) {
+  const stats = useDeckStats(deck.id)
+
+  return (
+    <Card onClick={onClick}>
+      <h3 className="font-medium">{deck.name}</h3>
+
+      {/* Progress visualization */}
+      <div className="mt-4 space-y-2">
+        <div className="flex justify-between text-sm">
+          <span>Due today</span>
+          <span className="font-medium">{stats.dueToday}</span>
+        </div>
+        <Progress value={(stats.completed / stats.total) * 100} />
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>{stats.completed} completed</span>
+          <span>{stats.total} total</span>
+        </div>
+      </div>
+
+      {/* Quick actions */}
+      {isActive && (
+        <div className="flex gap-2 mt-4">
+          <Button size="sm" onClick={() => startStudy(deck.id)}>
+            Study Now
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => viewCards(deck.id)}>
+            View Cards
+          </Button>
+        </div>
+      )}
+    </Card>
+  )
+}
+```
+
+**Features:**
+- Study stats
+- Progress visualization
+- Quick action buttons
+- Real-time data hooks
+
+### When to Use Feature-Rich Pattern
+
+✅ **Use this pattern when:**
+- Domain objects used in multiple contexts (study/browse/search)
+- Complex interactions (keyboard shortcuts, animations, state)
+- Server actions needed (mutations, optimistic updates)
+- Component will be reused across different features
+
+❌ **Don't use this pattern when:**
+- Pure design system components (buttons, inputs)
+- One-off unique UI (landing page hero)
+- Simple display-only components
+- Performance is critical (thousands of instances)
+
+### Implementation Checklist
+
+When creating a feature-rich domain component:
+
+1. ✅ **Internal state management**
+   ```tsx
+   const [expanded, setExpanded] = useState(false)
+   const [editing, setEditing] = useState(false)
+   ```
+
+2. ✅ **Server actions (colocated)**
+   ```tsx
+   const handleUpdate = async (data) => {
+     await updateEntity(id, data)
+     revalidatePath('/current-page')
+   }
+   ```
+
+3. ✅ **Keyboard shortcuts (when active)**
+   ```tsx
+   useEffect(() => {
+     if (!isActive) return
+     const handleKey = (e: KeyboardEvent) => {
+       if (e.key === 'e') setEditing(true)
+     }
+     window.addEventListener('keydown', handleKey)
+     return () => window.removeEventListener('keydown', handleKey)
+   }, [isActive])
+   ```
+
+4. ✅ **Animations and transitions**
+   ```tsx
+   <motion.div
+     initial={{ opacity: 0, scale: 0.9 }}
+     animate={{ opacity: 1, scale: 1 }}
+     exit={{ opacity: 0, scale: 0.9 }}
+   />
+   ```
+
+5. ✅ **Minimal props (just data + control)**
+   ```tsx
+   interface Props {
+     entity: EntityType       // The data
+     isActive: boolean        // Control state
+     onClick?: () => void     // Parent communication
+   }
+   ```
+
+6. ✅ **Accessibility**
+   ```tsx
+   <button aria-label="Edit note" aria-pressed={editing}>
+     Edit
+   </button>
+   ```
+
+### Migration Example
+
+**Before (prop drilling):**
+```tsx
+// Parent manages everything
+function ConnectionsList() {
+  const [activeId, setActiveId] = useState(null)
+  const [feedbackTypes, setFeedbackTypes] = useState({})
+  const [submitting, setSubmitting] = useState({})
+
+  const handleFeedback = async (id, type) => {
+    setSubmitting(prev => ({ ...prev, [id]: true }))
+    await updateConnection(id, type)
+    setFeedbackTypes(prev => ({ ...prev, [id]: type }))
+    setSubmitting(prev => ({ ...prev, [id]: false }))
+  }
+
+  return connections.map(conn => (
+    <ConnectionCard
+      connection={conn}
+      onFeedback={(type) => handleFeedback(conn.id, type)}
+      feedbackType={feedbackTypes[conn.id]}
+      isSubmitting={submitting[conn.id]}
+      isActive={activeId === conn.id}
+      onActivate={() => setActiveId(conn.id)}
+    />
+  ))
+}
+```
+
+**After (feature-rich):**
+```tsx
+// Parent is clean and simple
+function ConnectionsList() {
+  const [activeId, setActiveId] = useState(null)
+
+  return connections.map(conn => (
+    <ConnectionCard
+      connection={conn}
+      isActive={activeId === conn.id}
+      onClick={() => setActiveId(conn.id)}
+    />
+  ))
+}
+
+// Component handles everything internally
+export function ConnectionCard({ connection, isActive, onClick }) {
+  const [feedbackType, setFeedbackType] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleFeedback = async (type) => {
+    setSubmitting(true)
+    await updateConnection(connection.id, type)
+    setFeedbackType(type)
+    setSubmitting(false)
+  }
+
+  useEffect(() => {
+    if (!isActive) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'v') handleFeedback('validate')
+      if (e.key === 'r') handleFeedback('reject')
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [isActive])
+
+  return (
+    <Card onClick={onClick}>
+      {/* All UI and logic here */}
+    </Card>
+  )
+}
+```
+
+### Testing Feature-Rich Components
+
+```tsx
+// test/components/flashcard-card.test.tsx
+describe('FlashcardCard', () => {
+  it('flips card on space key when active', async () => {
+    const { getByText } = render(
+      <FlashcardCard
+        flashcard={mockCard}
+        isActive={true}
+        onClick={jest.fn()}
+      />
+    )
+
+    expect(getByText(mockCard.front)).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: ' ' })
+
+    await waitFor(() => {
+      expect(getByText(mockCard.back)).toBeInTheDocument()
+    })
+  })
+
+  it('calls review action on number keys', async () => {
+    const { getByText } = render(
+      <FlashcardCard
+        flashcard={mockCard}
+        isActive={true}
+        onClick={jest.fn()}
+      />
+    )
+
+    // Flip to reveal answer
+    fireEvent.keyDown(window, { key: ' ' })
+
+    // Press '3' for "Good"
+    fireEvent.keyDown(window, { key: '3' })
+
+    await waitFor(() => {
+      expect(reviewFlashcard).toHaveBeenCalledWith(mockCard.id, 3)
+    })
+  })
+
+  it('does not respond to keys when inactive', () => {
+    render(
+      <FlashcardCard
+        flashcard={mockCard}
+        isActive={false}
+        onClick={jest.fn()}
+      />
+    )
+
+    fireEvent.keyDown(window, { key: ' ' })
+
+    // Card should not flip
+    expect(queryByText(mockCard.back)).not.toBeInTheDocument()
+  })
+})
+```
+
 ## Summary Rules
 
 1. **Never block the main content** - User can always read/interact
@@ -573,6 +1128,7 @@ return (
 10. **Performance First** - Disable heavy effects on low-end devices
 11. **Accessibility Always** - Provide reduced-motion alternatives
 12. **Purposeful Effects** - Every animation should have a clear UX purpose
+13. **Feature-Rich Components** - Domain components are self-contained with internal state, server actions, and keyboard shortcuts
 
 
 This comprehensive guide ensures Claude Code will never use modals and always implements the correct non-blocking UI patterns. Each pattern includes complete implementation code that can be directly used.

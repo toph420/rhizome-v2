@@ -17,6 +17,19 @@ const StartSessionSchema = z.object({
   dueOnly: z.boolean().optional(),
   filters: z.object({
     tags: z.array(z.string()).optional(),
+    // Advanced filters
+    dateRange: z.object({
+      start: z.string().datetime(),
+      end: z.string().datetime(),
+      field: z.enum(['created_at', 'last_review', 'next_review']),
+    }).optional(),
+    status: z.array(z.enum(['draft', 'active', 'suspended'])).optional(),
+    difficulty: z.object({
+      min: z.number().min(0).max(10),
+      max: z.number().min(0).max(10),
+    }).optional(),
+    notStudiedYet: z.boolean().optional(),
+    failedCards: z.boolean().optional(),  // Rated Again (1) recently
   }).optional(),
 })
 
@@ -84,6 +97,39 @@ export async function startStudySession(input: z.infer<typeof StartSessionSchema
 
     if (validated.filters?.tags && validated.filters.tags.length > 0) {
       query = query.contains('tags', validated.filters.tags)
+    }
+
+    // Advanced filters
+    if (validated.filters) {
+      const f = validated.filters
+
+      // Date range filter
+      if (f.dateRange) {
+        const field = f.dateRange.field === 'last_review' ? 'updated_at' : f.dateRange.field
+        query = query
+          .gte(field, f.dateRange.start)
+          .lte(field, f.dateRange.end)
+      }
+
+      // Status filter (override default 'active')
+      if (f.status && f.status.length > 0) {
+        query = query.in('status', f.status)
+      }
+
+      // Difficulty range
+      if (f.difficulty) {
+        query = query
+          .gte('difficulty', f.difficulty.min)
+          .lte('difficulty', f.difficulty.max)
+      }
+
+      // Not studied yet (no last_review)
+      if (f.notStudiedYet) {
+        query = query.is('last_review', null)
+      }
+
+      // Note: failedCards filter requires tracking last_rating or querying sessions
+      // For MVP, this can be handled client-side or by adding last_rating to cache
     }
 
     const { data: cards, error: cardsError } = await query
@@ -195,15 +241,18 @@ export async function getSessionStats(sessionId: string) {
 
     if (error) throw error
 
+    // Extract ratings from JSONB object
+    const ratings = data.ratings as { again: number; hard: number; good: number; easy: number }
+
     return {
       success: true,
       stats: {
-        reviewedCount: data.reviewed_count,
-        againCount: data.again_count,
-        hardCount: data.hard_count,
-        goodCount: data.good_count,
-        easyCount: data.easy_count,
-        totalTimeMs: data.total_time_ms,
+        reviewedCount: data.cards_reviewed || 0,
+        againCount: ratings?.again || 0,
+        hardCount: ratings?.hard || 0,
+        goodCount: ratings?.good || 0,
+        easyCount: ratings?.easy || 0,
+        totalTimeMs: data.total_time_ms || 0,
         startedAt: data.started_at,
         endedAt: data.ended_at,
       },
