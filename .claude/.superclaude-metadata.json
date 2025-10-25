@@ -1,0 +1,66 @@
+{
+  "commands": {
+    "auto_update": false,
+    "enabled": true,
+    "version": "4.1.6"
+  },
+  "components": {
+    "agents": {
+      "agents_count": 17,
+      "agents_list": [
+        "backend-architect.md",
+        "business-panel-experts.md",
+        "deep-research-agent.md",
+        "devops-architect.md",
+        "frontend-architect.md",
+        "learning-guide.md",
+        "performance-engineer.md",
+        "pm-agent.md",
+        "python-expert.md",
+        "quality-engineer.md",
+        "refactoring-expert.md",
+        "requirements-analyst.md",
+        "root-cause-analyst.md",
+        "security-engineer.md",
+        "socratic-mentor.md",
+        "system-architect.md",
+        "technical-writer.md"
+      ],
+      "category": "agents",
+      "installed_at": "2025-10-25T02:00:18.334742",
+      "version": "4.1.6"
+    },
+    "commands": {
+      "category": "commands",
+      "files_count": 26,
+      "installed_at": "2025-10-25T02:00:18.324644",
+      "version": "4.1.6"
+    },
+    "core": {
+      "category": "core",
+      "files_count": 6,
+      "installed_at": "2025-10-25T01:59:54.046375",
+      "version": "4.1.6"
+    },
+    "modes": {
+      "files_count": 7,
+      "installed": true,
+      "version": "4.1.6"
+    }
+  },
+  "framework": {
+    "components": [
+      "core"
+    ],
+    "description": "AI-enhanced development framework for Claude Code",
+    "installation_type": "global",
+    "name": "superclaude",
+    "version": "4.1.6"
+  },
+  "superclaude": {
+    "auto_update": false,
+    "enabled": true,
+    "profile": "default",
+    "version": "4.1.6"
+  }
+}

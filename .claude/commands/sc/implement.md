@@ -3,7 +3,7 @@ name: implement
 description: "Feature and code implementation with intelligent persona activation and MCP integration"
 category: workflow
 complexity: standard
-mcp-servers: [context7, sequential-thinking, shadcn, playwright]
+mcp-servers: [context7, sequential, magic, playwright]
 personas: [architect, frontend, backend, security, qa-specialist]
 ---
 
@@ -32,13 +32,13 @@ personas: [architect, frontend, backend, security, qa-specialist]
 
 Key behaviors:
 - Context-based persona activation (architect, frontend, backend, security, qa)
-- Framework-specific implementation via Context7 and ShadCN MCP integration
+- Framework-specific implementation via Context7 and Magic MCP integration
 - Systematic multi-component coordination via Sequential MCP
 - Comprehensive testing integration with Playwright for validation
 
 ## MCP Integration
 - **Context7 MCP**: Framework patterns and official documentation for React, Vue, Angular, Express
-- **ShadCN MCP**: Auto-activated for UI component generation and design system integration
+- **Magic MCP**: Auto-activated for UI component generation and design system integration
 - **Sequential MCP**: Complex multi-step analysis and implementation planning
 - **Playwright MCP**: Testing validation and quality assurance integration
 
@@ -59,7 +59,7 @@ Key behaviors:
 ### React Component Implementation
 ```
 /sc:implement user profile component --type component --framework react
-# ShadCN MCP generates UI component with design system integration
+# Magic MCP generates UI component with design system integration
 # Frontend persona ensures best practices and accessibility
 ```
 

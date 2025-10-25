@@ -1,5 +1,15 @@
 # CLAUDE.md - AI Assistant Guide for Rhizome V2
 
+## ⚡ SuperClaude Framework Integration
+
+**Project uses SuperClaude 4.1.5** (project-specific installation)
+
+**See**: `.claude/CLAUDE.md` for SuperClaude configuration and behavioral modes
+**Framework Features**: 26 commands (`/sc:`), 7 modes, 17+ agents, Rhizome-specific flags
+**Custom Agents**: ECS Architect, Storage Manager, Worker Coordinator (in `.claude/agents/rhizome/`)
+
+---
+
 ## 📍 Quick Navigation
 [Critical Rules](#-critical-rules) • [Common Tasks](#-common-tasks) • [Architecture](#%EF%B8%8F-architecture-patterns) • [Reference](#-quick-reference)
 
