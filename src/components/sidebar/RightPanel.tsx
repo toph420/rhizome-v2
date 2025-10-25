@@ -16,6 +16,7 @@ import {
   GraduationCap,
   ChevronLeft,
   ChevronRight,
+  Database,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Chunk } from '@/types/annotations'
@@ -31,8 +32,9 @@ import { FlashcardsTab } from './FlashcardsTab'
 import { AnnotationReviewTab } from './AnnotationReviewTab'
 import { TuneTab } from './TuneTab'
 import { CompactStudyTab } from './CompactStudyTab'
+import { ChunksTab } from './ChunksTab'
 
-type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune' | 'study'
+type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune' | 'study' | 'chunks'
 
 interface Tab {
   id: TabId
@@ -49,6 +51,7 @@ const TABS: Tab[] = [
   { id: 'review', icon: FileQuestion, label: 'Review' },
   { id: 'tune', icon: Sliders, label: 'Tune' },
   { id: 'study', icon: GraduationCap, label: 'Study' },
+  { id: 'chunks', icon: Database, label: 'Chunks' },
 ]
 
 interface ReviewResults {
@@ -244,7 +247,7 @@ export function RightPanelV2({
             transition={{ delay: 0.3, duration: 0.2 }}
           >
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="h-full flex flex-col">
-              <TabsList className="grid grid-cols-8 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
+              <TabsList className="grid grid-cols-9 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
                 {TABS.map((tab) => {
                   const Icon = tab.icon
                   const badgeCount = badgeCounts[tab.id]
@@ -333,6 +336,13 @@ export function RightPanelV2({
 
               <TabsContent value="study" className="flex-1 overflow-hidden m-0 h-full">
                 <CompactStudyTab documentId={documentId} />
+              </TabsContent>
+
+              <TabsContent value="chunks" className="flex-1 overflow-hidden m-0 h-full">
+                <ChunksTab
+                  documentId={documentId}
+                  onNavigateToChunk={onNavigateToChunk}
+                />
               </TabsContent>
             </Tabs>
           </motion.div>

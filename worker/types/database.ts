@@ -106,6 +106,16 @@ export interface Chunk {
   // Embeddings (Transformers.js)
   embedding: string | null
 
+  // Connection detection tracking (NEW in migration 053)
+  /** Whether connection detection has been run for this chunk */
+  connections_detected: boolean
+
+  /** Timestamp when connections were detected */
+  connections_detected_at: string | null
+
+  /** Why detection was skipped: user_choice, error, or manual_skip */
+  detection_skipped_reason: 'user_choice' | 'error' | 'manual_skip' | null
+
   // Reprocessing support
   is_current: boolean
   reprocessing_batch: string | null
@@ -162,6 +172,11 @@ export interface ChunkInsert {
 
   embedding?: string | null
 
+  // Connection detection tracking (defaults: false, null, null)
+  connections_detected?: boolean
+  connections_detected_at?: string | null
+  detection_skipped_reason?: 'user_choice' | 'error' | 'manual_skip' | null
+
   is_current?: boolean
   reprocessing_batch?: string | null
 }
@@ -214,6 +229,11 @@ export interface ChunkUpdate {
   metadata_extracted_at?: string | null
 
   embedding?: string | null
+
+  // Connection detection tracking
+  connections_detected?: boolean
+  connections_detected_at?: string | null
+  detection_skipped_reason?: 'user_choice' | 'error' | 'manual_skip' | null
 
   is_current?: boolean
   reprocessing_batch?: string | null

@@ -71,6 +71,8 @@ interface DocumentPreviewProps {
   onExtractImagesChange?: (checked: boolean) => void
   chunkerType?: ChunkerType
   onChunkerTypeChange?: (chunkerType: ChunkerType) => void
+  detectConnections?: boolean
+  onDetectConnectionsChange?: (checked: boolean) => void
   isMarkdownFile?: boolean
   markdownProcessing?: 'asis' | 'clean'
   onMarkdownProcessingChange?: (processing: 'asis' | 'clean') => void
@@ -115,6 +117,8 @@ export function DocumentPreview({
   onExtractImagesChange,
   chunkerType = 'recursive',
   onChunkerTypeChange,
+  detectConnections = false,
+  onDetectConnectionsChange,
   isMarkdownFile = false,
   markdownProcessing = 'asis',
   onMarkdownProcessingChange
@@ -416,6 +420,35 @@ export function DocumentPreview({
             <Sparkles className="h-3 w-3" />
             Extract images from PDF (slower, ~30-40% more time)
           </label>
+        </div>
+
+        {/* Connection Detection Option */}
+        <div className="flex items-start gap-3 p-4 border rounded-lg bg-muted/30">
+          <Checkbox
+            id="detect-connections-preview"
+            checked={detectConnections}
+            onCheckedChange={(checked) => {
+              onDetectConnectionsChange?.(checked as boolean)
+            }}
+          />
+          <div className="flex-1">
+            <label
+              htmlFor="detect-connections-preview"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer block"
+            >
+              Detect connections after processing
+            </label>
+            <p className="text-xs text-muted-foreground mt-1">
+              Finds semantic similarities, contradictions, and thematic bridges between chunks.
+              You can detect connections later for individual chunks or all at once.
+            </p>
+            {process.env.NEXT_PUBLIC_PROCESSING_MODE === 'local' && (
+              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                LOCAL mode: Connection detection adds 10-30 seconds per document
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Action Buttons */}

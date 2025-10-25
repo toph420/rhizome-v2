@@ -28,8 +28,8 @@ const __dirname = dirname(__filename)
 // Load environment variables from parent .env.local
 config({ path: resolve(__dirname, '../.env.local') })
 
-// File logging setup
-const LOG_FILE = resolve(__dirname, 'worker.log')
+// File logging setup - logs to /tmp for easy access
+const LOG_FILE = '/tmp/rhizome-worker.log'
 const originalConsoleLog = console.log
 console.log = function(...args: any[]) {
   const timestamp = new Date().toISOString()
@@ -41,6 +41,9 @@ console.log = function(...args: any[]) {
   }
   originalConsoleLog.apply(console, args)
 }
+
+// Log startup message with file location
+console.log(`Worker starting... Logging to: ${LOG_FILE}`)
 
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,

@@ -21,6 +21,7 @@ interface UploadConfig {
   reviewDoclingExtraction: boolean
   extractImages: boolean
   chunkerStrategy: string
+  detectConnections: boolean  // NEW: Connection detection flag
   documentType: string | null
   author: string | null
   publicationYear: number | null
@@ -55,6 +56,9 @@ function extractUploadConfig(formData: FormData): UploadConfig {
 
   const chunkerStrategy = formData.get('chunkerStrategy') as string || 'recursive'
 
+  const detectConnectionsRaw = formData.get('detectConnections')
+  const detectConnections = detectConnectionsRaw === 'true'  // NEW: Default false
+
   const documentType = formData.get('document_type') as string | null
   const author = formData.get('author') as string | null
   const publicationYear = formData.get('publication_year')
@@ -68,6 +72,7 @@ function extractUploadConfig(formData: FormData): UploadConfig {
     cleanMarkdown: { raw: cleanMarkdownRaw, parsed: cleanMarkdown },
     reviewDoclingExtraction: { raw: reviewDoclingExtractionRaw, parsed: reviewDoclingExtraction },
     extractImages: { raw: extractImagesRaw, parsed: extractImages },
+    detectConnections: { raw: detectConnectionsRaw, parsed: detectConnections },
     chunkerStrategy
   })
 
@@ -81,6 +86,7 @@ function extractUploadConfig(formData: FormData): UploadConfig {
     reviewDoclingExtraction,
     extractImages,
     chunkerStrategy,
+    detectConnections,
     documentType,
     author,
     publicationYear,
@@ -355,7 +361,8 @@ export async function uploadDocument(formData: FormData): Promise<{
         cleanMarkdown: config.cleanMarkdown,
         reviewDoclingExtraction: config.reviewDoclingExtraction,
         extractImages: config.extractImages,
-        chunkerStrategy: config.chunkerStrategy
+        chunkerStrategy: config.chunkerStrategy,
+        detectConnections: config.detectConnections  // NEW: Pass connection detection flag
       })
 
       return { documentId, jobId }

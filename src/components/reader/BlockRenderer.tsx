@@ -47,6 +47,7 @@ export const BlockRenderer = memo(function BlockRenderer({
 }: BlockRendererProps) {
   const showChunkBoundaries = useUIStore(state => state.showChunkBoundaries)
   const chunks = useReaderStore(state => state.chunks)
+  const documentId = useReaderStore(state => state.documentId)  // NEW: Get documentId for detection
   const contentRef = useRef<HTMLDivElement>(null)
   const [chunkPositions, setChunkPositions] = useState<Map<string, number>>(new Map())
 
@@ -172,10 +173,11 @@ export const BlockRenderer = memo(function BlockRenderer({
       onClick={handleClick}
     >
       {/* Chunk metadata icon in left margin - only show on first block of chunk */}
-      {showMetadataIcon && (
+      {showMetadataIcon && documentId && (
         <ChunkMetadataIcon
           chunk={chunk}
           chunkIndex={chunk.chunk_index}
+          documentId={documentId}
           alwaysVisible={showChunkBoundaries}
         />
       )}
@@ -183,11 +185,12 @@ export const BlockRenderer = memo(function BlockRenderer({
       {/* BANDAID: Show icons for chunks that START in this block (mid-paragraph splits) */}
       {chunksStartingInBlock.map((chunkInBlock) => {
         const calculatedPosition = chunkPositions.get(chunkInBlock.id)
-        return (
+        return documentId ? (
           <ChunkMetadataIcon
             key={chunkInBlock.id}
             chunk={chunkInBlock}
             chunkIndex={chunkInBlock.chunk_index}
+            documentId={documentId}
             alwaysVisible={showChunkBoundaries}
             style={
               calculatedPosition !== undefined
@@ -195,7 +198,7 @@ export const BlockRenderer = memo(function BlockRenderer({
                 : undefined // Fallback to default em-based positioning
             }
           />
-        )
+        ) : null
       })}
 
       {/* Rendered content with injected annotations */}

@@ -29,7 +29,13 @@ import type { SourceType } from '../types/multi-format.js'
  * @param job - Background job containing document processing request
  */
 export async function processDocumentHandler(supabase: any, job: any): Promise<void> {
-  const { document_id, source_type = 'pdf', review_before_chunking, review_docling_extraction } = job.input_data
+  const {
+    document_id,
+    source_type = 'pdf',
+    review_before_chunking,
+    review_docling_extraction,
+    detectConnections = true  // NEW: Default true for backward compatibility
+  } = job.input_data
 
   // Get document metadata
   const { data: doc, error: docError } = await supabase
@@ -48,7 +54,8 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     userId: doc.user_id,
     sourceType: source_type as SourceType,
     reviewBeforeChunking: review_before_chunking,
-    reviewDoclingExtraction: review_docling_extraction
+    reviewDoclingExtraction: review_docling_extraction,
+    detectConnections  // NEW: Pass connection detection flag
   })
 
   // Execute complete workflow

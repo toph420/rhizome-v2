@@ -87,6 +87,7 @@ export function UploadZone() {
   const [cleanMarkdown, setCleanMarkdown] = useState(true) // Default to true - cleanup enabled
   const [extractImages, setExtractImages] = useState(false)
   const [chunkerType, setChunkerType] = useState<ChunkerType>('recursive') // Default to recursive (recommended)
+  const [detectConnections, setDetectConnections] = useState(false) // Default false - user must opt-in
 
   /**
    * Detects URL type (YouTube vs web article).
@@ -313,6 +314,7 @@ export function UploadZone() {
       formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
       formData.append('extractImages', extractImages.toString())
       formData.append('chunkerStrategy', chunkerType)
+      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
 
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
@@ -355,7 +357,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, registerJob])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, detectConnections, registerJob])
 
   /**
    * Handles metadata preview cancellation.
@@ -390,6 +392,7 @@ export function UploadZone() {
       formData.append('cleanMarkdown', flags.cleanMarkdown.toString())
       formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
       formData.append('chunkerStrategy', chunkerType)
+      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
 
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
@@ -415,7 +418,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, getSourceTypeForFile, markdownProcessing, cleanMarkdown, chunkerType, registerJob])
+  }, [selectedFile, getSourceTypeForFile, markdownProcessing, cleanMarkdown, chunkerType, detectConnections, registerJob])
 
   /**
    * Handle YouTube URL metadata extraction.
@@ -524,6 +527,7 @@ export function UploadZone() {
       const formData = new FormData()
       formData.append('source_type', urlType)
       formData.append('source_url', urlInput)
+      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
 
       console.log('🔗 Fetching from URL...')
       const result = await uploadDocument(formData)
@@ -549,7 +553,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [urlInput, urlType, handleYouTubeUrl, registerJob])
+  }, [urlInput, urlType, handleYouTubeUrl, detectConnections, registerJob])
 
   /**
    * Submits pasted content.
@@ -567,7 +571,8 @@ export function UploadZone() {
       if (pasteSourceUrl) {
         formData.append('source_url', pasteSourceUrl)
       }
-      
+      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
+
       console.log('📋 Submitting pasted content...')
       const result = await uploadDocument(formData)
       console.log('📋 Paste result:', result)
@@ -592,7 +597,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [pastedContent, pasteSourceUrl, registerJob])
+  }, [pastedContent, pasteSourceUrl, detectConnections, registerJob])
 
   return (
     <div className="space-y-4">
@@ -627,6 +632,8 @@ export function UploadZone() {
               onExtractImagesChange={setExtractImages}
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
+              detectConnections={detectConnections}
+              onDetectConnectionsChange={setDetectConnections}
               isMarkdownFile={selectedFile?.name.endsWith('.md') || selectedFile?.name.endsWith('.markdown')}
               markdownProcessing={markdownProcessing}
               onMarkdownProcessingChange={setMarkdownProcessing}
@@ -750,6 +757,8 @@ export function UploadZone() {
               onExtractImagesChange={setExtractImages}
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
+              detectConnections={detectConnections}
+              onDetectConnectionsChange={setDetectConnections}
               isMarkdownFile={false}
               markdownProcessing={markdownProcessing}
               onMarkdownProcessingChange={setMarkdownProcessing}

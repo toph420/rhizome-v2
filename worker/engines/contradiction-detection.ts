@@ -16,6 +16,7 @@ export interface ContradictionDetectionConfig {
   polarityThreshold?: number;      // Default: 0.3 (sufficient opposition)
   maxResultsPerChunk?: number;     // Default: 20
   crossDocumentOnly?: boolean;     // Default: true
+  sourceChunkIds?: string[];       // NEW: Filter to specific source chunks
   targetDocumentIds?: string[];    // Filter to specific target documents (for Add New mode)
 }
 
@@ -35,10 +36,14 @@ export async function runContradictionDetection(
     polarityThreshold = 0.3,
     maxResultsPerChunk = 20,
     crossDocumentOnly = true,
+    sourceChunkIds,  // NEW
     targetDocumentIds
   } = config;
 
   console.log(`[ContradictionDetection] Processing document ${documentId}`);
+  if (sourceChunkIds && sourceChunkIds.length > 0) {
+    console.log(`[ContradictionDetection] Filtering to ${sourceChunkIds.length} source chunks`);
+  }
   if (targetDocumentIds && targetDocumentIds.length > 0) {
     console.log(`[ContradictionDetection] Filtering to ${targetDocumentIds.length} target document(s)`);
   }
@@ -57,6 +62,11 @@ export async function runContradictionDetection(
     .eq('document_id', documentId)
     .not('conceptual_metadata', 'is', null)
     .not('emotional_metadata', 'is', null);
+
+  // NEW: Filter to specific source chunks if provided
+  if (sourceChunkIds && sourceChunkIds.length > 0) {
+    sourceQuery = sourceQuery.in('id', sourceChunkIds)
+  }
 
   if (config.reprocessingBatch) {
     sourceQuery = sourceQuery.eq('reprocessing_batch', config.reprocessingBatch);
