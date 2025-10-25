@@ -3,12 +3,17 @@
 import { motion } from 'framer-motion'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/rhizome/hover-card'
 import { Badge } from '@/components/rhizome/badge'
-import { Info, TrendingUp, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Info, TrendingUp, CheckCircle, AlertTriangle, Link2, Loader2 } from 'lucide-react'
 import type { Chunk } from '@/types/annotations'
+import { useState } from 'react'
+import { detectConnectionsForChunks } from '@/app/actions/connections'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 
 interface ChunkMetadataIconProps {
   chunk: Chunk
   chunkIndex: number
+  documentId: string  // NEW: For detection action
   alwaysVisible?: boolean
   style?: React.CSSProperties
   /** For accurate positioning based on text content */
@@ -26,7 +31,10 @@ interface ChunkMetadataIconProps {
  * @param props.style - Optional inline styles for positioning
  * @returns Hover card with chunk metadata
  */
-export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, style, textOffset }: ChunkMetadataIconProps) {
+export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible = false, style, textOffset }: ChunkMetadataIconProps) {
+  const [isDetecting, setIsDetecting] = useState(false)
+  const { registerJob } = useBackgroundJobsStore()
+
   // Helper function to determine polarity category
   const getPolarity = (polarity?: number): 'positive' | 'negative' | 'neutral' | null => {
     if (polarity === undefined || polarity === null) return null
@@ -46,6 +54,25 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, st
     }
   }
 
+  // Handler for detecting connections for this specific chunk
+  const handleDetectConnections = async () => {
+    setIsDetecting(true)
+    try {
+      const result = await detectConnectionsForChunks(documentId, [chunk.id])
+      if (result.success && result.jobId) {
+        registerJob(result.jobId, 'detect_connections', {
+          documentId,
+          chunkIds: [chunk.id],
+          title: `Chunk ${chunkIndex}`
+        })
+      }
+    } catch (error) {
+      console.error('Failed to detect connections:', error)
+    } finally {
+      setIsDetecting(false)
+    }
+  }
+
   // Extract metadata from chunk (now populated from database)
   const metadata = {
     themes: chunk.themes || [],
@@ -59,7 +86,11 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, st
     positionValidated: chunk.position_validated,
     pageStart: chunk.page_start,
     pageEnd: chunk.page_end,
-    sectionMarker: chunk.section_marker
+    sectionMarker: chunk.section_marker,
+    // NEW: Connection detection status
+    connectionsDetected: chunk.connections_detected,
+    connectionsDetectedAt: chunk.connections_detected_at,
+    detectionSkippedReason: chunk.detection_skipped_reason
   }
 
   // Use em-based positioning for better text alignment (scales with font size)
@@ -211,6 +242,58 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, alwaysVisible = false, st
               </Badge>
             </div>
           )}
+
+          {/* Connection Detection Status */}
+          <div className="border-t pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Link2 className="h-3 w-3 text-muted-foreground" />
+                <span className="text-xs font-medium">Connections</span>
+              </div>
+              {metadata.connectionsDetected ? (
+                <Badge variant="secondary" className="text-xs">
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Detected
+                </Badge>
+              ) : metadata.detectionSkippedReason ? (
+                <Badge variant="outline" className="text-xs">
+                  Skipped ({metadata.detectionSkippedReason})
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs">
+                  Not detected
+                </Badge>
+              )}
+            </div>
+
+            {metadata.connectionsDetectedAt && (
+              <p className="text-xs text-muted-foreground mb-2">
+                Detected {new Date(metadata.connectionsDetectedAt).toLocaleDateString()}
+              </p>
+            )}
+
+            {!metadata.connectionsDetected && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full text-xs"
+                onClick={handleDetectConnections}
+                disabled={isDetecting}
+              >
+                {isDetecting ? (
+                  <>
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    Detecting...
+                  </>
+                ) : (
+                  <>
+                    <Link2 className="h-3 w-3 mr-1" />
+                    Detect Connections
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
 
           {/* Placeholder message when no metadata */}
           {metadata.themes.length === 0 && metadata.concepts.length === 0 && !metadata.summary && (
