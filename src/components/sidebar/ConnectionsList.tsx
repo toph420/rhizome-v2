@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useConnectionStore } from '@/stores/connection-store'
 import { useDebounce } from '@/hooks/useDebounce'
-import { createClient } from '@/lib/supabase/client'
+import { getConnectionsForChunks } from '@/app/actions/connections'
 import { ConnectionCard } from '@/components/rhizome/connection-card'
 import { CollapsibleSection } from './CollapsibleSection'
 import type { SynthesisEngine } from '@/types/annotations'
@@ -42,21 +42,25 @@ interface ConnectionsListProps {
 }
 
 /**
- * Displays connections for visible chunks with debounced fetching.
- * Re-ranks connections in real-time based on weight tuning (<100ms target).
+ * Displays connections for visible chunks using Pattern 2 (Server Action + Zustand).
  *
- * **Performance Critical**:
- * - Debounced fetching prevents 60 queries/second during scrolling
- * - Runtime type validation filters invalid engine types
- * - Re-ranking uses useMemo for optimized filtering/weighting/sorting
+ * **Pattern 2: Client-Fetched with Zustand** ✅
+ * - Server Action enforces RLS and authentication
+ * - Zustand store handles filtering, weighting, sorting
+ * - Store automatically applies filters when weights/thresholds change
  *
  * **Data Flow**:
  * 1. VirtualizedReader tracks visible chunks → visibleChunkIds
- * 2. useDebounce delays database query until scrolling pauses (300ms)
- * 3. Fetch connections for visible chunks from connections table
- * 4. Filter by enabled engines + strength threshold
- * 5. Apply weight multiplier and sort by weighted strength
+ * 2. useDebounce delays query until scrolling pauses (300ms)
+ * 3. Call Server Action getConnectionsForChunks()
+ * 4. Store in Zustand via setConnections() (auto-calls applyFilters())
+ * 5. Use filteredConnections from store (pre-computed)
  * 6. Group by engine type for collapsible sections
+ *
+ * **Performance**:
+ * - Debounced fetching prevents 60 queries/second during scrolling
+ * - Store handles filtering/weighting/sorting (no useMemo needed)
+ * - Re-ranking happens automatically when weights change
  *
  * @param props - Component props
  * @param props.documentId - Current document ID for navigation context
@@ -70,12 +74,11 @@ export function ConnectionsList({
   onConnectionsChange,
   onActiveConnectionCountChange
 }: ConnectionsListProps) {
-  const weights = useConnectionStore(state => state.weights)
-  const enabledEngines = useConnectionStore(state => state.enabledEngines)
-  const strengthThreshold = useConnectionStore(state => state.strengthThreshold)
+  // Pattern 2: Use store for connections state and filtering
+  const { setConnections, filteredConnections } = useConnectionStore()
+  const connections = useConnectionStore(state => state.connections)
 
   const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
-  const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(false)
 
   // Debounce visible chunk IDs to prevent database hammering during scroll
@@ -83,38 +86,24 @@ export function ConnectionsList({
   // With 300ms debounce: Query fires only when scrolling pauses
   const debouncedChunkIds = useDebounce(visibleChunkIds, 300)
 
+  // Stable reference to prevent infinite loops - only update when IDs actually change
+  const stableChunkIds = useMemo(() => debouncedChunkIds, [JSON.stringify(debouncedChunkIds)])
+
   // Fetch connections for visible chunks (debounced)
+  // Pattern 2: Call Server Action → Store in Zustand
   useEffect(() => {
     async function fetchConnections() {
-      console.log('[ConnectionsList] Fetching connections for chunks:', debouncedChunkIds)
-
-      // Filter out 'no-chunk' placeholders (gap regions without chunk coverage)
-      const validChunkIds = debouncedChunkIds.filter(id => id !== 'no-chunk')
-
-      if (validChunkIds.length === 0) {
-        console.log('[ConnectionsList] No valid chunks (gap region or empty), clearing connections')
-        setConnections([])
-        return
-      }
+      console.log('[ConnectionsList] Fetching connections for chunks:', stableChunkIds)
 
       setLoading(true)
-      const supabase = createClient()
 
       try {
-        const { data, error } = await supabase
-          .from('connections')
-          .select('*')
-          .in('source_chunk_id', validChunkIds)
-          .order('strength', { ascending: false })
-          .limit(100)
+        // Call Server Action (enforces RLS, proper authentication)
+        const data = await getConnectionsForChunks(stableChunkIds)
+        console.log('[ConnectionsList] Fetched connections:', data.length, 'connections')
 
-        if (error) {
-          console.error('[ConnectionsList] Failed to fetch connections:', error)
-          setConnections([])
-        } else {
-          console.log('[ConnectionsList] Fetched connections:', data?.length || 0, 'connections')
-          setConnections(data || [])
-        }
+        // Store in Zustand (automatically calls applyFilters())
+        setConnections(data)
       } catch (err) {
         console.error('[ConnectionsList] Unexpected error:', err)
         setConnections([])
@@ -124,50 +113,7 @@ export function ConnectionsList({
     }
 
     fetchConnections()
-  }, [debouncedChunkIds])
-
-  // Filter and weight connections with runtime type validation
-  // Re-ranking happens instantly without refetching (performance target: <100ms)
-  const filteredConnections = useMemo(() => {
-    const startTime = performance.now()
-
-    // Runtime validation: Only allow valid engine types from worker
-    // This safety net prevents crashes if database contains invalid engine names
-    const validEngines = new Set<SynthesisEngine>([
-      'semantic_similarity',
-      'thematic_bridge',
-      'contradiction_detection'
-    ])
-
-    // Single-pass filter and map (O(n)) - optimized for performance
-    const result = connections
-      .filter(c => validEngines.has(c.connection_type))  // Runtime type validation
-      .filter(c => enabledEngines.has(c.connection_type))  // User-enabled engines
-      .filter(c => c.strength >= strengthThreshold)        // Strength threshold
-      .map(c => ({
-        ...c,
-        weightedStrength: c.strength * (weights[c.connection_type] || 0)  // Apply weight multiplier
-      }))
-      .sort((a, b) => b.weightedStrength - a.weightedStrength)  // Sort by weighted score
-
-    const duration = performance.now() - startTime
-
-    // Performance monitoring with detailed logging
-    if (duration > 100) {
-      console.warn(
-        `⚠️ Connection re-ranking took ${duration.toFixed(2)}ms (target: <100ms)`,
-        {
-          connectionCount: result.length,
-          enabledEngines: Array.from(enabledEngines),
-          strengthThreshold
-        }
-      )
-    } else if (duration > 50) {
-      console.info(`ℹ️ Connection re-ranking: ${duration.toFixed(2)}ms`)
-    }
-
-    return result
-  }, [connections, weights, enabledEngines, strengthThreshold])  // Minimize re-computation
+  }, [stableChunkIds, setConnections])
 
   // Notify parent when connections change (for heatmap)
   useEffect(() => {

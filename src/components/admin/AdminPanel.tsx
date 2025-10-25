@@ -10,8 +10,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/rhizome/sheet'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/rhizome/tabs'
+import { Button } from '@/components/rhizome/button'
 import {
   ScannerTab,
   ImportTab,

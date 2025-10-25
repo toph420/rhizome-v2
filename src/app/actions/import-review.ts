@@ -165,7 +165,7 @@ export async function acceptImport(
 
     // Map Readwise color to our color system
     const highlight = pending.highlight_data
-    const colorMap: Record<string, string> = {
+    const colorMap = {
       yellow: 'yellow',
       blue: 'blue',
       red: 'red',
@@ -173,8 +173,11 @@ export async function acceptImport(
       orange: 'orange',
       purple: 'purple',
       pink: 'pink'
-    }
-    const color = colorMap[highlight.color || 'yellow'] || 'yellow'
+    } as const
+
+    type ColorType = 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
+    const rawColor = highlight.color || 'yellow'
+    const color: ColorType = (rawColor in colorMap ? colorMap[rawColor as keyof typeof colorMap] : 'yellow') as ColorType
 
     // Create annotation entity with ECS (5-component pattern via AnnotationOperations)
     const ops = new AnnotationOperations(ecs, user.id)

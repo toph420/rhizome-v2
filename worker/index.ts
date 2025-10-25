@@ -11,6 +11,7 @@ import { continueProcessing } from './handlers/continue-processing.js'
 import { importDocumentHandler } from './handlers/import-document.js'
 import { reprocessConnectionsHandler } from './handlers/reprocess-connections.js'
 import { exportDocumentHandler } from './handlers/export-document.js'
+import { generateFlashcardsHandler } from './handlers/generate-flashcards.js'
 import { importReadwiseHighlights } from './handlers/readwise-import.js'
 import { scanVaultHandler } from './handlers/scan-vault.js'
 import { importFromVaultHandler } from './handlers/import-from-vault.js'
@@ -47,6 +48,7 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
   'import_document': importDocumentHandler,
   'reprocess_connections': reprocessConnectionsHandler,
   'export_documents': exportDocumentHandler,
+  'generate_flashcards': generateFlashcardsHandler,
   'reprocess_document': async (supabase: any, job: any) => {
     const { documentId } = job.input_data
     const results = await reprocessDocument(documentId, supabase, job.id)  // Pass jobId for progress tracking

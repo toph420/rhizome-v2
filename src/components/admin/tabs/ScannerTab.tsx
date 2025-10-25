@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react'
 import { type DocumentScanResult, type SyncState } from '@/app/actions/documents'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/rhizome/button'
+import { Badge } from '@/components/rhizome/badge'
 import {
   Table,
   TableBody,
@@ -16,6 +16,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  TooltipProvider,
 } from '@/components/rhizome/tooltip'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Info, Trash2 } from 'lucide-react'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
@@ -187,7 +188,8 @@ export function ScannerTab() {
   }
 
   return (
-    <div className="space-y-6">
+    <TooltipProvider>
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -335,7 +337,7 @@ export function ScannerTab() {
             <TableBody>
               {filteredDocuments.map((doc) => (
                 <React.Fragment key={doc.documentId}>
-                  <TableRow className="cursor-pointer hover:bg-muted/50">
+                  <TableRow className="cursor-pointer hover:bg-main/50">
                       <TableCell>
                         <Button
                           variant="ghost"
@@ -457,7 +459,7 @@ export function ScannerTab() {
                           <div className="space-y-2">
                             <h4 className="text-sm font-medium">Storage Files:</h4>
                             {doc.storageFiles.length > 0 ? (
-                              <ul className="text-sm text-muted-foreground space-y-1 ml-4">
+                              <ul className="text-sm text-muted-background space-y-1 ml-4">
                                 {doc.storageFiles.map((file) => (
                                   <li key={file} className="list-disc">
                                     {file}
@@ -519,6 +521,7 @@ export function ScannerTab() {
           </Tooltip>
         </div>
       )}
-    </div>
+      </div>
+    </TooltipProvider>
   )
 }

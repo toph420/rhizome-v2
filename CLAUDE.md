@@ -329,6 +329,28 @@ const sparkId = await sparkOps.create({
 }
 ```
 
+**CRITICAL: Gemini SDK Usage**
+- ✅ ALWAYS use `@google/genai` (new native SDK) with `GoogleGenAI` class
+- ❌ NEVER use `@google/generative-ai` (deprecated old SDK)
+- See `worker/README.md` Development section for correct usage patterns
+
+**AI SDK Selection: Vercel AI SDK vs Native Google SDK**
+
+Use **Vercel AI SDK** (`ai` + `@ai-sdk/google`) for:
+- ✅ **Frontend AI features**: Chat, suggestions, streaming to UI
+- ✅ **React integration**: `useChat()`, `useCompletion()` hooks
+- ✅ **Streaming responses**: Real-time text generation in reader
+- ✅ **Structured data**: `generateObject()` with Zod schemas
+- ✅ **Server Actions → UI**: "Where was I", connection explanations, smart search
+
+Use **Native Google SDK** (`@google/genai`) for:
+- ✅ **Worker/background jobs**: Document processing, flashcard generation
+- ✅ **Batch operations**: No streaming needed, one-off generations
+- ✅ **File uploads**: Gemini Files API for large documents
+- ✅ **Direct control**: Lower-level API access
+
+**Rule of thumb**: UI-facing features → Vercel AI SDK | Background processing → Native SDK
+
 ---
 
 ## Quick Start Guide

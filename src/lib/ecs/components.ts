@@ -429,3 +429,120 @@ export const isSparkEntity = (
     validateSparkComponents(spark.components as Record<string, unknown>)
   );
 };
+
+// ============================================
+// FLASHCARD COMPONENT INTERFACES
+// ============================================
+
+/**
+ * Card component - Flashcard content and metadata
+ * Embedded: SRS (nullable for drafts), deckId, status
+ */
+export interface CardComponent {
+  // Core card data
+  type: 'basic' | 'cloze'
+  question: string
+  answer: string
+  content?: string  // For cloze: "The {{c1::rhizome}} opposes..."
+  clozeIndex?: number  // For cloze: which deletion (1, 2, 3...)
+  clozeCount?: number  // For cloze: total deletions
+
+  // Status management
+  status: 'draft' | 'active' | 'suspended'
+
+  // Cloze grouping (parent-child relationship)
+  parentCardId?: string  // null for basic cards, parent ID for cloze siblings
+
+  // Generation metadata
+  generatedBy?: 'manual' | 'ai_document' | 'ai_selection' | 'ai_connection' | 'import'
+  generationPromptVersion?: string
+
+  // SRS embedded (null for drafts)
+  srs: {
+    // FSRS Card state (from ts-fsrs library)
+    due: string  // ISO timestamp
+    stability: number  // Days for retrievability to drop from 100% to 90%
+    difficulty: number  // 1-10 scale
+    elapsed_days: number
+    scheduled_days: number
+    learning_steps: number
+    reps: number
+    lapses: number
+    state: number  // 0=New, 1=Learning, 2=Review, 3=Relearning
+    last_review: string | null  // ISO timestamp
+  } | null
+
+  // Deck membership embedded
+  deckId: string
+  deckAddedAt: string  // ISO timestamp
+}
+
+/**
+ * Complete Flashcard entity with all components
+ * 4-component pattern: Card, Content, Temporal, ChunkRef (optional)
+ */
+export interface FlashcardEntity {
+  id: string
+  user_id: string
+  created_at: string
+  updated_at: string
+  components: {
+    Card: CardComponent
+    Content: ContentComponent  // Shared: tags
+    Temporal: TemporalComponent  // Shared: createdAt, updatedAt
+    ChunkRef?: ChunkRefComponent  // Optional: documentId, chunkIds, etc.
+  }
+}
+
+/**
+ * Validates Card component structure
+ */
+export const validateCardComponent = (
+  data: unknown
+): data is CardComponent => {
+  if (typeof data !== 'object' || data === null) return false
+  const card = data as Record<string, unknown>
+
+  return (
+    ['basic', 'cloze'].includes(card.type as string) &&
+    typeof card.question === 'string' &&
+    typeof card.answer === 'string' &&
+    ['draft', 'active', 'suspended'].includes(card.status as string) &&
+    typeof card.deckId === 'string' &&
+    (card.srs === null || (typeof card.srs === 'object' && card.srs !== null))
+  )
+}
+
+/**
+ * Validates that an object has all required flashcard components
+ */
+export const validateFlashcardComponents = (
+  components: Record<string, unknown>
+): components is FlashcardEntity['components'] => {
+  return (
+    components.Card !== undefined &&
+    components.Content !== undefined &&
+    components.Temporal !== undefined
+    // ChunkRef is optional for flashcards
+  )
+}
+
+/**
+ * Type guard for FlashcardEntity
+ */
+export const isFlashcardEntity = (
+  entity: unknown
+): entity is FlashcardEntity => {
+  if (typeof entity !== 'object' || entity === null) return false
+  const flashcard = entity as Record<string, unknown>
+
+  return (
+    typeof flashcard.id === 'string' &&
+    typeof flashcard.user_id === 'string' &&
+    typeof flashcard.created_at === 'string' &&
+    typeof flashcard.updated_at === 'string' &&
+    typeof flashcard.components === 'object' &&
+    flashcard.components !== null &&
+    validateFlashcardComponents(flashcard.components as Record<string, unknown>)
+  )
+}

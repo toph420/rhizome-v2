@@ -835,6 +835,33 @@ npm run test:full-validation
 
 ## Development
 
+### Critical: Gemini SDK Usage
+
+**ALWAYS use `@google/genai` (new SDK), NEVER `@google/generative-ai` (deprecated)**
+
+```typescript
+// ✅ CORRECT
+import { GoogleGenAI } from '@google/genai'
+
+const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY })
+const result = await genAI.models.generateContent({
+  model: 'gemini-2.0-flash',
+  contents: [{ parts: [{ text: prompt }] }]
+})
+const text = result.text
+
+// ❌ WRONG (old SDK)
+import { GoogleGenerativeAI } from '@google/generative-ai'
+const genAI = new GoogleGenerativeAI(apiKey)
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+```
+
+**Import Paths**: Always verify file locations before importing
+- ✅ `../lib/handler-job-manager.js` (file in `lib/`)
+- ❌ `../lib/managers/handler-job-manager.js` (wrong path)
+
+**Check existing code** when in doubt: `grep -r "from '@google" worker/lib`
+
 ### Running Locally
 
 ```bash

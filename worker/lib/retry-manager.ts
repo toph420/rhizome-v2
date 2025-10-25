@@ -218,12 +218,15 @@ export async function recordJobFailure(
     ? calculateNextRetry(0) // First retry in 1 minute
     : null
 
+  // Preserve actual error message with classification context
+  const errorMessage = `${error.message} (${classification.type}: ${classification.message})`
+
   try {
     await supabase
       .from('background_jobs')
       .update({
         status: 'failed',
-        error_message: classification.message,
+        error_message: errorMessage,
         completed_at: new Date().toISOString(),
         next_retry_at: nextRetryAt
         // Note: We don't modify input_data to avoid type issues
@@ -231,7 +234,7 @@ export async function recordJobFailure(
       .eq('id', jobId)
 
     console.log(
-      `[RetryManager] Recorded ${classification.type} error for job ${jobId}: ${classification.message}`
+      `[RetryManager] Recorded ${classification.type} error for job ${jobId}: ${error.message}`
     )
   } catch (updateError) {
     console.error(`[RetryManager] Failed to record job failure for ${jobId}:`, updateError)

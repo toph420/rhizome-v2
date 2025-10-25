@@ -134,7 +134,6 @@ export function RightPanelV2({
   }
 
   return (
-    <NeobrutalismTheme>
       <motion.div
         className={cn(
           "fixed right-0 bottom-0 border-l-2 border-border z-40 bg-secondary-background",
@@ -182,7 +181,7 @@ export function RightPanelV2({
               <motion.button
                 key={tab.id}
                 className={cn(
-                  "relative p-2 rounded-base border-2 border-border",
+                  "relative p-2 rounded-base",
                   "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
                   "transition-all shadow-base",
                   activeTab === tab.id && "shadow-none translate-x-1 translate-y-1"
@@ -333,6 +332,5 @@ export function RightPanelV2({
         )}
       </AnimatePresence>
     </motion.div>
-    </NeobrutalismTheme>
   )
 }

@@ -24,6 +24,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  TooltipProvider,
 } from '@/components/rhizome/tooltip'
 import { useStorageScanStore } from '@/stores/admin/storage-scan'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
@@ -267,8 +268,9 @@ export function ImportTab() {
   const importJobsList = Array.from(jobs.values()).filter(j => j.type === 'import_document')
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <TooltipProvider>
+      <div className="space-y-6">
+        {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold">Import from Storage</h3>
@@ -573,6 +575,7 @@ export function ImportTab() {
           reprocessConnections={reprocessConnections}
         />
       )}
-    </div>
+      </div>
+    </TooltipProvider>
   )
 }

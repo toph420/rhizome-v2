@@ -1,6 +1,55 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth'
+
+/**
+ * Fetches connections for visible chunks with authentication.
+ *
+ * Pattern 2: Server Action → Zustand Store
+ * - Enforces RLS through Server Action
+ * - Returns connections for specified chunk IDs
+ * - Used by ConnectionsList to populate store
+ *
+ * @param chunkIds - Array of chunk IDs to fetch connections for
+ * @returns Array of connections or empty array on error
+ */
+export async function getConnectionsForChunks(chunkIds: string[]) {
+  try {
+    const user = await getCurrentUser()
+    if (!user) {
+      console.warn('[getConnectionsForChunks] Unauthorized: no user')
+      return []
+    }
+
+    // Filter out 'no-chunk' placeholders (gap regions without chunk coverage)
+    const validChunkIds = chunkIds.filter(id => id !== 'no-chunk')
+    if (validChunkIds.length === 0) {
+      console.log('[getConnectionsForChunks] No valid chunks (gap region or empty)')
+      return []
+    }
+
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+      .from('connections')
+      .select('*')
+      .in('source_chunk_id', validChunkIds)
+      .order('strength', { ascending: false })
+      .limit(100)
+
+    if (error) {
+      console.error('[getConnectionsForChunks] Error:', error)
+      return []
+    }
+
+    console.log('[getConnectionsForChunks] Fetched connections:', data?.length || 0)
+    return data || []
+  } catch (error) {
+    console.error('[getConnectionsForChunks] Exception:', error)
+    return []
+  }
+}
 
 /**
  * Updates connection feedback (validate/reject/star).
