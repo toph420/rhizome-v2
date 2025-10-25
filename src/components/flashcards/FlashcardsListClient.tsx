@@ -30,7 +30,7 @@ export function FlashcardsListClient({ documentId }: FlashcardsListClientProps) 
   } = useFlashcardStore()
 
   const cards = getCardsByDocument(documentId)
-  const [filter, setFilter] = useState<'all' | 'draft' | 'approved'>('all')
+  const [filter, setFilter] = useState<'all' | 'draft' | 'active'>('all')
   const [activeCardId, setActiveCardId] = useState<string | null>(null)
   const router = useRouter()
 
@@ -96,7 +96,7 @@ export function FlashcardsListClient({ documentId }: FlashcardsListClientProps) 
             <SelectContent>
               <SelectItem value="all">All Cards</SelectItem>
               <SelectItem value="draft">Drafts</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -104,7 +104,7 @@ export function FlashcardsListClient({ documentId }: FlashcardsListClientProps) 
         {dueCount > 0 && (
           <Button
             size="sm"
-            onClick={() => router.push('/flashcards/study')}
+            onClick={() => router.push('/study')}
           >
             Study ({dueCount})
           </Button>
@@ -112,16 +112,18 @@ export function FlashcardsListClient({ documentId }: FlashcardsListClientProps) 
       </div>
 
       {/* Stats summary */}
-      <div className="text-xs text-muted-foreground p-3 bg-muted rounded-lg">
-        <div className="flex justify-between">
-          <span>Total cards:</span>
-          <span className="font-medium">{cards.length}</span>
+      <Card className="p-3">
+        <div className="text-xs space-y-1">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Total cards:</span>
+            <span className="font-semibold">{cards.length}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Due for review:</span>
+            <span className="font-semibold">{dueCount}</span>
+          </div>
         </div>
-        <div className="flex justify-between mt-1">
-          <span>Due for review:</span>
-          <span className="font-medium">{dueCount}</span>
-        </div>
-      </div>
+      </Card>
 
       {/* Cards list */}
       <div className="space-y-2">
@@ -133,6 +135,7 @@ export function FlashcardsListClient({ documentId }: FlashcardsListClientProps) 
             onClick={() => setActiveCardId(card.entity_id)}
             onApproved={() => handleRefetch()}
             onDeleted={() => handleRefetch()}
+            onUpdated={() => handleRefetch()}
           />
         ))}
       </div>

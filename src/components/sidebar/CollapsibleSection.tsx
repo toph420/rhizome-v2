@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/rhizome/button'
+import { Badge } from '@/components/rhizome/badge'
 
 interface CollapsibleSectionProps {
   title: string

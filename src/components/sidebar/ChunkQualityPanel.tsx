@@ -1,9 +1,9 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/rhizome/card'
+import { Badge } from '@/components/rhizome/badge'
+import { Button } from '@/components/rhizome/button'
 import {
   Accordion,
   AccordionContent,

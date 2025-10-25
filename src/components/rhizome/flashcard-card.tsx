@@ -27,6 +27,7 @@ interface FlashcardCardProps {
   onClick: () => void
   onApproved?: () => void
   onDeleted?: () => void
+  onUpdated?: () => void
   onNavigateToChunk?: (chunkId: string) => void
 }
 
@@ -46,6 +47,7 @@ export function FlashcardCard({
   onClick,
   onApproved,
   onDeleted,
+  onUpdated,
   onNavigateToChunk
 }: FlashcardCardProps) {
   // Internal state (no prop drilling)
@@ -62,10 +64,6 @@ export function FlashcardCard({
     const originalQuestion = flashcard.question
     const originalAnswer = flashcard.answer
 
-    // Optimistic update (would update Zustand store here)
-    // flashcard.question = editQuestion
-    // flashcard.answer = editAnswer
-
     try {
       const result = await updateFlashcard(flashcard.entity_id, {
         question: editQuestion.trim(),
@@ -76,6 +74,7 @@ export function FlashcardCard({
 
       setIsEditing(false)
       toast.success('Flashcard updated')
+      onUpdated?.()
     } catch (error) {
       // Revert on error
       setEditQuestion(originalQuestion)
@@ -85,7 +84,7 @@ export function FlashcardCard({
     } finally {
       setIsSubmitting(false)
     }
-  }, [editQuestion, editAnswer, flashcard])
+  }, [editQuestion, editAnswer, flashcard, onUpdated])
 
   // Cancel editing
   const handleCancel = useCallback(() => {
@@ -103,10 +102,10 @@ export function FlashcardCard({
 
       if (!result.success) throw new Error(result.error || 'Failed to approve')
 
-      toast.success('Flashcard approved')
+      toast.success('Flashcard activated')
       onApproved?.()
     } catch (error) {
-      toast.error('Failed to approve flashcard')
+      toast.error('Failed to activate flashcard')
       console.error('[FlashcardCard] Approve failed:', error)
     } finally {
       setIsSubmitting(false)
@@ -139,6 +138,13 @@ export function FlashcardCard({
     if (!isActive) return
 
     const handleKeyPress = (e: KeyboardEvent) => {
+      // Allow ⌘Enter to work even in input fields (for saving edits)
+      if (e.key === 'Enter' && isEditing && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        handleSave()
+        return
+      }
+
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return // Don't trigger in input fields
       }
@@ -148,12 +154,6 @@ export function FlashcardCard({
           if (!isEditing) {
             e.preventDefault()
             setIsEditing(true)
-          }
-          break
-        case 'enter':  // Save with ⌘Enter
-          if (isEditing && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            handleSave()
           }
           break
         case 'escape':  // Cancel editing
@@ -193,9 +193,14 @@ export function FlashcardCard({
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
-          <Badge variant={isDraft ? "neutral" : "default"}>
-            {flashcard.card_type}
-          </Badge>
+          <div className="flex gap-2">
+            <Badge variant={isDraft ? "neutral" : "default"}>
+              {flashcard.card_type}
+            </Badge>
+            <Badge variant={isDraft ? "outline" : "default"}>
+              {isDraft ? "draft" : "active"}
+            </Badge>
+          </div>
           <div className="flex gap-1">
             {isDraft && (
               <Button

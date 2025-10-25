@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { reprocessConnections, type ReprocessMode, type EngineType } from '@/app/actions/documents'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/rhizome/button'
+import { Badge } from '@/components/rhizome/badge'
 import { Label } from '@/components/rhizome/label'
 import { RadioGroup, RadioGroupItem } from '@/components/rhizome/radio-group'
 import { Checkbox } from '@/components/rhizome/checkbox'

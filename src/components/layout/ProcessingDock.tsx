@@ -17,6 +17,7 @@ import {
   Zap,
   BookOpen,
   RefreshCw,
+  Brain,
 } from 'lucide-react'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { useAdminPanelStore } from '@/stores/admin/admin-panel'
@@ -153,6 +154,9 @@ export function ProcessingDock() {
       case 'readwise_import':
         return 'Readwise Import'
 
+      case 'generate_flashcards':
+        return 'Generating Flashcards'
+
       default:
         return 'Processing...'
     }
@@ -180,6 +184,8 @@ export function ProcessingDock() {
         return <RefreshCw className="size-4 text-indigo-600" />
       case 'readwise_import':
         return <BookOpen className="size-4 text-green-600" />
+      case 'generate_flashcards':
+        return <Brain className="size-4 text-purple-600" />
       default:
         return <Loader2 className="size-4 text-muted-foreground" />
     }

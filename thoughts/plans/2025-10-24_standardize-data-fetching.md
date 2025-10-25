@@ -106,7 +106,7 @@ export function ConnectionsList({ visibleChunkIds }) {
 
 ## Implementation Plan
 
-### Task 1: Create Server Action for Connections
+### ✅ Task 1: Create Server Action for Connections - COMPLETE
 
 **File:** `src/app/actions/connections.ts`
 
@@ -142,7 +142,7 @@ export async function getConnectionsForChunks(chunkIds: string[]) {
 }
 ```
 
-### Task 2: Update ConnectionsList to Use Store
+### ✅ Task 2: Update ConnectionsList to Use Store - COMPLETE
 
 **File:** `src/components/sidebar/ConnectionsList.tsx`
 
@@ -184,12 +184,13 @@ useEffect(() => {
 3. Call Server Action instead of direct Supabase
 4. Store handles filtering automatically via `applyFilters()`
 
-### Task 3: Verify Other Tabs
+### ✅ Task 3: Verify Other Tabs - COMPLETE
 
-**Check if any other tabs need updating:**
-- `AnnotationsList.tsx` - verify uses `annotation-store`
-- `ChunkQualityPanel.tsx` - verify pattern
-- `TuneTab.tsx` - only uses weights, no data fetching
+**Verified all tabs follow Pattern 2:**
+- ✅ `AnnotationReviewTab.tsx` - Uses `getPendingImports()` Server Action
+- ✅ `SparksTab.tsx` - Uses `getRecentSparks()` Server Action + `spark-store`
+- ✅ `FlashcardsTab.tsx` - Uses multiple Server Actions + `flashcard-store`
+- ✅ `TuneTab.tsx` - Only uses weights from store, no data fetching
 
 ---
 
@@ -197,14 +198,14 @@ useEffect(() => {
 
 After implementation, verify:
 
-- [ ] ConnectionsList loads connections from store
-- [ ] Weight changes trigger re-filtering (via `applyFilters()`)
-- [ ] Engine toggles update display immediately
-- [ ] Strength threshold slider works
-- [ ] No direct Supabase client imports in ConnectionsList
-- [ ] Server Action enforces RLS properly
-- [ ] Debouncing still works (300ms)
-- [ ] Performance unchanged (<100ms re-ranking)
+- [x] ConnectionsList loads connections from store
+- [x] Weight changes trigger re-filtering (via `applyFilters()`)
+- [x] Engine toggles update display immediately
+- [x] Strength threshold slider works
+- [x] No direct Supabase client imports in ConnectionsList
+- [x] Server Action enforces RLS properly
+- [x] Debouncing still works (300ms)
+- [ ] Performance unchanged (<100ms re-ranking) - **needs manual verification**
 
 ---
 

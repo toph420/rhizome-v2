@@ -16,6 +16,7 @@ import {
 } from '@/components/rhizome/select'
 import { generateFlashcards } from '@/app/actions/flashcards'
 import { useFlashcardStore } from '@/stores/flashcard-store'
+import { useReaderStore } from '@/stores/reader-store'
 
 interface GenerationPanelClientProps {
   documentId: string
@@ -23,6 +24,7 @@ interface GenerationPanelClientProps {
 
 export function GenerationPanelClient({ documentId }: GenerationPanelClientProps) {
   const { prompts, decks } = useFlashcardStore()
+  const { visibleChunks } = useReaderStore()
   const [sourceType, setSourceType] = useState<'document' | 'chunks'>('document')
   const [promptId, setPromptId] = useState('')
   const [count, setCount] = useState(5)
@@ -51,11 +53,25 @@ export function GenerationPanelClient({ documentId }: GenerationPanelClientProps
       return
     }
 
+    // Get source IDs based on type
+    let sourceIds: string[]
+    if (sourceType === 'chunks') {
+      // Use visible chunk IDs
+      sourceIds = visibleChunks.map(c => c.id)
+      if (sourceIds.length === 0) {
+        toast.error('No visible chunks to generate from')
+        return
+      }
+    } else {
+      // Use document ID
+      sourceIds = [documentId]
+    }
+
     setGenerating(true)
     try {
       const result = await generateFlashcards({
         sourceType,
-        sourceIds: [documentId],
+        sourceIds,
         promptTemplateId: promptId,
         cardCount: count,
         deckId,
@@ -93,11 +109,13 @@ export function GenerationPanelClient({ documentId }: GenerationPanelClientProps
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="document">Full Document</SelectItem>
-            <SelectItem value="chunks">Visible Chunks</SelectItem>
+            <SelectItem value="chunks">Visible Chunks ({visibleChunks.length})</SelectItem>
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground mt-1">
-          {sourceType === 'document' ? 'Generate from entire document' : 'Generate from currently visible chunks'}
+          {sourceType === 'document'
+            ? 'Generate from entire document'
+            : `Generate from ${visibleChunks.length} chunks currently visible in reader`}
         </p>
       </div>
 
@@ -172,16 +190,18 @@ export function GenerationPanelClient({ documentId }: GenerationPanelClientProps
       </div>
 
       {/* Cost estimate */}
-      <div className="text-xs text-muted-foreground p-3 bg-muted rounded-lg">
-        <div className="flex justify-between">
-          <span>Estimated cost:</span>
-          <span className="font-mono">~$0.{Math.ceil(count / 5).toString().padStart(2, '0')}</span>
+      <Card className="p-3">
+        <div className="text-xs space-y-1">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Estimated cost:</span>
+            <span className="font-mono font-semibold">~$0.{Math.ceil(count / 5).toString().padStart(2, '0')}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Processing time:</span>
+            <span className="font-semibold">~{Math.ceil(count / 2)}-{Math.ceil(count)} min</span>
+          </div>
         </div>
-        <div className="flex justify-between mt-1">
-          <span>Processing time:</span>
-          <span>~{Math.ceil(count / 2)}-{Math.ceil(count)} min</span>
-        </div>
-      </div>
+      </Card>
 
       {/* Generate button */}
       <Button

@@ -1,7 +1,7 @@
 'use client'
 
 import { WeightTuning } from './WeightTuning'
-import { Separator } from '@/components/ui/separator'
+import { Separator } from '@/components/rhizome/separator'
 import { Label } from '@/components/rhizome/label'
 import { Switch } from '@/components/rhizome/switch'
 import { useUIStore } from '@/stores/ui-store'

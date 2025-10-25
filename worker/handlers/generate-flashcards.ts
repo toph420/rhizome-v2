@@ -207,7 +207,6 @@ export async function generateFlashcardsHandler(
           await supabase.from('components').insert([
             {
               entity_id: entity.id,
-              user_id: userId,
               component_type: 'Card',
               data: {
                 type: 'cloze',
@@ -227,7 +226,6 @@ export async function generateFlashcardsHandler(
             },
             {
               entity_id: entity.id,
-              user_id: userId,
               component_type: 'Content',
               data: {
                 tags: card.keywords || [],
@@ -236,7 +234,6 @@ export async function generateFlashcardsHandler(
             },
             {
               entity_id: entity.id,
-              user_id: userId,
               component_type: 'Temporal',
               data: {
                 createdAt: new Date().toISOString(),
@@ -245,7 +242,6 @@ export async function generateFlashcardsHandler(
             },
             {
               entity_id: entity.id,
-              user_id: userId,
               component_type: 'ChunkRef',
               data: {
                 documentId: documentId,
@@ -281,7 +277,6 @@ export async function generateFlashcardsHandler(
         await supabase.from('components').insert([
           {
             entity_id: entity.id,
-            user_id: userId,
             component_type: 'Card',
             data: {
               type: 'basic',
@@ -297,7 +292,6 @@ export async function generateFlashcardsHandler(
           },
           {
             entity_id: entity.id,
-            user_id: userId,
             component_type: 'Content',
             data: {
               tags: card.keywords || [],
@@ -306,7 +300,6 @@ export async function generateFlashcardsHandler(
           },
           {
             entity_id: entity.id,
-            user_id: userId,
             component_type: 'Temporal',
             data: {
               createdAt: new Date().toISOString(),
@@ -315,7 +308,6 @@ export async function generateFlashcardsHandler(
           },
           {
             entity_id: entity.id,
-            user_id: userId,
             component_type: 'ChunkRef',
             data: {
               documentId: documentId,
@@ -345,7 +337,21 @@ export async function generateFlashcardsHandler(
 
     console.log(`✓ Created ${flashcardIds.length} ECS entities`)
 
-    // ✅ STEP 5: COMPLETE (100%)
+    // ✅ STEP 5: REBUILD CACHE (95%)
+    await jobManager.updateProgress(95, 'finalizing', 'Building flashcards cache')
+
+    const { error: cacheError } = await supabase.rpc('rebuild_flashcards_cache', {
+      p_user_id: userId
+    })
+
+    if (cacheError) {
+      console.error('[GenerateFlashcards] Cache rebuild failed:', cacheError)
+      // Continue anyway - cache can be rebuilt manually
+    } else {
+      console.log(`✓ Rebuilt flashcards cache for user`)
+    }
+
+    // ✅ STEP 6: COMPLETE (100%)
     const processingTime = Date.now() - startTime
 
     const outputData = {
