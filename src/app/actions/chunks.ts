@@ -372,3 +372,196 @@ export async function updateChunkOffsets(
     }
   }
 }
+
+/**
+ * Load lightweight chunk metadata for list display.
+ * Includes detection status and connection count.
+ */
+export async function loadChunkMetadata(documentId: string) {
+  const supabase = await createClient()
+  const user = await getCurrentUser()
+
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
+  const { data: chunks, error } = await supabase
+    .from('chunks')
+    .select(`
+      id,
+      chunk_index,
+      connections_detected,
+      heading_path,
+      word_count,
+      content
+    `)
+    .eq('document_id', documentId)
+    .eq('is_current', true)
+    .order('chunk_index')
+
+  if (error) throw error
+
+  // Count connections for each chunk (lazy load approach - only when needed)
+  // For now, return without counts (will query in detailed mode)
+  return chunks.map(chunk => ({
+    id: chunk.id,
+    chunk_index: chunk.chunk_index,
+    connections_detected: chunk.connections_detected,
+    preview: chunk.content.slice(0, 150) + '...',
+    connection_count: 0  // Placeholder - will load in detailed mode
+  }))
+}
+
+/**
+ * Load full chunk details for editing (lazy loaded on demand).
+ * Includes connection count query.
+ */
+export async function loadChunkDetails(chunkId: string) {
+  const supabase = await createClient()
+  const user = await getCurrentUser()
+
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
+  const { data: chunk, error } = await supabase
+    .from('chunks')
+    .select(`
+      id,
+      content,
+      heading_path,
+      page_start,
+      page_end,
+      word_count,
+      token_count,
+      themes,
+      importance_score,
+      summary,
+
+      emotional_metadata,
+      conceptual_metadata,
+      domain_metadata,
+
+      connections_detected,
+      connections_detected_at,
+
+      position_confidence,
+      metadata_confidence,
+      chunker_type
+    `)
+    .eq('id', chunkId)
+    .single()
+
+  if (error) throw error
+
+  // Count connections (only when loading detailed view)
+  const { count: connectionCount } = await supabase
+    .from('connections')
+    .select('id', { count: 'exact', head: true })
+    .eq('source_chunk_id', chunkId)
+
+  return {
+    ...chunk,
+    connection_count: connectionCount || 0
+  }
+}
+
+/**
+ * Update chunk metadata (JSONB fields and scalar fields).
+ * Used by metadata editor in detailed mode.
+ */
+export async function updateChunkMetadata(
+  chunkId: string,
+  metadata: {
+    title?: string
+    domain_metadata?: Record<string, any>
+    emotional_metadata?: Record<string, any>
+    conceptual_metadata?: Record<string, any>
+    themes?: string[]
+    importance_score?: number
+  }
+) {
+  const supabase = await createClient()
+  const user = await getCurrentUser()
+
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
+  // Build update object for JSONB fields
+  const updates: Record<string, any> = {}
+
+  if (metadata.domain_metadata !== undefined) {
+    updates.domain_metadata = metadata.domain_metadata
+  }
+  if (metadata.emotional_metadata !== undefined) {
+    updates.emotional_metadata = metadata.emotional_metadata
+  }
+  if (metadata.conceptual_metadata !== undefined) {
+    updates.conceptual_metadata = metadata.conceptual_metadata
+  }
+  if (metadata.themes !== undefined) {
+    updates.themes = metadata.themes
+  }
+  if (metadata.importance_score !== undefined) {
+    updates.importance_score = metadata.importance_score
+  }
+
+  const { error } = await supabase
+    .from('chunks')
+    .update(updates)
+    .eq('id', chunkId)
+
+  if (error) throw error
+
+  // Revalidate reader page to show updated metadata
+  const { data: chunk } = await supabase
+    .from('chunks')
+    .select('document_id')
+    .eq('id', chunkId)
+    .single()
+
+  if (chunk) {
+    revalidatePath(`/read/${chunk.document_id}`)
+  }
+
+  return { success: true }
+}
+
+/**
+ * Detect connections for multiple chunks (batch operation).
+ */
+export async function detectBatchChunkConnections(
+  documentId: string,
+  chunkIds: string[]
+) {
+  const user = await getCurrentUser()
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
+  const supabase = await createClient()
+
+  // Create batch detection job
+  const { data: job, error} = await supabase
+    .from('background_jobs')
+    .insert({
+      job_type: 'detect_connections',
+      input_data: {
+        document_id: documentId,
+        chunk_ids: chunkIds,  // Batch mode
+        trigger: 'user_batch'
+      },
+      entity_id: documentId,
+      user_id: user.id,
+      status: 'pending'
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  revalidatePath(`/read/${documentId}`)
+
+  return { success: true, jobId: job.id, chunkCount: chunkIds.length }
+}

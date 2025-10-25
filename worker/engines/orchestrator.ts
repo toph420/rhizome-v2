@@ -18,6 +18,7 @@ import { DEFAULT_ENGINE_CONFIG } from './engine-config'
 
 export interface OrchestratorConfig {
   enabledEngines?: ('semantic_similarity' | 'contradiction_detection' | 'thematic_bridge')[];
+  sourceChunkIds?: string[];  // NEW: Filter connections to these source chunks only
   targetDocumentIds?: string[];  // Filter connections to specific target documents (for Add New mode)
   reprocessingBatch?: string;  // Reprocessing batch ID to query correct chunks during reprocessing
   semanticSimilarity?: any;
@@ -45,6 +46,7 @@ export async function processDocument(
 ): Promise<OrchestratorResult> {
   const {
     enabledEngines = ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+    sourceChunkIds,  // NEW
     targetDocumentIds,
     reprocessingBatch,
     onProgress
@@ -52,6 +54,11 @@ export async function processDocument(
 
   console.log(`[Orchestrator] Processing document ${documentId}`);
   console.log(`[Orchestrator] Enabled engines: ${enabledEngines.join(', ')}`);
+
+  // NEW: Log chunk filtering
+  if (sourceChunkIds) {
+    console.log(`[Orchestrator] Per-chunk mode: ${sourceChunkIds.length} source chunks`)
+  }
   if (targetDocumentIds && targetDocumentIds.length > 0) {
     console.log(`[Orchestrator] Filtering to ${targetDocumentIds.length} target document(s)`);
   }
@@ -80,8 +87,9 @@ export async function processDocument(
       await onProgress?.(stage.start, engineName.replace('_', '-'), stage.label)
     }
 
-    // Prepare engine-specific config
+    // Prepare engine-specific config (UPDATED)
     const engineConfig: any = {
+      sourceChunkIds,  // NEW: Engines will filter source chunks
       targetDocumentIds,
       reprocessingBatch,
       ...DEFAULT_ENGINE_CONFIG[engineName as keyof typeof DEFAULT_ENGINE_CONFIG],

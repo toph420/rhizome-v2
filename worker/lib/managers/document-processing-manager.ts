@@ -20,6 +20,7 @@ import { StorageClient } from '../storage-client.js'
 import { generateEmbeddings } from '../embeddings.js'
 import { saveToStorage } from '../storage-helpers.js'
 import { processDocument as orchestrateConnections } from '../../engines/orchestrator.js'
+import { ConnectionDetectionManager } from './connection-detection-manager.js'
 import type { SourceType } from '../../types/multi-format.js'
 import type { ProcessResult } from '../../types/processor.js'
 import { GEMINI_MODEL } from '../model-config.js'
@@ -31,6 +32,7 @@ interface DocumentProcessingOptions {
   sourceType: SourceType
   reviewBeforeChunking?: boolean
   reviewDoclingExtraction?: boolean
+  detectConnections?: boolean  // NEW: Default true for backward compatibility
 }
 
 /**
@@ -107,9 +109,17 @@ export class DocumentProcessingManager extends HandlerJobManager {
     await this.updateProgress(80, 'metadata', 'Updating metadata')
     await this.updateDocumentMetadata(documentId, result)
 
-    // Stage 6: Run connection detection
-    await this.updateProgress(90, 'connections', 'Detecting connections')
-    await this.detectConnections(documentId)
+    // Stage 6: Optional connection detection
+    if (this.options.detectConnections !== false) {
+      await this.updateProgress(90, 'connections', 'Detecting connections')
+      await this.detectConnections(documentId)
+    } else {
+      console.log('[DocumentProcessing] Skipping connection detection (user opted out)')
+
+      // Mark chunks as skipped
+      const connectionManager = new ConnectionDetectionManager(this.supabase, this.jobId)
+      await connectionManager.markChunksAsSkipped(this.options.documentId, 'user_choice')
+    }
 
     // Stage 7: Mark complete
     await this.markComplete({

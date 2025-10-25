@@ -33,6 +33,7 @@ export interface SemanticSimilarityConfig {
   maxResultsPerChunk?: number; // Max matches per chunk (default: 50)
   importanceWeight?: number; // Weight for importance boost (default: 0.3)
   crossDocumentOnly?: boolean; // Only find cross-document connections (default: true)
+  sourceChunkIds?: string[];  // NEW: Filter to specific source chunks
   targetDocumentIds?: string[]; // Filter to specific target documents (for Add New mode)
 }
 
@@ -52,11 +53,15 @@ export async function runSemanticSimilarity(
     maxResultsPerChunk = 50,
     importanceWeight = 0.3,
     crossDocumentOnly = true,
+    sourceChunkIds,  // NEW
     targetDocumentIds
   } = config;
 
   console.log(`[SemanticSimilarity] Processing document ${documentId}`);
   console.log(`[SemanticSimilarity] Config: threshold=${threshold}, maxResults=${maxResultsPerChunk}, crossDocOnly=${crossDocumentOnly}`);
+  if (sourceChunkIds && sourceChunkIds.length > 0) {
+    console.log(`[SemanticSimilarity] Filtering to ${sourceChunkIds.length} source chunks`);
+  }
   if (targetDocumentIds && targetDocumentIds.length > 0) {
     console.log(`[SemanticSimilarity] Filtering to ${targetDocumentIds.length} target document(s)`);
   }
@@ -75,6 +80,11 @@ export async function runSemanticSimilarity(
     .select('id, document_id, embedding, importance_score')
     .eq('document_id', documentId)
     .not('embedding', 'is', null);
+
+  // NEW: Filter to specific source chunks if provided
+  if (sourceChunkIds && sourceChunkIds.length > 0) {
+    query = query.in('id', sourceChunkIds)
+  }
 
   if (config.reprocessingBatch) {
     query = query.eq('reprocessing_batch', config.reprocessingBatch);

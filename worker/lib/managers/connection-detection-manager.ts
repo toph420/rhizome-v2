@@ -18,8 +18,10 @@ type EngineType = 'semantic_similarity' | 'contradiction_detection' | 'thematic_
 
 interface DetectOptions {
   documentId: string
+  chunkIds?: string[]  // NEW: Optional chunk filtering
   chunkCount?: number
   trigger?: string
+  markAsDetected?: boolean  // NEW: Mark chunks after detection (default: true)
 }
 
 interface ReprocessOptions {
@@ -37,17 +39,24 @@ interface ReprocessOptions {
 export class ConnectionDetectionManager extends HandlerJobManager {
   /**
    * Execute initial connection detection for a document.
+   * Now supports per-chunk filtering via chunkIds parameter.
    */
   async detectConnections(options: DetectOptions): Promise<void> {
-    const { documentId, chunkCount, trigger } = options
+    const { documentId, chunkIds, chunkCount, trigger, markAsDetected = true } = options
 
-    console.log(`[DetectConnections] Starting for document ${documentId} (${chunkCount} chunks, ${trigger})`)
+    console.log(`[DetectConnections] Starting for document ${documentId}`)
+    if (chunkIds) {
+      console.log(`[DetectConnections] Per-chunk mode: ${chunkIds.length} chunks`)
+    } else {
+      console.log(`[DetectConnections] Document-level mode: all chunks`)
+    }
 
     await this.updateProgress(0, 'detect-connections', 'Starting connection detection')
 
-    // Run orchestrator with all 3 engines
+    // Run orchestrator with optional chunk filtering
     const result = await processDocument(documentId, {
       enabledEngines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
+      sourceChunkIds: chunkIds,  // NEW: Pass chunk filter to orchestrator
       onProgress: (percent, stage, details) => this.updateProgress(percent, stage, details),
       ...DEFAULT_ENGINE_CONFIG
     })
@@ -55,9 +64,17 @@ export class ConnectionDetectionManager extends HandlerJobManager {
     console.log(`[DetectConnections] Created ${result.totalConnections} connections`)
     console.log(`[DetectConnections] By engine:`, result.byEngine)
 
+    // Mark chunks as detected (if requested)
+    if (markAsDetected) {
+      const chunksToMark = chunkIds || await this.getAllChunkIds(documentId)
+      await this.markChunksAsDetected(chunksToMark)
+      console.log(`[DetectConnections] Marked ${chunksToMark.length} chunks as detected`)
+    }
+
     await this.markComplete({
       success: true,
       totalConnections: result.totalConnections,
+      chunksProcessed: chunkIds?.length || chunkCount,
       byEngine: result.byEngine
     }, `Found ${result.totalConnections} connections`)
   }
@@ -260,5 +277,59 @@ export class ConnectionDetectionManager extends HandlerJobManager {
       .gt('created_at', doc.created_at)
 
     return newerDocs?.map((d: any) => d.id) || []
+  }
+
+  /**
+   * Mark chunks as having connections detected.
+   */
+  private async markChunksAsDetected(chunkIds: string[]): Promise<void> {
+    const { error } = await this.supabase
+      .from('chunks')
+      .update({
+        connections_detected: true,
+        connections_detected_at: new Date().toISOString()
+      })
+      .in('id', chunkIds)
+
+    if (error) {
+      console.warn(`[ConnectionDetectionManager] Failed to mark chunks: ${error.message}`)
+      // Non-fatal: detection succeeded even if marking failed
+    }
+  }
+
+  /**
+   * Mark chunks as skipped (user chose not to detect).
+   */
+  async markChunksAsSkipped(
+    documentId: string,
+    reason: 'user_choice' | 'error' | 'manual_skip'
+  ): Promise<void> {
+    const { error } = await this.supabase
+      .from('chunks')
+      .update({
+        connections_detected: false,
+        detection_skipped_reason: reason
+      })
+      .eq('document_id', documentId)
+      .eq('is_current', true)
+
+    if (error) {
+      throw new Error(`Failed to mark chunks as skipped: ${error.message}`)
+    }
+
+    console.log(`[ConnectionDetectionManager] Marked chunks as skipped (${reason})`)
+  }
+
+  /**
+   * Get all chunk IDs for a document (helper).
+   */
+  private async getAllChunkIds(documentId: string): Promise<string[]> {
+    const { data } = await this.supabase
+      .from('chunks')
+      .select('id')
+      .eq('document_id', documentId)
+      .eq('is_current', true)
+
+    return data?.map(c => c.id) || []
   }
 }

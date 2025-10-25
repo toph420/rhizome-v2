@@ -33,11 +33,15 @@ export async function runThematicBridgeQwen(
     maxSourceChunks = 50,
     maxCandidatesPerSource = 10,
     batchSize = 5,
+    sourceChunkIds,  // NEW
     targetDocumentIds
   } = config;
 
   console.log(`[ThematicBridge:Qwen] Processing document ${documentId}`);
   console.log(`[ThematicBridge:Qwen] AI filtering: importance>${minImportance}, strength>${minStrength}`);
+  if (sourceChunkIds && sourceChunkIds.length > 0) {
+    console.log(`[ThematicBridge:Qwen] Per-chunk mode: ${sourceChunkIds.length} source chunks (skipping importance filter)`);
+  }
   if (targetDocumentIds && targetDocumentIds.length > 0) {
     console.log(`[ThematicBridge:Qwen] Filtering to ${targetDocumentIds.length} target document(s) (reduces AI calls)`);
   }
@@ -61,10 +65,19 @@ export async function runThematicBridgeQwen(
       importance_score
     `)
     .eq('document_id', documentId)
-    .gte('importance_score', minImportance)
     .not('domain_metadata', 'is', null)
-    .order('importance_score', { ascending: false })
-    .limit(maxSourceChunks);
+
+  // NEW: Filter to specific source chunks if provided
+  if (sourceChunkIds && sourceChunkIds.length > 0) {
+    sourceQuery = sourceQuery.in('id', sourceChunkIds)
+    // Don't apply importance filter or limit when specific chunks requested
+  } else {
+    // Original filtering for document-level detection
+    sourceQuery = sourceQuery
+      .gte('importance_score', minImportance)
+      .order('importance_score', { ascending: false })
+      .limit(maxSourceChunks)
+  }
 
   if (config.reprocessingBatch) {
     sourceQuery = sourceQuery.eq('reprocessing_batch', config.reprocessingBatch);

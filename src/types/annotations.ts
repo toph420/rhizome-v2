@@ -116,6 +116,11 @@ export interface Chunk {
   page_start?: number | null
   page_end?: number | null
   section_marker?: string | null
+
+  // Connection detection tracking (from migration 053)
+  connections_detected?: boolean
+  connections_detected_at?: string | null
+  detection_skipped_reason?: 'user_choice' | 'error' | 'manual_skip' | null
 }
 
 /**
