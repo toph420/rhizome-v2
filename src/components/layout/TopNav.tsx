@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Menu, Settings, Library, Brain, Palette, Database, FlaskConical } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import { cn } from '@/lib/utils'
 
 interface TopNavProps {
@@ -21,7 +21,6 @@ const navigation = [
     name: 'Study',
     href: '/study',
     icon: Brain,
-    disabled: true,
   },
   {
     name: 'Experiments',

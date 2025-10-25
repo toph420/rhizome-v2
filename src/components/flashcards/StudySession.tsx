@@ -5,8 +5,9 @@ import { Card, CardContent } from '@/components/rhizome/card'
 import { Button } from '@/components/rhizome/button'
 import { Badge } from '@/components/rhizome/badge'
 import { X, Loader2 } from 'lucide-react'
-import { startStudySession, updateSessionStats, endStudySession } from '@/app/actions/study'
+import { startStudySession, updateSessionStats, endStudySession, getSessionStats } from '@/app/actions/study'
 import { reviewCard } from '@/app/actions/flashcards'
+import { SessionComplete } from './SessionComplete'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -96,6 +97,15 @@ export function StudySession({
   const [submitting, setSubmitting] = useState(false)
   const [reviewStartTime, setReviewStartTime] = useState(Date.now())
   const [totalTimeSpent, setTotalTimeSpent] = useState(0)
+  const [sessionComplete, setSessionComplete] = useState(false)
+  const [sessionStats, setSessionStats] = useState<{
+    reviewedCount: number
+    timeSpentMs: number
+    againCount: number
+    hardCount: number
+    goodCount: number
+    easyCount: number
+  } | null>(null)
 
   useEffect(() => {
     initSession()
@@ -162,14 +172,23 @@ export function StudySession({
         setRevealed(false)
         setReviewStartTime(Date.now())
       } else {
-        // Session complete
+        // Last card - fetch stats and show completion
         await endStudySession(session.id)
-        toast.success(`Study session complete! Reviewed ${session.cards.length} cards`)
-        onComplete?.({
-          reviewedCount: session.cards.length,
-          timeSpentMs: newTotalTime,
-        })
-        onExit?.()
+
+        const statsResult = await getSessionStats(session.id)
+        if (statsResult.success && statsResult.stats) {
+          setSessionStats({
+            reviewedCount: statsResult.stats.reviewedCount,
+            timeSpentMs: newTotalTime,
+            againCount: statsResult.stats.againCount,
+            hardCount: statsResult.stats.hardCount,
+            goodCount: statsResult.stats.goodCount,
+            easyCount: statsResult.stats.easyCount,
+          })
+        }
+
+        // Show completion screen instead of immediately calling onComplete
+        setSessionComplete(true)
       }
     } catch (error) {
       toast.error('Failed to save review')
@@ -238,6 +257,26 @@ export function StudySession({
     onExit?.()
   }
 
+  // Show completion screen
+  if (sessionComplete && sessionStats) {
+    return (
+      <SessionComplete
+        stats={sessionStats}
+        onStudyMore={() => {
+          // Reset and start new session
+          setSessionComplete(false)
+          setSessionStats(null)
+          setCurrentIndex(0)
+          setRevealed(false)
+          setTotalTimeSpent(0)
+          setReviewStartTime(Date.now())
+          initSession()  // Fetch new cards
+        }}
+        onExit={onExit || (() => {})}
+      />
+    )
+  }
+
   if (loading) {
     return (
       <div className={cn(
@@ -268,10 +307,10 @@ export function StudySession({
   const currentCard = session.cards[currentIndex]
   const remaining = session.cards.length - currentIndex
 
-  // Fullscreen mode
+  // Fullscreen mode (fills tab, not actual fullscreen)
   if (mode === 'fullscreen') {
     return (
-      <div className="fixed inset-0 bg-background flex flex-col z-50">
+      <div className="flex flex-col h-full">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b-2 border-border">
           <div className="flex items-center gap-4">
@@ -321,7 +360,7 @@ export function StudySession({
         </div>
         <Button
           size="sm"
-          variant="ghost"
+          variant="neutral"
           onClick={handleExit}
         >
           <X className="h-3 w-3" />

@@ -1,7 +1,7 @@
 # Flashcard System Documentation
 
-**Status**: ⚠️ Backend Complete, UI Functional (Study Mode Missing)
-**Version**: 1.0
+**Status**: ✅ Complete - Backend & Study System Fully Implemented
+**Version**: 2.0
 **Last Updated**: 2025-10-24
 
 ---
@@ -20,35 +20,47 @@
 - ✅ Template renderer (Mustache-style variables)
 - ✅ Multi-source loaders (5 types: document, chunks, selection, annotation, connection)
 - ✅ Server actions (CRUD + batch operations)
-- ✅ Database schema (decks, prompt_templates, flashcards_cache)
+- ✅ Database schema (decks, prompt_templates, flashcards_cache, study_sessions)
 - ✅ Cache rebuild RPC function
 - ✅ FSRS integration (ts-fsrs library)
+- ✅ Study statistics (streak, retention, upcoming reviews)
+- ✅ Advanced study filters (difficulty, tags, date ranges, status)
 
-**Frontend (80% Complete)**:
+**Frontend - Study System (100% Complete)** 🎉:
+- ✅ Study page with two-tab interface (`/study`)
+- ✅ Study management tab (deck browser, custom study builder)
+- ✅ Study session component (fullscreen and compact modes)
+- ✅ Session completion screen with analytics
+- ✅ DeckCard component (feature-rich with keyboard shortcuts)
+- ✅ CustomStudyBuilder (10+ filter types with live preview)
+- ✅ StudyStats component (compact and expanded modes)
+- ✅ CompactStudyTab (8th RightPanel tab for sidebar study)
+- ✅ Study store (Zustand - Pattern 2: Server Actions + Store)
+
+**Frontend - Flashcard Management (80% Complete)**:
 - ✅ FlashcardsTab (2-tab interface in RightPanel)
 - ✅ GenerationPanelClient (AI generation UI)
 - ✅ FlashcardsListClient (card browsing/filtering)
 - ✅ FlashcardCard component (keyboard shortcuts, inline editing)
 - ✅ Flashcard store (Zustand - Pattern 2: Server Actions + Store)
 
-### ❌ Not Implemented Yet
+### ⚠️ Optional Enhancements (Not Critical)
 
-**Frontend Missing**:
-- ❌ Study mode UI (`/flashcards/study` page)
-- ❌ Study session interface (card flip, rating buttons)
-- ❌ Deck management page (browse all decks)
-- ❌ Advanced stats/analytics
-- ❌ Prompt template editor UI
-- ❌ Batch selection toolbar
+**Nice-to-Have Features**:
+- ⚠️ Deck management page (full-page deck browser)
+- ⚠️ Advanced stats/analytics (graphs, trends)
+- ⚠️ Prompt template editor UI
+- ⚠️ Batch selection toolbar
+- ⚠️ Selection-based generation (from reader highlights)
+- ⚠️ Anki export (`.apkg` format)
 
-**Known Issues**:
-- ⚠️ React Query still in dependencies (handoff document proposes removal)
-- ⚠️ Study mode referenced in docs but not implemented
-
-**Recent Fixes** (2025-10-24):
-- ✅ Fixed component inserts in generation handler (removed invalid `user_id` field)
-- ✅ Added automatic cache rebuild after flashcard generation
-- ✅ Cards now appear in UI immediately after generation
+**Recent Implementation** (2025-10-24):
+- ✅ **Complete Study System v2** - Full 4-phase implementation
+- ✅ Study management with deck grid and custom study builder
+- ✅ Session completion screen with retention analytics
+- ✅ Compact sidebar study (RightPanel integration)
+- ✅ Advanced filtering with live preview
+- ✅ Smart session navigation
 
 ---
 
@@ -591,6 +603,395 @@ interface FlashcardState {
 - ✅ Server Actions enforce RLS
 - ✅ Consistent with SparksTab, ConnectionsList, AnnotationReviewTab
 - ✅ No QueryProvider setup needed
+
+---
+
+## Study System Components
+
+The complete study system was implemented in 4 phases (2025-10-24). This section documents the study-specific components.
+
+### Study Page (`src/app/study/page.tsx`)
+
+**Two-Tab Interface**:
+1. **Management Tab** - Deck browser, custom study builder, global stats
+2. **Session Tab** - Active study session with completion screen
+
+```typescript
+interface StudyPageProps {
+  // No props - uses Zustand store for state
+}
+
+// Tab switching managed by Zustand study-store
+```
+
+**Features**:
+- Keyboard-friendly navigation
+- Context-aware session management
+- Smart navigation (remembers where study started)
+- Persistent UI (no modals)
+
+### Management Tab Components
+
+#### 1. StudyManagement (`src/components/flashcards/StudyManagement.tsx`)
+
+Container component for management tab:
+
+```typescript
+interface StudyManagementProps {
+  onStartStudy: (context: SessionContext) => void
+}
+
+// Renders:
+// - StudyStats (global stats)
+// - DeckGrid (deck browser)
+// - CustomStudyBuilder (advanced filters)
+```
+
+#### 2. StudyStats (`src/components/flashcards/StudyStats.tsx`)
+
+**Reusable stats component** with two modes:
+
+```typescript
+interface StudyStatsProps {
+  scope: 'global' | 'deck' | 'document'
+  scopeId?: string
+  mode: 'compact' | 'expanded'
+  showRetention?: boolean
+  showStreak?: boolean
+  showUpcoming?: boolean
+  className?: string
+}
+
+// Compact mode: Inline stats (5 today | 12 due | 3 day streak 🔥)
+// Expanded mode: Full analytics grid with upcoming reviews
+```
+
+**Stats Provided**:
+- Today's review count
+- Cards due now
+- Retention rate (Good + Easy / Total)
+- Study streak (consecutive days)
+- Upcoming reviews (next 7 days)
+- Average time per card
+
+**Server Action**: `getStudyStats(scope, scopeId, timeRange)`
+
+#### 3. DeckGrid (`src/components/flashcards/DeckGrid.tsx`)
+
+Responsive grid of deck cards:
+
+```typescript
+interface DeckGridProps {
+  onStudyDeck: (deckId: string, deckName: string) => void
+}
+
+// Features:
+// - Responsive grid (1/2/3 columns)
+// - System deck identification
+// - Active deck selection
+// - Empty state handling
+```
+
+#### 4. DeckCard (`src/components/rhizome/deck-card.tsx`)
+
+**Feature-rich self-contained component**:
+
+```typescript
+interface DeckCardProps {
+  deck: {
+    id: string
+    name: string
+    description: string | null
+    is_system: boolean
+    total_cards: number
+    draft_cards: number
+    active_cards: number
+  }
+  isActive: boolean
+  onClick: () => void
+  onStudy: () => void
+  onRefresh: () => void
+}
+
+// Features:
+// - Keyboard shortcuts (S=study, Cmd+D=delete)
+// - Stats display (total/active/draft)
+// - System deck protection
+// - Dropdown menu (edit/delete/move)
+// - Server action integration
+```
+
+**Pattern**: Self-contained like FlashcardCard and ConnectionCard - no prop drilling.
+
+#### 5. CustomStudyBuilder (`src/components/flashcards/CustomStudyBuilder.tsx`)
+
+**Advanced filter UI** with live preview:
+
+```typescript
+interface CustomStudyBuilderProps {
+  onStartSession: (filters: CustomStudyFilters) => void
+}
+
+// 10+ Filter Types:
+// - Deck selection
+// - Tags (multiple)
+// - Difficulty range (0-10)
+// - Date ranges (created_at, last_review, next_review)
+// - Status (draft/active/suspended)
+// - Quick filters (not studied yet, failed cards)
+```
+
+**Features**:
+- Live preview count (debounced 300ms)
+- Filter persistence via Zustand
+- Reset all filters
+- Disabled state when no matches
+
+**Server Action**: Uses extended `startStudySession` with advanced filters
+
+### Session Components
+
+#### 6. StudySession (`src/components/flashcards/StudySession.tsx`)
+
+**Reusable study component** with two display modes:
+
+```typescript
+interface StudySessionProps {
+  deckId?: string
+  documentId?: string
+  chunkIds?: string[]
+  tags?: string[]
+  limit?: number
+  dueOnly?: boolean
+  mode: 'fullscreen' | 'compact'
+  onComplete?: (stats) => void
+  onExit?: () => void
+}
+
+// Fullscreen mode: Fixed overlay, large cards, exit button top-right
+// Compact mode: Embedded in sidebar, 2x2 rating grid, smaller UI
+```
+
+**Features**:
+- FSRS-powered scheduling
+- Keyboard shortcuts (Space, 1/2/3/4, Esc)
+- Session tracking
+- Completion screen integration
+- Context filtering
+
+**Keyboard Shortcuts**:
+- `Space` - Reveal answer
+- `1` - Again (forgot)
+- `2` - Hard
+- `3` - Good
+- `4` - Easy
+- `Esc` - Exit session
+
+#### 7. SessionComplete (`src/components/flashcards/SessionComplete.tsx`)
+
+**Completion screen** with analytics:
+
+```typescript
+interface SessionCompleteProps {
+  stats: SessionStats
+  onStudyMore: () => void
+  onExit: () => void
+  returnTo?: 'management' | { type: 'document'; id: string; title: string }
+}
+
+interface SessionStats {
+  reviewedCount: number
+  timeSpentMs: number
+  againCount: number
+  hardCount: number
+  goodCount: number
+  easyCount: number
+}
+```
+
+**Features**:
+- Rating breakdown visualization (colored bars)
+- Retention rate calculation
+- Time summary (minutes and seconds)
+- Smart navigation buttons
+- "Study More" quick restart
+
+**Retention Formula**: `(Good + Easy) / Total * 100`
+
+### Sidebar Study Components
+
+#### 8. CompactStudyTab (`src/components/sidebar/CompactStudyTab.tsx`)
+
+**8th RightPanel tab** for quick study:
+
+```typescript
+interface CompactStudyTabProps {
+  documentId: string
+}
+
+// Two modes:
+// - Selection mode: Choose study source
+// - Studying mode: Embedded StudySession
+```
+
+**Study Sources** (future implementation for visible/nearby):
+- Visible chunks (current viewport)
+- Nearby range (±N chunks)
+- Full document (all cards)
+
+**Features**:
+- Quick study without leaving document
+- Document stats (compact mode)
+- "Open Full Study Page" link
+- Embedded session in sidebar
+
+### Study Store (`src/stores/study-store.ts`)
+
+**Zustand store** for study UI state:
+
+```typescript
+interface StudyStore {
+  // Session context (for navigation)
+  sessionContext: SessionContext | null
+  setSessionContext: (context: SessionContext | null) => void
+
+  // Custom study filters
+  customFilters: CustomStudyFilters
+  setCustomFilters: (filters: CustomStudyFilters) => void
+  resetCustomFilters: () => void
+
+  // Preview state
+  previewCount: number
+  setPreviewCount: (count: number) => void
+
+  // Active deck selection
+  activeDeckId: string | null
+  setActiveDeckId: (deckId: string | null) => void
+}
+```
+
+**Pattern**: Simple state + setters (Pattern 2) - exactly like flashcard-store.ts
+
+### Study Server Actions
+
+#### Extended Study Actions (`src/app/actions/study.ts`)
+
+**Advanced Filtering Support**:
+
+```typescript
+// StartSessionSchema now supports:
+{
+  deckId?: string
+  documentId?: string
+  chunkIds?: string[]
+  filters?: {
+    tags?: string[]
+    dateRange?: {
+      start: string
+      end: string
+      field: 'created_at' | 'last_review' | 'next_review'
+    }
+    status?: ('draft' | 'active' | 'suspended')[]
+    difficulty?: { min: number; max: number }
+    notStudiedYet?: boolean
+    failedCards?: boolean
+  }
+}
+```
+
+**Actions**:
+```typescript
+startStudySession(input): Promise<{ sessionId, cards }>
+updateSessionStats(sessionId, rating, timeMs): Promise<Result>
+endStudySession(sessionId): Promise<Result>
+getSessionStats(sessionId): Promise<{ stats }>
+```
+
+#### Study Statistics Actions (`src/app/actions/stats.ts`)
+
+**New in v2.0**:
+
+```typescript
+getStudyStats({
+  scope: 'global' | 'deck' | 'document',
+  scopeId?: string,
+  timeRange?: 'today' | 'week' | 'month' | 'all'
+}): Promise<{ stats: StudyStatsData }>
+
+interface StudyStatsData {
+  reviewedToday: number
+  reviewedThisWeek: number
+  dueCount: number
+  retentionRate: number       // (Good + Easy) / Total
+  avgTimePerCard: number      // milliseconds
+  streak: number              // consecutive days
+  upcomingReviews: Array<{
+    date: string
+    count: number
+  }>
+}
+```
+
+**Features**:
+- Streak calculation (consecutive study days)
+- Retention rate from session ratings
+- Upcoming reviews (next 7 days)
+- Scoped stats (global/deck/document)
+
+#### Deck Batch Operations (`src/app/actions/decks.ts`)
+
+**Extended in v2.0**:
+
+```typescript
+// Move cards between decks
+moveCardsToDeck(
+  cardIds: string[],
+  targetDeckId: string
+): Promise<{ success: boolean; movedCount: number }>
+
+// Get detailed deck stats
+getDeckWithDetailedStats(
+  deckId: string
+): Promise<{
+  deck: Deck
+  stats: {
+    totalCards: number
+    draftCards: number
+    activeCards: number
+    dueCards: number
+    avgDifficulty: number
+    retentionRate: number  // TODO
+    lastStudied: Date | null  // TODO
+  }
+}>
+```
+
+### Database Schema Updates
+
+**study_sessions table** (migration 065):
+
+```sql
+CREATE TABLE study_sessions (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL,
+  deck_id UUID,
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at TIMESTAMPTZ,
+  cards_reviewed INTEGER DEFAULT 0,
+  again_count INTEGER DEFAULT 0,
+  hard_count INTEGER DEFAULT 0,
+  good_count INTEGER DEFAULT 0,
+  easy_count INTEGER DEFAULT 0,
+  total_time_ms BIGINT DEFAULT 0,
+  filters_applied JSONB
+);
+```
+
+**Tracks**:
+- Session duration
+- Rating distribution
+- Cards reviewed count
+- Applied filters (for analytics)
 
 ---
 

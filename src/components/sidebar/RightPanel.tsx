@@ -13,6 +13,7 @@ import {
   Brain,
   FileQuestion,
   Sliders,
+  GraduationCap,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -29,8 +30,9 @@ import { SparksTab } from './SparksTab'
 import { FlashcardsTab } from './FlashcardsTab'
 import { AnnotationReviewTab } from './AnnotationReviewTab'
 import { TuneTab } from './TuneTab'
+import { CompactStudyTab } from './CompactStudyTab'
 
-type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune'
+type TabId = 'connections' | 'annotations' | 'quality' | 'sparks' | 'cards' | 'review' | 'tune' | 'study'
 
 interface Tab {
   id: TabId
@@ -46,6 +48,7 @@ const TABS: Tab[] = [
   { id: 'cards', icon: Brain, label: 'Cards' },
   { id: 'review', icon: FileQuestion, label: 'Review' },
   { id: 'tune', icon: Sliders, label: 'Tune' },
+  { id: 'study', icon: GraduationCap, label: 'Study' },
 ]
 
 interface ReviewResults {
@@ -241,7 +244,7 @@ export function RightPanelV2({
             transition={{ delay: 0.3, duration: 0.2 }}
           >
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="h-full flex flex-col">
-              <TabsList className="grid grid-cols-7 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
+              <TabsList className="grid grid-cols-8 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
                 {TABS.map((tab) => {
                   const Icon = tab.icon
                   const badgeCount = badgeCounts[tab.id]
@@ -326,6 +329,10 @@ export function RightPanelV2({
                 <ScrollArea className="h-full">
                   <TuneTab />
                 </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="study" className="flex-1 overflow-hidden m-0 h-full">
+                <CompactStudyTab documentId={documentId} />
               </TabsContent>
             </Tabs>
           </motion.div>
