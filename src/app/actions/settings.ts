@@ -131,12 +131,15 @@ export async function saveObsidianSettings(
 }
 
 /**
- * Validate that the vault structure exists and is complete.
- * Checks for required directories (Documents/, Connections/, Sparks/, Index/).
+ * Validate vault path configuration.
+ *
+ * NOTE: This runs on Vercel servers, so it cannot access your local filesystem.
+ * Directory validation happens on the worker when exporting files.
+ * This function only validates that paths are provided.
  *
  * @param vaultPath - Absolute path to vault root
  * @param rhizomePath - Relative path within vault (default: "Rhizome/")
- * @returns Validation result with list of missing directories
+ * @returns Validation result (always valid if paths provided)
  */
 export async function validateVault(
   vaultPath: string,
@@ -153,16 +156,14 @@ export async function validateVault(
       return { success: false, error: 'vaultPath and rhizomePath are required' }
     }
 
-    const result = await validateVaultStructure({
-      vaultPath,
-      vaultName: '', // Not needed for validation
-      rhizomePath
-    })
+    // Can't validate filesystem from Vercel - just validate paths are provided
+    // Actual directory validation will happen on worker during export
+    console.log(`[validateVault] Path configuration valid (filesystem check deferred to worker)`)
 
     return {
       success: true,
-      valid: result.valid,
-      missing: result.missing
+      valid: true,
+      missing: []
     }
   } catch (error) {
     console.error('[validateVault] Unexpected error:', error)
