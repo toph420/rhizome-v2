@@ -1,18 +1,10 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/rhizome/sonner";
 import { AppShell } from "@/components/layout/AppShell";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Fonts are now loaded via CSS @import in neobrutalism.css
+// Change fonts in: src/styles/neobrutalism.css (lines 44-45)
 
 export const metadata: Metadata = {
   title: "Rhizome V2 - AI-Powered Document Processing & Knowledge Synthesis",
@@ -26,9 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased neobrutalism-theme`}
-      >
+      <body className="antialiased neobrutalism-theme">
         <AppShell>
           {children}
         </AppShell>
