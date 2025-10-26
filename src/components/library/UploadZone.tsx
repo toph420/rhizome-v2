@@ -1,8 +1,15 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { uploadDocument, estimateProcessingCost } from '@/app/actions/documents'
+import {
+  extractYoutubeMetadata,
+  extractTextMetadata,
+  extractEpubMetadata,
+  extractPdfMetadata
+} from '@/app/actions/metadata-extraction'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
+import { useUploadStore } from '@/stores/upload-store'
 import { Card } from '@/components/rhizome/card'
 import { Button } from '@/components/rhizome/button'
 import { Input } from '@/components/rhizome/input'
@@ -20,28 +27,24 @@ type TabType = 'file' | 'url' | 'paste'
 type UploadPhase = 'idle' | 'detecting' | 'preview' | 'uploading'
 
 /**
- * Determine which metadata extraction API to use for a file.
- * Returns null for types without preview (web_url, paste).
+ * Determine which metadata extraction method to use for a file.
+ * Returns the extraction type, or null for types without preview (web_url, paste).
  */
-function getMetadataEndpoint(file: File): string | null {
-  // PDF - already working
+function getMetadataExtractionType(file: File): 'pdf' | 'epub' | 'text' | null {
+  // PDF
   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-    return '/api/extract-metadata'
+    return 'pdf'
   }
 
-  // EPUB - new
+  // EPUB
   if (file.type === 'application/epub+zip' || file.name.endsWith('.epub')) {
-    return '/api/extract-epub-metadata'
+    return 'epub'
   }
 
-  // Markdown - new
-  if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
-    return '/api/extract-text-metadata'
-  }
-
-  // Text - new
-  if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
-    return '/api/extract-text-metadata'
+  // Markdown or Text
+  if (file.name.endsWith('.md') || file.name.endsWith('.markdown') ||
+      file.type === 'text/plain' || file.name.endsWith('.txt')) {
+    return 'text'
   }
 
   // No preview for other types (web_url, paste)
@@ -57,37 +60,45 @@ export function UploadZone() {
   // Background jobs store for tracking upload/processing jobs
   const { registerJob } = useBackgroundJobsStore()
 
-  const [activeTab, setActiveTab] = useState<TabType>('file')
-
-  // File upload state
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const [markdownProcessing, setMarkdownProcessing] = useState<'asis' | 'clean'>('asis')
-  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
-  const [detectedMetadata, setDetectedMetadata] = useState<DetectedMetadata | null>(null)
-  const [uploadSource, setUploadSource] = useState<'file' | 'url' | null>(null) // Track which tab initiated upload
-
-  // URL fetch state
-  const [urlInput, setUrlInput] = useState('')
-  const [urlType, setUrlType] = useState<'youtube' | 'web_url' | null>(null)
-
-  // Paste content state
-  const [pastedContent, setPastedContent] = useState('')
-  const [pasteSourceUrl, setPasteSourceUrl] = useState('')
-
-  // Shared state
-  const [costEstimate, setCostEstimate] = useState<{
-    tokens: number
-    cost: number
-    estimatedTime: number
-  } | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [reviewWorkflow, setReviewWorkflow] = useState<ReviewWorkflow>('none')
-  const [cleanMarkdown, setCleanMarkdown] = useState(true) // Default to true - cleanup enabled
-  const [extractImages, setExtractImages] = useState(false)
-  const [chunkerType, setChunkerType] = useState<ChunkerType>('recursive') // Default to recursive (recommended)
-  const [detectConnections, setDetectConnections] = useState(false) // Default false - user must opt-in
+  // Upload store - replaces 19 useState hooks
+  const activeTab = useUploadStore(state => state.activeTab)
+  const setActiveTab = useUploadStore(state => state.setActiveTab)
+  const selectedFile = useUploadStore(state => state.selectedFile)
+  const setSelectedFile = useUploadStore(state => state.setSelectedFile)
+  const isDragging = useUploadStore(state => state.isDragging)
+  const setIsDragging = useUploadStore(state => state.setIsDragging)
+  const markdownProcessing = useUploadStore(state => state.markdownProcessing)
+  const setMarkdownProcessing = useUploadStore(state => state.setMarkdownProcessing)
+  const uploadPhase = useUploadStore(state => state.uploadPhase)
+  const setUploadPhase = useUploadStore(state => state.setUploadPhase)
+  const detectedMetadata = useUploadStore(state => state.detectedMetadata)
+  const setDetectedMetadata = useUploadStore(state => state.setDetectedMetadata)
+  const uploadSource = useUploadStore(state => state.uploadSource)
+  const setUploadSource = useUploadStore(state => state.setUploadSource)
+  const urlInput = useUploadStore(state => state.urlInput)
+  const setUrlInput = useUploadStore(state => state.setUrlInput)
+  const urlType = useUploadStore(state => state.urlType)
+  const setUrlType = useUploadStore(state => state.setUrlType)
+  const pastedContent = useUploadStore(state => state.pastedContent)
+  const setPastedContent = useUploadStore(state => state.setPastedContent)
+  const pasteSourceUrl = useUploadStore(state => state.pasteSourceUrl)
+  const setPasteSourceUrl = useUploadStore(state => state.setPasteSourceUrl)
+  const costEstimate = useUploadStore(state => state.costEstimate)
+  const setCostEstimate = useUploadStore(state => state.setCostEstimate)
+  const isUploading = useUploadStore(state => state.isUploading)
+  const setIsUploading = useUploadStore(state => state.setIsUploading)
+  const error = useUploadStore(state => state.error)
+  const setError = useUploadStore(state => state.setError)
+  const reviewWorkflow = useUploadStore(state => state.reviewWorkflow)
+  const setReviewWorkflow = useUploadStore(state => state.setReviewWorkflow)
+  const cleanMarkdown = useUploadStore(state => state.cleanMarkdown)
+  const setCleanMarkdown = useUploadStore(state => state.setCleanMarkdown)
+  const extractImages = useUploadStore(state => state.extractImages)
+  const setExtractImages = useUploadStore(state => state.setExtractImages)
+  const chunkerType = useUploadStore(state => state.chunkerType)
+  const setChunkerType = useUploadStore(state => state.setChunkerType)
+  const detectConnections = useUploadStore(state => state.detectConnections)
+  const setDetectConnections = useUploadStore(state => state.setDetectConnections)
 
   /**
    * Detects URL type (YouTube vs web article).
@@ -122,62 +133,38 @@ export function UploadZone() {
     setCostEstimate(estimate)
 
     // Check if this file type supports metadata preview
-    const endpoint = getMetadataEndpoint(file)
+    const extractionType = getMetadataExtractionType(file)
 
-    if (!endpoint) {
+    if (!extractionType) {
       // No preview, proceed directly to upload (web_url, paste patterns)
       console.log('No metadata preview for this file type, skipping detection')
       return
     }
 
-    // Extract metadata for preview
+    // Extract metadata for preview using Server Actions
     setUploadPhase('detecting')
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      console.log(`🔍 Extracting metadata using ${endpoint}...`)
+      console.log(`🔍 Extracting metadata using ${extractionType} extraction...`)
       const startTime = Date.now()
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        body: formData
-      })
+      let metadata: DetectedMetadata
 
-      if (!response.ok) {
-        // Check if response is JSON before trying to parse
-        const contentType = response.headers.get('content-type')
-        let errorMessage = 'Metadata extraction failed'
-
-        if (contentType?.includes('application/json')) {
-          try {
-            const errorData = await response.json()
-            errorMessage = errorData.error || errorMessage
-          } catch (jsonError) {
-            console.error('Failed to parse error response as JSON:', jsonError)
-            // Use default error message if JSON parsing fails
-          }
-        } else {
-          // Non-JSON error (HTML, plain text, etc.)
-          const errorText = await response.text()
-          console.error('Non-JSON error response:', errorText.slice(0, 200))
-          errorMessage = `Server error (${response.status}): ${response.statusText}`
-        }
-
-        throw new Error(errorMessage)
+      if (extractionType === 'pdf') {
+        // PDF extraction
+        const fileBuffer = await file.arrayBuffer()
+        metadata = await extractPdfMetadata(fileBuffer)
+      } else if (extractionType === 'epub') {
+        // EPUB extraction
+        const fileBuffer = await file.arrayBuffer()
+        metadata = await extractEpubMetadata(fileBuffer)
+      } else {
+        // Text/Markdown extraction
+        const content = await file.text()
+        metadata = await extractTextMetadata(content)
       }
 
-      // Check if success response is JSON
-      const contentType = response.headers.get('content-type')
-      if (!contentType?.includes('application/json')) {
-        console.error('Expected JSON response, got:', contentType)
-        throw new Error('Invalid response format from server')
-      }
-
-      const metadata = await response.json()
       const duration = Date.now() - startTime
-
       console.log(`✅ Metadata extracted in ${duration}ms:`, metadata.title)
 
       setDetectedMetadata(metadata)
@@ -431,76 +418,39 @@ export function UploadZone() {
     try {
       console.log('🔍 Fetching YouTube metadata...')
 
-      const response = await fetch('/api/extract-youtube-metadata', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      })
+      const metadata = await extractYoutubeMetadata(url)
+      console.log('✅ YouTube metadata extracted:', metadata.title)
 
-      if (!response.ok) {
-        // Check if response is JSON before trying to parse
-        const contentType = response.headers.get('content-type')
-        let errorData: any = null
-
-        if (contentType?.includes('application/json')) {
-          try {
-            errorData = await response.json()
-          } catch (jsonError) {
-            console.error('Failed to parse error response as JSON:', jsonError)
-          }
-        }
-
-        // Handle different error types with specific user guidance
-        const errorType = errorData?.errorType
-        const errorMessage = errorData?.message || errorData?.error
-
-        switch (errorType) {
-          case 'QUOTA_EXCEEDED':
-            console.warn('YouTube API quota exceeded')
-            setError('YouTube API quota exceeded. Please switch to the "Paste Content" tab and paste the video transcript manually.')
-            setUploadPhase('idle')
-            return
-
-          case 'API_NOT_ENABLED':
-            console.warn('YouTube Data API not enabled')
-            setError(`YouTube Data API v3 is not enabled. Enable it at: ${errorData?.helpUrl || 'Google Cloud Console'}`)
-            setUploadPhase('idle')
-            return
-
-          case 'INVALID_API_KEY':
-            console.warn('Invalid YouTube API key')
-            setError('YouTube API key is invalid or restricted. Check YOUTUBE_API_KEY in .env.local')
-            setUploadPhase('idle')
-            return
-
-          case 'API_FORBIDDEN':
-            console.warn('YouTube API access forbidden')
-            setError(errorMessage || 'Access forbidden. Check API key restrictions in Google Cloud Console.')
-            setUploadPhase('idle')
-            return
-
-          default:
-            throw new Error(errorMessage || `Server error (${response.status}): ${response.statusText}`)
-        }
-      } else {
-        // Check if success response is JSON
-        const contentType = response.headers.get('content-type')
-        if (!contentType?.includes('application/json')) {
-          console.error('Expected JSON response, got:', contentType)
-          throw new Error('Invalid response format from server')
-        }
-
-        const metadata = await response.json()
-        console.log('✅ YouTube metadata extracted:', metadata.title)
-        setDetectedMetadata(metadata)
-      }
-
+      setDetectedMetadata(metadata)
       setUrlInput(url)
       setUploadPhase('preview')
     } catch (error) {
       console.error('YouTube metadata error:', error)
 
-      // Show error message instead of fallback
+      // Handle specific error types
+      if (error instanceof Error) {
+        if (error.name === 'QUOTA_EXCEEDED') {
+          console.warn('YouTube API quota exceeded')
+          setError('YouTube API quota exceeded. Please switch to the "Paste Content" tab and paste the video transcript manually.')
+          setUploadPhase('idle')
+          setUploadSource(null)
+          return
+        } else if (error.name === 'API_NOT_ENABLED') {
+          console.warn('YouTube Data API not enabled')
+          setError('YouTube Data API v3 is not enabled in Google Cloud Console. Please switch to the "Paste Content" tab.')
+          setUploadPhase('idle')
+          setUploadSource(null)
+          return
+        } else if (error.name === 'INVALID_API_KEY') {
+          console.warn('Invalid YouTube API key')
+          setError('YouTube API key is invalid or restricted. Check YOUTUBE_API_KEY in .env.local')
+          setUploadPhase('idle')
+          setUploadSource(null)
+          return
+        }
+      }
+
+      // Show error message for other errors
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch YouTube metadata'
       setError(`YouTube metadata extraction failed: ${errorMessage}. Please switch to the "Paste Content" tab and paste the transcript manually.`)
       setUploadPhase('idle')
@@ -650,7 +600,7 @@ export function UploadZone() {
             </Card>
           ) : (
             <Card
-              className={`border-2 border-dashed p-8 text-center transition-colors ${
+              className={`border-2 border-dashed !shadow-none p-8 text-center transition-colors ${
                 isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
               }`}
               onDragOver={(e) => {
