@@ -424,6 +424,20 @@ export interface ReadwiseImportResult {
 }
 
 /**
+ * Result of Readwise auto-import operation
+ */
+export interface ReadwiseAutoImportResult {
+  success: boolean
+  jobId?: string
+  bookTitle?: string
+  bookAuthor?: string
+  highlightCount?: number
+  bookId?: number
+  error?: string
+  suggestion?: string
+}
+
+/**
  * Import highlights from Readwise export JSON.
  * Creates a background job that runs the import via worker/handlers/readwise-import.ts
  *
@@ -524,6 +538,146 @@ export async function importReadwiseHighlights(
 
   } catch (error) {
     console.error('[importReadwiseHighlights] Unexpected error:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Auto-import highlights from Readwise by searching library.
+ *
+ * Flow:
+ * 1. Fetch document metadata (title, author)
+ * 2. Search Readwise library for matching book
+ * 3. Download highlights from matched book
+ * 4. Create background job to import highlights
+ *
+ * @param documentId - Rhizome document ID
+ * @returns Result with job ID if successful
+ *
+ * @example
+ * ```typescript
+ * const result = await autoImportFromReadwise(docId)
+ * if (result.success) {
+ *   toast.success(`Found: ${result.bookTitle} by ${result.bookAuthor}`)
+ *   // Track job progress with result.jobId
+ * } else {
+ *   toast.error(result.error)
+ *   // Fallback to manual JSON upload
+ * }
+ * ```
+ */
+export async function autoImportFromReadwise(
+  documentId: string
+): Promise<ReadwiseAutoImportResult> {
+  try {
+    const supabase = getSupabaseClient()
+    const user = await getCurrentUser()
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // 1. Fetch document metadata
+    const { data: doc, error: docError } = await supabase
+      .from('documents')
+      .select('id, title, author, user_id')
+      .eq('id', documentId)
+      .single()
+
+    if (docError || !doc) {
+      return { success: false, error: 'Document not found' }
+    }
+
+    if (doc.user_id !== user.id) {
+      return { success: false, error: 'Not authorized' }
+    }
+
+    if (!doc.title || !doc.author) {
+      return {
+        success: false,
+        error: 'Document metadata incomplete. Please set title and author first.'
+      }
+    }
+
+    // 2. Check for Readwise token
+    const readwiseToken = process.env.READWISE_ACCESS_TOKEN
+    if (!readwiseToken) {
+      return {
+        success: false,
+        error: 'READWISE_ACCESS_TOKEN not configured. Add to .env.local'
+      }
+    }
+
+    // 3. Search Readwise library
+    const { ReadwiseExportClient } = await import('../../../worker/lib/readwise-export-api.js')
+    const client = new ReadwiseExportClient(readwiseToken)
+
+    console.log(`[autoImportFromReadwise] Searching for: "${doc.title}" by ${doc.author}`)
+
+    const books = await client.searchBooks({
+      title: doc.title,
+      author: doc.author
+    })
+
+    if (books.length === 0) {
+      return {
+        success: false,
+        error: `No matching book found in Readwise library for "${doc.title}"`,
+        suggestion: 'Try manual JSON upload instead'
+      }
+    }
+
+    // Use first match (could add fuzzy scoring later)
+    const matchedBook = books[0]
+    console.log(`[autoImportFromReadwise] Found match: ${matchedBook.title} (ID: ${matchedBook.user_book_id})`)
+
+    // 4. Highlights are already included in the book object
+    const highlights = matchedBook.highlights
+
+    if (highlights.length === 0) {
+      return {
+        success: false,
+        error: `Book found but has no highlights: "${matchedBook.title}"`,
+        bookId: matchedBook.user_book_id
+      }
+    }
+
+    console.log(`[autoImportFromReadwise] Downloaded ${highlights.length} highlights`)
+
+    // 5. Create background job (reuse existing readwise_import)
+    const { data: job, error: jobError } = await supabase
+      .from('background_jobs')
+      .insert({
+        user_id: user.id,
+        job_type: 'readwise_import',
+        entity_type: 'document',
+        entity_id: documentId,
+        input_data: {
+          documentId: documentId,
+          readwiseData: highlights
+        }
+      })
+      .select()
+      .single()
+
+    if (jobError) {
+      console.error('[autoImportFromReadwise] Job creation failed:', jobError)
+      return { success: false, error: `Job creation failed: ${jobError.message}` }
+    }
+
+    console.log(`[autoImportFromReadwise] Job created: ${job.id}`)
+
+    return {
+      success: true,
+      jobId: job.id,
+      bookTitle: matchedBook.title,
+      bookAuthor: matchedBook.author,
+      highlightCount: highlights.length
+    }
+
+  } catch (error) {
+    console.error('[autoImportFromReadwise] Error:', error)
     const message = error instanceof Error ? error.message : 'Unknown error'
     return { success: false, error: message }
   }
