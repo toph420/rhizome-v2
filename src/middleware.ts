@@ -7,15 +7,34 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Allow login and auth callback pages without auth check
+  if (request.nextUrl.pathname.startsWith('/login') ||
+      request.nextUrl.pathname.startsWith('/auth/callback')) {
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
     },
   })
 
+  // Check if env vars are available
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('[Middleware] Missing Supabase environment variables')
+    // In production without env vars, redirect to login
+    if (!request.nextUrl.pathname.startsWith('/login')) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+    return response
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         get(name: string) {
@@ -39,17 +58,22 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { session } } = await supabase.auth.getSession()
-
-  // Redirect to login if not authenticated
-  if (!session && !request.nextUrl.pathname.startsWith('/login') &&
-      !request.nextUrl.pathname.startsWith('/auth/callback')) {
-    return NextResponse.redirect(new URL('/login', request.url))
+  let session = null
+  try {
+    const { data: { session: authSession } } = await supabase.auth.getSession()
+    session = authSession
+  } catch (error) {
+    console.error('[Middleware] Error getting session:', error)
+    // If there's an error getting session, redirect to login
+    if (!request.nextUrl.pathname.startsWith('/login')) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+    return response
   }
 
-  // Redirect to home if already logged in and trying to access login
-  if (session && request.nextUrl.pathname === '/login') {
-    return NextResponse.redirect(new URL('/', request.url))
+  // Redirect to login if not authenticated (already checked for /login and /auth/callback above)
+  if (!session) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return response
