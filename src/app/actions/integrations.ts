@@ -1,6 +1,6 @@
 'use server'
 
-import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
+import { getCurrentUser, getServerSupabaseClient } from '@/lib/auth'
 
 // ============================================================================
 // OBSIDIAN INTEGRATION
@@ -47,7 +47,7 @@ export async function exportToObsidian(
   documentId: string
 ): Promise<ObsidianExportResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -138,7 +138,7 @@ export async function syncFromObsidian(
   documentId: string
 ): Promise<ObsidianSyncResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -265,7 +265,7 @@ export interface VaultImportResult {
  */
 export async function scanVault(): Promise<VaultScanResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -362,7 +362,7 @@ export async function importFromVault(
   documentTitle: string
 ): Promise<VaultImportResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -467,7 +467,7 @@ export async function importReadwiseHighlights(
   readwiseJson: unknown[] // Array of Readwise highlight objects
 ): Promise<ReadwiseImportResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -571,7 +571,7 @@ export async function autoImportFromReadwise(
   documentId: string
 ): Promise<ReadwiseAutoImportResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -736,7 +736,7 @@ export interface SparkImportResult {
  */
 export async function exportSparksToVault(): Promise<SparkExportResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -808,7 +808,7 @@ export async function exportSparksToVault(): Promise<SparkExportResult> {
  */
 export async function importSparksFromVault(): Promise<SparkImportResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {

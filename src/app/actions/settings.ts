@@ -1,7 +1,9 @@
 'use server'
 
-import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
-import { validateVaultStructure, createVaultStructure } from '@/lib/vault-structure'
+import { getCurrentUser, getServerSupabaseClient } from '@/lib/auth'
+import { validateVaultStructure } from '@/lib/vault-structure'
+
+const IS_DEV = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
 
 // ============================================================================
 // OBSIDIAN SETTINGS
@@ -45,7 +47,7 @@ export interface VaultValidationResult {
  */
 export async function getObsidianSettings(): Promise<SettingsResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -92,7 +94,7 @@ export async function saveObsidianSettings(
   settings: ObsidianSettings
 ): Promise<SettingsResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -132,8 +134,10 @@ export async function saveObsidianSettings(
 }
 
 /**
- * Validate that the vault structure exists and is complete.
- * Checks for required directories (Documents/, Connections/, Sparks/, Index/).
+ * Validate vault path configuration.
+ *
+ * In development mode: Validates that directories exist on filesystem
+ * In production mode: Only validates that paths are provided (can't access local filesystem from Vercel)
  *
  * @param vaultPath - Absolute path to vault root
  * @param rhizomePath - Relative path within vault (default: "Rhizome/")
@@ -154,6 +158,19 @@ export async function validateVault(
       return { success: false, error: 'vaultPath and rhizomePath are required' }
     }
 
+    // In production (Vercel), can't access local filesystem
+    // Just validate paths are provided
+    if (!IS_DEV) {
+      console.log(`[validateVault] Production mode - filesystem check deferred to worker`)
+      return {
+        success: true,
+        valid: true,
+        missing: []
+      }
+    }
+
+    // In development mode, validate filesystem
+    console.log(`[validateVault] Dev mode - validating filesystem`)
     const result = await validateVaultStructure({
       vaultPath,
       vaultName: '', // Not needed for validation
@@ -178,12 +195,14 @@ export async function validateVault(
 }
 
 /**
- * Create vault directory structure.
- * Creates all required directories: Documents/, Connections/, Sparks/, Index/, and README.
- * Idempotent - safe to call multiple times.
+ * Configure vault path.
+ * Saves vault configuration - directory structure is created by worker when needed.
  *
- * @param vaultPath - Absolute path to vault root
- * @param vaultName - Vault name (for README)
+ * NOTE: This runs on Vercel servers, so it cannot access your local filesystem.
+ * The vault directories will be created by the local worker when exporting files.
+ *
+ * @param vaultPath - Absolute path to vault root (e.g., "/Users/topher/Tophs Vault")
+ * @param vaultName - Vault name (for Obsidian URIs)
  * @param rhizomePath - Relative path within vault (default: "Rhizome/")
  * @returns Success result
  */
@@ -203,11 +222,10 @@ export async function createVault(
       return { success: false, error: 'vaultPath, vaultName, and rhizomePath are required' }
     }
 
-    await createVaultStructure({
-      vaultPath,
-      vaultName,
-      rhizomePath
-    })
+    // Don't create directories here - this runs on Vercel (cloud)
+    // The worker (running locally) will create vault structure when exporting
+    console.log(`[createVault] Vault path configured: ${vaultPath}`)
+    console.log(`[createVault] Directory structure will be created by worker on first export`)
 
     return { success: true }
   } catch (error) {

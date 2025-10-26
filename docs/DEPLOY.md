@@ -1,6 +1,6 @@
 # Rhizome V2 - Production Deployment Guide
 
-**Last Updated**: 2025-10-25
+**Last Updated**: 2025-10-26
 **Architecture**: Hybrid (Cloud UI + Cloud Database + Local Processing)
 **Status**: Production Ready
 
@@ -296,38 +296,34 @@ npm run dev  # Starts both app and worker
 Polling for jobs...
 ```
 
-### Step 4: Fix Trigger Race Condition
+### Step 4: Seed Prompt Templates
 
-Run this SQL in **Supabase Dashboard → SQL Editor**:
+**Issue**: The trigger in migration `066_prompt_templates.sql` should auto-create default flashcard prompts for new users, but there's a timing issue with magic link authentication. Users are created in `auth.users` during the magic link flow, before migration 066 runs.
 
-```sql
--- Recreate the trigger with error handling
-CREATE OR REPLACE FUNCTION create_default_prompts()
-RETURNS TRIGGER AS $$
-BEGIN
-  -- Safety check: only proceed if prompt_templates table exists
-  IF EXISTS (
-    SELECT FROM information_schema.tables
-    WHERE table_schema = 'public'
-    AND table_name = 'prompt_templates'
-  ) THEN
-    INSERT INTO prompt_templates (user_id, name, description, template, variables, is_system, is_default) VALUES
-      (NEW.id, 'Comprehensive Concepts', 'Key definitions, core ideas, and concept relationships',
-       E'Generate {{count}} flashcards covering the most important concepts in this text.\n\nFocus on:\n- Key definitions and terminology\n- Core ideas and principles\n- Relationships between concepts\n\nFor each card:\n- Question should be clear and specific\n- Answer should be concise but complete (1-3 sentences)\n- Include keywords from the source text for chunk matching\n\nText:\n{{content}}\n\nChunk metadata:\n{{chunks}}\n\nCustom instructions:\n{{custom}}\n\nReturn ONLY a JSON array of flashcards in this format:\n[\n  {\n    "type": "basic",\n    "question": "...",\n    "answer": "...",\n    "confidence": 0.85,\n    "keywords": ["concept1", "concept2"]\n  }\n]\n\nGenerate exactly {{count}} flashcards.',
-       ARRAY['count', 'content', 'chunks', 'custom'], TRUE, TRUE);
-  END IF;
+**Fix**: Run the seed script after deployment:
 
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Recreate the trigger
-DROP TRIGGER IF EXISTS on_user_created_prompts ON auth.users;
-CREATE TRIGGER on_user_created_prompts
-  AFTER INSERT ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION create_default_prompts();
+```bash
+cd /Users/topher/Code/rhizome-v2
+npx tsx scripts/seed-prompt-templates.ts
 ```
+
+**Expected Output**:
+```
+🌱 Seeding prompt templates...
+👥 Found 1 users
+🔍 Checking user: your-email@example.com
+  📝 Creating 4 prompt templates...
+  ✅ Created 4 prompt templates
+✅ Prompt template seeding complete!
+```
+
+**What This Creates**:
+- **Comprehensive Concepts** (default) - Key definitions and core ideas
+- **Deep Details** - Specific claims and evidence
+- **Connections & Synthesis** - How ideas connect
+- **Contradiction Focus** - Conceptual tensions
+
+**Note**: This script is idempotent - safe to run multiple times. It checks for existing prompts before creating new ones.
 
 ---
 
@@ -542,10 +538,28 @@ ollama serve  # Start Ollama
 
 ### Authentication Issues
 
+**"Authentication required" error in Server Actions** (FIXED in commits 885b9ad - 462bd92):
+- **Issue**: Server Actions were using browser Supabase client instead of server client
+- **Symptoms**: Upload fails, settings won't save, integrations fail with "Not authenticated"
+- **Root Cause**: Server Actions run on Vercel servers and need server-side client to read auth cookies from Next.js request context
+- **Fix Applied**: All Server Actions now use `getServerSupabaseClient()` instead of `getSupabaseClient()`
+- **Files Fixed**:
+  - `src/app/actions/documents/upload.ts` (3 functions)
+  - `src/app/actions/documents/utils.ts` (2 functions)
+  - `src/app/actions/settings.ts` (2 functions)
+  - `src/app/actions/integrations.ts` (8 functions)
+- **Verification**: Upload a document - should work without auth errors
+
+**Vault path filesystem errors** (FIXED in commit 35995d4):
+- **Issue**: Saving vault path shows "ENOENT: no such file or directory, mkdir '/Users'"
+- **Root Cause**: Server Action tried to create directories on Vercel servers (cloud), not local filesystem
+- **Fix Applied**: Removed `createVaultStructure()` call from Server Action - worker creates directories locally when exporting
+- **Verification**: Save vault path in Settings → Should succeed without errors
+
 **"Database error saving new user"**:
-- Trigger race condition (see Step 4 in Initial Deployment)
+- Prompt template trigger timing issue (see Step 4 in Initial Deployment)
 - Check if user actually created: Supabase Dashboard → Authentication → Users
-- If user exists, error is cosmetic - proceed with login
+- If user exists, run seed script: `npx tsx scripts/seed-prompt-templates.ts`
 
 **Magic link not received**:
 - Check Supabase Dashboard → Logs → Auth Logs
@@ -745,7 +759,13 @@ npx supabase db remote --linked sql "QUERY"  # Run SQL
 
 ---
 
-**Deployment Guide Version**: 1.0
-**Last Verified**: 2025-10-25
+**Deployment Guide Version**: 1.1
+**Last Verified**: 2025-10-26
 **Maintained By**: Topher
 **Support**: See `thoughts/handoffs/` for session-specific notes
+
+**Recent Updates**:
+- 2025-10-26: Added authentication fixes (Server Actions client migration)
+- 2025-10-26: Added prompt template seeding documentation
+- 2025-10-26: Added vault path filesystem issue resolution
+- 2025-10-25: Initial deployment guide created

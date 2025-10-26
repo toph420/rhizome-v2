@@ -1,6 +1,6 @@
 'use server'
 
-import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
+import { getCurrentUser, getServerSupabaseClient } from '@/lib/auth'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -19,7 +19,7 @@ export async function getAuthContext() {
   if (!user) {
     throw new Error('Authentication required')
   }
-  const supabase = getSupabaseClient()
+  const supabase = await getServerSupabaseClient()
   return { user, supabase }
 }
 
@@ -37,7 +37,7 @@ export async function createBackgroundJob(
   entityId: string,
   inputData: Record<string, unknown>
 ): Promise<string> {
-  const supabase = getSupabaseClient()
+  const supabase = await getServerSupabaseClient()
 
   const { data: job, error } = await supabase
     .from('background_jobs')
