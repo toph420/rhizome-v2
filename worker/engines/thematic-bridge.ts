@@ -22,6 +22,7 @@ export interface ThematicBridgeConfig {
   batchSize?: number;              // Default: 5 (pairs per AI call)
   sourceChunkIds?: string[];       // NEW: Filter to specific source chunks
   targetDocumentIds?: string[];    // Filter to specific target documents (for Add New mode)
+  reprocessingBatch?: string;      // Batch ID for connection reprocessing
 }
 
 /**

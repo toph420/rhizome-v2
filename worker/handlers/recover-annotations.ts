@@ -44,7 +44,7 @@ export async function recoverAnnotations(
     .eq('component_type', 'ChunkRef')
     .eq('data->>document_id', documentId)
 
-  const entityIds = sourceComponents?.map(c => c.entity_id) || []
+  const entityIds = sourceComponents?.map((c: { entity_id: string }) => c.entity_id) || []
 
   if (entityIds.length === 0) {
     console.log('[RecoverAnnotations] No annotations to recover')
@@ -80,7 +80,7 @@ export async function recoverAnnotations(
 
   // Create a map of entity_id -> note (from Content component)
   const contentMap = new Map(
-    contentComponents?.map(c => [c.entity_id, c.data.note]) || []
+    contentComponents?.map((c: { entity_id: string; data: { note?: string } }) => [c.entity_id, c.data.note]) || []
   )
 
   console.log(`[RecoverAnnotations] Recovering ${positionComponents.length} annotations...`)

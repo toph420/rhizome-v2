@@ -19,6 +19,7 @@ import { importAnnotationsFromVault } from '../lib/vault-import-annotations.js'
 // NOTE: Sparks now imported globally via separate mechanism (vault-import-sparks.ts)
 import { importConnectionsFromVault } from '../lib/vault-import-connections.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
+import { ImportFromVaultOutputSchema } from '../types/job-schemas.js'
 import * as path from 'path'
 import * as fs from 'fs/promises'
 import * as crypto from 'crypto'
@@ -490,26 +491,32 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
     // ✅ STEP 11: MARK JOB COMPLETE (100%)
     await updateProgress(supabase, job.id, 100, 'complete', 'completed', 'Import from vault completed')
 
+    // Prepare and validate output data
+    const outputData = {
+      success: true,
+      documentId,
+      documentTitle,
+      chunksImported,
+      annotationsImported: annotationsResult.imported,
+      annotationsRecovered: annotationsResult.recovered,
+      sparksImported: sparksResult.imported,
+      sparksRecovered: sparksResult.recovered,
+      connectionsImported: connectionsResult.imported,
+      connectionsRemapped: connectionsResult.remapped,
+      uploadedToStorage: uploadToStorage !== false,
+      strategy: importStrategy,
+      embeddingsRegenerated,
+      connectionDetectionJobId
+    }
+
+    // Validate before saving
+    ImportFromVaultOutputSchema.parse(outputData)
+
     await supabase
       .from('background_jobs')
       .update({
         status: 'completed',
-        output_data: {
-          success: true,
-          documentId,
-          documentTitle,
-          chunksImported,
-          annotationsImported: annotationsResult.imported,
-          annotationsRecovered: annotationsResult.recovered,
-          sparksImported: sparksResult.imported,
-          sparksRecovered: sparksResult.recovered,
-          connectionsImported: connectionsResult.imported,
-          connectionsRemapped: connectionsResult.remapped,
-          uploadedToStorage: uploadToStorage !== false,
-          strategy: importStrategy,
-          embeddingsRegenerated,
-          connectionDetectionJobId
-        },
+        output_data: outputData,
         completed_at: new Date().toISOString()
       })
       .eq('id', job.id)
@@ -537,15 +544,22 @@ export async function importFromVaultHandler(supabase: any, job: any): Promise<v
       error.message || 'Import from vault failed'
     )
 
+    // Prepare and validate error output
+    const errorOutputData = {
+      success: false,
+      documentTitle,
+      chunksImported: 0,
+      error: error.message
+    }
+
+    // Validate before saving
+    ImportFromVaultOutputSchema.parse(errorOutputData)
+
     await supabase
       .from('background_jobs')
       .update({
         status: 'failed',
-        output_data: {
-          success: false,
-          documentTitle,
-          error: error.message
-        },
+        output_data: errorOutputData,
         last_error: error.message,
         completed_at: new Date().toISOString()
       })

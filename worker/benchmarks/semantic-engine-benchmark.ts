@@ -5,7 +5,7 @@
  */
 
 import { performance } from 'perf_hooks';
-import { SemanticSimilarityEngine } from '../engines/semantic-similarity';
+import { SemanticSimilarityEngine } from '../engines/adapters';
 import { ChunkData } from '../engines/types';
 import { createClient } from '@supabase/supabase-js';
 

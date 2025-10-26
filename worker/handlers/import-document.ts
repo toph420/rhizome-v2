@@ -17,6 +17,7 @@
 import { readFromStorage } from '../lib/storage-helpers.js'
 import { generateEmbeddings } from '../lib/embeddings.js'
 import type { ChunksExport, ConflictStrategy } from '../types/storage.js'
+import { ImportJobOutputSchema } from '../types/job-schemas.js'
 import { createHash } from 'crypto'
 import { HandlerJobManager } from '../lib/handler-job-manager.js'
 
@@ -202,15 +203,21 @@ export async function importDocumentHandler(supabase: any, job: any): Promise<vo
     }
 
     // ✅ STEP 5: MARK JOB COMPLETE (100%)
+    const outputData = {
+      success: true,
+      documentId: document_id,  // ✅ camelCase
+      documentTitle: existingDoc?.title,
+      chunksImported: importedCount,  // ✅ Correct field name
+      strategy,
+      embeddingsRegenerated: regenerateEmbeddings || false,  // ✅ Correct field name
+      connectionsReprocessed: reprocessConnections || false,  // ✅ Correct field name
+    }
+
+    // Validate before saving
+    ImportJobOutputSchema.parse(outputData)
+
     await jobManager.markComplete(
-      {
-        success: true,
-        document_id,
-        strategy,
-        imported: importedCount,
-        regeneratedEmbeddings: regenerateEmbeddings || false,
-        reprocessConnections: reprocessConnections || false
-      },
+      outputData,
       'Import completed successfully'
     )
 

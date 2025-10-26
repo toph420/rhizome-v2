@@ -72,7 +72,7 @@ export async function recoverSparks(
   }
 
   // Filter to only entities that have Spark component
-  const entityIds = chunkRefComponents.map(c => c.entity_id)
+  const entityIds = chunkRefComponents.map((c: { entity_id: string }) => c.entity_id)
 
   const { data: sparkComponents } = await supabase
     .from('components')
@@ -85,7 +85,7 @@ export async function recoverSparks(
     return results
   }
 
-  const sparkEntityIds = new Set<string>(sparkComponents.map(c => c.entity_id))
+  const sparkEntityIds = new Set<string>(sparkComponents.map((c: { entity_id: string }) => c.entity_id))
 
   console.log(`[RecoverSparks] Found ${sparkEntityIds.size} sparks to recover`)
 
@@ -100,9 +100,10 @@ export async function recoverSparks(
 
       if (!components) continue
 
-      const spark = components.find(c => c.component_type === 'Spark')
-      const content = components.find(c => c.component_type === 'Content')
-      const chunkRef = components.find(c => c.component_type === 'ChunkRef')
+      type ComponentData = { id: string; component_type: string; data: any }
+      const spark = components.find((c: ComponentData) => c.component_type === 'Spark')
+      const content = components.find((c: ComponentData) => c.component_type === 'Content')
+      const chunkRef = components.find((c: ComponentData) => c.component_type === 'ChunkRef')
 
       if (!spark || !content || !chunkRef) continue
 

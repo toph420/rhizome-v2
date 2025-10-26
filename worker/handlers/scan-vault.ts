@@ -9,6 +9,8 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { scanVaultDocuments } from '../lib/vault-reader.js'
+import { HandlerJobManager } from '../lib/handler-job-manager.js'
+import { ScanVaultOutputSchema } from '../types/job-schemas.js'
 
 /**
  * Scan vault for documents
@@ -18,6 +20,8 @@ export async function scanVaultHandler(supabase: any, job: any): Promise<void> {
   const { userId, vaultPath, rhizomePath } = job.input_data
 
   console.log(`[ScanVault] Starting vault scan at ${vaultPath}`)
+
+  const jobManager = new HandlerJobManager(supabase, job.id)
 
   try {
     // Scan vault for documents
@@ -37,22 +41,24 @@ export async function scanVaultHandler(supabase: any, job: any): Promise<void> {
       hasManifestJson: doc.hasManifestJson
     }))
 
-    // Update job with results
-    await supabase
-      .from('background_jobs')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        output_data: {
-          documents: serializedDocuments,
-          vaultPath: vaultPath
-        }
-      })
-      .eq('id', job.id)
+    // Prepare output data
+    const outputData = {
+      success: true,
+      documentCount: documents.length,
+      documents: serializedDocuments,
+      vaultPath: vaultPath
+    }
+
+    // Validate before saving
+    ScanVaultOutputSchema.parse(outputData)
+
+    // Mark job complete
+    await jobManager.markComplete(outputData, `Scanned ${documents.length} documents`)
 
     console.log(`[ScanVault] ✅ Scan complete`)
-  } catch (error) {
+  } catch (error: any) {
     console.error('[ScanVault] ❌ Scan failed:', error)
+    await jobManager.markFailed(error)
     throw error
   }
 }

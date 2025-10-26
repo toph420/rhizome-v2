@@ -48,8 +48,9 @@ export async function remapConnections(
 
   // Create a lookup map for old chunk embeddings
   // CRITICAL: Parse embeddings from strings to number arrays (Supabase returns vectors as JSON strings)
+  type ChunkData = { id: string; embedding?: string | number[]; document_id: string; is_current: boolean }
   const oldChunkMap = new Map()
-  allDocChunks?.forEach(chunk => {
+  allDocChunks?.forEach((chunk: ChunkData) => {
     if (!chunk.is_current && chunk.embedding) {
       const embedding = typeof chunk.embedding === 'string'
         ? JSON.parse(chunk.embedding)
@@ -79,8 +80,9 @@ export async function remapConnections(
   }
 
   // Step 3: Batch fetch current chunks (avoid N+1 query problem)
+  type ConnectionData = { id: string; source_chunk_id: string; target_chunk_id: string; connection_type: string; strength: number; user_validated: boolean; metadata: any }
   const chunkIdsNeeded = new Set<string>()
-  allConnections?.forEach(conn => {
+  allConnections?.forEach((conn: ConnectionData) => {
     if (!oldChunkMap.has(conn.source_chunk_id)) {
       chunkIdsNeeded.add(conn.source_chunk_id)
     }
@@ -98,7 +100,7 @@ export async function remapConnections(
 
   // Parse embeddings and create lookup map
   const currentChunkMap = new Map(
-    currentChunks?.map(c => [
+    currentChunks?.map((c: { id: string; document_id: string; embedding?: string | number[] }) => [
       c.id,
       {
         id: c.id,
@@ -109,7 +111,7 @@ export async function remapConnections(
   )
 
   // Step 4: Enrich connections with chunk data (synchronous - no more queries)
-  const enrichedConnections = (allConnections || []).map(conn => ({
+  const enrichedConnections = (allConnections || []).map((conn: ConnectionData) => ({
     ...conn,
     source_chunk: oldChunkMap.has(conn.source_chunk_id)
       ? {
@@ -128,8 +130,9 @@ export async function remapConnections(
   }))
 
   // Step 5: Filter to connections involving this document
+  type EnrichedConnection = ConnectionData & { source_chunk: { id: string; document_id: string; embedding: number[] } | null; target_chunk: { id: string; document_id: string; embedding: number[] } | null }
   const connections = enrichedConnections.filter(
-    conn =>
+    (conn: EnrichedConnection) =>
       conn.source_chunk?.document_id === documentId ||
       conn.target_chunk?.document_id === documentId
   )

@@ -12,6 +12,7 @@ import { HandlerJobManager } from '../handler-job-manager.js'
 import { processDocument } from '../../engines/orchestrator.js'
 import { DEFAULT_ENGINE_CONFIG } from '../../engines/engine-config.js'
 import { saveToStorage } from '../storage-helpers.js'
+import { ReprocessConnectionsOutputSchema } from '../../types/job-schemas.js'
 
 type ReprocessMode = 'all' | 'add_new' | 'smart'
 type EngineType = 'semantic_similarity' | 'contradiction_detection' | 'thematic_bridge'
@@ -147,14 +148,29 @@ export class ConnectionDetectionManager extends HandlerJobManager {
     console.log(`  - After: ${connectionsAfter}`)
     console.log(`  - By engine:`, result.byEngine)
 
-    await this.markComplete({
+    // Map mode to schema-compliant values
+    const modeMapping: Record<ReprocessMode, 'reprocess_all' | 'smart_mode' | 'add_new'> = {
+      'all': 'reprocess_all',
+      'smart': 'smart_mode',
+      'add_new': 'add_new'
+    }
+
+    // Prepare output data matching schema
+    const outputData = {
       success: true,
-      connectionsBefore,
-      connectionsAfter,
-      validatedPreserved,
-      backupPath,
-      byEngine: result.byEngine
-    }, `Reprocessed connections (${mode} mode)`)
+      mode: modeMapping[mode],
+      connectionsDeleted: mode === 'all' ? connectionsBefore : undefined,
+      connectionsCreated: Math.max(0, connectionsAfter - connectionsBefore),
+      validatedPreserved: validatedPreserved > 0 ? validatedPreserved : undefined,
+      backupCreated: backupPath ? true : undefined,
+      backupPath: backupPath,
+      engines: engines,
+    }
+
+    // Validate before saving
+    ReprocessConnectionsOutputSchema.parse(outputData)
+
+    await this.markComplete(outputData, `Reprocessed connections (${mode} mode)`)
   }
 
   /**

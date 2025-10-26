@@ -18,6 +18,7 @@ export interface ContradictionDetectionConfig {
   crossDocumentOnly?: boolean;     // Default: true
   sourceChunkIds?: string[];       // NEW: Filter to specific source chunks
   targetDocumentIds?: string[];    // Filter to specific target documents (for Add New mode)
+  reprocessingBatch?: string;      // Batch ID for connection reprocessing
 }
 
 /**

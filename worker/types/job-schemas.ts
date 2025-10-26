@@ -124,6 +124,58 @@ export const GenerateFlashcardsOutputSchema = z.object({
 export type GenerateFlashcardsOutput = z.infer<typeof GenerateFlashcardsOutputSchema>
 
 /**
+ * Scan Vault Job Output Schema
+ *
+ * Used in: worker/handlers/scan-vault.ts
+ * Stored in: background_jobs.output_data (JSONB)
+ * Consumed by: Obsidian integration UI
+ */
+export const ScanVaultOutputSchema = z.object({
+  success: z.boolean(),
+  documentCount: z.number(),
+  documents: z.array(z.object({
+    title: z.string(),
+    complete: z.boolean(),
+    hasContent: z.boolean(),
+    hasHighlights: z.boolean(),
+    hasConnections: z.boolean(),
+    hasChunksJson: z.boolean(),
+    hasMetadataJson: z.boolean(),
+    hasManifestJson: z.boolean(),
+  })),
+  vaultPath: z.string(),
+})
+
+export type ScanVaultOutput = z.infer<typeof ScanVaultOutputSchema>
+
+/**
+ * Import From Vault Job Output Schema
+ *
+ * Used in: worker/handlers/import-from-vault.ts
+ * Stored in: background_jobs.output_data (JSONB)
+ * Consumed by: Obsidian integration UI
+ */
+export const ImportFromVaultOutputSchema = z.object({
+  success: z.boolean(),
+  documentId: z.string().optional(),
+  documentTitle: z.string().optional(),
+  chunksImported: z.number(),
+  annotationsImported: z.number().optional(),
+  annotationsRecovered: z.number().optional(),
+  sparksImported: z.number().optional(),
+  sparksRecovered: z.number().optional(),
+  connectionsImported: z.number().optional(),
+  connectionsRemapped: z.number().optional(),
+  uploadedToStorage: z.boolean().optional(),
+  strategy: z.enum(['skip', 'replace', 'merge_smart']).optional(),
+  embeddingsRegenerated: z.boolean().optional(),
+  connectionDetectionJobId: z.string().optional(),
+  error: z.string().optional(),
+})
+
+export type ImportFromVaultOutput = z.infer<typeof ImportFromVaultOutputSchema>
+
+/**
  * Union type for all job outputs
  */
 export type JobOutput =
@@ -131,6 +183,8 @@ export type JobOutput =
   | ImportJobOutput
   | ReprocessConnectionsOutput
   | GenerateFlashcardsOutput
+  | ScanVaultOutput
+  | ImportFromVaultOutput
   | JobErrorOutput
 
 /**
@@ -146,7 +200,7 @@ export type JobOutput =
  * validateJobOutput('export', outputData) // Throws if invalid
  */
 export function validateJobOutput(
-  jobType: 'export_documents' | 'import_document' | 'reprocess_connections' | 'generate_flashcards',
+  jobType: 'export_documents' | 'import_document' | 'reprocess_connections' | 'generate_flashcards' | 'scan_vault' | 'import_from_vault',
   data: unknown
 ): JobOutput {
   switch (jobType) {
@@ -158,6 +212,10 @@ export function validateJobOutput(
       return ReprocessConnectionsOutputSchema.parse(data)
     case 'generate_flashcards':
       return GenerateFlashcardsOutputSchema.parse(data)
+    case 'scan_vault':
+      return ScanVaultOutputSchema.parse(data)
+    case 'import_from_vault':
+      return ImportFromVaultOutputSchema.parse(data)
     default:
       throw new Error(`Unknown job type: ${jobType}`)
   }
