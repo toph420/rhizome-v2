@@ -1,6 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TypographyShowcase } from '@/components/design/TypographyShowcase'
 import { ColorPalette } from '@/components/design/ColorPalette'
+import { ColorShowcase } from '@/components/design/ColorShowcase'
 import { ComponentShowcase } from '@/components/design/ComponentShowcase'
 import { BrutalismPlayground } from '@/components/design/BrutalismPlayground'
 import { LibrariesShowcase } from '@/components/design/LibrariesShowcase'
@@ -49,6 +50,7 @@ export default function DesignGuidePage() {
         {/* Colors Section */}
         <TabsContent value="colors" className="space-y-6">
           <ColorPalette />
+          <ColorShowcase />
         </TabsContent>
 
         {/* Components Section */}

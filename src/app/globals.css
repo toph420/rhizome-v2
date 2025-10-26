@@ -1,258 +1,279 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @import "tw-animate-css";
-@import "../styles/neobrutalism.css";
-@import "../styles/retroui.css";
+
+/* Google Fonts - Simple CSS import approach */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap');
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
-  /* Core app utilities - reference runtime variables */
-  --color-background: var(--bg);
-  --color-foreground: var(--fg);
-  --color-border: var(--border);
-  --color-ring: var(--ring);
-
-  /* Neobrutalism utilities - reference runtime variables */
-  --color-main: var(--main);
-  --color-main-foreground: var(--main-fg);
-  --color-secondary-background: var(--secondary-bg);
-
-  /* RetroUI utilities - reference runtime variables */
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-fg);
-  --color-primary-hover: var(--primary-hover);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-fg);
-  --color-secondary-hover: var(--secondary-hover);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-fg);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-fg);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-fg);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-fg);
-
-  /* Border radius - reference runtime variables */
-  --radius-base: var(--radius-val);
-
-  /* Shadows - reference runtime variables */
-  --shadow-shadow: var(--shadow-val);
-  --shadow-md: var(--shadow-md-val);
-  --shadow-primary: var(--shadow-primary-val);
-
-  /* Translate values - reference runtime variables */
-  --translate-boxShadowX: var(--translateX);
-  --translate-boxShadowY: var(--translateY);
-  --translate-reverseBoxShadowX: var(--translateRevX);
-  --translate-reverseBoxShadowY: var(--translateRevY);
-
-  /* Fonts - reference runtime variables */
-  --font-base: var(--font-val);
-  --font-head: var(--font-head-val);
-}
 
 :root {
-  /* Runtime variables - defaults for the app */
-  --bg: #fff;
-  --fg: #0a0a0a;
-  --border: #e5e5e5;
-  --ring: #a3a3a3;
-  --main: #1a1a1a;
-  --main-fg: #fafafa;
-  --secondary-bg: #f5f5f5;
-  --primary: #333;
-  --primary-fg: #fff;
-  --primary-hover: #1a1a1a;
-  --secondary: #666;
-  --secondary-fg: #fff;
-  --secondary-hover: #333;
-  --card: #fff;
-  --card-fg: #0a0a0a;
-  --muted: #f5f5f5;
-  --muted-fg: #666;
-  --accent: #f5f5f5;
-  --accent-fg: #0a0a0a;
-  --destructive: #dc2626;
-  --destructive-fg: #fff;
-  --radius-val: 0.5rem;
-  --shadow-val: 4px 4px 0 0 #000;
-  --shadow-md-val: 4px 4px 0 0 #000;
-  --shadow-primary-val: 3px 3px 0 0 #333;
+  --background: oklch(96.79% 0.0654 102.26);
+  --bg: oklch(96.79% 0.0654 102.26);
+  --secondary-background: oklch(100% 0 0);
+  --secondary-bg: oklch(100% 0 0);
+  --foreground: oklch(0% 0 0);
+  --main-foreground: oklch(0% 0 0);
+  --main-fg: oklch(0% 0 0);
+  --fg: oklch(0% 0 0);
+  --main: oklch(86.03% 0.176 92.36);
+  --border: oklch(0% 0 0);
+  --ring: oklch(0% 0 0);
+  --overlay: oklch(0% 0 0 / 0.8);
+  --shadow: 2px 2px 0px 0px var(--border);
   --translateX: 4px;
   --translateY: 4px;
   --translateRevX: -4px;
   --translateRevY: -4px;
-  --font-val: system-ui, sans-serif;
-  --font-head-val: system-ui, sans-serif;
+  --radius-val: 10px;
 
-  /* Legacy variables for existing styles */
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Font Selection - Change these to switch fonts:
+      Available fonts (imported via @import above):
+      'Inter', sans-serif          - Versatile UI sans-serif
+      'DM Sans', sans-serif        - Geometric sans-serif
+      'Lora', serif                - Beautiful serif font
+  */
+  --font-base: 'DM Sans', sans-serif;
+  --font-heading: 'Inter', sans-serif;
+
+  --chart-1: #FACC00;
+  --chart-2: #7A83FF;
+  --chart-3: #FF4D50;
+  --chart-4: #00D696;
+  --chart-5: #0099FF;
+  --chart-active-dot: #000;
+
+  /* Bold Primary Colors - Option 2: Authentic Neobrutalism (unused) */
+  --neo-primary: oklch(0.4849 0.069 220.07);      /* #2a687a - Ming (Teal Blue) - bold but not neon */
+  --neo-secondary: oklch(0.661 0.1091 136.97);  /* #72a25e - Russian Green (Sage) - earthy pop */
+  --neo-accent: oklch(0.6406 0.2565 8.07);      /* #ff6b35 - Vibrant Orange - high energy */
+  --neo-warning: oklch(0.8133 0.167 80.52);     /* #f9b409 - Spanish Yellow - bright warning */
+  --neo-danger: oklch(0.7045 0.1926 39.23);       /* #ff006e - Hot Pink - vibrant alert color */
+
+  /* New pastel palette - organized by color family */
+  
+  /* Blues & Cyans */
+  --color-mint: oklch(0.9492 0.029 183.51);
+  --color-seafoam: oklch(0.8545 0.0538 191.85);
+  --color-sky: oklch(0.8148 0.082 225.79);
+  --color-cyan: oklch(0.809 0.1013 212.48);
+  
+  /* Greens */
+  --color-sage: oklch(0.8324 0.0594 139);
+  --color-lime: oklch(0.9257 0.1352 137.67);
+  --color-mint-green: oklch(0.868 0.1558 144.12);
+  --color-forest: oklch(0.7406 0.0935 150.34);
+  
+  /* Yellows & Golds */
+  --color-cream: oklch(0.9723 0.1255 108.54);
+  --color-mustard: oklch(0.8985 0.1512 93.67);
+  --color-gold: oklch(0.8781 0.167 98.22);
+  --color-amber: oklch(0.7516 0.1521 77.55);
+  
+  /* Oranges & Reds */
+  --color-peach: oklch(0.896 0.0597 67.74);
+  --color-coral: oklch(0.7938 0.1248 42.41);
+  --color-salmon: oklch(0.7295 0.1687 34.04);
+  --color-red: oklch(0.7116 0.1812 22.83);
+  
+  /* Pinks & Purples */
+  --color-lavender: oklch(0.9369 0.0526 322.98);
+  --color-pink: oklch(0.8677 0.0735 7.03);
+  --color-rose: oklch(0.8549 0.1179 334.21);
+  --color-hot-pink: oklch(0.7283 0.1971 351.98);
+  
+  /* Purples */
+  --color-periwinkle: oklch(0.9124 0.026 295.44);
+  --color-lilac: oklch(0.7756 0.1354 300.41);
+  --color-purple: oklch(0.6938 0.1477 294.41);
+  --color-violet: oklch(0.5246 0.2376 312.4);
+
+  /* Vibrant Palette - High saturation, bold colors */
+  --color-vibrant-pink: oklch(0.71 0.18 357);      /* #FF7396 */
+  --color-vibrant-yellow: oklch(0.85 0.16 95);     /* #FCCB30 */
+  --color-vibrant-orange: oklch(0.73 0.19 45);     /* #FF8048 */
+  --color-vibrant-purple: oklch(0.67 0.18 305);    /* #C980DB */
+  --color-vibrant-teal: oklch(0.68 0.11 185);      /* #00BEAE */
+  --color-vibrant-cyan: oklch(0.65 0.12 205);      /* #00AFC7 */
+
+  /* Annotation Colors (using pastel palette with color-mix) */
+  --annotation-yellow-bg: color-mix(in oklch, var(--color-mustard), transparent 60%);
+  --annotation-yellow-border: color-mix(in oklch, var(--color-mustard), transparent 40%);
+  --annotation-green-bg: color-mix(in oklch, var(--color-mint-green), transparent 60%);
+  --annotation-green-border: color-mix(in oklch, var(--color-mint-green), transparent 40%);
+  --annotation-blue-bg: color-mix(in oklch, var(--color-sky), transparent 60%);
+  --annotation-blue-border: color-mix(in oklch, var(--color-sky), transparent 40%);
+  --annotation-red-bg: color-mix(in oklch, var(--color-salmon), transparent 60%);
+  --annotation-red-border: color-mix(in oklch, var(--color-salmon), transparent 40%);
+  --annotation-purple-bg: color-mix(in oklch, var(--color-lilac), transparent 60%);
+  --annotation-purple-border: color-mix(in oklch, var(--color-lilac), transparent 40%);
+  --annotation-orange-bg: color-mix(in oklch, var(--color-coral), transparent 60%);
+  --annotation-orange-border: color-mix(in oklch, var(--color-coral), transparent 40%);
+  --annotation-pink-bg: color-mix(in oklch, var(--color-rose), transparent 60%);
+  --annotation-pink-border: color-mix(in oklch, var(--color-rose), transparent 40%);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(29.28% 0.0373 94.38);
+  --bg: oklch(29.28% 0.0373 94.38);
+  --secondary-background: oklch(23.93% 0 0);
+  --secondary-bg: oklch(23.93% 0 0);
+  --foreground: oklch(92.49% 0 0);
+  --fg: oklch(92.49% 0 0);
+  --main-foreground: oklch(0% 0 0);
+  --main-fg: oklch(0% 0 0);
+  --main: oklch(79.36% 0.1624 92.49);
+  --main: oklch(79.36% 0.1624 92.49);
+  --border: oklch(0% 0 0);
+  --ring: oklch(100% 0 0);
+  --shadow: 2px 2px 0px 0px var(--border);
+  --chart-1: #E0B700;
+  --chart-2: #7A83FF;
+  --chart-3: #FF6669;
+  --chart-4: #00BD84;
+  --chart-5: #008AE5;
+  --chart-active-dot: #fff;
+
+  /* Annotation Colors - Dark Mode (reduced opacity for better readability) */
+  --annotation-yellow-bg: color-mix(in oklch, var(--color-mustard), transparent 80%);
+  --annotation-yellow-border: color-mix(in oklch, var(--color-mustard), transparent 65%);
+  --annotation-green-bg: color-mix(in oklch, var(--color-mint-green), transparent 80%);
+  --annotation-green-border: color-mix(in oklch, var(--color-mint-green), transparent 65%);
+  --annotation-blue-bg: color-mix(in oklch, var(--color-sky), transparent 80%);
+  --annotation-blue-border: color-mix(in oklch, var(--color-sky), transparent 65%);
+  --annotation-red-bg: color-mix(in oklch, var(--color-salmon), transparent 80%);
+  --annotation-red-border: color-mix(in oklch, var(--color-salmon), transparent 65%);
+  --annotation-purple-bg: color-mix(in oklch, var(--color-lilac), transparent 80%);
+  --annotation-purple-border: color-mix(in oklch, var(--color-lilac), transparent 65%);
+  --annotation-orange-bg: color-mix(in oklch, var(--color-coral), transparent 80%);
+  --annotation-orange-border: color-mix(in oklch, var(--color-coral), transparent 65%);
+  --annotation-pink-bg: color-mix(in oklch, var(--color-rose), transparent 80%);
+  --annotation-pink-border: color-mix(in oklch, var(--color-rose), transparent 65%);
+}
+
+@theme inline {
+  --color-main: var(--main);
+  --color-background: var(--background);
+  --color-secondary-background: var(--secondary-background);
+  --color-foreground: var(--foreground);
+  --color-main-foreground: var(--main-foreground);
+  --color-border: var(--border);
+  --color-overlay: var(--overlay);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Pastel color palette */
+  --color-mint: var(--color-mint);
+  --color-sage: var(--color-sage);
+  --color-cream: var(--color-cream);
+  --color-peach: var(--color-peach);
+  --color-lavender: var(--color-lavender);
+  --color-periwinkle: var(--color-periwinkle);
+  --color-seafoam: var(--color-seafoam);
+  --color-lime: var(--color-lime);
+  --color-mustard: var(--color-mustard);
+  --color-coral: var(--color-coral);
+  --color-pink: var(--color-pink);
+  --color-lilac: var(--color-lilac);
+  --color-sky: var(--color-sky);
+  --color-mint-green: var(--color-mint-green);
+  --color-gold: var(--color-gold);
+  --color-salmon: var(--color-salmon);
+  --color-rose: var(--color-rose);
+  --color-purple: var(--color-purple);
+  --color-cyan: var(--color-cyan);
+  --color-forest: var(--color-forest);
+  --color-amber: var(--color-amber);
+  --color-red: var(--color-red);
+  --color-hot-pink: var(--color-hot-pink);
+  --color-violet: var(--color-violet);
+
+  /* Vibrant palette */
+  --color-vibrant-pink: var(--color-vibrant-pink);
+  --color-vibrant-yellow: var(--color-vibrant-yellow);
+  --color-vibrant-orange: var(--color-vibrant-orange);
+  --color-vibrant-purple: var(--color-vibrant-purple);
+  --color-vibrant-teal: var(--color-vibrant-teal);
+  --color-vibrant-cyan: var(--color-vibrant-cyan);
+
+  --spacing-boxShadowX: 2px;
+  --spacing-boxShadowY: 2px;
+  --spacing-reverseBoxShadowX: -2px;
+  --spacing-reverseBoxShadowY: -2px;
+  --radius-base: 10px;
+  --shadow-shadow: var(--shadow);
+  --font-weight-base: 500;
+  --font-weight-heading: 800;
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
   body {
-    @apply bg-background text-foreground;
+    /* Uses --font-base from :root (line 44) - CHANGE FONTS THERE! */
+    font-family: var(--font-base);
+    color: var(--color-foreground);
+    background-color: var(--color-background);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    /* Uses --font-heading from :root (line 45) */
+    font-family: var(--font-heading);
   }
 }
 
+
 @layer components {
   /* ============================================
-     Annotation Highlighting Styles (Span-Based)
+     Annotation Highlighting Styles
+     Uses neobrutalist color palette with CSS variables
      ============================================ */
 
-  /* Yellow */
   [data-annotation-color="yellow"] {
-    background-color: rgba(254, 240, 138, 0.4);
-    border-bottom: 2px solid rgba(234, 179, 8, 0.5);
+    background-color: var(--annotation-yellow-bg);
+    border-bottom: 2px solid var(--annotation-yellow-border);
     transition: all 0.15s ease;
   }
 
-  /* Green */
   [data-annotation-color="green"] {
-    background-color: rgba(187, 247, 208, 0.4);
-    border-bottom: 2px solid rgba(34, 197, 94, 0.5);
+    background-color: var(--annotation-green-bg);
+    border-bottom: 2px solid var(--annotation-green-border);
     transition: all 0.15s ease;
   }
 
-  /* Blue */
   [data-annotation-color="blue"] {
-    background-color: rgba(191, 219, 254, 0.4);
-    border-bottom: 2px solid rgba(59, 130, 246, 0.5);
+    background-color: var(--annotation-blue-bg);
+    border-bottom: 2px solid var(--annotation-blue-border);
     transition: all 0.15s ease;
   }
 
-  /* Red */
   [data-annotation-color="red"] {
-    background-color: rgba(254, 202, 202, 0.4);
-    border-bottom: 2px solid rgba(239, 68, 68, 0.5);
+    background-color: var(--annotation-red-bg);
+    border-bottom: 2px solid var(--annotation-red-border);
     transition: all 0.15s ease;
   }
 
-  /* Purple */
   [data-annotation-color="purple"] {
-    background-color: rgba(233, 213, 255, 0.4);
-    border-bottom: 2px solid rgba(168, 85, 247, 0.5);
+    background-color: var(--annotation-purple-bg);
+    border-bottom: 2px solid var(--annotation-purple-border);
     transition: all 0.15s ease;
   }
 
-  /* Orange */
   [data-annotation-color="orange"] {
-    background-color: rgba(254, 215, 170, 0.4);
-    border-bottom: 2px solid rgba(249, 115, 22, 0.5);
+    background-color: var(--annotation-orange-bg);
+    border-bottom: 2px solid var(--annotation-orange-border);
     transition: all 0.15s ease;
   }
 
-  /* Pink */
   [data-annotation-color="pink"] {
-    background-color: rgba(252, 231, 243, 0.4);
-    border-bottom: 2px solid rgba(236, 72, 153, 0.5);
+    background-color: var(--annotation-pink-bg);
+    border-bottom: 2px solid var(--annotation-pink-border);
     transition: all 0.15s ease;
-  }
-
-  /* Dark mode variants */
-  .dark [data-annotation-color="yellow"] {
-    background-color: rgba(254, 240, 138, 0.2);
-    border-bottom-color: rgba(234, 179, 8, 0.3);
-  }
-
-  .dark [data-annotation-color="green"] {
-    background-color: rgba(187, 247, 208, 0.2);
-    border-bottom-color: rgba(34, 197, 94, 0.3);
-  }
-
-  .dark [data-annotation-color="blue"] {
-    background-color: rgba(191, 219, 254, 0.2);
-    border-bottom-color: rgba(59, 130, 246, 0.3);
-  }
-
-  .dark [data-annotation-color="red"] {
-    background-color: rgba(254, 202, 202, 0.2);
-    border-bottom-color: rgba(239, 68, 68, 0.3);
-  }
-
-  .dark [data-annotation-color="purple"] {
-    background-color: rgba(233, 213, 255, 0.2);
-    border-bottom-color: rgba(168, 85, 247, 0.3);
-  }
-
-  .dark [data-annotation-color="orange"] {
-    background-color: rgba(254, 215, 170, 0.2);
-    border-bottom-color: rgba(249, 115, 22, 0.3);
-  }
-
-  .dark [data-annotation-color="pink"] {
-    background-color: rgba(252, 231, 243, 0.2);
-    border-bottom-color: rgba(236, 72, 153, 0.3);
   }
 
   /* Hover effects */
