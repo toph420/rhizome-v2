@@ -12,7 +12,12 @@ interface TopNavProps {
   onSettingsClick: () => void
 }
 
-const navigation = [
+const navigation: Array<{
+  name: string
+  href: string
+  icon: typeof Library
+  disabled?: boolean
+}> = [
   {
     name: 'Library',
     href: '/',

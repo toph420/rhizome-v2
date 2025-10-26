@@ -130,7 +130,14 @@ export function FlashcardsListClient({ documentId }: FlashcardsListClientProps) 
         {cards.map(card => (
           <FlashcardCard
             key={card.entity_id}
-            flashcard={card}
+            flashcard={{
+              ...card,
+              card_type: card.card_type as 'basic' | 'cloze',
+              status: card.status as 'draft' | 'active' | 'suspended',
+              tags: card.tags || [],
+              chunk_ids: card.chunk_ids || [],
+              deck_id: card.deck_id || '',
+            }}
             isActive={activeCardId === card.entity_id}
             onClick={() => setActiveCardId(card.entity_id)}
             onApproved={() => handleRefetch()}

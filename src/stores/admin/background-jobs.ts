@@ -521,9 +521,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
           removeItem: (name) => localStorage.removeItem(name),
         },
         // Only persist jobs, not polling state
-        partialize: (state) => ({
-          jobs: state.jobs,
-        } as Partial<BackgroundJobsStore>),
+        partialize: (state) => ({ jobs: state.jobs } as BackgroundJobsStore),
         // Auto-restart polling on hydration if there are active jobs
         onRehydrateStorage: () => (state) => {
           if (state) {

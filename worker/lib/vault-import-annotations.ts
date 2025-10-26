@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import { SupabaseClient } from '@supabase/supabase-js'
-import { findAnnotationMatch } from '../lib/fuzzy-matching.js'
+import { findAnnotationMatch } from '../../src/lib/fuzzy-matching.js'
 import type { AnnotationMatchResult } from '../types/recovery.js'
 
 /**

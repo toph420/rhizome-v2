@@ -193,6 +193,15 @@ const ALLOWED_IPS = ['YOUR.HOME.IP.ADDRESS']
 
 ## Development Workflow
 
+### Initial Setup (One-time)
+```bash
+# After first `npx supabase db reset`, seed the dev user:
+psql postgresql://postgres:postgres@localhost:54322/postgres -f scripts/seed-dev-user.sql
+
+# This creates user with ID: 00000000-0000-0000-0000-000000000000
+# Required for foreign key constraints in user_settings and other tables
+```
+
 ### Daily Use
 ```bash
 # Start everything
@@ -204,7 +213,7 @@ npm run dev
 ### Database Access
 ```bash
 # Direct SQL access when needed
-npx supabase db reset  # Reset everything
+npx supabase db reset  # Reset everything (remember to re-run seed-dev-user.sql after!)
 psql $DATABASE_URL      # Direct SQL access
 ```
 

@@ -2,9 +2,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TypographyShowcase } from '@/components/design/TypographyShowcase'
 import { ColorPalette } from '@/components/design/ColorPalette'
 import { ColorShowcase } from '@/components/design/ColorShowcase'
-import { ComponentShowcase } from '@/components/design/ComponentShowcase'
-import { BrutalismPlayground } from '@/components/design/BrutalismPlayground'
-import { LibrariesShowcase } from '@/components/design/LibrariesShowcase'
 
 /**
  * Design guide page showcasing typography, colors, components, and experimental styles.
@@ -22,25 +19,12 @@ export default function DesignGuidePage() {
       </div>
 
       {/* Tabs Navigation */}
-      <Tabs defaultValue="libraries" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6 lg:w-auto">
-          <TabsTrigger value="libraries">Libraries</TabsTrigger>
-          <TabsTrigger value="brutalism">Brutalism</TabsTrigger>
+      <Tabs defaultValue="typography" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-3 lg:w-auto">
           <TabsTrigger value="typography">Typography</TabsTrigger>
           <TabsTrigger value="colors">Colors</TabsTrigger>
-          <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="spacing">Spacing</TabsTrigger>
         </TabsList>
-
-        {/* Libraries Showcase */}
-        <TabsContent value="libraries" className="space-y-6">
-          <LibrariesShowcase />
-        </TabsContent>
-
-        {/* Brutalism Playground */}
-        <TabsContent value="brutalism" className="space-y-6">
-          <BrutalismPlayground />
-        </TabsContent>
 
         {/* Typography Section */}
         <TabsContent value="typography" className="space-y-6">
@@ -51,11 +35,6 @@ export default function DesignGuidePage() {
         <TabsContent value="colors" className="space-y-6">
           <ColorPalette />
           <ColorShowcase />
-        </TabsContent>
-
-        {/* Components Section */}
-        <TabsContent value="components" className="space-y-6">
-          <ComponentShowcase />
         </TabsContent>
 
         {/* Spacing Section */}

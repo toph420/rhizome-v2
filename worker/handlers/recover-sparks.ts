@@ -8,7 +8,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { findAnnotationMatch } from '../lib/fuzzy-matching.js'
+import { findAnnotationMatch } from '../../src/lib/fuzzy-matching.js'
 import { embed } from 'ai'
 import { google } from '@ai-sdk/google'
 import type { Chunk } from '../types/recovery.js'

@@ -11,8 +11,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { ECS } from '@/lib/ecs/ecs';
 import { AnnotationOperations } from '@/lib/ecs/annotations';
 import { getCurrentUser, getSupabaseClient } from '@/lib/auth';
+import type { AnnotationEntity } from '@/types/annotations';
 import type {
-  AnnotationEntity,
   CreateAnnotationInput,
   UpdateAnnotationInput,
 } from '@/lib/ecs/annotations';

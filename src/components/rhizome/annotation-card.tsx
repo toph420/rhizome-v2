@@ -351,7 +351,7 @@ export function AnnotationCard({
         {!isEditing && (
           <div className="flex gap-1 absolute bottom-0 right-3">
             <Button
-              variant=""
+              variant="ghost"
               size="icon"
               className="mr-1"
               onClick={(e) => {
@@ -363,7 +363,7 @@ export function AnnotationCard({
               <Pencil className="h-3 w-3" />
             </Button>
             <Button
-              variant=""
+              variant="ghost"
               size="icon"
               onClick={(e) => {
                 e.stopPropagation()

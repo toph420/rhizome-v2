@@ -143,7 +143,7 @@ export abstract class BaseEngine implements CollisionEngine {
     
     // Filter by minimum score
     if (config?.minScore) {
-      processed = processed.filter(r => r.score >= config.minScore);
+      processed = processed.filter(r => r.score >= (config.minScore || 0));
     }
     
     // Sort by score descending

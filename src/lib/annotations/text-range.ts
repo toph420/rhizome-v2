@@ -3,7 +3,13 @@
  * Provides Range API helpers for precise text selection handling.
  */
 
-import type { TextSelection, TextContext } from '@/types/annotations'
+import type { TextSelection } from '@/types/annotations'
+
+export interface TextContext {
+  before: string
+  content: string
+  after: string
+}
 
 /**
  * Finds the closest chunk element ancestor from a DOM node.
@@ -61,7 +67,7 @@ export function captureSelection(): TextSelection | null {
     range: {
       startOffset,
       endOffset: startOffset + selectionText.length,
-      chunkId,
+      chunkIds: [chunkId],
     },
     rect: range.getBoundingClientRect(),
   }

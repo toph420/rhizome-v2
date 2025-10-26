@@ -1,5 +1,6 @@
 // Spark component (stored in ECS components table)
 export interface SparkComponent {
+  title?: string  // AI-generated or user-provided title
   content: string
   createdAt: string
   updatedAt?: string

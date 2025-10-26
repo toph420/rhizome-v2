@@ -8,7 +8,7 @@ import { Card } from '@/components/rhizome/card'
 import { Separator } from '@/components/rhizome/separator'
 import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight, FileText } from 'lucide-react'
 import { toast } from 'sonner'
-import type { RecoveryResults, ReviewItem } from '../../worker/types/recovery'
+import type { RecoveryResults, ReviewItem } from '@/types/recovery'
 import { getPendingImports, acceptImport, rejectImport, type PendingImport } from '@/app/actions/import-review'
 import { acceptAnnotationMatch, rejectAnnotationMatch } from '@/app/actions/annotations'
 
@@ -99,8 +99,8 @@ export function AnnotationReviewTab({
         results.success.push({
           id: item.annotation.id,
           text: item.suggestedMatch.text,
-          confidence: item.suggestedMatch.confidence,
-          method: item.suggestedMatch.method,
+          startOffset: item.suggestedMatch.startOffset,
+          endOffset: item.suggestedMatch.endOffset,
         })
       }
 
@@ -139,8 +139,8 @@ export function AnnotationReviewTab({
         results.lost.push({
           id: item.annotation.id,
           text: item.annotation.text,
-          confidence: 0,
-          method: 'lost',
+          startOffset: item.annotation.startOffset,
+          endOffset: item.annotation.endOffset,
         })
       }
 
@@ -163,7 +163,7 @@ export function AnnotationReviewTab({
   async function handleAcceptAll() {
     try {
       // Process all accepts in parallel
-      const results = await Promise.all(
+      const acceptResults = await Promise.all(
         needsReview.map((item) =>
           acceptAnnotationMatch(item.annotation.id, {
             startOffset: item.suggestedMatch.startOffset,
@@ -175,7 +175,7 @@ export function AnnotationReviewTab({
         )
       )
 
-      const failed = results.filter((r) => !r.success)
+      const failed = acceptResults.filter((r) => !r.success)
       if (failed.length > 0) {
         throw new Error(`${failed.length} annotations failed to accept`)
       }
@@ -189,8 +189,8 @@ export function AnnotationReviewTab({
         results.success.push(...needsReview.map(item => ({
           id: item.annotation.id,
           text: item.suggestedMatch.text,
-          confidence: item.suggestedMatch.confidence,
-          method: item.suggestedMatch.method,
+          startOffset: item.suggestedMatch.startOffset,
+          endOffset: item.suggestedMatch.endOffset,
         })))
         results.needsReview = []
       }
@@ -208,11 +208,11 @@ export function AnnotationReviewTab({
   async function handleDiscardAll() {
     try {
       // Process all rejects in parallel
-      const results = await Promise.all(
+      const rejectResults = await Promise.all(
         needsReview.map((item) => rejectAnnotationMatch(item.annotation.id))
       )
 
-      const failed = results.filter((r) => !r.success)
+      const failed = rejectResults.filter((r) => !r.success)
       if (failed.length > 0) {
         throw new Error(`${failed.length} annotations failed to discard`)
       }
@@ -226,8 +226,8 @@ export function AnnotationReviewTab({
         results.lost.push(...needsReview.map(item => ({
           id: item.annotation.id,
           text: item.annotation.text,
-          confidence: 0,
-          method: 'lost',
+          startOffset: item.annotation.startOffset,
+          endOffset: item.annotation.endOffset,
         })))
         results.needsReview = []
       }

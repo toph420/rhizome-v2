@@ -24,7 +24,7 @@ export function ChunkStatsOverview({ documentId }: { documentId: string }) {
 
   useEffect(() => {
     loadChunkDetectionStats(documentId)
-      .then((data: ChunkDetectionStats) => setStats(data))
+      .then((data) => setStats(data as ChunkDetectionStats))
       .catch(err => {
         console.error('[ChunkStatsOverview] Failed to load stats:', err)
         toast.error('Failed to load detection stats')

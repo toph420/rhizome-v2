@@ -34,7 +34,7 @@ export interface DocumentEngine {
   run(
     documentId: string,
     config: any,
-    onProgress?: (percent: number, stage: string, details: string) => Promise<void>
+    onProgress?: (percent: number, stage: string, details?: string) => Promise<void>
   ): Promise<ChunkConnection[]>
   cleanup?(): Promise<void>
 }
@@ -84,7 +84,7 @@ export class ThematicBridgeEngine implements DocumentEngine {
   async run(
     documentId: string,
     config: ThematicBridgeConfig = {},
-    onProgress?: (percent: number, stage: string, details: string) => Promise<void>
+    onProgress?: (percent: number, stage: string, details?: string) => Promise<void>
   ): Promise<ChunkConnection[]> {
     if (this.useLocalMode) {
       console.log(`[ThematicBridge] Using LOCAL mode (Qwen)`)

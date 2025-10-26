@@ -7,8 +7,8 @@ import type { ReactNode } from 'react'
 import type { AnnotationEntity, PositionComponent } from '@/types/annotations'
 import { Badge } from '@/components/ui/badge'
 
-// Import fuzzy matching algorithm from worker
-import { fuzzyMatchChunkToSource } from '../../../worker/lib/fuzzy-matching'
+// Import fuzzy matching algorithm from shared lib
+import { fuzzyMatchChunkToSource } from '@/lib/fuzzy-matching'
 
 /**
  * Restores annotation position in re-processed document using fuzzy matching.

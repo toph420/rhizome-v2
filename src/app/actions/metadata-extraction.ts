@@ -99,7 +99,7 @@ export async function extractTextMetadata(content: string) {
   })
 
   const { object } = await generateObject({
-    model: google(modelName, { apiKey }),
+    model: google(modelName),
     schema: metadataSchema,
     prompt: `Extract metadata from this document.
 
@@ -521,6 +521,10 @@ async function extractFirstPagesFromPDF(fileBuffer: ArrayBuffer, pageCount: numb
     file: pdfBlob,
     config: { mimeType: 'application/pdf' }
   })
+
+  if (!uploadedFile.name) {
+    throw new Error('Failed to upload PDF file')
+  }
 
   let fileState = await ai.files.get({ name: uploadedFile.name })
   let attempts = 0

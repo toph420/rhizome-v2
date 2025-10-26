@@ -8,9 +8,9 @@ import { WeightConfig, EngineType } from '@/types/collision-detection';
  * Creates a Supabase client for server-side operations with admin privileges.
  * @returns Supabase client with service role access
  */
-function getSupabaseAdmin() {
-  const cookieStore = cookies();
-  
+async function getSupabaseAdmin() {
+  const cookieStore = await cookies();
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -48,23 +48,28 @@ interface CustomPreset {
  * @returns The user's weight configuration preferences
  */
 export async function getUserPreferences(userId: string): Promise<WeightConfig> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   try {
     // Use the database function that creates defaults if needed
     const { data, error } = await supabase
       .rpc('get_user_preferences', { p_user_id: userId })
       .single();
-    
+
     if (error) {
       console.error('Error fetching user preferences:', error);
       throw new Error('Failed to fetch preferences');
     }
-    
+
+    if (!data) {
+      throw new Error('No preferences data returned');
+    }
+
     // Transform database format to WeightConfig
+    const userPref = data as unknown as UserPreference;
     const preferences: WeightConfig = {
-      weights: data.engine_weights as Record<EngineType, number>,
-      normalizationMethod: data.normalization_method as 'linear' | 'sigmoid' | 'softmax',
+      weights: userPref.engine_weights as Record<EngineType, number>,
+      normalizationMethod: userPref.normalization_method as 'linear' | 'sigmoid' | 'softmax',
     };
     
     return preferences;
@@ -98,7 +103,7 @@ export async function updateUserPreferences(
   config: WeightConfig,
   presetName?: string
 ): Promise<WeightConfig> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   try {
     // Use the database function to validate and normalize weights
@@ -138,7 +143,7 @@ export async function saveCustomPreset(
   presetName: string,
   config: WeightConfig
 ): Promise<boolean> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   try {
     const { data, error } = await supabase
@@ -166,7 +171,7 @@ export async function saveCustomPreset(
  * @returns Array of custom preset configurations
  */
 export async function getCustomPresets(userId: string): Promise<CustomPreset[]> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   try {
     const { data, error } = await supabase
@@ -197,7 +202,7 @@ export async function deleteCustomPreset(
   userId: string,
   presetName: string
 ): Promise<boolean> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   try {
     // Get current presets
@@ -245,7 +250,7 @@ export async function deleteCustomPreset(
  * @returns The default weight configuration
  */
 export async function resetUserPreferences(userId: string): Promise<WeightConfig> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   const defaultWeights: WeightConfig = {
     weights: {
@@ -291,7 +296,7 @@ export async function getPreferenceStatistics(): Promise<{
   presetUsage: Record<string, number>;
   averageWeights: Record<EngineType, number>;
 }> {
-  const supabase = getSupabaseAdmin();
+  const supabase = await getSupabaseAdmin();
   
   try {
     const { data, error } = await supabase
