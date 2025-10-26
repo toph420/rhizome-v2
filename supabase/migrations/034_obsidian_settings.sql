@@ -29,24 +29,8 @@ COMMENT ON TABLE user_settings IS 'User-specific settings for Obsidian integrati
 COMMENT ON COLUMN user_settings.obsidian_settings IS 'Obsidian vault configuration. Example: {vaultName: "MyVault", vaultPath: "/path/to/vault", autoSync: true, syncAnnotations: true, exportPath: "Rhizome/"}';
 COMMENT ON COLUMN user_settings.preferences IS 'General user preferences. Can include annotation colors, default views, etc.';
 
--- Insert default settings for existing dev user
-INSERT INTO user_settings (user_id, obsidian_settings, preferences)
-VALUES (
-  '00000000-0000-0000-0000-000000000000',
-  '{
-    "vaultName": null,
-    "vaultPath": null,
-    "autoSync": false,
-    "syncAnnotations": true,
-    "exportPath": "Rhizome/"
-  }'::jsonb,
-  '{}'::jsonb
-)
-ON CONFLICT (user_id) DO NOTHING;
-
--- RLS Policies (currently disabled for dev, but ready for production)
--- POLICY: Users can only view/edit their own settings
--- This will be enabled when real auth is implemented
+-- RLS Policies for production
+-- Users can only view/edit their own settings
 ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view own settings"
