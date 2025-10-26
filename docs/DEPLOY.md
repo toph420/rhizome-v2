@@ -19,7 +19,7 @@
 
 ## Architecture Overview
 
-### Hybrid Deployment Model
+### Hybrid Deployment Model (Dual-Worktree Setup)
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -27,6 +27,7 @@
 │  ↓ HTTPS                                             │
 ├──────────────────────────────────────────────────────┤
 │  VERCEL (Next.js 15 + React 19)                      │
+│  - Auto-deploys from main branch                     │
 │  - Server Components (data fetching)                 │
 │  - Server Actions (mutations)                        │
 │  - Supabase Auth (magic links)                       │
@@ -38,15 +39,26 @@
 │  - Storage buckets (documents, markdown, exports)    │
 │  - background_jobs queue                             │
 │  - Auth system (magic links, sessions)               │
-│  ↑ Polling every 5s                                  │
-├──────────────────────────────────────────────────────┤
-│  MAC AT HOME (Worker Process)                        │
-│  - Polls Supabase for pending jobs                   │
-│  - Docling (PDF processing)                          │
-│  - Ollama (qwen2.5:32b, local AI)                    │
-│  - Transformers.js (embeddings)                      │
-│  - 3-engine connection detection                     │
-│  - Saves results back to Supabase                    │
+│  ↑ Polling every 5s         ↑ Polling every 5s      │
+├──────────────┬───────────────────────────────────────┤
+│  Production  │  Development                          │
+│  Worker      │  Worker                               │
+├──────────────┴───────────────────────────────────────┤
+│  LOCAL MAC - DUAL WORKTREE SETUP                     │
+│                                                       │
+│  /rhizome-v2/ (main branch)                          │
+│  └─ worker/.env → Production DB                      │
+│     - Polls production Supabase                      │
+│     - Processes real user jobs                       │
+│     - Docling (PDF processing)                       │
+│     - Ollama (qwen2.5:32b, local AI)                 │
+│     - 3-engine connection detection                  │
+│                                                       │
+│  /rhizome-v2-worktree-merge/ (dev branch)            │
+│  └─ worker/.env → Local DB (localhost:54322)         │
+│     - Development and testing                        │
+│     - Local Supabase instance                        │
+│     - Same code, isolated data                       │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +68,8 @@
 - ✅ **Local processing**: Unlimited AI usage with Ollama
 - ✅ **No VPN needed**: Worker uses outbound HTTPS only
 - ✅ **Auto-scaling UI**: Vercel handles traffic
-- ✅ **Persistent storage**: Supabase manages data
+- ✅ **Dual-module architecture**: Clean separation between app and worker
+- ✅ **Isolated dev environment**: Test safely without affecting production
 
 ---
 
@@ -73,17 +86,17 @@
 **API Keys** (New Format):
 ```bash
 # Publishable Key (client-side, anon role)
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_<your-key>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_[get-from-dashboard]
 
 # Secret Key (server-side, service_role)
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_<your-key>
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_[get-from-dashboard]
 ```
 
 **Note**: Get these from Supabase Dashboard → Settings → API → "Project API keys"
 
 **Database**:
-- **Password**: Saved in 1Password (Supabase Production DB)
-- **Connection String**: Available in Supabase Dashboard → Settings → Database
+- **Connection String**: Get from Supabase Dashboard → Settings → Database
+- **Format**: `postgresql://postgres:[password]@db.pqkdcfxkitovcgvjoyuu.supabase.co:5432/postgres`
 - **Direct Link**: `npx supabase link --project-ref pqkdcfxkitovcgvjoyuu`
 
 ### Vercel
@@ -183,23 +196,23 @@ Go to Vercel Dashboard → Project Settings → Environment Variables
 Add for **Production** environment:
 
 ```bash
-# Supabase
+# Supabase (get from Supabase Dashboard → Settings → API)
 NEXT_PUBLIC_SUPABASE_URL=https://pqkdcfxkitovcgvjoyuu.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_1OLaFwC1fEhzlEoPgRjTNg_qeqpxhJJ
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_DmzMNorjia_FKkbiElNy0Q_ftsBjeWY
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_[your-key]
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_[your-key]
 
-# Google AI
-GOOGLE_AI_API_KEY=AIzaSyC0KCHfUIy0aKKtZY_v7uxf3eLHUEnsuPM
-GOOGLE_GENERATIVE_AI_API_KEY=AIzaSyC0KCHfUIy0aKKtZY_v7uxf3eLHUEnsuPM
-GEMINI_API_KEY=AIzaSyC0KCHfUIy0aKKtZY_v7uxf3eLHUEnsuPM
+# Google AI (get from https://aistudio.google.com/apikey)
+GOOGLE_AI_API_KEY=[your-key]
+GOOGLE_GENERATIVE_AI_API_KEY=[your-key]
+GEMINI_API_KEY=[your-key]
 GEMINI_MODEL=gemini-2.5-flash
 
-# External APIs
-YOUTUBE_API_KEY=AIzaSyAqmAteOtQ-iL714WkdpIwxJ_rb1br_6U8
-READWISE_ACCESS_TOKEN=YlszXAfi1AdX6WMl0VyMdSP0irmhxPolTBEz6zA3hXCAH2z4gm
+# External APIs (optional)
+YOUTUBE_API_KEY=[your-key]  # Optional - for YouTube processing
+READWISE_ACCESS_TOKEN=[your-key]  # Optional - for Readwise imports
 
-# Processing Mode
-PROCESSING_MODE=cloud  # Vercel has no Ollama
+# Processing Mode (Vercel has no Ollama, must use cloud)
+PROCESSING_MODE=cloud
 USE_GEMINI_CLEANUP=true
 USE_INLINE_METADATA=true
 ```
@@ -209,28 +222,74 @@ USE_INLINE_METADATA=true
 vercel --prod --yes
 ```
 
-### Step 3: Worker Configuration
+### Step 3: Dual-Worktree Setup
 
-**Update Environment** (`worker/.env`):
+**Create Development Worktree** (one-time setup):
 ```bash
-# Production Supabase
-SUPABASE_URL=https://pqkdcfxkitovcgvjoyuu.supabase.co
-NEXT_PUBLIC_SUPABASE_URL=https://pqkdcfxkitovcgvjoyuu.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_DmzMNorjia_FKkbiElNy0Q_ftsBjeWY
+# Navigate to main repository
+cd /Users/topher/Code/rhizome-v2
 
-# Local Processing
-PROCESSING_MODE=local  # Use Ollama on Mac
-OLLAMA_HOST=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen2.5:32b
+# Create worktree for development on integration branch
+git worktree add ../rhizome-v2-worktree-merge integration/study-and-connections
 ```
 
-**Start Worker**:
+**Worktree Structure**:
+```
+/Users/topher/Code/
+├── rhizome-v2/                    # Main branch (production)
+│   ├── worker/.env                # → Production database
+│   └── ...
+└── rhizome-v2-worktree-merge/     # Integration branch (development)
+    ├── worker/.env                # → Local database (localhost:54322)
+    └── ...
+```
+
+### Step 4: Worker Configuration
+
+**Production Worker** (`/rhizome-v2/worker/.env`):
+```bash
+# Production database connection
+DATABASE_URL=postgresql://postgres:[password]@db.pqkdcfxkitovcgvjoyuu.supabase.co:5432/postgres
+
+# Production Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://pqkdcfxkitovcgvjoyuu.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_[your-key]
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_[your-key]
+
+# Local Processing (Ollama on Mac)
+PROCESSING_MODE=local
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:32b
+USE_GEMINI_CLEANUP=true
+
+# API Keys
+GEMINI_API_KEY=[your-key]
+HF_TOKEN=[your-key]
+```
+
+**Development Worker** (`/rhizome-v2-worktree-merge/worker/.env`):
+```bash
+# Local database connection
+DATABASE_URL=postgresql://postgres:postgres@localhost:54322/postgres
+
+# Local Supabase instance
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+PROCESSING_MODE=local
+```
+
+**Start Production Worker**:
 ```bash
 cd /Users/topher/Code/rhizome-v2/worker
 npm start
 ```
 
-**Expected Output**:
+**Start Development Worker**:
+```bash
+cd /Users/topher/Code/rhizome-v2-worktree-merge
+npm run dev  # Starts both app and worker
+```
+
+**Expected Output** (Production):
 ```
 🚀 Background worker started
 ✅ Connected to Supabase: https://pqkdcfxkitovcgvjoyuu.supabase.co
@@ -274,20 +333,48 @@ CREATE TRIGGER on_user_created_prompts
 
 ## Ongoing Deployments
 
-### Code Changes
+### Dual-Worktree Workflow
 
-**Automatic Deployment** (Recommended):
+**Development Workflow** (integration branch):
 ```bash
-# In main worktree
-cd /Users/topher/Code/rhizome-v2
-git pull origin main  # Get latest
-# Make changes...
+# Work in development worktree
+cd /Users/topher/Code/rhizome-v2-worktree-merge
+
+# Start local development environment
+npm run dev  # Runs app + worker with local Supabase
+
+# Make changes, test locally...
 git add .
-git commit -m "feat: description"
+git commit -m "feat: your feature"
+git push origin integration/study-and-connections
+```
+
+**Production Deployment** (main branch):
+```bash
+# Switch to main worktree
+cd /Users/topher/Code/rhizome-v2
+
+# Merge integration branch
+git merge integration/study-and-connections --no-edit
+
+# Push to trigger Vercel deployment
 git push origin main
 
-# Vercel auto-deploys from GitHub
+# Vercel auto-deploys from main branch
 # Check status: https://vercel.com/dashboard
+```
+
+**Worker Deployment**:
+```bash
+# Production worker runs from main worktree
+cd /Users/topher/Code/rhizome-v2/worker
+
+# Pull latest changes
+git pull origin main
+
+# Restart worker to pick up changes
+# (Ctrl+C to stop, then:)
+npm start
 ```
 
 ### Database Migrations
