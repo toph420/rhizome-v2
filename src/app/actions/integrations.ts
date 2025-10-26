@@ -610,71 +610,80 @@ export async function autoImportFromReadwise(
     }
 
     // 3. Search Readwise library
-    const { ReadwiseExportClient } = await import('../../../worker/lib/readwise-export-api.js')
-    const client = new ReadwiseExportClient(readwiseToken)
+    // TODO: Implement Readwise auto-import
+    // const { ReadwiseExportClient } = await import('../../../worker/lib/readwise-export-api.js')
+    // const client = new ReadwiseExportClient(readwiseToken)
 
-    console.log(`[autoImportFromReadwise] Searching for: "${doc.title}" by ${doc.author}`)
+    console.log(`[autoImportFromReadwise] Feature not yet implemented for: "${doc.title}" by ${doc.author}`)
 
-    const books = await client.searchBooks({
-      title: doc.title,
-      author: doc.author
-    })
-
-    if (books.length === 0) {
-      return {
-        success: false,
-        error: `No matching book found in Readwise library for "${doc.title}"`,
-        suggestion: 'Try manual JSON upload instead'
-      }
-    }
-
-    // Use first match (could add fuzzy scoring later)
-    const matchedBook = books[0]
-    console.log(`[autoImportFromReadwise] Found match: ${matchedBook.title} (ID: ${matchedBook.user_book_id})`)
-
-    // 4. Highlights are already included in the book object
-    const highlights = matchedBook.highlights
-
-    if (highlights.length === 0) {
-      return {
-        success: false,
-        error: `Book found but has no highlights: "${matchedBook.title}"`,
-        bookId: matchedBook.user_book_id
-      }
-    }
-
-    console.log(`[autoImportFromReadwise] Downloaded ${highlights.length} highlights`)
-
-    // 5. Create background job (reuse existing readwise_import)
-    const { data: job, error: jobError } = await supabase
-      .from('background_jobs')
-      .insert({
-        user_id: user.id,
-        job_type: 'readwise_import',
-        entity_type: 'document',
-        entity_id: documentId,
-        input_data: {
-          documentId: documentId,
-          readwiseData: highlights
-        }
-      })
-      .select()
-      .single()
-
-    if (jobError) {
-      console.error('[autoImportFromReadwise] Job creation failed:', jobError)
-      return { success: false, error: `Job creation failed: ${jobError.message}` }
-    }
-
-    console.log(`[autoImportFromReadwise] Job created: ${job.id}`)
-
+    // Placeholder - auto-import not yet implemented
     return {
-      success: true,
-      jobId: job.id,
-      bookTitle: matchedBook.title,
-      bookAuthor: matchedBook.author,
-      highlightCount: highlights.length
+      success: false,
+      error: 'Readwise auto-import not yet implemented',
+      suggestion: 'Use manual JSON upload from Readwise export instead'
     }
+
+    // const books = await client.searchBooks({
+    //   title: doc.title,
+    //   author: doc.author
+    // })
+
+    // if (books.length === 0) {
+    //   return {
+    //     success: false,
+    //     error: `No matching book found in Readwise library for "${doc.title}"`,
+    //     suggestion: 'Try manual JSON upload instead'
+    //   }
+    // }
+
+    // TODO: Implement the rest when ReadwiseExportClient is available
+    // // Use first match (could add fuzzy scoring later)
+    // const matchedBook = books[0]
+    // console.log(`[autoImportFromReadwise] Found match: ${matchedBook.title} (ID: ${matchedBook.user_book_id})`)
+
+    // // 4. Highlights are already included in the book object
+    // const highlights = matchedBook.highlights
+
+    // if (highlights.length === 0) {
+    //   return {
+    //     success: false,
+    //     error: `Book found but has no highlights: "${matchedBook.title}"`,
+    //     bookId: matchedBook.user_book_id
+    //   }
+    // }
+
+    // console.log(`[autoImportFromReadwise] Downloaded ${highlights.length} highlights`)
+
+    // // 5. Create background job (reuse existing readwise_import)
+    // const { data: job, error: jobError } = await supabase
+    //   .from('background_jobs')
+    //   .insert({
+    //     user_id: user.id,
+    //     job_type: 'readwise_import',
+    //     entity_type: 'document',
+    //     entity_id: documentId,
+    //     input_data: {
+    //       documentId: documentId,
+    //       readwiseData: highlights
+    //     }
+    //   })
+    //   .select()
+    //   .single()
+
+    // if (jobError) {
+    //   console.error('[autoImportFromReadwise] Job creation failed:', jobError)
+    //   return { success: false, error: `Job creation failed: ${jobError.message}` }
+    // }
+
+    // console.log(`[autoImportFromReadwise] Job created: ${job.id}`)
+
+    // return {
+    //   success: true,
+    //   jobId: job.id,
+    //   bookTitle: matchedBook.title,
+    //   bookAuthor: matchedBook.author,
+    //   highlightCount: highlights.length
+    // }
 
   } catch (error) {
     console.error('[autoImportFromReadwise] Error:', error)
