@@ -62,8 +62,7 @@ export function parseMarkdownToBlocks(
     let html = ''
     try {
       html = marked.parse(raw, {
-        async: false,
-        smartypants: true  // Convert straight quotes to curly quotes
+        async: false
       }) as string
     } catch (err) {
       console.error('Failed to parse token:', err)

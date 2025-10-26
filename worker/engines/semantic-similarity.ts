@@ -144,7 +144,7 @@ export async function runSemanticSimilarity(
     let filteredMatches = matches;
     if (targetDocumentIds && targetDocumentIds.length > 0) {
       const targetSet = new Set(targetDocumentIds);
-      filteredMatches = matches.filter(m => targetSet.has(m.document_id));
+      filteredMatches = matches.filter((m: any) => targetSet.has(m.document_id));
     }
 
     if (filteredMatches.length === 0) {
@@ -154,7 +154,7 @@ export async function runSemanticSimilarity(
     totalMatches += filteredMatches.length;
 
     // Enrich matches with document titles (batch fetch for efficiency)
-    const matchIds = filteredMatches.map(m => m.document_id);
+    const matchIds = filteredMatches.map((m: any) => m.document_id);
     const { data: docTitles } = await supabase
       .from('documents')
       .select('id, title')

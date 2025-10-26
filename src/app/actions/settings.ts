@@ -1,7 +1,7 @@
 'use server'
 
 import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
-import { validateVaultStructure, createVaultStructure } from '../../../worker/lib/vault-structure'
+import { validateVaultStructure, createVaultStructure } from '@/lib/vault-structure'
 
 // ============================================================================
 // OBSIDIAN SETTINGS
@@ -59,6 +59,13 @@ export async function getObsidianSettings(): Promise<SettingsResult> {
       .single()
 
     if (error) {
+      // In dev mode, if settings don't exist yet, return empty settings (not an error)
+      if (error.code === 'PGRST116') {
+        return {
+          success: true,
+          settings: undefined
+        }
+      }
       console.error('[getObsidianSettings] Error:', error)
       return { success: false, error: error.message }
     }
@@ -96,6 +103,7 @@ export async function saveObsidianSettings(
     if (!settings.vaultPath || !settings.vaultName) {
       return { success: false, error: 'Vault path and name are required' }
     }
+
 
     // Upsert user_settings with obsidian_settings JSONB
     const { error } = await supabase

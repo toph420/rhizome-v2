@@ -102,12 +102,12 @@ export class UploadZone extends BasePage {
     
     // Read file for drag and drop
     const buffer = require('fs').readFileSync(filePath)
-    const dataTransfer = await this.page.evaluateHandle((data) => {
+    const dataTransfer = await this.page.evaluateHandle((data: number[]) => {
       const dt = new DataTransfer()
       const file = new File([new Uint8Array(data)], 'test-file.pdf', { type: 'application/pdf' })
       dt.items.add(file)
       return dt
-    }, Array.from(buffer))
+    }, Array.from(buffer) as number[])
 
     // Trigger drag and drop
     const dropZone = this.page.locator(this.selectors.dropZone)

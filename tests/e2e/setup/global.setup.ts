@@ -19,6 +19,6 @@ setup('global setup', async ({ page }) => {
     sessionStorage.clear()
     
     // Set test environment flag
-    window.__PLAYWRIGHT_TESTING__ = true
+    (window as any).__PLAYWRIGHT_TESTING__ = true
   })
 })

@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { StoredAnnotation, TextSelection } from '@/types/annotations'
 
 type ViewMode = 'explore' | 'focus' | 'study'
-type SidebarTab = 'connections' | 'annotations' | 'sparks' | 'cards' | 'review' | 'tune'
+type SidebarTab = 'connections' | 'annotations' | 'sparks' | 'cards' | 'review' | 'tune' | 'study' | 'chunks'
 
 interface UIState {
   // View mode

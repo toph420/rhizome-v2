@@ -16,8 +16,7 @@ export async function generateSparkTitle(content: string): Promise<string> {
 
 "${content.slice(0, 200)}"
 
-Return ONLY the title, nothing else.`,
-      maxSteps: 1,  // Single generation step
+Return ONLY the title, nothing else.`
     })
 
     return slugify(text.trim().toLowerCase())

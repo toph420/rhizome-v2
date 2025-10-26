@@ -126,7 +126,7 @@ export const useConnectionStore = create<ConnectionState>()(
 
         const normalized = Object.fromEntries(
           Object.entries(weights).map(([k, v]) => [k, v / total])
-        ) as EngineWeights
+        ) as unknown as EngineWeights
 
         set({ weights: normalized })
       },

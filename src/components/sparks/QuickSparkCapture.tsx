@@ -111,7 +111,14 @@ export function QuickSparkCapture({
         setContent(editingSparkContent)
       }
       if (editingSparkSelections && editingSparkSelections.length > 0) {
-        setSelections(editingSparkSelections)
+        // Convert TextSelection[] to SparkSelection[]
+        const sparkSelections: SparkSelection[] = editingSparkSelections.map(sel => ({
+          text: sel.text,
+          chunkId: sel.range.chunkIds[0] || '',
+          startOffset: sel.range.startOffset,
+          endOffset: sel.range.endOffset,
+        }))
+        setSelections(sparkSelections)
       }
       // linkedAnnotationIds already tracked in UIStore, no need to set here
     } else if (isOpen && !editingSparkId) {
@@ -126,10 +133,12 @@ export function QuickSparkCapture({
     if (isOpen && textareaRef.current) {
       // Small delay to ensure animation completes
       setTimeout(() => {
-        textareaRef.current?.focus()
-        // Move cursor to end (capture content length at this moment)
-        const length = textareaRef.current.value.length
-        textareaRef.current?.setSelectionRange(length, length)
+        if (textareaRef.current) {
+          textareaRef.current.focus()
+          // Move cursor to end (capture content length at this moment)
+          const length = textareaRef.current.value.length
+          textareaRef.current.setSelectionRange(length, length)
+        }
       }, 100)
     }
   }, [isOpen]) // Only run when panel opens, NOT on every content change
@@ -302,7 +311,7 @@ export function QuickSparkCapture({
     if (!activeSelection) return
 
     // Get full markdown for context
-    const markdown = chunks.map((c: any) => c.markdown || '').join('\n')
+    const markdown = chunks?.map((c: any) => c.markdown || '').join('\n') || ''
 
     const newSelection: SparkSelection = {
       text: activeSelection.text,

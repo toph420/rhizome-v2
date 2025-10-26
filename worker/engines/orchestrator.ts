@@ -24,7 +24,7 @@ export interface OrchestratorConfig {
   semanticSimilarity?: any;
   contradictionDetection?: any;
   thematicBridge?: any;
-  onProgress?: (percent: number, stage: string, details: string) => Promise<void>;
+  onProgress?: (percent: number, stage: string, details?: string) => Promise<void>;
 }
 
 export interface OrchestratorResult {

@@ -24,7 +24,8 @@ import {
   RotateCcw,
   Save,
 } from 'lucide-react';
-import { EngineType, WeightConfig, DEFAULT_WEIGHTS } from '@/types/collision-detection';
+import { EngineType, DEFAULT_WEIGHTS } from '@/types/collision-detection';
+import type { WeightConfig } from '@/types/collision-detection';
 
 interface WeightConfigProps {
   initialWeights?: WeightConfig;

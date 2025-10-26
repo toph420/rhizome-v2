@@ -5,7 +5,7 @@ import type { DetectedMetadata } from '@/types/metadata'
 
 type TabType = 'file' | 'url' | 'paste'
 type UploadPhase = 'idle' | 'detecting' | 'preview' | 'uploading' | 'complete'
-type ReviewWorkflow = 'none' | 'quick' | 'detailed'
+type ReviewWorkflow = 'none' | 'after_extraction' | 'after_cleanup'
 
 interface CostEstimate {
   tokens: number

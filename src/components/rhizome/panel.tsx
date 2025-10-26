@@ -7,7 +7,7 @@ import { PanelLeftIcon } from "lucide-react"
 
 import * as React from "react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/rhizome/button"
 import { Input } from "@/components/rhizome/input"
 import {
   Sheet,
