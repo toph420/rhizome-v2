@@ -15,6 +15,8 @@
     "start": "next start",
     "lint": "eslint",
     "docs": "typedoc --out docs/api src/lib",
+    "db:types": "npx supabase gen types typescript --local > src/types/database.types.ts",
+    "db:reset": "npx supabase db reset && npm run db:types",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:critical": "jest tests/e2e/journeys/critical-paths.spec.ts tests/e2e/smoke.spec.ts tests/integration/database/migrations.test.ts",

@@ -178,7 +178,10 @@ export async function createAnnotation(data: AnnotationData) {
 9. ❌ Don't skip metadata validation - Chunk statistics catch quality regressions
 10. ❌ Don't assume 100% overlap coverage - 70-90% is expected and excellent for Chonkie
 
+
 **Detection:** Run `npm run test:critical` before commits
+
+(🔴 CRITICAL) Never provide timeline estimates (e.g., "this will take X weeks/days/hours"). Focus only on what needs to be done, not how long it might take.
 
 ---
 
@@ -760,7 +763,9 @@ worker/                   # Separate Node.js app
 - **AI SDK**: https://ai-sdk.dev/docs/introduction - TypeScript toolkit for AI apps
 - **Docling**: https://docling-project.github.io/docling/ - Document processing with advanced PDF understanding
 - **Chonkie**: https://docs.chonkie.ai/oss/chunkers/overview - 9 chunking strategies
+- **ShadCN**: https://ui.shadcn.com/llms.txt - ShadCN UI library documentation
 
 ---
+
 
 **Remember**: This is an AI-first personal tool. Prioritize connection discovery and knowledge synthesis over traditional features.
