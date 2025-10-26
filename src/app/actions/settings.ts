@@ -1,6 +1,9 @@
 'use server'
 
 import { getCurrentUser, getServerSupabaseClient } from '@/lib/auth'
+import { validateVaultStructure } from '@/lib/vault-structure'
+
+const IS_DEV = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
 
 // ============================================================================
 // OBSIDIAN SETTINGS
@@ -133,13 +136,12 @@ export async function saveObsidianSettings(
 /**
  * Validate vault path configuration.
  *
- * NOTE: This runs on Vercel servers, so it cannot access your local filesystem.
- * Directory validation happens on the worker when exporting files.
- * This function only validates that paths are provided.
+ * In development mode: Validates that directories exist on filesystem
+ * In production mode: Only validates that paths are provided (can't access local filesystem from Vercel)
  *
  * @param vaultPath - Absolute path to vault root
  * @param rhizomePath - Relative path within vault (default: "Rhizome/")
- * @returns Validation result (always valid if paths provided)
+ * @returns Validation result with list of missing directories
  */
 export async function validateVault(
   vaultPath: string,
@@ -156,14 +158,29 @@ export async function validateVault(
       return { success: false, error: 'vaultPath and rhizomePath are required' }
     }
 
-    // Can't validate filesystem from Vercel - just validate paths are provided
-    // Actual directory validation will happen on worker during export
-    console.log(`[validateVault] Path configuration valid (filesystem check deferred to worker)`)
+    // In production (Vercel), can't access local filesystem
+    // Just validate paths are provided
+    if (!IS_DEV) {
+      console.log(`[validateVault] Production mode - filesystem check deferred to worker`)
+      return {
+        success: true,
+        valid: true,
+        missing: []
+      }
+    }
+
+    // In development mode, validate filesystem
+    console.log(`[validateVault] Dev mode - validating filesystem`)
+    const result = await validateVaultStructure({
+      vaultPath,
+      vaultName: '', // Not needed for validation
+      rhizomePath
+    })
 
     return {
       success: true,
-      valid: true,
-      missing: []
+      valid: result.valid,
+      missing: result.missing
     }
   } catch (error) {
     console.error('[validateVault] Unexpected error:', error)
