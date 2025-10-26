@@ -1,7 +1,6 @@
 'use server'
 
 import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
-import { validateVaultStructure, createVaultStructure } from '@/lib/vault-structure'
 
 // ============================================================================
 // OBSIDIAN SETTINGS
@@ -178,12 +177,14 @@ export async function validateVault(
 }
 
 /**
- * Create vault directory structure.
- * Creates all required directories: Documents/, Connections/, Sparks/, Index/, and README.
- * Idempotent - safe to call multiple times.
+ * Configure vault path.
+ * Saves vault configuration - directory structure is created by worker when needed.
  *
- * @param vaultPath - Absolute path to vault root
- * @param vaultName - Vault name (for README)
+ * NOTE: This runs on Vercel servers, so it cannot access your local filesystem.
+ * The vault directories will be created by the local worker when exporting files.
+ *
+ * @param vaultPath - Absolute path to vault root (e.g., "/Users/topher/Tophs Vault")
+ * @param vaultName - Vault name (for Obsidian URIs)
  * @param rhizomePath - Relative path within vault (default: "Rhizome/")
  * @returns Success result
  */
@@ -203,11 +204,10 @@ export async function createVault(
       return { success: false, error: 'vaultPath, vaultName, and rhizomePath are required' }
     }
 
-    await createVaultStructure({
-      vaultPath,
-      vaultName,
-      rhizomePath
-    })
+    // Don't create directories here - this runs on Vercel (cloud)
+    // The worker (running locally) will create vault structure when exporting
+    console.log(`[createVault] Vault path configured: ${vaultPath}`)
+    console.log(`[createVault] Directory structure will be created by worker on first export`)
 
     return { success: true }
   } catch (error) {
