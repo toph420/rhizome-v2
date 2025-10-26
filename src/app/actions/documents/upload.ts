@@ -1,6 +1,6 @@
 'use server'
 
-import { getSupabaseClient } from '@/lib/auth'
+import { getServerSupabaseClient } from '@/lib/auth'
 import { base64ToBlob } from '@/types/metadata'
 import { revalidatePath } from 'next/cache'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -426,7 +426,7 @@ export async function retryProcessing(documentId: string): Promise<{
   error?: string
 }> {
   return withErrorHandling(async () => {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
 
     // Reset document status
     await supabase

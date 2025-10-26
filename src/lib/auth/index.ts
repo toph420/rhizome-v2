@@ -3,7 +3,8 @@
  * Handles both development and production auth seamlessly.
  */
 
-import { createClient } from '@/lib/supabase/client'
+import { createClient as createBrowserClient } from '@/lib/supabase/client'
+import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 const IS_DEV = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
@@ -11,6 +12,7 @@ const DEV_USER_ID = process.env.NEXT_PUBLIC_DEV_USER_ID || '00000000-0000-0000-0
 
 /**
  * Gets the current user in both dev and production environments.
+ * SERVER-SIDE ONLY: Use in Server Actions and Server Components.
  * @returns The current user object or null if not authenticated.
  */
 export async function getCurrentUser() {
@@ -20,24 +22,40 @@ export async function getCurrentUser() {
       email: 'dev@localhost'
     }
   }
-  
-  const supabase = createClient()
+
+  // Use server-side client (works in Server Actions and Server Components)
+  const supabase = await createServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   return user
 }
 
 /**
- * Gets the appropriate Supabase client based on environment.
- * @returns Admin client in dev (bypasses RLS), regular client in production.
+ * Gets Supabase client for CLIENT-SIDE use only.
+ * Use in React components and hooks.
+ * For Server Actions, import getServerSupabaseClient instead.
+ * @returns Browser client or admin client in dev mode.
  */
 export function getSupabaseClient() {
-  // In dev, use admin client to bypass RLS
-  // In prod, use regular client with RLS
+  // In dev, use admin client to bypass RLS (server-side only)
   if (IS_DEV && typeof window === 'undefined') {
-    // Only use admin client on server side
     return createAdminClient()
   }
-  return createClient()
+  // In production or client-side, use browser client
+  return createBrowserClient()
+}
+
+/**
+ * Gets Supabase client for SERVER-SIDE use.
+ * Use in Server Actions and Server Components.
+ * @returns Server client (reads auth cookies) or admin client in dev mode.
+ */
+export async function getServerSupabaseClient() {
+  // In dev, use admin client to bypass RLS
+  if (IS_DEV) {
+    return createAdminClient()
+  }
+  // In production, use server client (reads cookies from request)
+  return await createServerClient()
 }
 
 /**
