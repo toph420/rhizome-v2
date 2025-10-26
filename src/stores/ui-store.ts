@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { StoredAnnotation } from '@/types/annotations'
+import type { StoredAnnotation, TextSelection } from '@/types/annotations'
 
 type ViewMode = 'explore' | 'focus' | 'study'
 type SidebarTab = 'connections' | 'annotations' | 'sparks' | 'cards' | 'review' | 'tune'
@@ -23,10 +23,10 @@ interface UIState {
   quickCaptureOpen: boolean // Annotation quick capture
   activeAnnotation: StoredAnnotation | null
   sparkCaptureOpen: boolean // Spark quick capture
-  pendingAnnotationSelection: any | null // Selection to annotate from spark panel
+  pendingAnnotationSelection: TextSelection | null // Selection to annotate from spark panel
   editingSparkId: string | null // ID of spark being edited (null = creating new)
   editingSparkContent: string | null // Content to pre-fill when editing spark
-  editingSparkSelections: any[] // Selections to restore when editing
+  editingSparkSelections: TextSelection[] // Selections to restore when editing
   linkedAnnotationIds: string[] // NEW - Phase 6b: Annotations linked to current spark
 
   // Actions
@@ -42,9 +42,9 @@ interface UIState {
   setActiveAnnotation: (annotation: StoredAnnotation | null) => void
   openSparkCapture: () => void
   closeSparkCapture: () => void
-  setPendingAnnotationSelection: (selection: any | null) => void
+  setPendingAnnotationSelection: (selection: TextSelection | null) => void
   setEditingSparkContent: (content: string | null) => void
-  setEditingSpark: (sparkId: string | null, content: string | null, selections?: any[], annotations?: string[]) => void
+  setEditingSpark: (sparkId: string | null, content: string | null, selections?: TextSelection[], annotations?: string[]) => void
   addLinkedAnnotation: (annotationId: string) => void  // NEW - Phase 6b
   removeLinkedAnnotation: (annotationId: string) => void  // NEW - Phase 6b
   clearLinkedAnnotations: () => void  // NEW - Phase 6b
