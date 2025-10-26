@@ -167,7 +167,16 @@ export const useConnectionStore = create<ConnectionState>()(
           .filter((c) => c.finalScore >= strengthThreshold)
           .sort((a, b) => b.finalScore - a.finalScore)
 
-        set({ filteredConnections: filtered })
+        // Deduplicate: Keep only highest-scoring connection per target chunk
+        const targetMap = new Map()
+        filtered.forEach(c => {
+          const existing = targetMap.get(c.target_chunk_id)
+          if (!existing || c.finalScore > existing.finalScore) {
+            targetMap.set(c.target_chunk_id, c)
+          }
+        })
+
+        set({ filteredConnections: Array.from(targetMap.values()) })
       },
 
       // Score a connection using personal weights

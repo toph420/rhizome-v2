@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { clearAllJobs, clearCompletedJobs, clearFailedJobs, forceFailAllProcessing, clearAllJobsAndProcessingDocuments, getAllJobs } from '@/app/actions/admin'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import { Loader2, Trash2, AlertTriangle, Bomb } from 'lucide-react'
 import {
   Tooltip,
@@ -211,7 +211,7 @@ export function JobsTab() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="w-full justify-start"
+                  className="mr-2 justify-start"
                   onClick={() => {
                     if (!confirm('Stop all processing jobs? They will be cancelled and deleted immediately.')) return
                     handleAction(forceFailAllProcessing, 'force-fail-all', 'Stopped all processing jobs')
@@ -236,7 +236,7 @@ export function JobsTab() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="w-full justify-start"
+                  className="mr-2 justify-start"
                   onClick={() => {
                     if (!confirm('Delete ALL jobs regardless of status? This cannot be undone.')) return
                     handleAction(clearAllJobs, 'clear-all', 'Cleared all jobs')
@@ -261,7 +261,7 @@ export function JobsTab() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="w-full justify-start"
+                  className="justify-start"
                   onClick={() => {
                     if (!confirm('⚠️ NUCLEAR OPTION: Delete ALL jobs AND all processing documents?\n\nThis will delete:\n• All background jobs\n• All documents with status "processing", "pending", or "failed"\n• All associated chunks, connections, and storage files\n\nThis CANNOT be undone!')) return
                     handleAction(

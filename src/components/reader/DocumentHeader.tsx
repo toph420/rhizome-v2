@@ -9,7 +9,7 @@ import { ExternalLink, RefreshCw, Loader2, BookMarked, Compass, BookOpen, Gradua
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useRouter } from 'next/navigation'
 import { chunkerLabels, chunkerDescriptions, chunkerColors, type ChunkerType } from '@/types/chunker'
-import { exportToObsidian, syncFromObsidian } from '@/app/actions/integrations'
+import { exportToObsidian, syncFromObsidian, autoImportFromReadwise } from '@/app/actions/integrations'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -122,38 +122,26 @@ export function DocumentHeader({
   }
 
   /**
-   * Import highlights from Readwise
-   * Searches Readwise library for matching book and imports highlights
+   * Auto-import highlights from Readwise library
+   * Searches for matching book and imports highlights automatically
    */
   async function handleImportFromReadwise() {
     setIsImporting(true)
 
     try {
-      const response = await fetch('/api/readwise/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId })
-      })
-
-      const result = await response.json()
+      const result = await autoImportFromReadwise(documentId)
 
       if (!result.success) {
         throw new Error(result.error || 'Import failed')
       }
 
-      const { imported, needsReview, failed, bookTitle, bookAuthor } = result
-
-      // Show success toast with stats
-      const total = imported + needsReview + failed
-      const stats = `${imported} imported | ${needsReview} need review | ${failed} failed`
-
-      toast.success('Readwise Import Complete', {
-        description: `${bookTitle} by ${bookAuthor}\n${stats}`,
+      toast.success('Readwise Import Started', {
+        description: `Found: ${result.bookTitle} by ${result.bookAuthor}\n${result.highlightCount} highlights queued for import`,
         duration: 5000
       })
 
-      // Reload page to show imported annotations
-      window.location.reload()
+      // Monitor progress in ProcessingDock
+      // Job will import highlights with fuzzy matching
 
     } catch (error) {
       console.error('[DocumentHeader] Readwise import failed:', error)

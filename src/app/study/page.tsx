@@ -47,7 +47,7 @@ export default function StudyPage() {
       <Tabs
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as StudyTab)}
-        className="flex-1 flex flex-col"
+        className="p-6 space-y-6 max-w-7xl mx-auto"
       >
         <TabsList className="grid w-full grid-cols-2 border-b-2 border-border">
           <TabsTrigger value="management">Management</TabsTrigger>

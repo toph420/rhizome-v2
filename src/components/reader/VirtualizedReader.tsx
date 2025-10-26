@@ -6,7 +6,6 @@ import { toast } from 'sonner'
 import { parseMarkdownToBlocks } from '@/lib/reader/block-parser'
 import { BlockRenderer } from './BlockRenderer'
 import { QuickCapturePanel } from './QuickCapturePanel'
-import { AnnotationsDebugPanel } from './AnnotationsDebugPanel'
 import { useTextSelection } from '@/hooks/useTextSelection'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
@@ -446,9 +445,6 @@ export function VirtualizedReader() {
           markdown={markdown}
         />
       )}
-
-      {/* Debug panel to show annotations */}
-      <AnnotationsDebugPanel annotations={annotations} />
     </>
   )
 }

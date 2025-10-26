@@ -13,6 +13,7 @@ import { useReaderStore } from '@/stores/reader-store'
 import { useConnectionStore } from '@/stores/connection-store'
 import { useUIStore } from '@/stores/ui-store'
 import { calculateOffsetsFromCurrentSelection } from '@/lib/reader/offset-calculator'
+import { getConnectionsForChunks } from '@/app/actions/connections'
 import type { Chunk, StoredAnnotation } from '@/types/annotations'
 
 /**
@@ -150,19 +151,8 @@ export function ReaderLayout({
 
     const fetchConnections = async () => {
       try {
-        const response = await fetch('/api/connections/for-chunks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chunkIds: visibleChunks.map(c => c.id)
-          })
-        })
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-
-        const connections = await response.json()
+        const chunkIds = visibleChunks.map(c => c.id)
+        const connections = await getConnectionsForChunks(chunkIds)
         setConnections(connections)
       } catch (error) {
         console.error('[ReaderLayout] Failed to fetch connections:', error)

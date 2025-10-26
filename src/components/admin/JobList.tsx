@@ -1,10 +1,10 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/rhizome/badge'
+import { Button } from '@/components/rhizome/button'
 import { Progress } from '@/components/rhizome/progress'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/rhizome/tabs'
 import {
   Loader2,
   CheckCircle2,

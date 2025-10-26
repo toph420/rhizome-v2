@@ -5,8 +5,8 @@ import {
   importFromStorage,
   type DocumentScanResult,
 } from '@/app/actions/documents'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/rhizome/button'
+import { Badge } from '@/components/rhizome/badge'
 import { Checkbox } from '@/components/rhizome/checkbox'
 import { Label } from '@/components/rhizome/label'
 import {

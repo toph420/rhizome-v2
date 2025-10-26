@@ -13,8 +13,8 @@ import { Button } from '@/components/ui/button'
 import { RadioGroup, RadioGroupItem } from '@/components/rhizome/radio-group'
 import { Alert, AlertDescription, AlertTitle } from '@/components/rhizome/alert'
 import { Label } from '@/components/rhizome/label'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/rhizome/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/rhizome/card'
 import {
   AlertTriangleIcon,
   InfoIcon,

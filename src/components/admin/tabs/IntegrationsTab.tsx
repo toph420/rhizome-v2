@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import {
   exportToObsidian,
   syncFromObsidian,
+  autoImportFromReadwise,
   importReadwiseHighlights,
   scanVault,
   importFromVault,
@@ -11,6 +12,7 @@ import {
   importSparksFromVault,
   type ObsidianExportResult,
   type ObsidianSyncResult,
+  type ReadwiseAutoImportResult,
   type ReadwiseImportResult,
   type VaultScanResult,
   type VaultImportResult,
@@ -18,7 +20,7 @@ import {
   type SparkExportResult,
   type SparkImportResult,
 } from '@/app/actions/integrations'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import { Label } from '@/components/rhizome/label'
 import {
   Table,
@@ -28,10 +30,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/rhizome/table'
-import { Badge } from '@/components/ui/badge'
+import { Badge } from '@/components/rhizome/badge'
 import { Loader2, FileText, RefreshCw, Upload, CheckCircle2, AlertCircle, XCircle, Info } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { Separator } from '@/components/ui/separator'
+import { Separator } from '@/components/rhizome/separator'
 import {
   Tooltip,
   TooltipContent,
@@ -298,7 +300,7 @@ export function IntegrationsTab() {
 
   /**
    * Auto-search and import from Readwise API
-   * Searches Readwise library for matching book and imports highlights automatically
+   * Searches Readwise library for matching book and imports highlights
    */
   const handleReadwiseAutoImport = async () => {
     if (!selectedDoc) {
@@ -310,27 +312,15 @@ export function IntegrationsTab() {
     setMessage(null)
 
     try {
-      const response = await fetch('/api/readwise/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId: selectedDoc })
-      })
-
-      const result = await response.json()
+      const result = await autoImportFromReadwise(selectedDoc)
 
       if (!result.success) {
         throw new Error(result.error || 'Import failed')
       }
 
-      const { imported, needsReview, failed, bookTitle, bookAuthor } = result
-
-      // Show success message with stats
-      const total = imported + needsReview + failed
-      const stats = `${imported} imported | ${needsReview} need review | ${failed} failed`
-
       setMessage({
         type: 'success',
-        text: `Readwise import complete: ${bookTitle} by ${bookAuthor}\n${stats}`,
+        text: `Auto-import started: ${result.bookTitle} by ${result.bookAuthor}\n${result.highlightCount} highlights queued\nJob ID: ${result.jobId}`,
       })
 
       // Reload history to show new job

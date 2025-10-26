@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useUIStore } from '@/stores/ui-store'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/rhizome/tabs'
 import { Badge } from '@/components/rhizome/badge'
 import { ScrollArea } from '@/components/rhizome/scroll-area'
@@ -112,8 +113,11 @@ export function RightPanelV2({
   onConnectionsChange,
   onActiveConnectionCountChange,
 }: RightPanelV2Props) {
-  const [collapsed, setCollapsed] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabId>('connections')
+  // Use UI store instead of local useState
+  const collapsed = useUIStore(state => state.sidebarCollapsed)
+  const setCollapsed = useUIStore(state => state.setSidebarCollapsed)
+  const activeTab = useUIStore(state => state.activeTab)
+  const setActiveTab = useUIStore(state => state.setActiveTab)
 
   // Fixed position: TopNav (56px h-14) + DocumentHeader (78px with py-4)
   // Total: 134px from top

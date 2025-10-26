@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react'
 import { exportDocuments, type ExportOptions } from '@/app/actions/documents'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/rhizome/button'
 import { Checkbox } from '@/components/rhizome/checkbox'
 import { Label } from '@/components/rhizome/label'
 import { Progress } from '@/components/rhizome/progress'

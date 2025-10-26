@@ -3,13 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { HelpCircle } from 'lucide-react'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/rhizome/sheet'
+import { BottomPanel } from '@/components/layout/BottomPanel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/rhizome/tabs'
 import { Button } from '@/components/rhizome/button'
 import {
@@ -65,65 +59,59 @@ export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
 
   return (
     <>
-      <Sheet open={isOpen} onOpenChange={onClose}>
-        <SheetContent side="top" className="h-[85vh] overflow-auto">
-          <SheetHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <SheetTitle>Admin Panel</SheetTitle>
-                <SheetDescription>
-                  Manage documents, storage, and integrations
-                </SheetDescription>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setHelpDialogOpen(true)}
-                title="Keyboard shortcuts (Shift + ?)"
-              >
-                <HelpCircle className="h-5 w-5" />
-              </Button>
-            </div>
-          </SheetHeader>
+      <BottomPanel
+        open={isOpen}
+        onOpenChange={(open) => !open && onClose()}
+        title="Admin Panel"
+        description="Manage documents, storage, and integrations"
+        size="lg"
+      >
+        <div className="flex items-center justify-end mb-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setHelpDialogOpen(true)}
+            title="Keyboard shortcuts (Shift + ?)"
+          >
+            <HelpCircle className="h-5 w-5" />
+          </Button>
+        </div>
 
-          <div className="mt-6 p-6">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-6">
-                <TabsTrigger value="scanner">Scanner</TabsTrigger>
-                <TabsTrigger value="import">Import</TabsTrigger>
-                <TabsTrigger value="export">Export</TabsTrigger>
-                <TabsTrigger value="connections">Connections</TabsTrigger>
-                <TabsTrigger value="integrations">Integrations</TabsTrigger>
-                <TabsTrigger value="jobs">Jobs</TabsTrigger>
-              </TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-6">
+            <TabsTrigger value="scanner">Scanner</TabsTrigger>
+            <TabsTrigger value="import">Import</TabsTrigger>
+            <TabsTrigger value="export">Export</TabsTrigger>
+            <TabsTrigger value="connections">Connections</TabsTrigger>
+            <TabsTrigger value="integrations">Integrations</TabsTrigger>
+            <TabsTrigger value="jobs">Jobs</TabsTrigger>
+          </TabsList>
 
-              <TabsContent value="scanner" className="mt-6">
-                <ScannerTab />
-              </TabsContent>
+          <TabsContent value="scanner" className="mt-6">
+            <ScannerTab />
+          </TabsContent>
 
-              <TabsContent value="import" className="mt-6">
-                <ImportTab />
-              </TabsContent>
+          <TabsContent value="import" className="mt-6">
+            <ImportTab />
+          </TabsContent>
 
-              <TabsContent value="export" className="mt-6">
-                <ExportTab />
-              </TabsContent>
+          <TabsContent value="export" className="mt-6">
+            <ExportTab />
+          </TabsContent>
 
-              <TabsContent value="connections" className="mt-6">
-                <ConnectionsTab />
-              </TabsContent>
+          <TabsContent value="connections" className="mt-6">
+            <ConnectionsTab />
+          </TabsContent>
 
-              <TabsContent value="integrations" className="mt-6">
-                <IntegrationsTab />
-              </TabsContent>
+          <TabsContent value="integrations" className="mt-6">
+            <IntegrationsTab />
+          </TabsContent>
 
-              <TabsContent value="jobs" className="mt-6">
-                <JobsTab />
-              </TabsContent>
-            </Tabs>
-          </div>
-        </SheetContent>
-      </Sheet>
+          <TabsContent value="jobs" className="mt-6">
+            <JobsTab />
+          </TabsContent>
+        </Tabs>
+      </BottomPanel>
 
       <KeyboardShortcutsDialog
         isOpen={helpDialogOpen}

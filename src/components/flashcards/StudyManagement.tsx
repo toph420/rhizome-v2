@@ -19,7 +19,7 @@ interface StudyManagementProps {
 export function StudyManagement({ onStartStudy }: StudyManagementProps) {
   return (
     <ScrollArea className="h-full">
-      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="space-y-6 max-w-7xl mx-auto">
         {/* Global Stats */}
         <StudyStats
           scope="global"
