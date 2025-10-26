@@ -5,7 +5,7 @@ import {
   FuzzyMatchResult,
   FuzzyMatchPerformance,
   DEFAULT_CONFIG
-} from '../../src/lib/fuzzy-matching'
+} from "../lib/fuzzy-matching.js"
 
 describe('Fuzzy Matching Module', () => {
   describe('Exact Match (Tier 1)', () => {

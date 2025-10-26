@@ -20,7 +20,7 @@ import { SourceProcessor } from './base.js'
 import type { ProcessResult, ProcessedChunk } from '../types/processor.js'
 import { extractVideoId, fetchTranscriptWithRetry, formatTranscriptToMarkdown } from '../lib/youtube.js'
 import { cleanYoutubeTranscript } from '../lib/youtube-cleaning.js'
-import { fuzzyMatchChunkToSource } from '../../src/lib/fuzzy-matching.js'
+import { fuzzyMatchChunkToSource } from "../lib/fuzzy-matching.js"
 import { GEMINI_MODEL } from '../lib/model-config.js'
 // Chonkie Integration
 import { chunkWithChonkie } from '../lib/chonkie/chonkie-chunker.js'
