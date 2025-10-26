@@ -1,6 +1,6 @@
 'use server'
 
-import { getCurrentUser, getSupabaseClient } from '@/lib/auth'
+import { getCurrentUser, getServerSupabaseClient } from '@/lib/auth'
 
 // ============================================================================
 // OBSIDIAN SETTINGS
@@ -44,7 +44,7 @@ export interface VaultValidationResult {
  */
 export async function getObsidianSettings(): Promise<SettingsResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
@@ -91,7 +91,7 @@ export async function saveObsidianSettings(
   settings: ObsidianSettings
 ): Promise<SettingsResult> {
   try {
-    const supabase = getSupabaseClient()
+    const supabase = await getServerSupabaseClient()
     const user = await getCurrentUser()
 
     if (!user) {
