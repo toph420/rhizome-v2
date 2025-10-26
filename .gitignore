@@ -59,6 +59,9 @@ worker/tests/validation/reports/
 test-files/
 supabase/.temp/
 
+# Supabase local config (contains DB passwords, migration state)
+.supabase/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -27,10 +27,84 @@ psql postgresql://postgres:postgres@localhost:54322/postgres -c "\d table_name"
 **ALWAYS check latest migration number:**
 ```bash
 ls supabase/migrations/ | tail -1
-# Latest: 068_flashcards_cache_rebuild.sql
+# Check dynamically - migration number changes frequently
 ```
 
+**Migration workflow (🔴 CRITICAL):**
+```bash
+# Create migration
+npx supabase migration new add_field_name
+
+# Apply INCREMENTALLY (normal development - preserves data)
+npx supabase db push
+
+# Full reset ONLY when needed (wipes all data)
+npx supabase db reset  # Initial setup, conflicts, or clean slate
+```
+
+**Dual-Worktree Migration Workflow (🔴 CRITICAL):**
+
+This project uses a dual-worktree setup for development and production:
+
+**Worktree Structure:**
+- `/Users/topher/Code/rhizome-v2` - Production (main branch, runs worker)
+- `/Users/topher/Code/rhizome-v2-dev-1` - Development (feature branches, ALL development happens here)
+
+**Development Pattern (ALWAYS use dev worktree):**
+```bash
+# 1. Develop in dev worktree (rhizome-v2-dev-1)
+cd /Users/topher/Code/rhizome-v2-dev-1
+git checkout -b feature/my-feature  # Or existing feature branch
+
+# 2. Create migration (tracked by git)
+npx supabase db diff -f my_feature_migration
+
+# 3. Test locally (incremental)
+npx supabase migration up
+
+# 4. Commit (code + migration together!)
+git add supabase/migrations/
+git add src/
+git commit -m "feat: my feature"
+git push origin feature/my-feature
+
+# 5. Merge to main (in dev worktree!)
+git checkout main
+git pull origin main
+git merge feature/my-feature --no-edit
+git push origin main  # → Triggers Vercel deployment
+
+# 6. Push migration to cloud (IMMEDIATELY after git push)
+npx supabase db push  # → Applies migration to production database
+
+# 7. Optional: Update production worker (if worker code changed)
+cd /Users/topher/Code/rhizome-v2
+git pull origin main
+# Restart worker if needed
+```
+
+**Critical Rules:**
+- ✅ ALL development in `rhizome-v2-dev-1` worktree (never in production worktree)
+- ✅ Merge to main happens in dev worktree (not production worktree)
+- ✅ Push migration (`npx supabase db push`) IMMEDIATELY after `git push origin main`
+- ✅ Migration files are tracked by git (committed with code)
+- ✅ Only dev worktree is linked to Supabase (production worktree just runs worker)
+- ❌ NEVER develop in production worktree (`rhizome-v2`)
+- ❌ NEVER push migrations before pushing code to main
+- ❌ NEVER skip `npx supabase db push` after deploying new code
+
+**Why this works:**
+- Migrations are just SQL files tracked by git
+- They move between branches during merge (like any other file)
+- `git push origin main` → Vercel deploys UI
+- `npx supabase db push` → Cloud DB gets schema
+- Timing control: You decide when to apply migrations
+
+**See**: `docs/MIGRATION_WORKFLOW.md` for complete guide, `docs/DEPLOY.md` for deployment
+
 **Common mistakes:**
+- ❌ Using `db reset` for every change - Wipes all data unnecessarily
+- ✅ Use `db push` for normal development (incremental, preserves data)
 - ❌ `chunks.user_id` - Doesn't exist (user comes via RLS from documents)
 - ❌ `documents.chunk_count` - Doesn't exist (not stored)
 - ❌ `documents.processed_at` - Wrong name (use `processing_completed_at`)
@@ -135,6 +209,19 @@ export async function createAnnotation(data: AnnotationData) {
 
 ❌ NEVER use API routes for mutations
 ❌ NEVER use direct database calls from client components
+
+**Why this rule works for Rhizome:**
+- **Worker communication**: Uses `background_jobs` table (database-driven), NOT HTTP endpoints
+- **Type safety**: Shared types between frontend/backend, no HTTP boundary
+- **Transactional**: Database operations are atomic, queuing/retry built-in
+- **Zero network overhead**: No HTTP layer between worker and main app
+
+**When to ACTUALLY use API routes (concrete needs only):**
+- ✅ External webhooks (Readwise push notifications, if implemented)
+- ✅ Public export APIs (if sharing knowledge graph publicly)
+- ✅ SSE streaming (Server Actions can't stream events)
+- ❌ Worker communication (already solved via database)
+- ❌ "Just in case" future flexibility (YAGNI applies)
 
 **Pattern:**
 1. Server Action in `app/actions/`
@@ -298,13 +385,22 @@ npx supabase migration new add_field_name
 
 # 4. Write migration SQL
 
-# 5. Apply migration
-npx supabase db reset
+# 5. Apply migration (INCREMENTAL - doesn't wipe data)
+npx supabase db push
 ```
 
+**Migration Commands:**
+| Command | What it does | When to use |
+|---------|--------------|-------------|
+| `npx supabase db push` | Apply pending migrations only | **Normal development** (incremental changes) |
+| `npx supabase db reset` | Drop all → Rebuild from scratch | Initial setup, migration conflicts, clean slate |
+| `npx supabase migration up` | Apply specific migration | Granular control |
+
 **Common gotchas:**
+- ❌ Using `db reset` for every change - Wipes all data unnecessarily
 - ❌ `chunks.user_id` - Doesn't exist (RLS via documents)
 - ❌ `documents.chunk_count` - Doesn't exist (not stored)
+- ✅ Use `db push` for normal development (preserves data)
 - ✅ Always set `markdown_available` and `embeddings_available` flags
 
 ---
@@ -664,16 +760,17 @@ AI-first document processing system with **3-engine collision detection** for di
 npm run dev              # Start all services (Supabase + Worker + Next.js)
 npm run stop             # Stop all services
 npm run status           # Check service status
-npx supabase db reset    # Reset database with migrations
 
 # Database operations
 npx supabase start                    # Start Supabase
 npx supabase migration new <name>     # Create migration
+npx supabase db push                  # Apply new migrations (normal development)
+npx supabase db reset                 # Full reset (initial setup or clean slate)
 
 # See README.md for full setup and environment variables
 ```
 
-**Latest Migration**: `068_flashcards_cache_rebuild.sql`
+**Latest Migration**: Check dynamically (changes frequently)
 
 **Check latest migration:**
 ```bash

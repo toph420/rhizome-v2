@@ -11,6 +11,7 @@
 - [Production Credentials](#production-credentials)
 - [Initial Deployment](#initial-deployment)
 - [Ongoing Deployments](#ongoing-deployments)
+- [Database Migrations](#database-migrations)
 - [Worker Configuration](#worker-configuration)
 - [Troubleshooting](#troubleshooting)
 - [Rollback Procedures](#rollback-procedures)
@@ -54,7 +55,7 @@
 │     - Ollama (qwen2.5:32b, local AI)                 │
 │     - 3-engine connection detection                  │
 │                                                       │
-│  /rhizome-v2-worktree-merge/ (dev branch)            │
+│  /rhizome-v2-dev-1/ (dev branch)            │
 │  └─ worker/.env → Local DB (localhost:54322)         │
 │     - Development and testing                        │
 │     - Local Supabase instance                        │
@@ -166,7 +167,9 @@ npx supabase link --project-ref pqkdcfxkitovcgvjoyuu
 npx supabase db push --linked
 ```
 
-**Expected**: 68 migrations applied successfully
+**Expected**: All migrations applied successfully
+- Check latest migration: `ls supabase/migrations/ | tail -1`
+- Current latest (as of 2025-10-26): `070_chunk_connection_detection.sql`
 - Migrations `004` and `043` are skipped (.skip files)
 - Migrations `034` and `059` are modified for Cloud compatibility
 
@@ -229,8 +232,13 @@ vercel --prod --yes
 # Navigate to main repository
 cd /Users/topher/Code/rhizome-v2
 
-# Create worktree for development on integration branch
-git worktree add ../rhizome-v2-worktree-merge integration/study-and-connections
+# Create worktree for development (initial branch doesn't matter)
+git worktree add ../rhizome-v2-dev-1 main
+
+# You can switch to any branch in the dev worktree:
+cd ../rhizome-v2-dev-1
+git checkout -b feature/your-feature  # Create new feature branch
+# Or: git checkout existing-branch     # Switch to existing branch
 ```
 
 **Worktree Structure**:
@@ -239,7 +247,7 @@ git worktree add ../rhizome-v2-worktree-merge integration/study-and-connections
 ├── rhizome-v2/                    # Main branch (production)
 │   ├── worker/.env                # → Production database
 │   └── ...
-└── rhizome-v2-worktree-merge/     # Integration branch (development)
+└── rhizome-v2-dev-1/              # Development worktree (feature branches)
     ├── worker/.env                # → Local database (localhost:54322)
     └── ...
 ```
@@ -267,7 +275,7 @@ GEMINI_API_KEY=[your-key]
 HF_TOKEN=[your-key]
 ```
 
-**Development Worker** (`/rhizome-v2-worktree-merge/worker/.env`):
+**Development Worker** (`/rhizome-v2-dev-1/worker/.env`):
 ```bash
 # Local database connection
 DATABASE_URL=postgresql://postgres:postgres@localhost:54322/postgres
@@ -285,7 +293,7 @@ npm start
 
 **Start Development Worker**:
 ```bash
-cd /Users/topher/Code/rhizome-v2-worktree-merge
+cd /Users/topher/Code/rhizome-v2-dev-1
 npm run dev  # Starts both app and worker
 ```
 
@@ -331,10 +339,10 @@ npx tsx scripts/seed-prompt-templates.ts
 
 ### Dual-Worktree Workflow
 
-**Development Workflow** (integration branch):
+**Development Workflow** (feature branch):
 ```bash
 # Work in development worktree
-cd /Users/topher/Code/rhizome-v2-worktree-merge
+cd /Users/topher/Code/rhizome-v2-dev-1
 
 # Start local development environment
 npm run dev  # Runs app + worker with local Supabase
@@ -342,18 +350,22 @@ npm run dev  # Runs app + worker with local Supabase
 # Make changes, test locally...
 git add .
 git commit -m "feat: your feature"
-git push origin integration/study-and-connections
+git push origin your-feature-branch  # e.g., homepage-and-search
 ```
 
 **Production Deployment** (main branch):
 ```bash
-# Switch to main worktree
+# Option 1: Merge from development worktree (recommended)
+cd /Users/topher/Code/rhizome-v2-dev-1
+git checkout main
+git pull origin main
+git merge your-feature-branch --no-edit  # e.g., homepage-and-search
+git push origin main
+
+# Option 2: Merge from production worktree
 cd /Users/topher/Code/rhizome-v2
-
-# Merge integration branch
-git merge integration/study-and-connections --no-edit
-
-# Push to trigger Vercel deployment
+git pull origin main
+git merge origin/your-feature-branch --no-edit
 git push origin main
 
 # Vercel auto-deploys from main branch
@@ -375,32 +387,28 @@ npm start
 
 ### Database Migrations
 
-**Create New Migration**:
+**📖 See [MIGRATION_WORKFLOW.md](./MIGRATION_WORKFLOW.md) for comprehensive migration guide**
+
+The complete workflow covers:
+- Dual-worktree setup and linking
+- Development cycle (additive vs breaking changes)
+- Data safety strategies (storage-first architecture)
+- Testing before pushing to cloud
+- Common patterns and troubleshooting
+
+**Quick commands**:
 ```bash
-cd /Users/topher/Code/rhizome-v2
-npx supabase migration new add_feature_name
-```
+# Link development worktree to cloud (one-time)
+npx supabase link --project-ref pqkdcfxkitovcgvjoyuu
 
-**Test Locally**:
-```bash
-# Start local Supabase
-npx supabase start
+# Create migration
+npx supabase db diff -f feature_name
 
-# Reset DB with new migration
-npx supabase db reset
+# Test locally (incremental)
+npx supabase migration up
 
-# Verify
-psql postgresql://postgres:postgres@localhost:54322/postgres -c "\dt"
-```
-
-**Push to Production**:
-```bash
-npx supabase db push --linked
-```
-
-**Verify**:
-```bash
-npx supabase migration list --linked
+# Push to cloud
+npx supabase db push
 ```
 
 ### Worker Updates
