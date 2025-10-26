@@ -24,7 +24,7 @@ import { WebProcessor } from '../../processors/web-processor'
 import { MarkdownProcessor } from '../../processors/markdown-processor'
 import { TextProcessor } from '../../processors/text-processor'
 import { PasteProcessor } from '../../processors/paste-processor'
-import { stitchMarkdownBatches } from '../../../src/lib/fuzzy-matching'
+import { stitchMarkdownBatches } from "../lib/fuzzy-matching.js"
 import type { BackgroundJob } from '../../processors/base'
 import type { AIChunkMetadata } from '../../types/ai-metadata'
 

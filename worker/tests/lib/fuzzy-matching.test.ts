@@ -8,7 +8,7 @@ import {
   findBestOverlap,
   stitchMarkdownBatches,
   type OverlapResult
-} from '../../../src/lib/fuzzy-matching.js'
+} from "../lib/fuzzy-matching.js"
 
 describe('normalizeForMatching', () => {
   it('should remove extra whitespace', () => {

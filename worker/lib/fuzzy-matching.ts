@@ -5,7 +5,7 @@
  */
 
 import { distance } from 'fastest-levenshtein'
-import type { Annotation, AnnotationMatchResult } from '../types/recovery.js'
+import type { Annotation, AnnotationMatchResult } from '@/types/recovery'
 
 /**
  * Result from fuzzy matching with confidence and position metadata.
@@ -633,7 +633,7 @@ function findFuzzyOverlap(
     }
 
     // If we found a good match at this length, use it
-    if (bestMatch && bestMatch.confidence >= threshold) {
+    if (bestMatch && (bestMatch as any).confidence >= threshold) {
       return bestMatch
     }
   }
