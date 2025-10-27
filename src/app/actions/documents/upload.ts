@@ -21,7 +21,8 @@ interface UploadConfig {
   reviewDoclingExtraction: boolean
   extractImages: boolean
   chunkerStrategy: string
-  detectConnections: boolean  // NEW: Connection detection flag
+  enrichChunks: boolean
+  detectConnections: boolean
   documentType: string | null
   author: string | null
   publicationYear: number | null
@@ -56,8 +57,17 @@ function extractUploadConfig(formData: FormData): UploadConfig {
 
   const chunkerStrategy = formData.get('chunkerStrategy') as string || 'recursive'
 
+  const enrichChunksRaw = formData.get('enrichChunks')
+  const enrichChunks = enrichChunksRaw !== 'false'  // Default: true if missing
+
   const detectConnectionsRaw = formData.get('detectConnections')
-  const detectConnections = detectConnectionsRaw === 'true'  // NEW: Default false
+  let detectConnections = detectConnectionsRaw === 'true'  // Default: false
+
+  // Auto-skip connections if enrichment disabled
+  if (!enrichChunks && detectConnections) {
+    console.log('[Upload] Auto-skipping connections (enrichment disabled)')
+    detectConnections = false
+  }
 
   const documentType = formData.get('document_type') as string | null
   const author = formData.get('author') as string | null
@@ -72,6 +82,7 @@ function extractUploadConfig(formData: FormData): UploadConfig {
     cleanMarkdown: { raw: cleanMarkdownRaw, parsed: cleanMarkdown },
     reviewDoclingExtraction: { raw: reviewDoclingExtractionRaw, parsed: reviewDoclingExtraction },
     extractImages: { raw: extractImagesRaw, parsed: extractImages },
+    enrichChunks: { raw: enrichChunksRaw, parsed: enrichChunks },
     detectConnections: { raw: detectConnectionsRaw, parsed: detectConnections },
     chunkerStrategy
   })
@@ -86,6 +97,7 @@ function extractUploadConfig(formData: FormData): UploadConfig {
     reviewDoclingExtraction,
     extractImages,
     chunkerStrategy,
+    enrichChunks,
     detectConnections,
     documentType,
     author,
@@ -362,7 +374,8 @@ export async function uploadDocument(formData: FormData): Promise<{
         reviewDoclingExtraction: config.reviewDoclingExtraction,
         extractImages: config.extractImages,
         chunkerStrategy: config.chunkerStrategy,
-        detectConnections: config.detectConnections  // NEW: Pass connection detection flag
+        enrichChunks: config.enrichChunks,
+        detectConnections: config.detectConnections
       })
 
       return { documentId, jobId }

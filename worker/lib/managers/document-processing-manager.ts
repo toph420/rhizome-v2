@@ -21,6 +21,7 @@ import { generateEmbeddings } from '../embeddings.js'
 import { saveToStorage } from '../storage-helpers.js'
 import { processDocument as orchestrateConnections } from '../../engines/orchestrator.js'
 import { ConnectionDetectionManager } from './connection-detection-manager.js'
+import { ChunkEnrichmentManager } from './chunk-enrichment-manager.js'
 import type { SourceType } from '../../types/multi-format.js'
 import type { ProcessResult } from '../../types/processor.js'
 import { GEMINI_MODEL } from '../model-config.js'
@@ -32,7 +33,8 @@ interface DocumentProcessingOptions {
   sourceType: SourceType
   reviewBeforeChunking?: boolean
   reviewDoclingExtraction?: boolean
-  detectConnections?: boolean  // NEW: Default true for backward compatibility
+  enrichChunks?: boolean  // Default: true
+  detectConnections?: boolean  // Default: true for backward compatibility
 }
 
 /**
@@ -106,12 +108,30 @@ export class DocumentProcessingManager extends HandlerJobManager {
     await this.saveChunksToDatabase(documentId, userId, result)
 
     // Stage 5: Update document metadata
-    await this.updateProgress(80, 'metadata', 'Updating metadata')
+    await this.updateProgress(75, 'metadata', 'Updating metadata')
     await this.updateDocumentMetadata(documentId, result)
 
-    // Stage 6: Optional connection detection
+    // Stage 5.5: Optional Metadata Enrichment (75-85%)
+    if (this.options.enrichChunks !== false) {
+      await this.updateProgress(75, 'enrichment', 'Enriching chunks with metadata')
+      await this.enrichChunks(documentId)
+    } else {
+      console.log('[DocumentProcessing] Skipping metadata enrichment (user opted out)')
+
+      // Mark chunks as skipped
+      const enrichmentManager = new ChunkEnrichmentManager(this.supabase, this.jobId)
+      await enrichmentManager.markChunksAsUnenriched(documentId, 'user_choice')
+
+      // Auto-skip connections if enrichment skipped
+      if (this.options.detectConnections !== false) {
+        console.log('[DocumentProcessing] Auto-skipping connections (enrichment required)')
+        this.options.detectConnections = false
+      }
+    }
+
+    // Stage 6: Optional Connection Detection (85-95%)
     if (this.options.detectConnections !== false) {
-      await this.updateProgress(90, 'connections', 'Detecting connections')
+      await this.updateProgress(85, 'connections', 'Detecting connections')
       await this.detectConnections(documentId)
     } else {
       console.log('[DocumentProcessing] Skipping connection detection (user opted out)')
@@ -336,20 +356,54 @@ export class DocumentProcessingManager extends HandlerJobManager {
 
     console.log(`[Review] Pausing for ${reviewStage} review`)
 
-    // Export to Obsidian
-    const { exportToObsidian } = await import('../../handlers/obsidian-sync.js')
-    await exportToObsidian(documentId, userId)
+    try {
+      // Export to Obsidian and capture URI
+      const { exportToObsidian } = await import('../../handlers/obsidian-sync.js')
+      const exportResult = await exportToObsidian(documentId, userId)
 
-    // Update status
-    await this.supabase
-      .from('documents')
-      .update({
-        processing_status: 'awaiting_manual_review',
-        review_stage: reviewStage
+      console.log(`[Review] Export result:`, {
+        success: exportResult.success,
+        hasUri: !!exportResult.uri,
+        hasPath: !!exportResult.path,
+        uri: exportResult.uri,
+        error: exportResult.error
       })
-      .eq('id', documentId)
 
-    await this.updateProgress(100, 'review', 'Awaiting manual review')
+      // Check if export succeeded
+      if (!exportResult.success) {
+        console.error(`[Review] Obsidian export failed: ${exportResult.error}`)
+        throw new Error(`Obsidian export failed: ${exportResult.error}`)
+      }
+
+      // Update document status with markdown_available since it's uploaded
+      console.log(`[Review] Updating document status...`)
+      await this.supabase
+        .from('documents')
+        .update({
+          processing_status: 'awaiting_manual_review',
+          review_stage: reviewStage,
+          markdown_available: true,  // ✅ Markdown is uploaded, set flag
+          obsidian_path: exportResult.path || null  // ✅ Store Obsidian path
+        })
+        .eq('id', documentId)
+
+      console.log(`[Review] Document updated, marking job complete...`)
+
+      // Mark job as complete with Obsidian URI for UI
+      await this.updateProgress(100, 'review', 'Awaiting manual review')
+      await this.markComplete({
+        obsidianUri: exportResult.uri || null,
+        obsidianPath: exportResult.path || null,
+        reviewStage,
+        status: 'awaiting_manual_review'
+      })
+
+      console.log(`[Review] ✓ Job marked complete with URI: ${exportResult.uri}`)
+
+    } catch (error) {
+      console.error(`[Review] ❌ Error in pauseForReview:`, error)
+      throw error
+    }
   }
 
   /**
@@ -439,6 +493,25 @@ export class DocumentProcessingManager extends HandlerJobManager {
   }
 
   /**
+   * Enrich chunks with metadata using bulletproof extraction.
+   */
+  private async enrichChunks(documentId: string): Promise<void> {
+    try {
+      const enrichmentManager = new ChunkEnrichmentManager(this.supabase, this.jobId)
+
+      await enrichmentManager.enrichChunks({
+        documentId,
+        onProgress: async (percent, stage, details) => {
+          await this.updateProgress(75 + (percent / 10), stage, details)
+        }
+      })
+    } catch (error: any) {
+      console.error(`Chunk enrichment failed: ${error.message}`)
+      // Non-fatal: Continue to next stage even if enrichment fails
+    }
+  }
+
+  /**
    * Run connection detection.
    */
   private async detectConnections(documentId: string): Promise<void> {
@@ -446,7 +519,7 @@ export class DocumentProcessingManager extends HandlerJobManager {
       await orchestrateConnections(documentId, {
         enabledEngines: ['semantic_similarity', 'contradiction_detection', 'thematic_bridge'],
         onProgress: async (percent, stage, details) => {
-          await this.updateProgress(90 + (percent / 10), stage, details)
+          await this.updateProgress(85 + (percent / 10), stage, details)
         }
       })
     } catch (error: any) {

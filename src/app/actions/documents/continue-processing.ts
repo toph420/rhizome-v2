@@ -38,7 +38,20 @@ export async function continueDocumentProcessing(
       throw new Error(`Invalid status: ${document.processing_status}. Expected: awaiting_manual_review or failed`)
     }
 
-    // Create background job
+    // Fetch original processing flags from process_document job
+    // This preserves user choices for enrichment and connection detection
+    const { data: originalJob } = await supabase
+      .from('background_jobs')
+      .select('input_data')
+      .eq('job_type', 'process_document')
+      .contains('input_data', { document_id: documentId })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    const originalFlags = originalJob?.input_data || {}
+
+    // Create background job with preserved flags
     const jobId = await createBackgroundJob(
       user.id,
       'continue_processing',
@@ -49,7 +62,10 @@ export async function continueDocumentProcessing(
         skipAiCleanup,
         chunkerStrategy,
         documentTitle: document.title,
-        reviewStage: document.review_stage
+        reviewStage: document.review_stage,
+        // ✅ Preserve original user choices for enrichment and connections
+        enrichChunks: originalFlags.enrichChunks ?? true,  // Default: true if not found
+        detectConnections: originalFlags.detectConnections ?? true  // Default: true if not found
       }
     )
 

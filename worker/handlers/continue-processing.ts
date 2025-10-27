@@ -18,6 +18,7 @@ import { createClient } from '@supabase/supabase-js'
 import { loadCachedChunksRaw } from '../lib/cached-chunks.js'
 import { chunkWithChonkie } from '../lib/chonkie/chonkie-chunker.js'
 import { transferMetadataToChonkieChunks } from '../lib/chonkie/metadata-transfer.js'
+import { saveToStorage } from '../lib/storage-helpers.js'
 import type { ChonkieStrategy } from '../lib/chonkie/types.js'
 
 /**
@@ -55,13 +56,17 @@ export interface ContinueProcessingResult {
  * @param jobId - Optional job ID for progress tracking
  * @param skipAiCleanup - Skip AI cleanup (only for docling_extraction stage)
  * @param chunkerStrategy - Chonkie chunking strategy (default: 'recursive')
+ * @param enrichChunks - Extract metadata from chunks (default: true)
+ * @param detectConnections - Run connection detection after processing (default: true)
  */
 export async function continueProcessing(
   documentId: string,
   userId: string,
   jobId?: string,
   skipAiCleanup: boolean = false,
-  chunkerStrategy: ChonkieStrategy = 'recursive'
+  chunkerStrategy: ChonkieStrategy = 'recursive',
+  enrichChunks: boolean = true,
+  detectConnections: boolean = true
 ): Promise<ContinueProcessingResult> {
   const supabase = getSupabaseClient()
 
@@ -229,10 +234,29 @@ export async function continueProcessing(
     let chunksWithMetadata: any[]
 
     if (cachedDoclingChunks && cachedDoclingChunks.length > 0) {
-      // Transfer metadata using overlap detection
+      // CRITICAL FIX: Run bulletproof matcher to create coordinate map
+      // Cached chunks are raw Docling chunks (no offsets), need to map them to cleaned markdown
+      console.log('[ContinueProcessing] Creating coordinate map with bulletproof matcher')
+      console.log(`[ContinueProcessing] Mapping ${cachedDoclingChunks.length} Docling chunks to cleaned markdown`)
+
+      const { bulletproofMatch } = await import('../lib/local/bulletproof-matcher.js')
+
+      const { chunks: bulletproofMatches } = await bulletproofMatch(
+        markdown,
+        cachedDoclingChunks,
+        {
+          onProgress: async (layerNum, matched, remaining) => {
+            console.log(`[ContinueProcessing] Bulletproof Layer ${layerNum}: ${matched} mapped, ${remaining} remaining`)
+          }
+        }
+      )
+
+      console.log(`[ContinueProcessing] ✓ Coordinate map created: ${bulletproofMatches.length} chunks with offsets`)
+
+      // Transfer metadata using coordinate-mapped chunks
       chunksWithMetadata = await transferMetadataToChonkieChunks(
         chonkieChunks,
-        cachedDoclingChunks,
+        bulletproofMatches,  // ✅ Use bulletproofMatches instead of raw chunks
         documentId
       )
       console.log(`[ContinueProcessing] ✓ Metadata transfer complete: ${chunksWithMetadata.length} enriched chunks`)
@@ -266,65 +290,80 @@ export async function continueProcessing(
       await updateProgress(75, 'Basic metadata assigned')
     }
 
-    // 8. Stage 8: Metadata Enrichment (75-85%)
-    console.log('[ContinueProcessing] Stage 8: Starting metadata enrichment (PydanticAI + Ollama)')
-    await updateProgress(76, 'Extracting structured metadata...')
+    // 8. Stage 8: Metadata Enrichment (75-85%) - OPTIONAL
+    let enrichedChunks: any[]
 
-    const { bulletproofExtractMetadata } = await import('../lib/chunking/bulletproof-metadata.js')
+    if (enrichChunks) {
+      console.log('[ContinueProcessing] Stage 8: Starting metadata enrichment (PydanticAI + Ollama)')
+      await updateProgress(76, 'Extracting structured metadata...')
 
-    const batchInput = chunksWithMetadata.map(chunk => ({
-      id: `${documentId}-${chunk.chunk_index}`,
-      content: chunk.content
-    }))
+      const { bulletproofExtractMetadata } = await import('../lib/chunking/bulletproof-metadata.js')
 
-    const results = await bulletproofExtractMetadata(batchInput, {
-      maxRetries: 5,
-      enableGeminiFallback: false,
-      onProgress: (processed, total, status) => {
-        const overallProgress = 76 + Math.floor((processed / total) * 9) // 76-85%
-        updateProgress(overallProgress, `Enriching chunk ${processed}/${total} (${status})`)
-      }
-    })
+      const batchInput = chunksWithMetadata.map(chunk => ({
+        id: `${documentId}-${chunk.chunk_index}`,
+        content: chunk.content
+      }))
 
-    // Apply extracted metadata to chunks
-    let enrichedChunks = chunksWithMetadata.map(chunk => {
-      const chunkId = `${documentId}-${chunk.chunk_index}`
-      const result = results.get(chunkId)
-
-      if (result) {
-        return {
-          ...chunk,
-          themes: result.metadata.themes,
-          importance_score: result.metadata.importance,
-          summary: result.metadata.summary,
-          emotional_metadata: {
-            polarity: result.metadata.emotional.polarity,
-            primaryEmotion: result.metadata.emotional.primaryEmotion,
-            intensity: result.metadata.emotional.intensity
-          },
-          conceptual_metadata: {
-            concepts: result.metadata.concepts
-          },
-          domain_metadata: {
-            primaryDomain: result.metadata.domain,
-            confidence: 0.8
-          },
-          metadata_extracted_at: new Date().toISOString()
+      const results = await bulletproofExtractMetadata(batchInput, {
+        maxRetries: 5,
+        enableGeminiFallback: false,
+        onProgress: (processed, total, status) => {
+          const overallProgress = 76 + Math.floor((processed / total) * 9) // 76-85%
+          updateProgress(overallProgress, `Enriching chunk ${processed}/${total} (${status})`)
         }
-      }
+      })
 
-      console.warn(`[ContinueProcessing] No metadata for chunk ${chunk.chunk_index}`)
-      return chunk
-    })
+      // Apply extracted metadata to chunks
+      enrichedChunks = chunksWithMetadata.map(chunk => {
+        const chunkId = `${documentId}-${chunk.chunk_index}`
+        const result = results.get(chunkId)
 
-    console.log(`[ContinueProcessing] Metadata enrichment complete`)
-    console.log(`  Quality distribution:`)
-    console.log(`    - Ollama 32B: ${[...results.values()].filter(r => r.source === 'ollama-32b').length}`)
-    console.log(`    - Ollama 14B: ${[...results.values()].filter(r => r.source === 'ollama-14b').length}`)
-    console.log(`    - Ollama 7B: ${[...results.values()].filter(r => r.source === 'ollama-7b').length}`)
-    console.log(`    - Regex: ${[...results.values()].filter(r => r.source === 'regex').length}`)
-    console.log(`    - Fallback: ${[...results.values()].filter(r => r.source === 'fallback').length}`)
-    await updateProgress(85, 'Metadata enrichment done')
+        if (result) {
+          return {
+            ...chunk,
+            themes: result.metadata.themes,
+            importance_score: result.metadata.importance,
+            summary: result.metadata.summary,
+            emotional_metadata: {
+              polarity: result.metadata.emotional.polarity,
+              primaryEmotion: result.metadata.emotional.primaryEmotion,
+              intensity: result.metadata.emotional.intensity
+            },
+            conceptual_metadata: {
+              concepts: result.metadata.concepts
+            },
+            domain_metadata: {
+              primaryDomain: result.metadata.domain,
+              confidence: 0.8
+            },
+            metadata_extracted_at: new Date().toISOString(),
+            enrichments_detected: true  // Mark as enriched
+          }
+        }
+
+        console.warn(`[ContinueProcessing] No metadata for chunk ${chunk.chunk_index}`)
+        return chunk
+      })
+
+      console.log(`[ContinueProcessing] Metadata enrichment complete`)
+      console.log(`  Quality distribution:`)
+      console.log(`    - Ollama 32B: ${[...results.values()].filter(r => r.source === 'ollama-32b').length}`)
+      console.log(`    - Ollama 14B: ${[...results.values()].filter(r => r.source === 'ollama-14b').length}`)
+      console.log(`    - Ollama 7B: ${[...results.values()].filter(r => r.source === 'ollama-7b').length}`)
+      console.log(`    - Regex: ${[...results.values()].filter(r => r.source === 'regex').length}`)
+      console.log(`    - Fallback: ${[...results.values()].filter(r => r.source === 'fallback').length}`)
+      await updateProgress(85, 'Metadata enrichment done')
+    } else {
+      // Skip enrichment - mark chunks as unenriched
+      console.log('[ContinueProcessing] Skipping metadata enrichment (user opted out)')
+      enrichedChunks = chunksWithMetadata.map(chunk => ({
+        ...chunk,
+        enrichments_detected: false,
+        enrichment_skipped_reason: 'user_choice',
+        metadata_extracted_at: null
+      }))
+      await updateProgress(85, 'Skipped enrichment (user choice)')
+    }
 
     // 9. Stage 9: Local Embeddings (85-90%)
     console.log('[ContinueProcessing] Stage 9: Generating embeddings')
@@ -376,47 +415,108 @@ export async function continueProcessing(
     }
 
     console.log(`[ContinueProcessing] ✓ Saved ${chunksToInsert.length} chunks`)
-    await updateProgress(90, 'Chunks saved to database')
+    await updateProgress(88, 'Chunks saved to database')
 
-    // 9. Queue collision detection job
-    await updateProgress(92, 'Queueing collision detection...')
+    // 8.5. Save to Storage for portability (chunks.json, metadata.json, manifest.json)
+    console.log('[ContinueProcessing] Saving chunks to Storage for portability...')
+    await updateProgress(89, 'Saving to Storage...')
 
-    // Check for existing active jobs to avoid duplicates
-    const { data: existingJobs } = await supabase
-      .from('background_jobs')
-      .select('id, status')
-      .eq('job_type', 'detect_connections')
-      .eq('user_id', userId)
-      .in('status', ['pending', 'processing'])
-      .contains('input_data', { document_id: documentId })
-      .limit(1)
+    const storagePath = `${userId}/${documentId}`
 
-    if (existingJobs && existingJobs.length > 0) {
-      console.log(`[ContinueProcessing] Collision detection job already exists (${existingJobs[0].status})`)
-    } else {
-      const { error: jobError } = await supabase
+    // Save chunks.json
+    await saveToStorage(supabase, `${storagePath}/chunks.json`, {
+      version: "1.0",
+      document_id: documentId,
+      user_id: userId,
+      chunks: enrichedChunks,
+      chunk_count: enrichedChunks.length,
+      generated_at: new Date().toISOString(),
+      source: 'continue-processing',
+      chunker_strategy: chunkerStrategy
+    })
+
+    // Save metadata.json
+    await saveToStorage(supabase, `${storagePath}/metadata.json`, {
+      document_id: documentId,
+      chunk_count: enrichedChunks.length,
+      word_count: enrichedChunks.reduce((sum, c) => sum + (c.word_count || 0), 0),
+      chunker_type: chunkerStrategy,
+      enrichments_enabled: enrichChunks,
+      connections_enabled: detectConnections,
+      processing_mode: 'continue-processing',
+      completed_at: new Date().toISOString()
+    })
+
+    // Save manifest.json
+    await saveToStorage(supabase, `${storagePath}/manifest.json`, {
+      version: "1.0",
+      document_id: documentId,
+      files: {
+        markdown: `${storagePath}/content.md`,
+        chunks: `${storagePath}/chunks.json`,
+        metadata: `${storagePath}/metadata.json`
+      },
+      workflow: 'continue-processing',
+      review_stage: reviewStage,
+      ai_cleanup_used: reviewStage === 'docling_extraction' && !skipAiCleanup,
+      generated_at: new Date().toISOString()
+    })
+
+    console.log('[ContinueProcessing] ✓ Saved chunks to Storage for portability')
+    await updateProgress(91, 'Storage export complete')
+
+    // 9. Queue collision detection job - OPTIONAL
+    if (detectConnections) {
+      await updateProgress(92, 'Queueing collision detection...')
+
+      // Check for existing active jobs to avoid duplicates
+      const { data: existingJobs } = await supabase
         .from('background_jobs')
-        .insert({
-          user_id: userId,
-          job_type: 'detect_connections',
-          status: 'pending',
-          input_data: {
-            document_id: documentId,
-            user_id: userId,
-            chunk_count: chunksToInsert.length,
-            trigger: 'continue-processing-complete'
-          },
-          created_at: new Date().toISOString()
-        })
+        .select('id, status')
+        .eq('job_type', 'detect_connections')
+        .eq('user_id', userId)
+        .in('status', ['pending', 'processing'])
+        .contains('input_data', { document_id: documentId })
+        .limit(1)
 
-      if (jobError) {
-        console.warn(`[ContinueProcessing] ⚠️ Failed to create collision detection job: ${jobError.message}`)
+      if (existingJobs && existingJobs.length > 0) {
+        console.log(`[ContinueProcessing] Collision detection job already exists (${existingJobs[0].status})`)
       } else {
-        console.log(`[ContinueProcessing] ✓ Collision detection job queued`)
-      }
-    }
+        const { error: jobError } = await supabase
+          .from('background_jobs')
+          .insert({
+            user_id: userId,
+            job_type: 'detect_connections',
+            status: 'pending',
+            input_data: {
+              document_id: documentId,
+              user_id: userId,
+              chunk_count: chunksToInsert.length,
+              trigger: 'continue-processing-complete'
+            },
+            created_at: new Date().toISOString()
+          })
 
-    await updateProgress(95, 'Collision detection queued')
+        if (jobError) {
+          console.warn(`[ContinueProcessing] ⚠️ Failed to create collision detection job: ${jobError.message}`)
+        } else {
+          console.log(`[ContinueProcessing] ✓ Collision detection job queued`)
+        }
+      }
+
+      await updateProgress(95, 'Collision detection queued')
+    } else {
+      console.log('[ContinueProcessing] Skipping collision detection (user opted out)')
+      // Mark chunks with skipped reason
+      await supabase
+        .from('chunks')
+        .update({
+          connections_detected: false,
+          detection_skipped_reason: 'user_choice'
+        })
+        .eq('document_id', documentId)
+      await updateProgress(95, 'Skipped connection detection (user choice)')
+    }
 
     // 10. Mark document as completed
     await supabase

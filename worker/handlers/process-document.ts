@@ -32,10 +32,18 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
   const {
     document_id,
     source_type = 'pdf',
-    review_before_chunking,
-    review_docling_extraction,
-    detectConnections = true  // NEW: Default true for backward compatibility
+    reviewBeforeChunking,
+    reviewDoclingExtraction,
+    enrichChunks = true,  // Default: true
+    detectConnections = true  // Default: true for backward compatibility
   } = job.input_data
+
+  console.log(`[ProcessDocument] Processing flags:`, {
+    reviewBeforeChunking,
+    reviewDoclingExtraction,
+    enrichChunks,
+    detectConnections
+  })
 
   // Get document metadata
   const { data: doc, error: docError } = await supabase
@@ -53,9 +61,10 @@ export async function processDocumentHandler(supabase: any, job: any): Promise<v
     documentId: document_id,
     userId: doc.user_id,
     sourceType: source_type as SourceType,
-    reviewBeforeChunking: review_before_chunking,
-    reviewDoclingExtraction: review_docling_extraction,
-    detectConnections  // NEW: Pass connection detection flag
+    reviewBeforeChunking,
+    reviewDoclingExtraction,
+    enrichChunks,
+    detectConnections
   })
 
   // Execute complete workflow
