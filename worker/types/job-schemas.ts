@@ -176,6 +176,59 @@ export const ImportFromVaultOutputSchema = z.object({
 export type ImportFromVaultOutput = z.infer<typeof ImportFromVaultOutputSchema>
 
 /**
+ * Enrich Chunks Job Output Schema
+ *
+ * Used in: worker/handlers/enrich-chunks.ts
+ * Stored in: background_jobs.output_data (JSONB)
+ * Consumed by: UI components (ChunkMetadataIcon, ChunkCard, EnrichmentsTab)
+ */
+export const EnrichChunksOutputSchema = z.object({
+  success: z.boolean(),
+  chunksEnriched: z.union([z.number(), z.literal('all')]),
+  completedAt: z.string(),
+})
+
+export type EnrichChunksOutput = z.infer<typeof EnrichChunksOutputSchema>
+
+/**
+ * Enrich and Connect Job Output Schema
+ *
+ * Used in: worker/handlers/enrich-and-connect.ts
+ * Stored in: background_jobs.output_data (JSONB)
+ * Consumed by: UI components (ChunkMetadataIcon, ChunkCard)
+ */
+export const EnrichAndConnectOutputSchema = z.object({
+  success: z.boolean(),
+  chunksProcessed: z.union([z.number(), z.literal('all')]),
+  enrichmentComplete: z.boolean(),
+  connectionsComplete: z.boolean(),
+  completedAt: z.string(),
+})
+
+export type EnrichAndConnectOutput = z.infer<typeof EnrichAndConnectOutputSchema>
+
+/**
+ * Readwise Auto-Import Job Output Schema
+ *
+ * Used in: worker/handlers/readwise-auto-import.ts
+ * Stored in: background_jobs.output_data (JSONB)
+ * Consumed by: Integrations panel UI
+ */
+export const ReadwiseAutoImportOutputSchema = z.object({
+  success: z.boolean(),
+  bookTitle: z.string().optional(),
+  bookAuthor: z.string().optional(),
+  bookId: z.number().optional(),
+  highlightCount: z.number().optional(),
+  imported: z.number().optional(),
+  needsReview: z.number().optional(),
+  failed: z.number().optional(),
+  error: z.string().optional(),
+})
+
+export type ReadwiseAutoImportOutput = z.infer<typeof ReadwiseAutoImportOutputSchema>
+
+/**
  * Union type for all job outputs
  */
 export type JobOutput =
@@ -185,6 +238,9 @@ export type JobOutput =
   | GenerateFlashcardsOutput
   | ScanVaultOutput
   | ImportFromVaultOutput
+  | EnrichChunksOutput
+  | EnrichAndConnectOutput
+  | ReadwiseAutoImportOutput
   | JobErrorOutput
 
 /**
@@ -200,7 +256,7 @@ export type JobOutput =
  * validateJobOutput('export', outputData) // Throws if invalid
  */
 export function validateJobOutput(
-  jobType: 'export_documents' | 'import_document' | 'reprocess_connections' | 'generate_flashcards' | 'scan_vault' | 'import_from_vault',
+  jobType: 'export_documents' | 'import_document' | 'reprocess_connections' | 'generate_flashcards' | 'scan_vault' | 'import_from_vault' | 'enrich_chunks' | 'enrich_and_connect' | 'readwise_auto_import',
   data: unknown
 ): JobOutput {
   switch (jobType) {
@@ -216,6 +272,12 @@ export function validateJobOutput(
       return ScanVaultOutputSchema.parse(data)
     case 'import_from_vault':
       return ImportFromVaultOutputSchema.parse(data)
+    case 'enrich_chunks':
+      return EnrichChunksOutputSchema.parse(data)
+    case 'enrich_and_connect':
+      return EnrichAndConnectOutputSchema.parse(data)
+    case 'readwise_auto_import':
+      return ReadwiseAutoImportOutputSchema.parse(data)
     default:
       throw new Error(`Unknown job type: ${jobType}`)
   }

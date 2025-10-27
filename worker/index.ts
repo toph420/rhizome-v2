@@ -13,8 +13,11 @@ import { reprocessConnectionsHandler } from './handlers/reprocess-connections.js
 import { exportDocumentHandler } from './handlers/export-document.js'
 import { generateFlashcardsHandler } from './handlers/generate-flashcards.js'
 import { importReadwiseHighlights } from './handlers/readwise-import.js'
+import { readwiseAutoImportHandler } from './handlers/readwise-auto-import.js'
 import { scanVaultHandler } from './handlers/scan-vault.js'
 import { importFromVaultHandler } from './handlers/import-from-vault.js'
+import { handleEnrichChunks } from './handlers/enrich-chunks.js'
+import { handleEnrichAndConnect } from './handlers/enrich-and-connect.js'
 import { getUserFriendlyError } from './lib/errors.js'
 import { startAnnotationExportCron } from './jobs/export-annotations.js'
 import { retryLoop, classifyError, recordJobFailure } from './lib/retry-manager.js'
@@ -48,6 +51,8 @@ console.log(`Worker starting... Logging to: ${LOG_FILE}`)
 const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> = {
   'process_document': processDocumentHandler,
   'detect_connections': detectConnectionsHandler,
+  'enrich_chunks': handleEnrichChunks,
+  'enrich_and_connect': handleEnrichAndConnect,
   'import_document': importDocumentHandler,
   'reprocess_connections': reprocessConnectionsHandler,
   'export_documents': exportDocumentHandler,
@@ -117,13 +122,45 @@ const JOB_HANDLERS: Record<string, (supabase: any, job: any) => Promise<void>> =
       })
       .eq('id', job.id)
   },
+  'readwise_auto_import': async (supabase: any, job: any) => {
+    const result = await readwiseAutoImportHandler(supabase, job)
+
+    const status = result.success ? 'completed' : 'failed'
+    await supabase
+      .from('background_jobs')
+      .update({
+        status,
+        completed_at: new Date().toISOString(),
+        output_data: result,
+        ...(result.error && { last_error: result.error })
+      })
+      .eq('id', job.id)
+  },
   'scan_vault': scanVaultHandler,
   'import_from_vault': importFromVaultHandler,
   'continue_processing': async (supabase: any, job: any) => {
     const { documentId, userId } = job.input_data
     const skipAiCleanup = (job.input_data as any).skipAiCleanup || false
     const chunkerStrategy = (job.input_data as any).chunkerStrategy || 'recursive'
-    const result = await continueProcessing(documentId, userId, job.id, skipAiCleanup, chunkerStrategy)  // Pass jobId for progress tracking
+    const enrichChunks = (job.input_data as any).enrichChunks ?? true  // Default: true
+    const detectConnections = (job.input_data as any).detectConnections ?? true  // Default: true
+
+    console.log('[ContinueProcessingHandler] Processing flags:', {
+      enrichChunks,
+      detectConnections,
+      skipAiCleanup,
+      chunkerStrategy
+    })
+
+    const result = await continueProcessing(
+      documentId,
+      userId,
+      job.id,
+      skipAiCleanup,
+      chunkerStrategy,
+      enrichChunks,
+      detectConnections
+    )
 
     await supabase
       .from('background_jobs')
