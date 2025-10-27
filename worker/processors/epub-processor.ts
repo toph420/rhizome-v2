@@ -633,10 +633,14 @@ export class EPUBProcessor extends SourceProcessor {
 
     // Stage 8: Metadata Enrichment (77-90%)
     // Phase 2: Use shared method from base class
-    console.log('[EPUBProcessor] Starting local metadata enrichment (PydanticAI + Ollama)')
-    finalChunks = await this.enrichMetadataBatch(finalChunks, 77, 90, {
-      onError: 'mark_review'  // Mark document for review on error
-    })
+    if (this.options.enrichChunks !== false) {
+      console.log('[EPUBProcessor] Starting local metadata enrichment (PydanticAI + Ollama)')
+      finalChunks = await this.enrichMetadataBatch(finalChunks, 77, 90, {
+        onError: 'mark_review'  // Mark document for review on error
+      })
+    } else {
+      console.log('[EPUBProcessor] Skipping metadata enrichment (user opted out)')
+    }
 
     // Stage 9: Local Embeddings (90-95%)
     // Phase 2: Use shared method from base class

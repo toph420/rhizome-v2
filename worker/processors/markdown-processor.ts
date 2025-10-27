@@ -148,10 +148,14 @@ export class MarkdownAsIsProcessor extends SourceProcessor {
 
       // Stage 3: Metadata Enrichment (30-70%)
       // Phase 3: Use shared method from base class
-      console.log('[MarkdownAsIsProcessor] Stage 3: Starting local metadata enrichment (PydanticAI + Ollama)')
-      finalChunks = await this.enrichMetadataBatch(finalChunks, 30, 70, {
-        onError: 'warn'  // Markdown processor just warns on errors
-      })
+      if (this.options.enrichChunks !== false) {
+        console.log('[MarkdownAsIsProcessor] Stage 3: Starting local metadata enrichment (PydanticAI + Ollama)')
+        finalChunks = await this.enrichMetadataBatch(finalChunks, 30, 70, {
+          onError: 'warn'  // Markdown processor just warns on errors
+        })
+      } else {
+        console.log('[MarkdownAsIsProcessor] Skipping metadata enrichment (user opted out)')
+      }
 
       // Checkpoint 3: Save enriched chunks (no final flag - not final output)
       await this.saveStageResult('metadata', finalChunks)
@@ -372,10 +376,14 @@ export class MarkdownCleanProcessor extends SourceProcessor {
 
       // Stage 4: Metadata Enrichment (35-70%)
       // Phase 3: Use shared method from base class
-      console.log('[MarkdownCleanProcessor] Stage 4: Starting local metadata enrichment (PydanticAI + Ollama)')
-      finalChunks = await this.enrichMetadataBatch(finalChunks, 35, 70, {
-        onError: 'warn'  // Markdown processor just warns on errors
-      })
+      if (this.options.enrichChunks !== false) {
+        console.log('[MarkdownCleanProcessor] Stage 4: Starting local metadata enrichment (PydanticAI + Ollama)')
+        finalChunks = await this.enrichMetadataBatch(finalChunks, 35, 70, {
+          onError: 'warn'  // Markdown processor just warns on errors
+        })
+      } else {
+        console.log('[MarkdownCleanProcessor] Skipping metadata enrichment (user opted out)')
+      }
 
       // Checkpoint 3: Save enriched chunks (no final flag - not final output)
       await this.saveStageResult('metadata', finalChunks)

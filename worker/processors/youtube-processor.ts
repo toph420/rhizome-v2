@@ -179,10 +179,14 @@ export class YouTubeProcessor extends SourceProcessor {
 
       // Stage 5: Metadata Enrichment (50-75%)
       // Phase 2: Use shared method from base class
-      console.log('[YouTubeProcessor] Stage 5: Starting local metadata enrichment (PydanticAI + Ollama)')
-      finalChunks = await this.enrichMetadataBatch(finalChunks, 50, 75, {
-        onError: 'warn'  // YouTube processor just warns on errors
-      })
+      if (this.options.enrichChunks !== false) {
+        console.log('[YouTubeProcessor] Stage 5: Starting local metadata enrichment (PydanticAI + Ollama)')
+        finalChunks = await this.enrichMetadataBatch(finalChunks, 50, 75, {
+          onError: 'warn'  // YouTube processor just warns on errors
+        })
+      } else {
+        console.log('[YouTubeProcessor] Skipping metadata enrichment (user opted out)')
+      }
 
       // Checkpoint 3: Save enriched chunks (no final flag - not final output)
       await this.saveStageResult('metadata', finalChunks)

@@ -420,10 +420,14 @@ export class PDFProcessor extends SourceProcessor {
 
     // Stage 8: Metadata Enrichment (77-90%)
     // Phase 2: Use shared method from base class
-    console.log('[PDFProcessor] Stage 8: Starting local metadata enrichment (PydanticAI + Ollama)')
-    finalChunks = await this.enrichMetadataBatch(finalChunks, 77, 90, {
-      onError: 'mark_review'  // Mark document for review on error
-    })
+    if (this.options.enrichChunks !== false) {
+      console.log('[PDFProcessor] Stage 8: Starting local metadata enrichment (PydanticAI + Ollama)')
+      finalChunks = await this.enrichMetadataBatch(finalChunks, 77, 90, {
+        onError: 'mark_review'  // Mark document for review on error
+      })
+    } else {
+      console.log('[PDFProcessor] Skipping metadata enrichment (user opted out)')
+    }
 
     // Stage 9: Local Embeddings (90-95%)
     // Phase 2: Use shared method from base class

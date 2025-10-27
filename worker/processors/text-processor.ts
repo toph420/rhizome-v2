@@ -143,10 +143,14 @@ export class TextProcessor extends SourceProcessor {
 
       // Stage 4: Metadata Enrichment (35-70%)
       // Phase 3: Use shared method from base class
-      console.log('[TextProcessor] Stage 4: Starting local metadata enrichment (PydanticAI + Ollama)')
-      finalChunks = await this.enrichMetadataBatch(finalChunks, 35, 70, {
-        onError: 'warn'  // Text processor just warns on errors
-      })
+      if (this.options.enrichChunks !== false) {
+        console.log('[TextProcessor] Stage 4: Starting local metadata enrichment (PydanticAI + Ollama)')
+        finalChunks = await this.enrichMetadataBatch(finalChunks, 35, 70, {
+          onError: 'warn'  // Text processor just warns on errors
+        })
+      } else {
+        console.log('[TextProcessor] Skipping metadata enrichment (user opted out)')
+      }
 
       // Checkpoint 3: Save enriched chunks (no final flag - not final output)
       await this.saveStageResult('metadata', finalChunks)

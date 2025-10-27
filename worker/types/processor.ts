@@ -272,6 +272,8 @@ export interface ProcessingOptions {
   targetChunkSize?: number
   /** Skip metadata extraction for chunks */
   skipMetadataExtraction?: boolean
+  /** Enable chunk enrichment with metadata (PydanticAI + Ollama) */
+  enrichChunks?: boolean
   /** Enable position tracking */
   trackPositions?: boolean
   /** Custom retry attempts */

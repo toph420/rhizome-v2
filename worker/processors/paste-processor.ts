@@ -329,10 +329,14 @@ ${pastedContent}`
 
       // Stage 4: Metadata Enrichment (40-70%)
       // Phase 3: Use shared method from base class
-      console.log('[PasteProcessor] Stage 4: Starting local metadata enrichment (PydanticAI + Ollama)')
-      finalChunks = await this.enrichMetadataBatch(finalChunks, 40, 70, {
-        onError: 'warn'  // Paste processor just warns on errors
-      })
+      if (this.options.enrichChunks !== false) {
+        console.log('[PasteProcessor] Stage 4: Starting local metadata enrichment (PydanticAI + Ollama)')
+        finalChunks = await this.enrichMetadataBatch(finalChunks, 40, 70, {
+          onError: 'warn'  // Paste processor just warns on errors
+        })
+      } else {
+        console.log('[PasteProcessor] Skipping metadata enrichment (user opted out)')
+      }
 
       // Checkpoint 3: Save enriched chunks (no final flag - not final output)
       await this.saveStageResult('metadata', finalChunks)

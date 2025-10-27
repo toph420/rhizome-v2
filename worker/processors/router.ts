@@ -16,7 +16,7 @@ import type { SourceType } from '../types/multi-format.js'
 export class ProcessorRouter {
   /**
    * Creates the appropriate processor instance based on source type.
-   * 
+   *
    * @param sourceType - The type of source document to process
    * @param ai - GoogleGenAI instance
    * @param supabase - Supabase client instance
@@ -31,39 +31,45 @@ export class ProcessorRouter {
     job: any
   ): SourceProcessor {
     console.log(`🏗️ Creating processor for source type: ${sourceType}`)
-    
+
+    // Extract enrichChunks flag from job input_data (default: true for backward compatibility)
+    const enrichChunks = job.input_data?.enrichChunks ?? true
+    const options = { enrichChunks }
+
+    console.log(`[ProcessorRouter] enrichChunks flag: ${enrichChunks}`)
+
     switch (sourceType) {
       case 'pdf':
         console.log('📄 Using PDFProcessor')
-        return new PDFProcessor(ai, supabase, job)
+        return new PDFProcessor(ai, supabase, job, options)
 
       case 'epub':
         console.log('📚 Using EPUBProcessor')
-        return new EPUBProcessor(ai, supabase, job)
+        return new EPUBProcessor(ai, supabase, job, options)
 
       case 'youtube':
         console.log('🎬 Using YouTubeProcessor')
-        return new YouTubeProcessor(ai, supabase, job)
+        return new YouTubeProcessor(ai, supabase, job, options)
 
       case 'web_url':
         console.log('🌐 Using WebProcessor')
-        return new WebProcessor(ai, supabase, job)
+        return new WebProcessor(ai, supabase, job, options)
 
       case 'markdown_asis':
         console.log('📝 Using MarkdownAsIsProcessor (no AI)')
-        return new MarkdownAsIsProcessor(ai, supabase, job)
+        return new MarkdownAsIsProcessor(ai, supabase, job, options)
 
       case 'markdown_clean':
         console.log('✨ Using MarkdownCleanProcessor (with AI)')
-        return new MarkdownCleanProcessor(ai, supabase, job)
+        return new MarkdownCleanProcessor(ai, supabase, job, options)
 
       case 'txt':
         console.log('📄 Using TextProcessor')
-        return new TextProcessor(ai, supabase, job)
+        return new TextProcessor(ai, supabase, job, options)
 
       case 'paste':
         console.log('📋 Using PasteProcessor')
-        return new PasteProcessor(ai, supabase, job)
+        return new PasteProcessor(ai, supabase, job, options)
 
       default:
         const validTypes = ['pdf', 'epub', 'youtube', 'web_url', 'markdown_asis', 'markdown_clean', 'txt', 'paste']

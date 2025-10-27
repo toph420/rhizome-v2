@@ -10,16 +10,13 @@ export default async function Home() {
     <main className="container mx-auto p-8 pb-32">
       <div className="max-w-4xl mx-auto space-y-8">
         <div>
-          <h1 className="text-4xl font-bold mb-2">Rhizome V2</h1>
-          <p className="text-muted-foreground">
-            Document Reader & Knowledge Synthesis
-          </p>
+          <h1 className="text-4xl font-bold mb-2">Rhizome</h1>
         </div>
 
         <UploadZone />
 
         <div className="space-y-4">
-          <h2 className="text-2xl font-semibold">Your Documents</h2>
+          <h2 className="text-2xl font-semibold">Books and Shit</h2>
           <DocumentList />
         </div>
       </div>

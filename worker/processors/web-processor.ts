@@ -183,10 +183,14 @@ ${article.textContent}`
 
       // Stage 5: Metadata Enrichment (50-75%)
       // Phase 3: Use shared method from base class
-      console.log('[WebProcessor] Stage 5: Starting local metadata enrichment (PydanticAI + Ollama)')
-      finalChunks = await this.enrichMetadataBatch(finalChunks, 50, 75, {
-        onError: 'warn'  // Web processor just warns on errors
-      })
+      if (this.options.enrichChunks !== false) {
+        console.log('[WebProcessor] Stage 5: Starting local metadata enrichment (PydanticAI + Ollama)')
+        finalChunks = await this.enrichMetadataBatch(finalChunks, 50, 75, {
+          onError: 'warn'  // Web processor just warns on errors
+        })
+      } else {
+        console.log('[WebProcessor] Skipping metadata enrichment (user opted out)')
+      }
 
       // Checkpoint 3: Save enriched chunks (no final flag - not final output)
       await this.saveStageResult('metadata', finalChunks)
