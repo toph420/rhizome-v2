@@ -92,7 +92,7 @@ export const useUploadStore = create<UploadState>()(
       cleanMarkdown: true,
       extractImages: false,
       chunkerType: 'recursive',
-      enrichChunks: true,
+      enrichChunks: false,  // Default: skip enrichment (user can enable via checkbox)
       detectConnections: false,
       isUploading: false,
       error: null,
