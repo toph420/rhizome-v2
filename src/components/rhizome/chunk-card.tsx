@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { useChunkStore } from '@/stores/chunk-store'
 import type { ChunkListItem, ChunkDetailed, ChunkMetadata } from '@/stores/chunk-store'
 import { detectBatchChunkConnections } from '@/app/actions/chunks'
+import { enrichChunksForDocument, enrichAndConnectChunks } from '@/app/actions/enrichments'
 import { toast } from 'sonner'
 import { ChunkMetadataEditor } from './chunk-metadata-editor'
 
@@ -52,6 +53,7 @@ export function ChunkCard({
   onToggleMode
 }: ChunkCardProps) {
   const [isDetecting, setIsDetecting] = useState(false)
+  const [isEnriching, setIsEnriching] = useState(false)
   const [isEditingMetadata, setIsEditingMetadata] = useState(false)
   const [isSavingMetadata, setIsSavingMetadata] = useState(false)
 
@@ -65,6 +67,42 @@ export function ChunkCard({
 
   const detailedChunk = detailedChunks.get(chunk.id)
   const isLoadingDetails = loadingDetailed.has(chunk.id)
+
+  // Handle single chunk enrichment
+  const handleEnrich = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsEnriching(true)
+
+    try {
+      const result = await enrichChunksForDocument(documentId, [chunk.id])
+      toast.success('Enrichment started', {
+        description: 'Check ProcessingDock for progress'
+      })
+    } catch (error) {
+      console.error('[ChunkCard] Enrichment failed:', error)
+      toast.error('Failed to start enrichment')
+    } finally {
+      setIsEnriching(false)
+    }
+  }, [documentId, chunk.id])
+
+  // Handle enrich and connect
+  const handleEnrichAndConnect = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsEnriching(true)
+
+    try {
+      const result = await enrichAndConnectChunks(documentId, [chunk.id])
+      toast.success('Enrich & Connect started', {
+        description: 'Check ProcessingDock for progress'
+      })
+    } catch (error) {
+      console.error('[ChunkCard] Enrich & Connect failed:', error)
+      toast.error('Failed to start process')
+    } finally {
+      setIsEnriching(false)
+    }
+  }, [documentId, chunk.id])
 
   // Handle single chunk detection
   const handleDetect = useCallback(async (e: React.MouseEvent) => {
@@ -370,8 +408,59 @@ export function ChunkCard({
               </Button>
             )}
 
-            {/* Detection action */}
-            {!chunk.connections_detected && (
+            {/* Enrichment actions */}
+            {!detailedChunk.enrichments_detected && (
+              <div className="space-y-2">
+                <Button
+                  onClick={handleEnrich}
+                  disabled={isEnriching}
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                >
+                  {isEnriching ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Enriching...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Enrich Chunk
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  onClick={handleEnrichAndConnect}
+                  disabled={isEnriching}
+                  className="w-full"
+                  size="sm"
+                >
+                  {isEnriching ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Enrich & Connect
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* Enrichment timestamp */}
+            {detailedChunk.enrichments_detected_at && (
+              <p className="text-xs text-muted-foreground text-center">
+                Enriched {new Date(detailedChunk.enrichments_detected_at).toLocaleDateString()}
+              </p>
+            )}
+
+            {/* Detection action (only show if enriched) */}
+            {!chunk.connections_detected && detailedChunk.enrichments_detected && (
               <Button
                 onClick={handleDetect}
                 disabled={isDetecting}

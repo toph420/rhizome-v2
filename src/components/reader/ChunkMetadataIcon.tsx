@@ -3,17 +3,20 @@
 import { motion } from 'framer-motion'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/rhizome/hover-card'
 import { Badge } from '@/components/rhizome/badge'
-import { Button } from '@/components/ui/button'
-import { Info, TrendingUp, CheckCircle, AlertTriangle, Link2, Loader2 } from 'lucide-react'
+import { Button } from '@/components/rhizome/button'
+import { Info, TrendingUp, CheckCircle, AlertTriangle, Link2, Loader2, Sparkles } from 'lucide-react'
 import type { Chunk } from '@/types/annotations'
 import { useState } from 'react'
 import { detectConnectionsForChunks } from '@/app/actions/connections'
+import { enrichChunksForDocument, enrichAndConnectChunks } from '@/app/actions/enrichments'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
+import { useReaderStore } from '@/stores/reader-store'
 
 interface ChunkMetadataIconProps {
   chunk: Chunk
   chunkIndex: number
-  documentId: string  // NEW: For detection action
+  documentId: string  // For detection action
+  documentTitle?: string  // NEW: For job display
   alwaysVisible?: boolean
   style?: React.CSSProperties
   /** For accurate positioning based on text content */
@@ -31,9 +34,25 @@ interface ChunkMetadataIconProps {
  * @param props.style - Optional inline styles for positioning
  * @returns Hover card with chunk metadata
  */
-export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible = false, style, textOffset }: ChunkMetadataIconProps) {
+export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle, alwaysVisible = false, style, textOffset }: ChunkMetadataIconProps) {
   const [isDetecting, setIsDetecting] = useState(false)
+  const [isEnriching, setIsEnriching] = useState(false)
+  const [isEnrichingAndConnecting, setIsEnrichingAndConnecting] = useState(false)
   const { registerJob } = useBackgroundJobsStore()
+
+  // Read fresh chunk data from store (updates when enrichment completes)
+  const storeChunks = useReaderStore(state => state.chunks)
+  // Use store chunk if available (has latest enrichment data), fall back to prop
+  // Type cast needed because ReaderStore.Chunk and annotations.Chunk are different types
+  const freshChunk = (storeChunks.find(c => c.id === chunk.id) as Chunk | undefined) || chunk
+
+  // Debug: Log when freshChunk has enrichment data
+  if (freshChunk.enrichments_detected && !chunk.enrichments_detected) {
+    console.log(`[ChunkMetadataIcon] Chunk ${chunkIndex} enrichment detected! Themes:`, freshChunk.themes)
+  }
+
+  // Format job title with document name
+  const jobTitle = documentTitle ? `${documentTitle} - Chunk ${chunkIndex}` : `Chunk ${chunkIndex}`
 
   // Helper function to determine polarity category
   const getPolarity = (polarity?: number): 'positive' | 'negative' | 'neutral' | null => {
@@ -54,6 +73,46 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible
     }
   }
 
+  // Handler for enriching this specific chunk
+  const handleEnrichChunk = async () => {
+    setIsEnriching(true)
+    try {
+      const result = await enrichChunksForDocument(documentId, [chunk.id])
+      if (result.success && result.jobId) {
+        registerJob(result.jobId, 'enrich_chunks', {
+          documentId,
+          chunkIds: [chunk.id],
+          title: jobTitle,
+          showInDock: true  // ✅ Force show in ProcessingDock
+        })
+      }
+    } catch (error) {
+      console.error('Failed to enrich chunk:', error)
+    } finally {
+      setIsEnriching(false)
+    }
+  }
+
+  // Handler for enriching AND connecting this chunk
+  const handleEnrichAndConnect = async () => {
+    setIsEnrichingAndConnecting(true)
+    try {
+      const result = await enrichAndConnectChunks(documentId, [chunk.id])
+      if (result.success && result.jobId) {
+        registerJob(result.jobId, 'enrich_and_connect', {
+          documentId,
+          chunkIds: [chunk.id],
+          title: jobTitle,
+          showInDock: true  // ✅ Force show in ProcessingDock
+        })
+      }
+    } catch (error) {
+      console.error('Failed to enrich and connect:', error)
+    } finally {
+      setIsEnrichingAndConnecting(false)
+    }
+  }
+
   // Handler for detecting connections for this specific chunk
   const handleDetectConnections = async () => {
     setIsDetecting(true)
@@ -63,7 +122,8 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible
         registerJob(result.jobId, 'detect_connections', {
           documentId,
           chunkIds: [chunk.id],
-          title: `Chunk ${chunkIndex}`
+          title: jobTitle,
+          showInDock: true  // ✅ Force show in ProcessingDock
         })
       }
     } catch (error) {
@@ -74,23 +134,28 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible
   }
 
   // Extract metadata from chunk (now populated from database)
+  // Use freshChunk to get the latest data after enrichment updates
   const metadata = {
-    themes: chunk.themes || [],
-    importanceScore: chunk.importance_score || 0,
-    concepts: chunk.conceptual_metadata?.concepts?.slice(0, 5).map(c => c.text) || [],
-    emotionalPolarity: getPolarity(chunk.emotional_metadata?.polarity),
-    domain: chunk.domain_metadata?.primaryDomain,
-    summary: chunk.summary,
-    positionConfidence: chunk.position_confidence,
-    positionMethod: chunk.position_method,
-    positionValidated: chunk.position_validated,
-    pageStart: chunk.page_start,
-    pageEnd: chunk.page_end,
-    sectionMarker: chunk.section_marker,
+    themes: freshChunk.themes || [],
+    importanceScore: freshChunk.importance_score || 0,
+    concepts: freshChunk.conceptual_metadata?.concepts?.slice(0, 5).map(c => c.text) || [],
+    emotionalPolarity: getPolarity(freshChunk.emotional_metadata?.polarity),
+    domain: freshChunk.domain_metadata?.primaryDomain,
+    summary: freshChunk.summary,
+    positionConfidence: freshChunk.position_confidence,
+    positionMethod: freshChunk.position_method,
+    positionValidated: freshChunk.position_validated,
+    pageStart: freshChunk.page_start,
+    pageEnd: freshChunk.page_end,
+    sectionMarker: freshChunk.section_marker,
     // NEW: Connection detection status
-    connectionsDetected: chunk.connections_detected,
-    connectionsDetectedAt: chunk.connections_detected_at,
-    detectionSkippedReason: chunk.detection_skipped_reason
+    connectionsDetected: freshChunk.connections_detected,
+    connectionsDetectedAt: freshChunk.connections_detected_at,
+    detectionSkippedReason: freshChunk.detection_skipped_reason,
+    // NEW: Enrichment status
+    enrichmentsDetected: freshChunk.enrichments_detected,
+    enrichmentsDetectedAt: freshChunk.enrichments_detected_at,
+    enrichmentSkippedReason: freshChunk.enrichment_skipped_reason
   }
 
   // Use em-based positioning for better text alignment (scales with font size)
@@ -243,6 +308,80 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible
             </div>
           )}
 
+          {/* Enrichment Status */}
+          <div className="border-t pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3 w-3 text-muted-foreground" />
+                <span className="text-xs font-medium">Enrichment</span>
+              </div>
+              {metadata.enrichmentsDetected ? (
+                <Badge variant="secondary" className="text-xs">
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Enriched
+                </Badge>
+              ) : metadata.enrichmentSkippedReason ? (
+                <Badge variant="outline" className="text-xs">
+                  Skipped ({metadata.enrichmentSkippedReason})
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs">
+                  Not enriched
+                </Badge>
+              )}
+            </div>
+
+            {metadata.enrichmentsDetectedAt && (
+              <p className="text-xs text-muted-foreground mb-2">
+                Enriched {new Date(metadata.enrichmentsDetectedAt).toLocaleDateString()}
+              </p>
+            )}
+
+            {!metadata.enrichmentsDetected && (
+              <div className="space-y-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full text-xs"
+                  onClick={handleEnrichChunk}
+                  disabled={isEnriching || isEnrichingAndConnecting}
+                >
+                  {isEnriching ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Enriching...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3 w-3 mr-1" />
+                      Enrich Chunk
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="w-full text-xs"
+                  onClick={handleEnrichAndConnect}
+                  disabled={isEnriching || isEnrichingAndConnecting}
+                >
+                  {isEnrichingAndConnecting ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3 w-3 mr-1" />
+                      Enrich & Connect
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+
           {/* Connection Detection Status */}
           <div className="border-t pt-3">
             <div className="flex items-center justify-between mb-2">
@@ -272,7 +411,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, alwaysVisible
               </p>
             )}
 
-            {!metadata.connectionsDetected && (
+            {!metadata.connectionsDetected && metadata.enrichmentsDetected && (
               <Button
                 size="sm"
                 variant="outline"

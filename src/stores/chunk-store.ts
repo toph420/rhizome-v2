@@ -34,6 +34,11 @@ interface ChunkDetailed {
   connections_detected_at?: string
   connection_count: number
 
+  // Enrichment info
+  enrichments_detected?: boolean
+  enrichments_detected_at?: string
+  enrichment_skipped_reason?: string
+
   // Quality info
   position_confidence?: string
   metadata_confidence?: string

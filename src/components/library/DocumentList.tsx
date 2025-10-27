@@ -24,6 +24,7 @@ interface Document {
   created_at: string
   markdown_available: boolean
   embeddings_available: boolean
+  obsidian_uri?: string | null  // ✅ Add Obsidian URI from job
 }
 
 /**
@@ -73,45 +74,81 @@ export function DocumentList() {
         table: 'documents',
         filter: `user_id=eq.${userId}`
       }, (payload) => {
-        console.log('[DocumentList] Realtime update:', payload.eventType, payload.new)
+        console.log('[DocumentList] ⚡ Realtime event received:', {
+          eventType: payload.eventType,
+          documentId: payload.new?.id,
+          title: payload.new?.title,
+          status: payload.new?.processing_status
+        })
+
         if (payload.eventType === 'INSERT') {
+          console.log('[DocumentList] INSERT event - adding new document')
           setDocuments(prev => [payload.new as Document, ...prev])
         } else if (payload.eventType === 'UPDATE') {
-          setDocuments(prev => prev.map(doc =>
-            doc.id === (payload.new as Document).id ? payload.new as Document : doc
-          ))
+          const newDoc = payload.new as Document
+          console.log('[DocumentList] UPDATE event:', {
+            docId: newDoc.id,
+            title: newDoc.title,
+            processing_status: newDoc.processing_status,
+            isReviewStatus: newDoc.processing_status === 'awaiting_manual_review'
+          })
+
+          // If document entered review status, reload all to fetch Obsidian URI
+          if (newDoc.processing_status === 'awaiting_manual_review') {
+            console.log('[DocumentList] ✅ Document entered review - reloading to fetch URI')
+            loadDocuments(supabase, userId)
+          } else {
+            console.log('[DocumentList] Regular update - not review status')
+            // For other updates, just update the document directly
+            setDocuments(prev => prev.map(doc =>
+              doc.id === newDoc.id ? newDoc : doc
+            ))
+          }
         } else if (payload.eventType === 'DELETE') {
+          console.log('[DocumentList] DELETE event')
           setDocuments(prev => prev.filter(doc => doc.id !== payload.old.id))
         }
       })
       .subscribe()
 
-    // Fallback polling for processing documents (every 5 seconds)
-    // In case realtime doesn't trigger for status updates
+    // Fallback polling for processing/review documents (every 3 seconds)
+    // More aggressive to handle realtime failures
     const pollInterval = setInterval(async () => {
-      const hasProcessing = documents.some(doc => doc.processing_status === 'processing')
-      if (hasProcessing) {
-        console.log('[DocumentList] Polling for processing updates...')
-        const { data } = await supabase
-          .from('documents')
-          .select('id, title, processing_status, processing_stage, review_stage, created_at, markdown_available, embeddings_available')
-          .eq('user_id', userId)
-          .eq('processing_status', 'processing')
+      // Query for any documents in processing or review status
+      const { data: activeJobs } = await supabase
+        .from('documents')
+        .select('id, processing_status')
+        .eq('user_id', userId)
+        .in('processing_status', ['processing', 'awaiting_manual_review'])
 
-        if (data && data.length > 0) {
-          // Check if any completed
-          const completedDocs = documents.filter(doc =>
-            doc.processing_status === 'processing' &&
-            !data.find(d => d.id === doc.id)
-          )
+      if (!activeJobs) return
 
-          if (completedDocs.length > 0) {
-            console.log('[DocumentList] Documents completed, refreshing all...')
-            loadDocuments(supabase, userId)
-          }
-        }
+      // Check if we have NEW documents in processing/review that aren't in our list yet
+      const newActiveJobs = activeJobs.filter(job =>
+        !documents.some(doc => doc.id === job.id)
+      )
+
+      // Check if any existing documents changed status
+      const statusChanged = activeJobs.some(job => {
+        const existing = documents.find(doc => doc.id === job.id)
+        return existing && existing.processing_status !== job.processing_status
+      })
+
+      // Check if any documents LEFT processing/review status
+      const completedJobs = documents.filter(doc =>
+        (doc.processing_status === 'processing' || doc.processing_status === 'awaiting_manual_review') &&
+        !activeJobs.some(job => job.id === doc.id)
+      )
+
+      if (newActiveJobs.length > 0 || statusChanged || completedJobs.length > 0) {
+        console.log('[DocumentList] 🔄 Polling detected changes:', {
+          newJobs: newActiveJobs.length,
+          statusChanged,
+          completedJobs: completedJobs.length
+        })
+        loadDocuments(supabase, userId)
       }
-    }, 5000)
+    }, 3000)
 
     return () => {
       supabase.removeChannel(channel)
@@ -128,7 +165,38 @@ export function DocumentList() {
       .order('created_at', { ascending: false })
 
     if (data) {
-      setDocuments(data)
+      // For documents in review, fetch Obsidian URI from completed job
+      const documentsWithUris = await Promise.all(
+        data.map(async (doc) => {
+          if (doc.processing_status === 'awaiting_manual_review') {
+            console.log(`[DocumentList] Fetching URI for document in review: ${doc.title}`)
+
+            // Fetch most recent process_document job for this document
+            const { data: job, error: jobError } = await supabase
+              .from('background_jobs')
+              .select('output_data')
+              .eq('job_type', 'process_document')
+              .contains('input_data', { document_id: doc.id })
+              .eq('status', 'completed')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single()
+
+            if (jobError) {
+              console.error(`[DocumentList] Failed to fetch job for ${doc.title}:`, jobError)
+            }
+
+            const obsidianUri = job?.output_data?.obsidianUri || null
+            console.log(`[DocumentList] URI for ${doc.title}:`, obsidianUri)
+
+            return { ...doc, obsidian_uri: obsidianUri }
+          }
+          return { ...doc, obsidian_uri: null }
+        })
+      )
+
+      console.log(`[DocumentList] Loaded ${documentsWithUris.length} documents, ${documentsWithUris.filter(d => d.obsidian_uri).length} with URIs`)
+      setDocuments(documentsWithUris)
     }
     setLoading(false)
   }
@@ -176,8 +244,23 @@ export function DocumentList() {
     setDeleting(null)
   }
 
-  async function openInObsidian(documentId: string) {
+  async function openInObsidian(documentId: string, obsidianUri?: string) {
+    console.log('[DocumentList] openInObsidian called:', { documentId, obsidianUri, hasUri: !!obsidianUri })
+
     try {
+      // If we have a URI from the completed job, open it directly
+      if (obsidianUri) {
+        console.log('[DocumentList] Opening Obsidian with URI:', obsidianUri)
+        window.location.href = obsidianUri
+        toast.success('Opening in Obsidian', {
+          description: 'Document opened in your vault'
+        })
+        return
+      }
+
+      console.log('[DocumentList] No URI available, triggering export...')
+
+      // Otherwise, trigger a new export job
       setProcessing(documentId)
       toast.info('Exporting to Obsidian...', {
         description: 'Creating vault files'
@@ -189,8 +272,6 @@ export function DocumentList() {
         throw new Error(result.error || 'Export failed')
       }
 
-      // Note: Job-based export - URI will be in job output_data
-      // For now, just show success. Real URI handling would require job polling
       toast.success('Export job created', {
         description: 'Document will be available in Obsidian shortly'
       })
@@ -351,7 +432,7 @@ export function DocumentList() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openInObsidian(doc.id)}
+                        onClick={() => openInObsidian(doc.id, doc.obsidian_uri || undefined)}
                         data-testid="review-obsidian-button"
                       >
                         <ExternalLink className="h-4 w-4 mr-2" />

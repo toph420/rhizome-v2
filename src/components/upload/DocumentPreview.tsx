@@ -71,6 +71,8 @@ interface DocumentPreviewProps {
   onExtractImagesChange?: (checked: boolean) => void
   chunkerType?: ChunkerType
   onChunkerTypeChange?: (chunkerType: ChunkerType) => void
+  enrichChunks?: boolean
+  onEnrichChunksChange?: (checked: boolean) => void
   detectConnections?: boolean
   onDetectConnectionsChange?: (checked: boolean) => void
   isMarkdownFile?: boolean
@@ -117,6 +119,8 @@ export function DocumentPreview({
   onExtractImagesChange,
   chunkerType = 'recursive',
   onChunkerTypeChange,
+  enrichChunks = true,
+  onEnrichChunksChange,
   detectConnections = false,
   onDetectConnectionsChange,
   isMarkdownFile = false,
@@ -422,11 +426,46 @@ export function DocumentPreview({
           </label>
         </div>
 
+        {/* Chunk Enrichment Option */}
+        <div className="flex items-start gap-3 p-4 border rounded-lg bg-muted/30">
+          <Checkbox
+            id="enrich-chunks-preview"
+            checked={enrichChunks}
+            onCheckedChange={(checked) => {
+              const isEnriching = checked as boolean
+              onEnrichChunksChange?.(isEnriching)
+              // Auto-disable connections when enrichment is disabled
+              if (!isEnriching && detectConnections) {
+                onDetectConnectionsChange?.(false)
+              }
+            }}
+          />
+          <div className="flex-1">
+            <label
+              htmlFor="enrich-chunks-preview"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer block"
+            >
+              Enrich chunks with metadata
+            </label>
+            <p className="text-xs text-muted-foreground mt-1">
+              Extract themes, concepts, and emotions using local Ollama models.
+              You can enrich chunks later individually or in batches.
+            </p>
+            {process.env.NEXT_PUBLIC_PROCESSING_MODE === 'local' && (
+              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                LOCAL mode: Zero cost (Ollama models), ~30-60s per document
+              </p>
+            )}
+          </div>
+        </div>
+
         {/* Connection Detection Option */}
         <div className="flex items-start gap-3 p-4 border rounded-lg bg-muted/30">
           <Checkbox
             id="detect-connections-preview"
             checked={detectConnections}
+            disabled={!enrichChunks}
             onCheckedChange={(checked) => {
               onDetectConnectionsChange?.(checked as boolean)
             }}
@@ -437,6 +476,7 @@ export function DocumentPreview({
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer block"
             >
               Detect connections after processing
+              {!enrichChunks && <span className="text-muted-foreground ml-1">(requires enrichment)</span>}
             </label>
             <p className="text-xs text-muted-foreground mt-1">
               Finds semantic similarities, contradictions, and thematic bridges between chunks.

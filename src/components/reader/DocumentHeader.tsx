@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/rhizome/button'
+import { Badge } from '@/components/rhizome/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/rhizome/tooltip'
 import { toast } from 'sonner'
 import { ExternalLink, RefreshCw, Loader2, BookMarked, Compass, BookOpen, GraduationCap, Zap, ArrowLeft } from 'lucide-react'
@@ -10,6 +10,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useRouter } from 'next/navigation'
 import { chunkerLabels, chunkerDescriptions, chunkerColors, type ChunkerType } from '@/types/chunker'
 import { exportToObsidian, syncFromObsidian, autoImportFromReadwise } from '@/app/actions/integrations'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -46,6 +47,7 @@ export function DocumentHeader({
   onQuickSpark
 }: DocumentHeaderProps) {
   const router = useRouter()
+  const { registerJob } = useBackgroundJobsStore()
   const [isExporting, setIsExporting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -67,6 +69,12 @@ export function DocumentHeader({
       if (!result.success) {
         throw new Error(result.error || 'Export failed')
       }
+
+      // Register job with store for real-time tracking
+      registerJob(result.jobId!, 'obsidian_export', {
+        documentId: documentId,
+        operation: 'export'
+      })
 
       toast.success('Export job created', {
         description: 'Document will be available in Obsidian shortly. Check ProcessingDock for progress.',
@@ -103,6 +111,12 @@ export function DocumentHeader({
         throw new Error(result.error || 'Sync failed')
       }
 
+      // Register job with store for real-time tracking
+      registerJob(result.jobId!, 'obsidian_sync', {
+        documentId: documentId,
+        operation: 'sync'
+      })
+
       toast.success('Sync job created', {
         description: 'Check ProcessingDock for progress. Page will reload when complete.',
         duration: 5000
@@ -134,6 +148,14 @@ export function DocumentHeader({
       if (!result.success) {
         throw new Error(result.error || 'Import failed')
       }
+
+      // Register job with store for real-time tracking
+      registerJob(result.jobId!, 'readwise_import', {
+        documentId: documentId,
+        operation: 'import',
+        bookTitle: result.bookTitle,
+        bookAuthor: result.bookAuthor
+      })
 
       toast.success('Readwise Import Started', {
         description: `Found: ${result.bookTitle} by ${result.bookAuthor}\n${result.highlightCount} highlights queued for import`,

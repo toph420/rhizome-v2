@@ -47,7 +47,8 @@ export const BlockRenderer = memo(function BlockRenderer({
 }: BlockRendererProps) {
   const showChunkBoundaries = useUIStore(state => state.showChunkBoundaries)
   const chunks = useReaderStore(state => state.chunks)
-  const documentId = useReaderStore(state => state.documentId)  // NEW: Get documentId for detection
+  const documentId = useReaderStore(state => state.documentId)
+  const documentTitle = useReaderStore(state => state.documentTitle)  // NEW: For job display
   const contentRef = useRef<HTMLDivElement>(null)
   const [chunkPositions, setChunkPositions] = useState<Map<string, number>>(new Map())
 
@@ -178,6 +179,7 @@ export const BlockRenderer = memo(function BlockRenderer({
           chunk={chunk}
           chunkIndex={chunk.chunk_index}
           documentId={documentId}
+          documentTitle={documentTitle}
           alwaysVisible={showChunkBoundaries}
         />
       )}
@@ -191,6 +193,7 @@ export const BlockRenderer = memo(function BlockRenderer({
             chunk={chunkInBlock}
             chunkIndex={chunkInBlock.chunk_index}
             documentId={documentId}
+            documentTitle={documentTitle}
             alwaysVisible={showChunkBoundaries}
             style={
               calculatedPosition !== undefined

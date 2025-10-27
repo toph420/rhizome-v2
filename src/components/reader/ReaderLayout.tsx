@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
 import { RightPanelV2 as RightPanel } from '../sidebar/RightPanel'
@@ -12,8 +12,10 @@ import { toast } from 'sonner'
 import { useReaderStore } from '@/stores/reader-store'
 import { useConnectionStore } from '@/stores/connection-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { calculateOffsetsFromCurrentSelection } from '@/lib/reader/offset-calculator'
 import { getConnectionsForChunks } from '@/app/actions/connections'
+import { refetchChunks } from '@/app/actions/chunks'
 import type { Chunk, StoredAnnotation } from '@/types/annotations'
 
 /**
@@ -108,6 +110,7 @@ export function ReaderLayout({
   const scrollPosition = useReaderStore(state => state.scrollPosition)
   const setCorrectionModeStore = useReaderStore(state => state.setCorrectionMode)
   const setScrollToChunkId = useReaderStore(state => state.setScrollToChunkId)
+  const updateChunks = useReaderStore(state => state.updateChunks)
 
   // ConnectionStore: Engine configuration and connections
   const setConnections = useConnectionStore(state => state.setConnections)
@@ -119,6 +122,12 @@ export function ReaderLayout({
   const sparkCaptureOpen = useUIStore(state => state.sparkCaptureOpen)
   const openSparkCapture = useUIStore(state => state.openSparkCapture)
   const closeSparkCapture = useUIStore(state => state.closeSparkCapture)
+
+  // BackgroundJobsStore: Watch for enrichment completion
+  const jobsMap = useBackgroundJobsStore(state => state.jobs)
+
+  // Track processed enrichment jobs to avoid duplicate updates
+  const processedJobsRef = useRef<Set<string>>(new Set())
 
   // Correction mode state
   const [correctionMode, setCorrectionMode] = useState<CorrectionModeState | null>(null)
@@ -164,6 +173,72 @@ export function ReaderLayout({
     const timer = setTimeout(fetchConnections, 300)
     return () => clearTimeout(timer)
   }, [visibleChunks, setConnections])
+
+  // Watch for enrichment job completion and refresh affected chunks
+  useEffect(() => {
+    // Convert Map to array for filtering
+    const allJobs = Array.from(jobsMap.values())
+
+    const enrichmentJobs = allJobs.filter(job =>
+      (job.type === 'enrich_chunks' || job.type === 'enrich_and_connect') &&
+      job.status === 'completed' &&
+      job.metadata?.documentId === documentId &&
+      !processedJobsRef.current.has(job.id)
+    )
+
+    if (enrichmentJobs.length === 0) return
+
+    console.log(`[ReaderLayout] 🔍 Found ${enrichmentJobs.length} new enrichment jobs to process`)
+
+    // Process each new enrichment job
+    enrichmentJobs.forEach(async (job) => {
+      // Mark as processed immediately to prevent duplicate handling
+      processedJobsRef.current.add(job.id)
+
+      console.log('[ReaderLayout] 📋 Job details:', {
+        id: job.id,
+        type: job.type,
+        status: job.status,
+        input_data: job.input_data,
+        metadata: job.metadata
+      })
+
+      try {
+        // Extract chunk IDs from job input data (try both field names)
+        const chunkIds = job.input_data?.chunk_ids || job.input_data?.chunkIds || []
+
+        if (chunkIds.length === 0) {
+          console.warn('[ReaderLayout] ⚠️ Enrichment job completed but no chunk IDs found:', job.id)
+          console.warn('[ReaderLayout] Job input_data:', job.input_data)
+          return
+        }
+
+        console.log(`[ReaderLayout] 🔄 Enrichment completed for ${chunkIds.length} chunks, refreshing...`, chunkIds)
+
+        // Refetch updated chunks from database
+        const updatedChunks = await refetchChunks(chunkIds)
+
+        console.log(`[ReaderLayout] 📥 Fetched ${updatedChunks.length} updated chunks from database`)
+        if (updatedChunks.length > 0) {
+          console.log('[ReaderLayout] Sample chunk data:', {
+            id: updatedChunks[0].id,
+            themes: updatedChunks[0].themes,
+            summary: updatedChunks[0].summary?.substring(0, 50)
+          })
+        }
+
+        if (updatedChunks.length > 0) {
+          // Update ReaderStore with fresh chunk data
+          updateChunks(updatedChunks)
+
+          console.log(`[ReaderLayout] ✅ Refreshed ${updatedChunks.length} chunks with new metadata`)
+        }
+      } catch (error) {
+        console.error('[ReaderLayout] ❌ Failed to refresh chunks after enrichment:', error)
+        // Don't show error toast - enrichment completed successfully, just refresh failed
+      }
+    })
+  }, [jobsMap, documentId, updateChunks])
 
   // ⌘K keyboard shortcut for Quick Spark
   useEffect(() => {

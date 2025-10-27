@@ -121,6 +121,11 @@ export interface Chunk {
   connections_detected?: boolean
   connections_detected_at?: string | null
   detection_skipped_reason?: 'user_choice' | 'error' | 'manual_skip' | null
+
+  // Enrichment tracking (from migration 072)
+  enrichments_detected?: boolean
+  enrichments_detected_at?: string | null
+  enrichment_skipped_reason?: 'user_choice' | 'error' | 'manual_skip' | null
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   IntegrationsTab,
   JobsTab,
 } from './tabs'
+import { EnrichmentsTab } from './tabs/EnrichmentsTab'
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog'
 import { useAdminPanelStore } from '@/stores/admin/admin-panel'
 
@@ -41,9 +42,10 @@ export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
   useHotkeys('1', () => setActiveTab('scanner'), { enabled: isOpen })
   useHotkeys('2', () => setActiveTab('import'), { enabled: isOpen })
   useHotkeys('3', () => setActiveTab('export'), { enabled: isOpen })
-  useHotkeys('4', () => setActiveTab('connections'), { enabled: isOpen })
-  useHotkeys('5', () => setActiveTab('integrations'), { enabled: isOpen })
-  useHotkeys('6', () => setActiveTab('jobs'), { enabled: isOpen })
+  useHotkeys('4', () => setActiveTab('enrichments'), { enabled: isOpen })
+  useHotkeys('5', () => setActiveTab('connections'), { enabled: isOpen })
+  useHotkeys('6', () => setActiveTab('integrations'), { enabled: isOpen })
+  useHotkeys('7', () => setActiveTab('jobs'), { enabled: isOpen })
 
   // Help dialog shortcut
   useHotkeys(
@@ -78,10 +80,11 @@ export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="scanner">Scanner</TabsTrigger>
             <TabsTrigger value="import">Import</TabsTrigger>
             <TabsTrigger value="export">Export</TabsTrigger>
+            <TabsTrigger value="enrichments">Enrichments</TabsTrigger>
             <TabsTrigger value="connections">Connections</TabsTrigger>
             <TabsTrigger value="integrations">Integrations</TabsTrigger>
             <TabsTrigger value="jobs">Jobs</TabsTrigger>
@@ -97,6 +100,10 @@ export function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
 
           <TabsContent value="export" className="mt-6">
             <ExportTab />
+          </TabsContent>
+
+          <TabsContent value="enrichments" className="mt-6">
+            <EnrichmentsTab />
           </TabsContent>
 
           <TabsContent value="connections" className="mt-6">

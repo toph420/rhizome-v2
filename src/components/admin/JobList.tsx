@@ -24,6 +24,8 @@ import {
   PauseCircle,
   Search,
   FolderInput,
+  Sparkles,
+  Brain,
 } from 'lucide-react'
 import { type JobStatus } from '@/stores/admin/background-jobs'
 import { pauseJob, resumeJob, retryJob, deleteJob } from '@/app/actions/admin'
@@ -43,6 +45,8 @@ const jobTypeLabels: Record<JobStatus['type'], string> = {
   export_documents: 'Export',
   reprocess_connections: 'Connections',
   detect_connections: 'Detecting',
+  enrich_chunks: 'Enriching',
+  enrich_and_connect: 'Enrich & Connect',
   continue_processing: 'Continue',
   reprocess_document: 'Reprocess',
   obsidian_export: 'Obsidian Export',
@@ -50,6 +54,9 @@ const jobTypeLabels: Record<JobStatus['type'], string> = {
   readwise_import: 'Readwise Import',
   scan_vault: 'Scan Vault',
   import_from_vault: 'Import Vault',
+  export_vault_sparks: 'Export Sparks',
+  import_vault_sparks: 'Import Sparks',
+  generate_flashcards: 'Generate Flashcards',
 }
 
 const jobTypeIcons: Record<JobStatus['type'], React.ReactNode> = {
@@ -58,6 +65,8 @@ const jobTypeIcons: Record<JobStatus['type'], React.ReactNode> = {
   export_documents: <FileText className="size-4 text-purple-600" />,
   reprocess_connections: <Network className="size-4 text-orange-600" />,
   detect_connections: <GitBranch className="size-4 text-pink-600" />,
+  enrich_chunks: <Sparkles className="size-4 text-yellow-600" />,
+  enrich_and_connect: <Sparkles className="size-4 text-emerald-600" />,
   continue_processing: <Play className="size-4 text-teal-600" />,
   reprocess_document: <RefreshCw className="size-4 text-amber-600" />,
   obsidian_export: <RefreshCw className="size-4 text-indigo-600" />,
@@ -65,6 +74,9 @@ const jobTypeIcons: Record<JobStatus['type'], React.ReactNode> = {
   readwise_import: <BookOpen className="size-4 text-green-600" />,
   scan_vault: <Search className="size-4 text-slate-600" />,
   import_from_vault: <FolderInput className="size-4 text-cyan-600" />,
+  export_vault_sparks: <Zap className="size-4 text-amber-600" />,
+  import_vault_sparks: <Zap className="size-4 text-emerald-600" />,
+  generate_flashcards: <Brain className="size-4 text-purple-600" />,
 }
 
 const getStatusIcon = (status: JobStatus['status']) => {
@@ -302,6 +314,27 @@ function getJobDisplayName(job: JobStatus): string {
 
     case 'readwise_import':
       return 'Readwise Import'
+
+    case 'enrich_chunks':
+      return title ? `Enriching chunks: ${title}` : 'Enriching chunks'
+
+    case 'enrich_and_connect':
+      return title ? `Enriching and connecting: ${title}` : 'Enriching and connecting'
+
+    case 'scan_vault':
+      return 'Scanning Obsidian vault'
+
+    case 'import_from_vault':
+      return title ? `Import from vault: ${title}` : 'Importing from vault'
+
+    case 'export_vault_sparks':
+      return 'Exporting sparks to vault'
+
+    case 'import_vault_sparks':
+      return 'Importing sparks from vault'
+
+    case 'generate_flashcards':
+      return title ? `Generate flashcards: ${title}` : 'Generating flashcards'
 
     default:
       return title || `${jobTypeLabel} Job`

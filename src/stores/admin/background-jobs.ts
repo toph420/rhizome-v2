@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
  */
 export interface JobStatus {
   id: string
-  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'detect_connections' | 'reprocess_document' | 'continue_processing' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import' | 'scan_vault' | 'import_from_vault'
+  type: 'process_document' | 'import_document' | 'export_documents' | 'reprocess_connections' | 'detect_connections' | 'enrich_chunks' | 'enrich_and_connect' | 'reprocess_document' | 'continue_processing' | 'obsidian_export' | 'obsidian_sync' | 'readwise_import' | 'scan_vault' | 'import_from_vault' | 'export_vault_sparks' | 'import_vault_sparks' | 'generate_flashcards'
   status: 'pending' | 'processing' | 'paused' | 'completed' | 'failed' | 'cancelled'
   progress: number
   details: string
@@ -386,7 +386,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
 
               const { data: jobData, error } = await supabase
                 .from('background_jobs')
-                .select('status, progress, output_data, error_message, updated_at, pause_reason, last_checkpoint_stage')
+                .select('status, progress, input_data, output_data, error_message, updated_at, pause_reason, last_checkpoint_stage')
                 .eq('id', job.id)
                 .single()
 
@@ -424,6 +424,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     progress: 100,
                     details: progressMessage || 'Completed successfully',
                     result: jobData.output_data,
+                    input_data: jobData.input_data,
                     updatedAt,
                   })
                 } else if (jobData.status === 'failed') {
@@ -433,6 +434,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     progress: 0,
                     details: jobData.error_message || progressMessage || 'Job failed',
                     error: jobData.output_data?.error || jobData.error_message || 'Unknown error',
+                    input_data: jobData.input_data,
                     updatedAt,
                   })
                 } else if (jobData.status === 'paused') {
@@ -443,6 +445,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     pauseReason: jobData.pause_reason,
                     checkpointStage,
                     canResume: true,
+                    input_data: jobData.input_data,
                     updatedAt,
                   })
                 } else if (jobData.status === 'cancelled') {
@@ -450,6 +453,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     status: 'cancelled',
                     progress: progressPercent,
                     details: 'Cancelled by user',
+                    input_data: jobData.input_data,
                     updatedAt,
                   })
                 } else if (jobData.status === 'processing') {
@@ -459,6 +463,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     details: progressMessage || 'Processing...',
                     canResume,
                     checkpointStage,
+                    input_data: jobData.input_data,
                     updatedAt,
                   })
                 } else if (jobData.status === 'pending') {
@@ -466,6 +471,7 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
                     status: 'pending',
                     progress: progressPercent,
                     details: progressMessage || 'Waiting to start...',
+                    input_data: jobData.input_data,
                     updatedAt,
                   })
                 }

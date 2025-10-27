@@ -565,3 +565,48 @@ export async function detectBatchChunkConnections(
 
   return { success: true, jobId: job.id, chunkCount: chunkIds.length }
 }
+
+/**
+ * Refetch specific chunks by IDs after enrichment completion.
+ * Used to update ReaderLayout with newly enriched metadata.
+ *
+ * @param chunkIds - Array of chunk IDs to refetch
+ * @returns Array of updated chunks with enrichment metadata
+ */
+export async function refetchChunks(chunkIds: string[]) {
+  const supabase = await createClient()
+  const user = await getCurrentUser()
+
+  if (!user) {
+    throw new Error('Not authenticated')
+  }
+
+  if (chunkIds.length === 0) {
+    return []
+  }
+
+  const { data: chunks, error } = await supabase
+    .from('chunks')
+    .select(`
+      id,
+      chunk_index,
+      start_offset,
+      end_offset,
+      content,
+      themes,
+      summary,
+      importance_score,
+      emotional_metadata,
+      conceptual_metadata,
+      domain_metadata
+    `)
+    .in('id', chunkIds)
+    .order('chunk_index', { ascending: true })
+
+  if (error) {
+    console.error('[refetchChunks] Error fetching chunks:', error)
+    throw error
+  }
+
+  return chunks || []
+}

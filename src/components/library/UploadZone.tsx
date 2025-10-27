@@ -97,6 +97,8 @@ export function UploadZone() {
   const setExtractImages = useUploadStore(state => state.setExtractImages)
   const chunkerType = useUploadStore(state => state.chunkerType)
   const setChunkerType = useUploadStore(state => state.setChunkerType)
+  const enrichChunks = useUploadStore(state => state.enrichChunks)
+  const setEnrichChunks = useUploadStore(state => state.setEnrichChunks)
   const detectConnections = useUploadStore(state => state.detectConnections)
   const setDetectConnections = useUploadStore(state => state.setDetectConnections)
 
@@ -301,7 +303,8 @@ export function UploadZone() {
       formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
       formData.append('extractImages', extractImages.toString())
       formData.append('chunkerStrategy', chunkerType)
-      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
+      formData.append('enrichChunks', enrichChunks.toString())
+      formData.append('detectConnections', detectConnections.toString())
 
       // Handle cover images (File upload or base64/URL from metadata)
       if (coverImage) {
@@ -344,7 +347,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, detectConnections, registerJob])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, enrichChunks, detectConnections, registerJob])
 
   /**
    * Handles metadata preview cancellation.
@@ -379,7 +382,8 @@ export function UploadZone() {
       formData.append('cleanMarkdown', flags.cleanMarkdown.toString())
       formData.append('reviewDoclingExtraction', flags.reviewDoclingExtraction.toString())
       formData.append('chunkerStrategy', chunkerType)
-      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
+      formData.append('enrichChunks', enrichChunks.toString())
+      formData.append('detectConnections', detectConnections.toString())
 
       console.log('📤 Uploading file...')
       const result = await uploadDocument(formData)
@@ -405,7 +409,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, getSourceTypeForFile, markdownProcessing, cleanMarkdown, chunkerType, detectConnections, registerJob])
+  }, [selectedFile, getSourceTypeForFile, markdownProcessing, cleanMarkdown, chunkerType, enrichChunks, detectConnections, registerJob])
 
   /**
    * Handle YouTube URL metadata extraction.
@@ -477,7 +481,8 @@ export function UploadZone() {
       const formData = new FormData()
       formData.append('source_type', urlType)
       formData.append('source_url', urlInput)
-      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
+      formData.append('enrichChunks', enrichChunks.toString())
+      formData.append('detectConnections', detectConnections.toString())
 
       console.log('🔗 Fetching from URL...')
       const result = await uploadDocument(formData)
@@ -503,7 +508,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [urlInput, urlType, handleYouTubeUrl, detectConnections, registerJob])
+  }, [urlInput, urlType, handleYouTubeUrl, enrichChunks, detectConnections, registerJob])
 
   /**
    * Submits pasted content.
@@ -521,7 +526,8 @@ export function UploadZone() {
       if (pasteSourceUrl) {
         formData.append('source_url', pasteSourceUrl)
       }
-      formData.append('detectConnections', detectConnections.toString()) // NEW: Connection detection flag
+      formData.append('enrichChunks', enrichChunks.toString())
+      formData.append('detectConnections', detectConnections.toString())
 
       console.log('📋 Submitting pasted content...')
       const result = await uploadDocument(formData)
@@ -547,7 +553,7 @@ export function UploadZone() {
     } finally {
       setIsUploading(false)
     }
-  }, [pastedContent, pasteSourceUrl, detectConnections, registerJob])
+  }, [pastedContent, pasteSourceUrl, enrichChunks, detectConnections, registerJob])
 
   return (
     <div className="space-y-4">
@@ -582,6 +588,8 @@ export function UploadZone() {
               onExtractImagesChange={setExtractImages}
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
+              enrichChunks={enrichChunks}
+              onEnrichChunksChange={setEnrichChunks}
               detectConnections={detectConnections}
               onDetectConnectionsChange={setDetectConnections}
               isMarkdownFile={selectedFile?.name.endsWith('.md') || selectedFile?.name.endsWith('.markdown')}
@@ -707,6 +715,8 @@ export function UploadZone() {
               onExtractImagesChange={setExtractImages}
               chunkerType={chunkerType}
               onChunkerTypeChange={setChunkerType}
+              enrichChunks={enrichChunks}
+              onEnrichChunksChange={setEnrichChunks}
               detectConnections={detectConnections}
               onDetectConnectionsChange={setDetectConnections}
               isMarkdownFile={false}

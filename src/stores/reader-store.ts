@@ -47,6 +47,7 @@ interface ReaderState {
   // Actions
   loadDocument: (docId: string, title: string, markdown: string, chunks: Chunk[]) => void
   updateScroll: (position: number, offsets: { start: number; end: number }) => void
+  updateChunks: (updatedChunks: Chunk[]) => void
   clearDocument: () => void
 }
 
@@ -135,6 +136,42 @@ export const useReaderStore = create<ReaderState>()(
         set({
           scrollPosition: position,
           viewportOffsets: offsets,
+          visibleChunks: visible
+        })
+      },
+
+      /**
+       * Updates specific chunks with fresh data (e.g., after enrichment).
+       * Efficiently merges updated chunks by replacing matching IDs.
+       * Recalculates visible chunks to trigger UI updates.
+       *
+       * @param updatedChunks - Array of chunks with fresh metadata
+       */
+      updateChunks: (updatedChunks) => {
+        const state = get()
+
+        // Create a map of updated chunks by ID for O(1) lookup
+        const updatedMap = new Map(updatedChunks.map(chunk => [chunk.id, chunk]))
+
+        // Merge: replace chunks that exist in updatedMap, keep others unchanged
+        const mergedChunks = state.chunks.map(chunk =>
+          updatedMap.has(chunk.id) ? updatedMap.get(chunk.id)! : chunk
+        )
+
+        // Recalculate visible chunks with updated data
+        const visible = mergedChunks.filter(chunk =>
+          chunk.start_offset <= state.viewportOffsets.end &&
+          chunk.end_offset >= state.viewportOffsets.start
+        )
+
+        console.log('[ReaderStore] Chunks updated:', {
+          updatedCount: updatedChunks.length,
+          updatedIds: updatedChunks.map(c => c.chunk_index).join(', '),
+          visibleCount: visible.length
+        })
+
+        set({
+          chunks: mergedChunks,
           visibleChunks: visible
         })
       },

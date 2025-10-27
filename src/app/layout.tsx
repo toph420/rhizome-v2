@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Toaster } from "@/components/rhizome/sonner";
 import { AppShell } from "@/components/layout/AppShell";
+import { ProcessingDock } from "@/components/layout/ProcessingDock";
 import "./globals.css";
 
 // Fonts are now loaded via CSS @import in neobrutalism.css
@@ -22,6 +23,7 @@ export default function RootLayout({
         <AppShell>
           {children}
         </AppShell>
+        <ProcessingDock />
         <Toaster />
       </body>
     </html>

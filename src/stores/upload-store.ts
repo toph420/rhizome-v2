@@ -41,6 +41,7 @@ interface UploadState {
   cleanMarkdown: boolean
   extractImages: boolean
   chunkerType: ChunkerType
+  enrichChunks: boolean
   detectConnections: boolean
 
   // Progress
@@ -64,6 +65,7 @@ interface UploadState {
   setCleanMarkdown: (clean: boolean) => void
   setExtractImages: (extract: boolean) => void
   setChunkerType: (type: ChunkerType) => void
+  setEnrichChunks: (enrich: boolean) => void
   setDetectConnections: (detect: boolean) => void
   setIsUploading: (uploading: boolean) => void
   setError: (error: string | null) => void
@@ -90,6 +92,7 @@ export const useUploadStore = create<UploadState>()(
       cleanMarkdown: true,
       extractImages: false,
       chunkerType: 'recursive',
+      enrichChunks: true,
       detectConnections: false,
       isUploading: false,
       error: null,
@@ -111,6 +114,7 @@ export const useUploadStore = create<UploadState>()(
       setCleanMarkdown: (clean) => set({ cleanMarkdown: clean }),
       setExtractImages: (extract) => set({ extractImages: extract }),
       setChunkerType: (type) => set({ chunkerType: type }),
+      setEnrichChunks: (enrich) => set({ enrichChunks: enrich }),
       setDetectConnections: (detect) => set({ detectConnections: detect }),
       setIsUploading: (uploading) => set({ isUploading: uploading }),
       setError: (error) => set({ error }),
@@ -137,6 +141,7 @@ export const useUploadStore = create<UploadState>()(
         cleanMarkdown: state.cleanMarkdown,
         extractImages: state.extractImages,
         chunkerType: state.chunkerType,
+        enrichChunks: state.enrichChunks,
         detectConnections: state.detectConnections,
       }),
     }
