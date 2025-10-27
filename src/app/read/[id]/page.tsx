@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
-import { getDocumentJob } from '@/app/actions/documents'
+import { getDocumentJob, updateLastViewed } from '@/app/actions/documents'
 import { getAnnotations, getAnnotationsNeedingReview } from '@/app/actions/annotations'
 import { ReaderLayout } from '@/components/reader/ReaderLayout'
 
@@ -40,7 +40,13 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
       </div>
     )
   }
-  
+
+  // Update last_viewed timestamp (fire and forget - don't block rendering)
+  updateLastViewed(id).catch(error => {
+    console.error('[ReaderPage] Failed to update last_viewed:', error)
+    // Continue rendering even if update fails
+  })
+
   // Check processing status first
   if (doc.processing_status === 'failed') {
     return (

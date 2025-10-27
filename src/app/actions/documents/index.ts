@@ -44,6 +44,11 @@ export {
   getJobStatus
 } from './continue-processing'
 
+// Metadata actions
+export {
+  updateLastViewed
+} from './metadata'
+
 // Types
 export type {
   JobProgress,
