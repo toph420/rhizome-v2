@@ -202,6 +202,45 @@ Set up react-pdf, configure worker, display single PDF page, create LeftPanel sh
 npm install react-pdf pdfjs-dist @use-gesture/react
 ```
 
+**File**: `package.json`
+**Changes**: Add postinstall script to copy PDF.js assets (cMaps for non-Latin text)
+
+```json
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "postinstall": "node scripts/copy-pdf-assets.js"
+  }
+}
+```
+
+**File**: `scripts/copy-pdf-assets.js` (new)
+**Changes**: Script to copy cMaps from pdfjs-dist to public directory
+
+```javascript
+const fs = require('fs')
+const path = require('path')
+
+// Copy PDF.js cMaps for non-Latin character support
+const pdfDistPath = path.dirname(require.resolve('pdfjs-dist/package.json'))
+const cmapsSource = path.join(pdfDistPath, 'cmaps')
+const cmapsTarget = path.join(__dirname, '../public/cmaps')
+
+// Create target directory if it doesn't exist
+if (!fs.existsSync(cmapsTarget)) {
+  fs.mkdirSync(cmapsTarget, { recursive: true })
+}
+
+// Copy cMaps
+fs.cpSync(cmapsSource, cmapsTarget, { recursive: true })
+
+console.log('✅ PDF.js cMaps copied to public/cmaps')
+```
+
+**Why this is needed**: React-PDF requires cMap files for PDFs with non-Latin characters (Chinese, Japanese, Arabic, etc.). This script automatically copies them during `npm install`.
+
 #### 2. Worker Configuration
 
 **File**: `src/lib/pdf/worker-config.ts` (new)
@@ -231,7 +270,7 @@ export { pdfjs }
 ```typescript
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Document, Page } from 'react-pdf'
 import { useGesture } from '@use-gesture/react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -250,6 +289,12 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad }: PDFViewerProp
   const [scale, setScale] = useState(1.0)
   const [pageWidth, setPageWidth] = useState<number>(0)
   const [pdfMetadata, setPdfMetadata] = useState<any>(null)
+
+  // ✅ Memoize options to prevent unnecessary re-renders (react-pdf best practice)
+  const documentOptions = useMemo(() => ({
+    cMapUrl: '/cmaps/',
+    cMapPacked: true,
+  }), [])
 
   const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages)
@@ -350,6 +395,7 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad }: PDFViewerProp
       >
         <Document
           file={fileUrl}
+          options={documentOptions}
           onLoadSuccess={onDocumentLoadSuccess}
           loading={
             <div className="text-center p-8">
@@ -2555,6 +2601,12 @@ export function VirtualizedPDFReader({
   const [rotation, setRotation] = useState(0)  // 🆕 ADD: Page rotation
   const [continuousScroll, setContinuousScroll] = useState(true)  // 🆕 ADD: View mode
 
+  // ✅ Memoize options to prevent unnecessary re-renders (react-pdf best practice)
+  const documentOptions = useMemo(() => ({
+    cMapUrl: '/cmaps/',
+    cMapPacked: true,
+  }), [])
+
   // Generate page array for Virtuoso
   const pages = useMemo(() => {
     return Array.from({ length: numPages }, (_, i) => i + 1)
@@ -2663,6 +2715,7 @@ export function VirtualizedPDFReader({
       {/* Virtualized PDF pages */}
       <Document
         file={fileUrl}
+        options={documentOptions}
         onLoadSuccess={onDocumentLoadSuccess}
         loading={
           <div className="flex-1 flex items-center justify-center">
@@ -2684,6 +2737,7 @@ export function VirtualizedPDFReader({
                 <div className="relative">
                   <Page
                     pageNumber={pageNumber}
+                    width={800}
                     scale={scale}
                     rotate={rotation}
                     renderTextLayer={true}
@@ -2713,6 +2767,7 @@ export function VirtualizedPDFReader({
             <div className="relative">
               <Page
                 pageNumber={currentPage}
+                width={800}
                 scale={scale}
                 rotate={rotation}
                 renderTextLayer={true}
