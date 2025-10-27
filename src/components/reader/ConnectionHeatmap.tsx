@@ -47,14 +47,24 @@ export function ConnectionHeatmap({ documentId, chunks, className = '' }: Connec
       const chunkIds = chunks.map(c => c.id)
       if (chunkIds.length === 0) return
 
-      const { data, error } = await supabase
-        .from('connections')
-        .select('source_chunk_id, strength')
-        .in('source_chunk_id', chunkIds)
+      // Batch queries to avoid URL length limits (max 50 chunks per query)
+      const BATCH_SIZE = 50
+      const allData = []
 
-      if (!error && data) {
-        setAllConnections(data)
+      for (let i = 0; i < chunkIds.length; i += BATCH_SIZE) {
+        const batch = chunkIds.slice(i, i + BATCH_SIZE)
+
+        const { data, error } = await supabase
+          .from('connections')
+          .select('source_chunk_id, strength')
+          .in('source_chunk_id', batch)
+
+        if (!error && data) {
+          allData.push(...data)
+        }
       }
+
+      setAllConnections(allData)
     }
 
     fetchAllConnections()

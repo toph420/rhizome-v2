@@ -40,6 +40,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/rhizome/tooltip'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 
 interface Document {
   id: string
@@ -85,6 +86,9 @@ export function IntegrationsTab() {
   // Operation history
   const [operationHistory, setOperationHistory] = useState<IntegrationJob[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
+
+  // Background jobs store
+  const { registerJob } = useBackgroundJobsStore()
 
   // Load documents and history on mount
   useEffect(() => {
@@ -234,15 +238,20 @@ export function IntegrationsTab() {
       const result: ObsidianExportResult = await exportToObsidian(selectedDoc)
 
       if (result.success) {
+        if (result.jobId) {
+          registerJob(result.jobId, 'obsidian_export', {
+            documentId: selectedDoc,
+            operation: 'export'
+          })
+          // Poll for completion and open in Obsidian
+          pollJobCompletion(result.jobId, 'obsidian-export')
+        }
         setMessage({
           type: 'success',
           text: `Obsidian export started. Check operation history for status.`,
         })
         // Reload history to show new job
         setTimeout(() => loadOperationHistory(), 1000)
-
-        // Poll for completion and open in Obsidian
-        pollJobCompletion(result.jobId!, 'obsidian-export')
       } else {
         setMessage({
           type: 'error',
@@ -272,6 +281,12 @@ export function IntegrationsTab() {
       const result: ObsidianSyncResult = await syncFromObsidian(selectedDoc)
 
       if (result.success) {
+        if (result.jobId) {
+          registerJob(result.jobId, 'obsidian_sync', {
+            documentId: selectedDoc,
+            operation: 'sync'
+          })
+        }
         setMessage({
           type: 'success',
           text: `Obsidian sync started. Check operation history for status.`,
@@ -428,6 +443,11 @@ export function IntegrationsTab() {
       const result: SparkExportResult = await exportSparksToVault()
 
       if (result.success) {
+        if (result.jobId) {
+          registerJob(result.jobId, 'export_vault_sparks', {
+            operation: 'export_sparks'
+          })
+        }
         setMessage({
           type: 'success',
           text: 'Spark export started. Check operation history for status.',
@@ -457,6 +477,11 @@ export function IntegrationsTab() {
       const result: SparkImportResult = await importSparksFromVault()
 
       if (result.success) {
+        if (result.jobId) {
+          registerJob(result.jobId, 'import_vault_sparks', {
+            operation: 'import_sparks'
+          })
+        }
         setMessage({
           type: 'success',
           text: 'Spark import started. Check operation history for status.',
@@ -510,6 +535,12 @@ export function IntegrationsTab() {
       const result: VaultImportResult = await importFromVault(documentTitle)
 
       if (result.success) {
+        if (result.jobId) {
+          registerJob(result.jobId, 'import_from_vault', {
+            operation: 'import_vault',
+            title: documentTitle
+          })
+        }
         setMessage({
           type: 'success',
           text: `Import started for "${documentTitle}". Check operation history for status.`

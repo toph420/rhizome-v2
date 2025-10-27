@@ -30,12 +30,26 @@ import type { ChonkieStrategy } from '../lib/chonkie/types.js'
  * @param documentId - Document to reprocess
  * @param supabaseClient - Optional Supabase client (if not provided, creates new one)
  * @param jobId - Optional job ID for progress tracking
+ * @param enrichChunks - Whether to extract metadata (themes, concepts, emotions). Default: true. Skip to save 5-10 minutes.
+ * @param detectConnections - Whether to run 3-engine connection detection. Default: true. Skip to save 10-15 minutes.
  * @returns Recovery results for annotations and connections
+ *
+ * Performance:
+ * - Full reprocessing (enrichChunks=true, detectConnections=true): 25-40 minutes
+ * - Fast reprocessing (enrichChunks=false, detectConnections=false): 5-10 minutes
+ * - Annotation recovery always runs (preserves user work)
+ *
+ * Use Cases:
+ * - Obsidian formatting edits: enrichChunks=false, detectConnections=false (fast)
+ * - Content changes: enrichChunks=true, detectConnections=true (complete)
+ * - Bulk formatting: enrichChunks=false (can enrich later via UI)
  */
 export async function reprocessDocument(
   documentId: string,
   supabaseClient?: any,
-  jobId?: string
+  jobId?: string,
+  enrichChunks: boolean = true,
+  detectConnections: boolean = true
 ): Promise<ReprocessResults> {
   const startTime = Date.now()
   const supabase = supabaseClient || createClient(
@@ -65,6 +79,7 @@ export async function reprocessDocument(
 
   console.log(`[ReprocessDocument] Starting for document ${documentId}`)
   console.log(`[ReprocessDocument] Batch ID: ${reprocessingBatch}`)
+  console.log(`[ReprocessDocument] Options: enrichChunks=${enrichChunks}, detectConnections=${detectConnections}`)
   await updateProgress(5, 'Starting reprocessing...')
 
   try {
@@ -287,69 +302,87 @@ export async function reprocessDocument(
       }
     })
 
-    // Step 7: Metadata enrichment (45-55%)
-    console.log('[ReprocessDocument] Starting local metadata enrichment (PydanticAI + Ollama)')
-    await updateProgress(45, 'Extracting structured metadata...')
+    // Step 7: Optional Metadata enrichment (45-55%)
+    if (enrichChunks) {
+      console.log('[ReprocessDocument] Starting local metadata enrichment (PydanticAI + Ollama)')
+      await updateProgress(45, 'Extracting structured metadata...')
 
-    try {
-      const BATCH_SIZE = 10
-      const enrichedResults: any[] = []
+      try {
+        const BATCH_SIZE = 10
+        const enrichedResults: any[] = []
 
-      for (let i = 0; i < enrichedChunks.length; i += BATCH_SIZE) {
-        const batch = enrichedChunks.slice(i, i + BATCH_SIZE)
-        const batchInput = batch.map(chunk => ({
-          id: `${documentId}-${chunk.chunk_index}`,
-          content: chunk.content
-        }))
+        for (let i = 0; i < enrichedChunks.length; i += BATCH_SIZE) {
+          const batch = enrichedChunks.slice(i, i + BATCH_SIZE)
+          const batchInput = batch.map(chunk => ({
+            id: `${documentId}-${chunk.chunk_index}`,
+            content: chunk.content
+          }))
 
-        console.log(`[ReprocessDocument] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(enrichedChunks.length / BATCH_SIZE)}`)
+          console.log(`[ReprocessDocument] Processing metadata batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(enrichedChunks.length / BATCH_SIZE)}`)
 
-        const metadataMap = await extractMetadataBatch(batchInput, {
-          onProgress: (processed) => {
-            const overallProgress = 47 + Math.floor(((i + processed) / enrichedChunks.length) * 8)
-            updateProgress(overallProgress, `Enriching chunk ${i + processed}/${enrichedChunks.length}`)
-          }
-        })
+          const metadataMap = await extractMetadataBatch(batchInput, {
+            onProgress: (processed) => {
+              const overallProgress = 47 + Math.floor(((i + processed) / enrichedChunks.length) * 8)
+              updateProgress(overallProgress, `Enriching chunk ${i + processed}/${enrichedChunks.length}`)
+            }
+          })
 
-        for (const chunk of batch) {
-          const chunkId = `${documentId}-${chunk.chunk_index}`
-          const metadata = metadataMap.get(chunkId)
+          for (const chunk of batch) {
+            const chunkId = `${documentId}-${chunk.chunk_index}`
+            const metadata = metadataMap.get(chunkId)
 
-          if (metadata) {
-            enrichedResults.push({
-              ...chunk,
-              themes: metadata.themes,
-              importance_score: metadata.importance,
-              summary: metadata.summary,
-              emotional_metadata: {
-                polarity: metadata.emotional.polarity,
-                primaryEmotion: metadata.emotional.primaryEmotion,
-                intensity: metadata.emotional.intensity
-              },
-              conceptual_metadata: {
-                concepts: metadata.concepts
-              },
-              domain_metadata: {
-                primaryDomain: metadata.domain,
-                confidence: 0.8
-              },
-              metadata_extracted_at: new Date().toISOString()
-            })
-          } else {
-            console.warn(`[ReprocessDocument] Metadata extraction failed for chunk ${chunk.chunk_index}`)
-            enrichedResults.push(chunk)
+            if (metadata) {
+              enrichedResults.push({
+                ...chunk,
+                themes: metadata.themes,
+                importance_score: metadata.importance,
+                summary: metadata.summary,
+                emotional_metadata: {
+                  polarity: metadata.emotional.polarity,
+                  primaryEmotion: metadata.emotional.primaryEmotion,
+                  intensity: metadata.emotional.intensity
+                },
+                conceptual_metadata: {
+                  concepts: metadata.concepts
+                },
+                domain_metadata: {
+                  primaryDomain: metadata.domain,
+                  confidence: 0.8
+                },
+                metadata_extracted_at: new Date().toISOString()
+              })
+            } else {
+              console.warn(`[ReprocessDocument] Metadata extraction failed for chunk ${chunk.chunk_index}`)
+              enrichedResults.push(chunk)
+            }
           }
         }
+
+        enrichedChunks = enrichedResults
+        console.log(`[ReprocessDocument] Local metadata enrichment complete`)
+        await updateProgress(55, 'Metadata enrichment done')
+
+      } catch (error: any) {
+        console.error(`[ReprocessDocument] Metadata enrichment failed: ${error.message}`)
+        console.warn('[ReprocessDocument] Continuing with default metadata')
+        await updateProgress(55, 'Using default metadata (enrichment failed)')
       }
-
-      enrichedChunks = enrichedResults
-      console.log(`[ReprocessDocument] Local metadata enrichment complete`)
-      await updateProgress(55, 'Metadata enrichment done')
-
-    } catch (error: any) {
-      console.error(`[ReprocessDocument] Metadata enrichment failed: ${error.message}`)
-      console.warn('[ReprocessDocument] Continuing with default metadata')
-      await updateProgress(55, 'Using default metadata (enrichment failed)')
+    } else {
+      console.log('[ReprocessDocument] Skipping metadata enrichment (user opted out)')
+      // Mark chunks as unenriched
+      enrichedChunks = enrichedChunks.map(chunk => ({
+        ...chunk,
+        enrichments_detected: false,
+        enrichment_skipped_reason: 'user_choice',
+        themes: [],
+        importance_score: 0.5,
+        summary: null,
+        emotional_metadata: null,
+        conceptual_metadata: null,
+        domain_metadata: null,
+        metadata_extracted_at: null
+      }))
+      await updateProgress(55, 'Skipped enrichment (user choice)')
     }
 
     // Step 8: Local embeddings (55-65%)
@@ -388,7 +421,7 @@ export async function reprocessDocument(
         importance: chunk.importance_score,
         summary: chunk.summary,
         emotional: chunk.emotional_metadata,
-        concepts: chunk.conceptual_metadata.concepts,
+        concepts: chunk.conceptual_metadata?.concepts,
         domain: chunk.domain_metadata?.primaryDomain
       },
       // Chonkie metadata fields (NEW - preserve chunking strategy)
@@ -474,20 +507,29 @@ export async function reprocessDocument(
     console.log(`[ReprocessDocument] Inserted ${newChunks.length} new chunks`)
     await updateProgress(73, 'New chunks inserted')
 
-    // 7. Run collision detection (wrapped in try-catch - non-blocking)
+    // 7. Optional collision detection (wrapped in try-catch - non-blocking)
     // Don't let connection failures block annotation recovery
-    try {
-      console.log('[ReprocessDocument] Running 3-engine collision detection...')
-      await updateProgress(75, 'Running collision detection...')
-      const { processDocument } = await import('../engines/orchestrator.js')
-      await processDocument(documentId, {
-        reprocessingBatch: reprocessingBatch  // ✅ Pass batch ID to query correct chunks
-      })
-      console.log('[ReprocessDocument] ✅ Collision detection complete')
-      await updateProgress(77, 'Collision detection complete')
-    } catch (error) {
-      console.error('[ReprocessDocument] ⚠️  Collision detection failed:', error)
-      console.log('[ReprocessDocument] Continuing with annotation recovery (connections can be rebuilt later)')
+    if (detectConnections && enrichChunks) {  // Connections require enrichment
+      try {
+        console.log('[ReprocessDocument] Running 3-engine collision detection...')
+        await updateProgress(75, 'Running collision detection...')
+        const { processDocument } = await import('../engines/orchestrator.js')
+        await processDocument(documentId, {
+          reprocessingBatch: reprocessingBatch  // ✅ Pass batch ID to query correct chunks
+        })
+        console.log('[ReprocessDocument] ✅ Collision detection complete')
+        await updateProgress(77, 'Collision detection complete')
+      } catch (error) {
+        console.error('[ReprocessDocument] ⚠️  Collision detection failed:', error)
+        console.log('[ReprocessDocument] Continuing with annotation recovery (connections can be rebuilt later)')
+      }
+    } else {
+      if (!enrichChunks) {
+        console.log('[ReprocessDocument] Skipping collision detection (enrichment required)')
+      } else {
+        console.log('[ReprocessDocument] Skipping collision detection (user opted out)')
+      }
+      await updateProgress(77, 'Skipped collision detection')
     }
 
     // 8. Recover annotations

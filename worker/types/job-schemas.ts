@@ -60,7 +60,7 @@ export const ImportJobOutputSchema = z.object({
   strategy: z.enum(['skip', 'replace', 'merge_smart']).optional(),
   conflictStrategy: z.enum(['skip', 'replace', 'merge_smart']).optional(), // Legacy field
   embeddingsRegenerated: z.boolean().optional(),
-  connectionDetectionJobId: z.string().optional(),
+  connectionDetectionJobId: z.string().nullish(),
   connectionsReprocessed: z.boolean().optional(),
   importDurationMs: z.number().optional(),
   error: z.string().optional(),
@@ -169,7 +169,7 @@ export const ImportFromVaultOutputSchema = z.object({
   uploadedToStorage: z.boolean().optional(),
   strategy: z.enum(['skip', 'replace', 'merge_smart']).optional(),
   embeddingsRegenerated: z.boolean().optional(),
-  connectionDetectionJobId: z.string().optional(),
+  connectionDetectionJobId: z.string().nullish(),
   error: z.string().optional(),
 })
 

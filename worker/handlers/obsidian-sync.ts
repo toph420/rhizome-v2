@@ -447,7 +447,16 @@ export async function syncFromObsidian(
 
     // 6. Full reprocessing with annotation recovery (post-chunking edits)
     console.log('[Obsidian Sync] Post-chunking edit detected - triggering full reprocessing')
-    const recovery = await reprocessDocument(documentId, supabase, jobId)
+
+    // Skip enrichment and connections by default for Obsidian edits (formatting changes)
+    // User can manually trigger enrichment/connections later via UI if needed
+    const enrichChunks = false       // Skip 5-10 minutes of metadata extraction
+    const detectConnections = false  // Skip 10-15 minutes of connection detection
+
+    console.log('[Obsidian Sync] Fast reprocessing mode: enrichChunks=false, detectConnections=false')
+    console.log('[Obsidian Sync] Time saved: ~15-25 minutes (can enrich/connect manually later)')
+
+    const recovery = await reprocessDocument(documentId, supabase, jobId, enrichChunks, detectConnections)
 
     console.log(`[Obsidian Sync] ✅ Sync complete`)
     console.log(`[Obsidian Sync] Recovery stats:`, {

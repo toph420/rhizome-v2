@@ -1,7 +1,7 @@
 'use client'
 
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Button } from '@/components/rhizome/button'
+import { Card } from '@/components/rhizome/card'
 import { Progress } from '@/components/rhizome/progress'
 import {
   Loader2,
@@ -157,6 +157,24 @@ export function ProcessingDock() {
       case 'generate_flashcards':
         return 'Generating Flashcards'
 
+      case 'enrich_chunks':
+        return 'Enriching chunks'
+
+      case 'enrich_and_connect':
+        return 'Enriching and connecting'
+
+      case 'scan_vault':
+        return 'Scanning Obsidian vault'
+
+      case 'import_from_vault':
+        return 'Importing from vault'
+
+      case 'export_vault_sparks':
+        return 'Exporting sparks to vault'
+
+      case 'import_vault_sparks':
+        return 'Importing sparks from vault'
+
       default:
         return 'Processing...'
     }
@@ -186,6 +204,18 @@ export function ProcessingDock() {
         return <BookOpen className="size-4 text-green-600" />
       case 'generate_flashcards':
         return <Brain className="size-4 text-purple-600" />
+      case 'enrich_chunks':
+        return <Zap className="size-4 text-yellow-600" />
+      case 'enrich_and_connect':
+        return <Network className="size-4 text-purple-600" />
+      case 'scan_vault':
+        return <RefreshCw className="size-4 text-slate-600" />
+      case 'import_from_vault':
+        return <Database className="size-4 text-cyan-600" />
+      case 'export_vault_sparks':
+        return <Zap className="size-4 text-amber-600" />
+      case 'import_vault_sparks':
+        return <Zap className="size-4 text-emerald-600" />
       default:
         return <Loader2 className="size-4 text-muted-foreground" />
     }
@@ -256,7 +286,7 @@ export function ProcessingDock() {
 
       {/* Job Cards */}
       <div className="space-y-2 max-h-80 overflow-y-auto">
-        {jobs.map((job) => {
+        {jobs.filter(job => job.id && typeof job.id === 'string').map((job) => {
           // Check if job is "alive" (updated within last 10 seconds)
           const isAlive =
             job.updatedAt && Date.now() - new Date(job.updatedAt).getTime() < 10000

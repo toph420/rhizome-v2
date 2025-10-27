@@ -154,6 +154,12 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
 
       // Actions
       registerJob: (jobId, type, metadata) => {
+        // Validate jobId before registering
+        if (!jobId || typeof jobId !== 'string') {
+          console.warn('[BackgroundJobs] Attempted to register job with invalid ID:', jobId)
+          return
+        }
+
         console.log(`[BackgroundJobs] Registering job: ${jobId} (${type})`)
         set((state) => {
           const newJobs = new Map(state.jobs)
@@ -373,6 +379,12 @@ export const useBackgroundJobsStore = create<BackgroundJobsStore>()(
           // Poll existing jobs
           for (const job of active) {
             try {
+              // Skip jobs with invalid IDs
+              if (!job.id || typeof job.id !== 'string') {
+                console.warn('[BackgroundJobs] Skipping job with invalid ID:', job)
+                continue
+              }
+
               // Skip polling temp jobs (IDs like "import-{uuid}", "export-{uuid}")
               // These will be updated with real job IDs after conflict resolution
               const isTempJob = job.id.startsWith('import-') ||
