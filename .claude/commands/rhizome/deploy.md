@@ -21,7 +21,16 @@ You are executing the Rhizome dual-worktree deployment workflow. Follow these st
    - Confirm all changes are committed
    - If uncommitted changes exist, ask user what to do
 
-2. **Get feature branch name:**
+2. **Run build check (CRITICAL):**
+   ```bash
+   npm run build
+   ```
+   - Verify TypeScript compilation succeeds
+   - Check for type errors or build failures
+   - If build fails, STOP deployment and report errors
+   - This prevents Vercel deployment failures
+
+3. **Get feature branch name:**
    - Store the current branch name for merging
    - Example: `feature/document-last-viewed`
 
@@ -79,6 +88,13 @@ Next steps:
 ```
 
 ## Error Handling
+
+**If build fails:**
+- Show full error output from `npm run build`
+- Identify type errors, compilation failures, or other issues
+- Error: "Build failed. Cannot deploy broken code to production."
+- Abort deployment
+- Suggest: "Fix the errors above, then run /rhizome:deploy again"
 
 **If uncommitted changes detected:**
 - Ask user: "You have uncommitted changes. Would you like to:
