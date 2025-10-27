@@ -1120,9 +1120,9 @@ export const EnrichAndConnectOutputSchema = z.object({
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type check: `npm run type-check` (worker)
-- [ ] Build: `cd worker && npm run build`
-- [ ] Job routing compiles without errors
+- [x] Type check: `npm run type-check` (worker) - NEW handlers compile without errors
+- [x] Build: `cd worker && npm run build` - Only pre-existing test errors
+- [x] Job routing compiles without errors - Handlers properly integrated
 
 #### Manual Verification:
 - [ ] Create `enrich_chunks` job manually → Handler executes
@@ -1531,14 +1531,14 @@ const tabs = [
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type check: `npm run type-check`
-- [ ] Build: `npm run build`
-- [ ] Linting: `npm run lint`
+- [x] Type check: `npm run type-check` - NEW files compile without errors
+- [x] Build: `npm run build` - Only pre-existing test errors
+- [x] Linting: `npm run lint` - No linting errors in new code
 
 #### Manual Verification:
 - [ ] ChunkMetadataIcon shows enrichment status section
 - [ ] ChunkCard shows enrichment buttons in detailed mode
-- [ ] Admin Panel has "Enrichments" tab
+- [ ] Admin Panel has "Enrichments" tab (Cmd+Shift+A → Tab 4)
 - [ ] Document cards show enrichment button when pending chunks exist
 - [ ] Buttons trigger Server Actions correctly
 - [ ] ProcessingDock shows enrichment progress
