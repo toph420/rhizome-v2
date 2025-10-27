@@ -241,6 +241,7 @@ export interface VaultScanResult {
  */
 export interface VaultImportResult {
   success: boolean
+  jobId?: string
   documentId?: string
   documentTitle?: string
   chunksImported?: number
@@ -400,6 +401,7 @@ export async function importFromVault(
 
     return {
       success: true,
+      jobId: job.id,
       documentTitle
     }
 
