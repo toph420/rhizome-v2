@@ -68,27 +68,28 @@ git add src/
 git commit -m "feat: my feature"
 git push origin feature/my-feature
 
-# 5. Merge to main (in dev worktree!)
-git checkout main
+# 5. Merge to main (in PRODUCTION worktree - main already checked out there)
+cd /Users/topher/Code/rhizome-v2  # Switch to production worktree
 git pull origin main
 git merge feature/my-feature --no-edit
 git push origin main  # → Triggers Vercel deployment
 
-# 6. Push migration to cloud (IMMEDIATELY after git push)
+# 6. Push migration to cloud (IMMEDIATELY after git push - can run from either worktree)
+cd /Users/topher/Code/rhizome-v2-dev-1  # Back to dev worktree (has .supabase/ link)
 npx supabase db push  # → Applies migration to production database
 
-# 7. Optional: Update production worker (if worker code changed)
-cd /Users/topher/Code/rhizome-v2
-git pull origin main
-# Restart worker if needed
+# 7. Optional: Restart worker if worker code changed
+cd /Users/topher/Code/rhizome-v2/worker
+# Ctrl+C to stop, then: npm start
 ```
 
 **Critical Rules:**
 - ✅ ALL development in `rhizome-v2-dev-1` worktree (never in production worktree)
-- ✅ Merge to main happens in dev worktree (not production worktree)
+- ✅ Merge to main happens in PRODUCTION worktree (git limitation: main already checked out there)
 - ✅ Push migration (`npx supabase db push`) IMMEDIATELY after `git push origin main`
 - ✅ Migration files are tracked by git (committed with code)
 - ✅ Only dev worktree is linked to Supabase (production worktree just runs worker)
+- ⚠️ Can't checkout `main` in dev worktree (already checked out in production worktree)
 - ❌ NEVER develop in production worktree (`rhizome-v2`)
 - ❌ NEVER push migrations before pushing code to main
 - ❌ NEVER skip `npx supabase db push` after deploying new code

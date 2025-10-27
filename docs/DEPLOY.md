@@ -355,18 +355,16 @@ git push origin your-feature-branch  # e.g., homepage-and-search
 
 **Production Deployment** (main branch):
 ```bash
-# Option 1: Merge from development worktree (recommended)
-cd /Users/topher/Code/rhizome-v2-dev-1
-git checkout main
-git pull origin main
-git merge your-feature-branch --no-edit  # e.g., homepage-and-search
-git push origin main
-
-# Option 2: Merge from production worktree
+# Merge in production worktree (main is already checked out there)
+# Note: Can't checkout main in dev worktree - git limitation with dual worktrees
 cd /Users/topher/Code/rhizome-v2
 git pull origin main
-git merge origin/your-feature-branch --no-edit
+git merge your-feature-branch --no-edit  # e.g., feature/document-last-viewed
 git push origin main
+
+# Push migration IMMEDIATELY after code deployment
+cd /Users/topher/Code/rhizome-v2-dev-1  # Back to dev worktree (has .supabase/ link)
+npx supabase db push
 
 # Vercel auto-deploys from main branch
 # Check status: https://vercel.com/dashboard
