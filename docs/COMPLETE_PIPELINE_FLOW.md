@@ -13,7 +13,7 @@ This document traces the complete flow from "user drops a PDF" to "connections s
 
 ```
 Upload → Docling Extract → Cleanup → Bulletproof Match →
-Review → Chonkie Chunk → Metadata Transfer → Enrich →
+Review → Chonkie Chunk → Metadata Transfer → [Enrich (optional)] →
 Embed → Connections → Display
 ```
 
@@ -410,13 +410,25 @@ for (const chonkieChunk of chonkieChunks) {
 
 ---
 
-## Stage 8: Metadata Enrichment (77-90%)
+## Stage 8: Metadata Enrichment (77-90%) - OPTIONAL
 
 ### Purpose
 Extract themes, concepts, emotional tone, importance scores.
 
-### Implementation (Oct 2025 Refactoring)
-**All 7 processors** (PDF, EPUB, YouTube, Web, Text, Paste, Markdown) now use the shared base class method:
+**User Control**: This stage can be skipped via the `enrichChunks` checkbox in the upload UI. Default: **OFF** (skip enrichment).
+
+**When to Enable**:
+- Need thematic connections (Thematic Bridge engine requires enriched metadata)
+- Want concept-based search
+- Need importance scoring for prioritization
+
+**When to Skip** (saves 3-8 minutes on large documents):
+- Quick document ingestion
+- Only need semantic similarity connections
+- Testing or experimenting
+
+### Implementation (Oct 2025 Refactoring + Jan 2026 Skip Feature)
+**All 7 processors** (PDF, EPUB, YouTube, Web, Text, Paste, Markdown) now use the shared base class method with optional execution:
 
 ```typescript
 // processors/pdf-processor.ts (and all other processors)
@@ -424,11 +436,16 @@ export class PDFProcessor extends SourceProcessor {
   async process(): Promise<ProcessResult> {
     // ... earlier stages ...
 
-    // Stage 8: Use shared method from base class
-    chunks = await this.enrichMetadataBatch(chunks, 77, 90, {
-      batchSize: 10,
-      onError: 'mark_review'
-    })
+    // Stage 8: Use shared method from base class (conditional)
+    if (this.options.enrichChunks !== false) {
+      console.log('[PDFProcessor] Starting metadata enrichment')
+      chunks = await this.enrichMetadataBatch(chunks, 77, 90, {
+        batchSize: 10,
+        onError: 'mark_review'
+      })
+    } else {
+      console.log('[PDFProcessor] Skipping metadata enrichment (user opted out)')
+    }
   }
 }
 ```
@@ -907,7 +924,7 @@ Chonkie Chunk (9 strategies, semantic boundaries)
   ↓
 Metadata Transfer (overlap detection 70-90%)
   ↓
-Enrich (PydanticAI + Ollama)
+Enrich (OPTIONAL - PydanticAI + Ollama, default: skip)
   ↓
 Embed (Transformers.js or Gemini, 768d)
   ↓

@@ -175,6 +175,46 @@ export async function extractPdfMetadata(fileBuffer: ArrayBuffer) {
   return metadata
 }
 
+/**
+ * Extract metadata from PDF already in storage.
+ * Avoids 413 errors by downloading from storage instead of HTTP body.
+ *
+ * @param storagePath - Path to PDF in Supabase Storage (e.g., "temp/user-id/file.pdf")
+ */
+export async function extractPdfMetadataFromStorage(storagePath: string) {
+  const { createClient } = await import('@/lib/supabase/server')
+  const supabase = await createClient()
+
+  console.log('[extractPdfMetadataFromStorage] Downloading from storage:', storagePath)
+
+  // 1. Download from storage
+  const { data, error } = await supabase.storage
+    .from('documents')
+    .download(storagePath)
+
+  if (error) {
+    console.error('[extractPdfMetadataFromStorage] Download error:', error)
+    throw new Error(`Failed to download PDF from storage: ${error.message}`)
+  }
+
+  // 2. Convert to buffer
+  const fileBuffer = await data.arrayBuffer()
+  console.log('[extractPdfMetadataFromStorage] Downloaded', fileBuffer.byteLength, 'bytes')
+
+  // 3. Extract metadata (using existing logic)
+  const apiKey = process.env.GOOGLE_AI_API_KEY
+  if (!apiKey) {
+    throw new Error('GOOGLE_AI_API_KEY not configured')
+  }
+
+  const firstPages = await extractFirstPagesFromPDF(fileBuffer, 10, apiKey)
+  const metadata = await detectDocumentMetadata(firstPages, apiKey)
+
+  console.log('[extractPdfMetadataFromStorage] Metadata extracted:', metadata.title)
+
+  return metadata
+}
+
 // ==================== Helper Functions ====================
 
 /**

@@ -29,6 +29,7 @@ Rhizome V2 uses a **unified 10-stage processing pipeline** powered by Chonkie fo
 
 - ✅ **9 Chunking Strategies**: From fastest (token) to highest quality (slumber)
 - ✅ **100% Local Processing**: Zero API costs with Docling + Ollama + Chonkie
+- ✅ **Optional Enrichment**: Skip metadata extraction to save processing time (default: off)
 - ✅ **Metadata Preservation**: 70-90% overlap coverage via coordinate mapping
 - ✅ **Character Offset Validation**: Guaranteed accuracy for metadata transfer
 - ✅ **Quality Tracking**: Confidence scores (high/medium/low) for all chunks
@@ -151,10 +152,11 @@ Rhizome V2 uses a **unified 10-stage processing pipeline** powered by Chonkie fo
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
-│ Stage 8: Metadata Enrichment (77-90%)               │
-│  • PydanticAI + Ollama                              │
+│ Stage 8: Metadata Enrichment (77-90%) - OPTIONAL   │
+│  • User can skip via enrichChunks checkbox          │
+│  • PydanticAI + Ollama (when enabled)               │
 │  • Extract themes, concepts, domains, emotions      │
-│  • Same for all chunker strategies                  │
+│  • Default: SKIP (enrichChunks: false)              │
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐

@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { uploadDocument, estimateProcessingCost } from '@/app/actions/documents'
+import { createClient } from '@/lib/supabase/client'
 import {
   extractYoutubeMetadata,
   extractTextMetadata,
   extractEpubMetadata,
-  extractPdfMetadata
+  extractPdfMetadata,
+  extractPdfMetadataFromStorage
 } from '@/app/actions/metadata-extraction'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { useUploadStore } from '@/stores/upload-store'
@@ -60,6 +62,9 @@ export function UploadZone() {
   // Background jobs store for tracking upload/processing jobs
   const { registerJob } = useBackgroundJobsStore()
 
+  // Local state for temp storage path (PDF metadata extraction)
+  const [tempStoragePath, setTempStoragePath] = useState<string | null>(null)
+
   // Upload store - replaces 19 useState hooks
   const activeTab = useUploadStore(state => state.activeTab)
   const setActiveTab = useUploadStore(state => state.setActiveTab)
@@ -101,6 +106,24 @@ export function UploadZone() {
   const setEnrichChunks = useUploadStore(state => state.setEnrichChunks)
   const detectConnections = useUploadStore(state => state.detectConnections)
   const setDetectConnections = useUploadStore(state => state.setDetectConnections)
+
+  /**
+   * Cleanup temp storage file.
+   */
+  const cleanupTempFile = useCallback(async () => {
+    if (!tempStoragePath) return
+
+    try {
+      console.log('🧹 Cleaning up temp file:', tempStoragePath)
+      const supabase = createClient()
+      await supabase.storage.from('documents').remove([tempStoragePath])
+      setTempStoragePath(null)
+      console.log('✅ Temp file cleaned up')
+    } catch (error) {
+      console.error('⚠️ Failed to cleanup temp file:', error)
+      // Don't throw - cleanup failure shouldn't block the workflow
+    }
+  }, [tempStoragePath])
 
   /**
    * Detects URL type (YouTube vs web article).
@@ -153,9 +176,39 @@ export function UploadZone() {
       let metadata: DetectedMetadata
 
       if (extractionType === 'pdf') {
-        // PDF extraction
-        const fileBuffer = await file.arrayBuffer()
-        metadata = await extractPdfMetadata(fileBuffer)
+        // PDF extraction - Storage-first approach to avoid 413 errors
+        console.log('📤 Uploading PDF to temp storage for metadata extraction...')
+
+        // Get Supabase client
+        const supabase = createClient()
+
+        // Get current user (needed for temp path)
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          throw new Error('User not authenticated')
+        }
+
+        // Generate temp path
+        const tempId = crypto.randomUUID()
+        const tempPath = `temp/${user.id}/${tempId}.pdf`
+
+        // Upload to storage (no HTTP body size limit)
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(tempPath, file)
+
+        if (uploadError) {
+          console.error('❌ Temp storage upload failed:', uploadError)
+          throw new Error(`Failed to upload to temp storage: ${uploadError.message}`)
+        }
+
+        console.log('✅ Uploaded to temp storage:', tempPath)
+
+        // Store temp path for later cleanup
+        setTempStoragePath(tempPath)
+
+        // Extract metadata from storage (tiny HTTP request with just the path)
+        metadata = await extractPdfMetadataFromStorage(tempPath)
       } else if (extractionType === 'epub') {
         // EPUB extraction
         const fileBuffer = await file.arrayBuffer()
@@ -174,6 +227,9 @@ export function UploadZone() {
     } catch (error) {
       console.error('Metadata detection error:', error)
 
+      // Cleanup temp file on error
+      await cleanupTempFile()
+
       // Fallback: Show preview with filename-based metadata
       setDetectedMetadata({
         title: file.name.replace(/\.[^/.]+$/, ''), // Remove extension
@@ -183,7 +239,7 @@ export function UploadZone() {
       })
       setUploadPhase('preview')
     }
-  }, [])
+  }, [cleanupTempFile])
 
   /**
    * Handles file drop event.
@@ -328,6 +384,9 @@ export function UploadZone() {
           title: editedMetadata.title
         })
 
+        // Cleanup temp file on success
+        await cleanupTempFile()
+
         // Reset state
         setSelectedFile(null)
         setCostEstimate(null)
@@ -337,29 +396,36 @@ export function UploadZone() {
         setUploadPhase('idle')
         setUploadSource(null)
       } else {
+        // Cleanup temp file on error
+        await cleanupTempFile()
         setError(result.error || 'Upload failed')
         setUploadPhase('preview') // Return to preview on error
       }
     } catch (err) {
       console.error('❌ Upload error:', err)
+      // Cleanup temp file on exception
+      await cleanupTempFile()
       setError(err instanceof Error ? err.message : 'Upload failed')
       setUploadPhase('preview')
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, enrichChunks, detectConnections, registerJob])
+  }, [selectedFile, urlInput, urlType, getSourceTypeForFile, reviewWorkflow, cleanMarkdown, extractImages, chunkerType, enrichChunks, detectConnections, registerJob, cleanupTempFile])
 
   /**
    * Handles metadata preview cancellation.
    */
-  const handlePreviewCancel = useCallback(() => {
+  const handlePreviewCancel = useCallback(async () => {
+    // Cleanup temp file on cancel
+    await cleanupTempFile()
+
     setSelectedFile(null)
     setCostEstimate(null)
     setDetectedMetadata(null)
     setUploadPhase('idle')
     setUploadSource(null)
     setError(null)
-  }, [])
+  }, [cleanupTempFile])
 
   /**
    * Uploads file with appropriate source type (non-PDF files).
