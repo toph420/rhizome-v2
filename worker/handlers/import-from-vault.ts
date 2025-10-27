@@ -684,8 +684,7 @@ async function applyImportStrategy(
             emotional_metadata: chunk.emotional_metadata,
             conceptual_metadata: chunk.conceptual_metadata,
             domain_metadata: chunk.domain_metadata,
-            metadata_extracted_at: chunk.metadata_extracted_at,
-            updated_at: new Date().toISOString()
+            metadata_extracted_at: chunk.metadata_extracted_at
           })
           .eq('id', existing.id)
 

@@ -33,20 +33,32 @@ export async function getConnectionsForChunks(chunkIds: string[]) {
 
     const supabase = await createClient()
 
-    const { data, error } = await supabase
-      .from('connections')
-      .select('*')
-      .in('source_chunk_id', validChunkIds)
-      .order('strength', { ascending: false })
-      .limit(100)
+    // Batch queries to avoid URL length limits (max 50 chunks per query)
+    const BATCH_SIZE = 50
+    const allConnections = []
 
-    if (error) {
-      console.error('[getConnectionsForChunks] Error:', error)
-      return []
+    for (let i = 0; i < validChunkIds.length; i += BATCH_SIZE) {
+      const batch = validChunkIds.slice(i, i + BATCH_SIZE)
+
+      const { data, error } = await supabase
+        .from('connections')
+        .select('*')
+        .in('source_chunk_id', batch)
+        .order('strength', { ascending: false })
+        .limit(100)
+
+      if (error) {
+        console.error('[getConnectionsForChunks] Error fetching batch:', error)
+        continue // Skip failed batch, continue with others
+      }
+
+      if (data) {
+        allConnections.push(...data)
+      }
     }
 
-    console.log('[getConnectionsForChunks] Fetched connections:', data?.length || 0)
-    return data || []
+    console.log('[getConnectionsForChunks] Fetched connections:', allConnections.length)
+    return allConnections
   } catch (error) {
     console.error('[getConnectionsForChunks] Exception:', error)
     return []
