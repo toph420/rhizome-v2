@@ -1,3 +1,7 @@
+---
+description: Deploy current feature branch to production with database migrations.
+---
+
 # Rhizome Deploy Command
 
 Deploy current feature branch to production with database migrations.
