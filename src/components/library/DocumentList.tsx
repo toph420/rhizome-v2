@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { SupabaseClient } from '@supabase/supabase-js'
+import { SupabaseClient, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/rhizome/card'
 import { Button } from '@/components/rhizome/button'
 import { Badge } from '@/components/rhizome/badge'
@@ -73,12 +73,13 @@ export function DocumentList() {
         schema: 'public',
         table: 'documents',
         filter: `user_id=eq.${userId}`
-      }, (payload) => {
+      }, (payload: RealtimePostgresChangesPayload<Document>) => {
+        const doc = payload.new as Document | null
         console.log('[DocumentList] ⚡ Realtime event received:', {
           eventType: payload.eventType,
-          documentId: payload.new?.id,
-          title: payload.new?.title,
-          status: payload.new?.processing_status
+          documentId: doc?.id,
+          title: doc?.title,
+          status: doc?.processing_status
         })
 
         if (payload.eventType === 'INSERT') {

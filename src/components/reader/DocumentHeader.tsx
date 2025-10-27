@@ -17,6 +17,7 @@ interface DocumentHeaderProps {
   chunkerType?: string | null
   viewMode?: 'explore' | 'focus' | 'study'
   onViewModeChange?: (mode: 'explore' | 'focus' | 'study') => void
+  onQuickSpark?: () => void
 }
 
 /**
@@ -31,6 +32,7 @@ export function DocumentHeader({
   chunkerType,
   viewMode = 'explore',
   onViewModeChange,
+  onQuickSpark,
 }: DocumentHeaderProps) {
   const router = useRouter()
 
