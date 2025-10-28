@@ -1,16 +1,20 @@
 'use client'
 
-import { motion } from 'framer-motion'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/rhizome/hover-card'
 import { Badge } from '@/components/rhizome/badge'
 import { Button } from '@/components/rhizome/button'
-import { Info, TrendingUp, CheckCircle, AlertTriangle, Link2, Loader2, Sparkles } from 'lucide-react'
+import { Input } from '@/components/rhizome/input'
+import { Textarea } from '@/components/rhizome/textarea'
+import { Slider } from '@/components/rhizome/slider'
+import { Info, TrendingUp, CheckCircle, AlertTriangle, Link2, Loader2, Sparkles, X, Plus, Pencil } from 'lucide-react'
 import type { Chunk } from '@/types/annotations'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { detectConnectionsForChunks } from '@/app/actions/connections'
 import { enrichChunksForDocument, enrichAndConnectChunks } from '@/app/actions/enrichments'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { useReaderStore } from '@/stores/reader-store'
+import { useChunkStore } from '@/stores/chunk-store'
+import type { ChunkMetadata } from '@/stores/chunk-store'
 
 interface ChunkMetadataIconProps {
   chunk: Chunk
@@ -38,7 +42,24 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   const [isDetecting, setIsDetecting] = useState(false)
   const [isEnriching, setIsEnriching] = useState(false)
   const [isEnrichingAndConnecting, setIsEnrichingAndConnecting] = useState(false)
+
+  // Inline editing states
+  const [editingThemes, setEditingThemes] = useState(false)
+  const [editingImportance, setEditingImportance] = useState(false)
+  const [editingSummary, setEditingSummary] = useState(false)
+  const [editingDomain, setEditingDomain] = useState(false)
+  const [newTheme, setNewTheme] = useState('')
+  const [tempThemes, setTempThemes] = useState<string[]>([])
+  const [tempImportance, setTempImportance] = useState(0)
+  const [tempSummary, setTempSummary] = useState('')
+  const [tempDomain, setTempDomain] = useState('')
+
+  const themeInputRef = useRef<HTMLInputElement>(null)
+  const summaryRef = useRef<HTMLTextAreaElement>(null)
+  const domainInputRef = useRef<HTMLInputElement>(null)
+
   const { registerJob } = useBackgroundJobsStore()
+  const { updateChunkMetadata } = useChunkStore()
 
   // Read fresh chunk data from store (updates when enrichment completes)
   const storeChunks = useReaderStore(state => state.chunks)
@@ -46,10 +67,11 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   // Type cast needed because ReaderStore.Chunk and annotations.Chunk are different types
   const freshChunk = (storeChunks.find(c => c.id === chunk.id) as Chunk | undefined) || chunk
 
-  // Debug: Log when freshChunk has enrichment data
-  if (freshChunk.enrichments_detected && !chunk.enrichments_detected) {
-    console.log(`[ChunkMetadataIcon] Chunk ${chunkIndex} enrichment detected! Themes:`, freshChunk.themes)
-  }
+  // Debug: Log enrichment status changes
+  useEffect(() => {
+    const storeChunk = storeChunks.find(c => c.id === chunk.id)
+    console.log(`[ChunkMetadataIcon c${chunkIndex}] freshChunkEnriched=${freshChunk.enrichments_detected}, propEnriched=${chunk.enrichments_detected}, storeHas=${!!storeChunk}, storeEnriched=${storeChunk?.enrichments_detected}`)
+  }, [freshChunk.enrichments_detected, storeChunks.length, chunkIndex, chunk.id, chunk.enrichments_detected])
 
   // Format job title with document name
   const jobTitle = documentTitle ? `${documentTitle} - Chunk ${chunkIndex}` : `Chunk ${chunkIndex}`
@@ -133,6 +155,81 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
     }
   }
 
+  // Inline editing handlers
+  const handleSaveThemes = async () => {
+    try {
+      await updateChunkMetadata(chunk.id, { themes: tempThemes })
+      setEditingThemes(false)
+    } catch (error) {
+      console.error('[ChunkMetadataIcon] Failed to save themes:', error)
+    }
+  }
+
+  const handleSaveImportance = async () => {
+    try {
+      await updateChunkMetadata(chunk.id, { importance_score: tempImportance })
+      setEditingImportance(false)
+    } catch (error) {
+      console.error('[ChunkMetadataIcon] Failed to save importance:', error)
+    }
+  }
+
+  const handleSaveSummary = async () => {
+    try {
+      await updateChunkMetadata(chunk.id, {
+        // Summary might need to be stored differently - check your schema
+        themes: metadata.themes, // Preserve other fields
+      })
+      setEditingSummary(false)
+    } catch (error) {
+      console.error('[ChunkMetadataIcon] Failed to save summary:', error)
+    }
+  }
+
+  const handleSaveDomain = async () => {
+    try {
+      await updateChunkMetadata(chunk.id, {
+        domain_metadata: {
+          primaryDomain: tempDomain,
+          confidence: 'medium'
+        }
+      })
+      setEditingDomain(false)
+    } catch (error) {
+      console.error('[ChunkMetadataIcon] Failed to save domain:', error)
+    }
+  }
+
+  const handleAddTheme = () => {
+    if (newTheme.trim() && !tempThemes.includes(newTheme.trim())) {
+      setTempThemes([...tempThemes, newTheme.trim()])
+      setNewTheme('')
+    }
+  }
+
+  const handleRemoveTheme = (theme: string) => {
+    setTempThemes(tempThemes.filter(t => t !== theme))
+  }
+
+  // Focus input when entering edit mode
+  useEffect(() => {
+    if (editingThemes && themeInputRef.current) {
+      themeInputRef.current.focus()
+    }
+  }, [editingThemes])
+
+  useEffect(() => {
+    if (editingSummary && summaryRef.current) {
+      summaryRef.current.focus()
+    }
+  }, [editingSummary])
+
+  useEffect(() => {
+    if (editingDomain && domainInputRef.current) {
+      domainInputRef.current.focus()
+    }
+  }, [editingDomain])
+
   // Extract metadata from chunk (now populated from database)
   // Use freshChunk to get the latest data after enrichment updates
   const metadata = {
@@ -158,6 +255,13 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
     enrichmentSkippedReason: freshChunk.enrichment_skipped_reason
   }
 
+  // Debug: Log metadata when button state might change
+  useEffect(() => {
+    if (!metadata.connectionsDetected) {
+      console.log(`[ChunkMetadataIcon c${chunkIndex}] DetectBtn: enriched=${metadata.enrichmentsDetected}, disabled=${!metadata.enrichmentsDetected}, connected=${metadata.connectionsDetected}`)
+    }
+  }, [metadata.enrichmentsDetected, metadata.connectionsDetected, chunkIndex])
+
   // Use em-based positioning for better text alignment (scales with font size)
   // Default: top-[0.375em] aligns roughly with first line of text
   const defaultStyle = { top: '0.375em', ...style }
@@ -165,26 +269,23 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   return (
     <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
-        <motion.button
-          className={`absolute left-0 -ml-12 w-6 h-6 rounded-full bg-muted/50 hover:bg-primary/20 transition-colors flex items-center justify-center ${
-            alwaysVisible ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-100'
+        <button
+          className={`absolute left-0 -ml-12 w-10 h-10 rounded-sm border-2 border-border bg-main shadow-shadow hover:translate-x-boxShadowX hover:translate-y-boxShadowY hover:shadow-none transition-all flex items-center justify-center ${
+            alwaysVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
           style={defaultStyle}
-          whileHover={{ scale: 1.2 }}
-          whileTap={{ scale: 0.95 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
         >
-          <Info className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-        </motion.button>
+          <Info className="h-4 w-4 text-main-foreground" />
+        </button>
       </HoverCardTrigger>
 
-      <HoverCardContent side="left" className="w-80">
+      <HoverCardContent side="left" className="w-96">
         <div className="space-y-3">
           {/* Chunk Index & ID */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Badge variant="outline" className="font-mono text-xs">
-                Chunk {chunkIndex}
+                c{chunkIndex}
               </Badge>
               {metadata.importanceScore > 0 && (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -193,11 +294,15 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
                 </div>
               )}
             </div>
-            {/* Chunk ID for spark references */}
+            {/* Short chunk ID for spark references */}
             <div className="text-xs">
-              <span className="text-muted-foreground">ID:</span>{' '}
+              <span className="text-muted-foreground">Short ID:</span>{' '}
               <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
-                /chunk_{chunk.id.replace('chunk_', '')}
+                /c{chunkIndex}
+              </code>
+              <span className="text-muted-foreground ml-2">or</span>{' '}
+              <code className="bg-muted px-1.5 py-0.5 rounded font-mono">
+                /{chunkIndex}
               </code>
             </div>
           </div>
@@ -243,21 +348,192 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
             </div>
           )}
 
-          {/* Themes */}
-          {metadata.themes.length > 0 && (
-            <div>
-              <p className="text-xs font-medium mb-1.5">Themes</p>
+          {/* Importance Score - Click to edit */}
+          <div className="border-t pt-3">
+            <p className="text-xs font-medium mb-1.5 flex items-center justify-between">
+              <span>Importance Score</span>
+              {!editingImportance && (
+                <button
+                  onClick={() => {
+                    setTempImportance(metadata.importanceScore)
+                    setEditingImportance(true)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </p>
+            {editingImportance ? (
+              <div className="space-y-2">
+                <Slider
+                  value={[tempImportance]}
+                  onValueChange={(v) => setTempImportance(v[0])}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground text-center">{Math.round(tempImportance * 100)}%</p>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveImportance} className="h-6 text-xs">
+                    Save
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditingImportance(false)} className="h-6 text-xs">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p
+                className="text-sm cursor-pointer hover:text-foreground"
+                onClick={() => {
+                  setTempImportance(metadata.importanceScore)
+                  setEditingImportance(true)
+                }}
+              >
+                {Math.round(metadata.importanceScore * 100)}%
+              </p>
+            )}
+          </div>
+
+          {/* Themes - Click to edit */}
+          <div className="border-t pt-3">
+            <p className="text-xs font-medium mb-1.5 flex items-center justify-between">
+              <span>Themes</span>
+              {!editingThemes && metadata.themes.length > 0 && (
+                <button
+                  onClick={() => {
+                    setTempThemes([...metadata.themes])
+                    setEditingThemes(true)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </p>
+            {editingThemes ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {tempThemes.map((theme, i) => (
+                    <Badge key={i} variant="secondary" className="text-xs flex items-center gap-1">
+                      {theme}
+                      <button onClick={() => handleRemoveTheme(theme)} className="hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    ref={themeInputRef}
+                    value={newTheme}
+                    onChange={(e) => setNewTheme(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleAddTheme()
+                      }
+                    }}
+                    placeholder="Add theme..."
+                    className="h-6 text-xs"
+                  />
+                  <Button size="sm" onClick={handleAddTheme} className="h-6 text-xs px-2">
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveThemes} className="h-6 text-xs">
+                    Save
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditingThemes(false)} className="h-6 text-xs">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : metadata.themes.length > 0 ? (
               <div className="flex flex-wrap gap-1">
                 {metadata.themes.map((theme, i) => (
-                  <Badge key={i} variant="secondary" className="text-xs">
+                  <Badge key={i} variant="secondary" className="text-xs cursor-pointer hover:bg-secondary/80"
+                    onClick={() => {
+                      setTempThemes([...metadata.themes])
+                      setEditingThemes(true)
+                    }}
+                  >
                     {theme}
                   </Badge>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <button
+                onClick={() => {
+                  setTempThemes([])
+                  setEditingThemes(true)
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Click to add themes...
+              </button>
+            )}
+          </div>
 
-          {/* Concepts (when available) */}
+          {/* Domain - Click to edit */}
+          <div className="border-t pt-3">
+            <p className="text-xs font-medium mb-1.5 flex items-center justify-between">
+              <span>Domain</span>
+              {!editingDomain && metadata.domain && (
+                <button
+                  onClick={() => {
+                    setTempDomain(metadata.domain || '')
+                    setEditingDomain(true)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </p>
+            {editingDomain ? (
+              <div className="space-y-2">
+                <Input
+                  ref={domainInputRef}
+                  value={tempDomain}
+                  onChange={(e) => setTempDomain(e.target.value)}
+                  className="h-7 text-xs"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveDomain} className="h-6 text-xs">
+                    Save
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditingDomain(false)} className="h-6 text-xs">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : metadata.domain ? (
+              <Badge variant="outline" className="text-xs cursor-pointer hover:bg-accent"
+                onClick={() => {
+                  setTempDomain(metadata.domain || '')
+                  setEditingDomain(true)
+                }}
+              >
+                {metadata.domain}
+              </Badge>
+            ) : (
+              <button
+                onClick={() => {
+                  setTempDomain('')
+                  setEditingDomain(true)
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Click to add domain...
+              </button>
+            )}
+          </div>
+
+          {/* Concepts (read-only display) */}
           {metadata.concepts.length > 0 && (
             <div>
               <p className="text-xs font-medium mb-1.5">Concepts</p>
@@ -271,25 +547,63 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
             </div>
           )}
 
-          {/* Summary (when available) */}
-          {metadata.summary && (
-            <div>
-              <p className="text-xs font-medium mb-1.5">Summary</p>
-              <p className="text-xs text-muted-foreground">{metadata.summary}</p>
-            </div>
-          )}
+          {/* Summary - Click to edit */}
+          <div className="border-t pt-3">
+            <p className="text-xs font-medium mb-1.5 flex items-center justify-between">
+              <span>Summary</span>
+              {!editingSummary && metadata.summary && (
+                <button
+                  onClick={() => {
+                    setTempSummary(metadata.summary || '')
+                    setEditingSummary(true)
+                  }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </p>
+            {editingSummary ? (
+              <div className="space-y-2">
+                <Textarea
+                  ref={summaryRef}
+                  value={tempSummary}
+                  onChange={(e) => setTempSummary(e.target.value)}
+                  className="text-xs min-h-[60px]"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveSummary} className="h-6 text-xs">
+                    Save
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditingSummary(false)} className="h-6 text-xs">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : metadata.summary ? (
+              <p
+                className="text-xs text-muted-foreground cursor-pointer hover:text-foreground"
+                onClick={() => {
+                  setTempSummary(metadata.summary || '')
+                  setEditingSummary(true)
+                }}
+              >
+                {metadata.summary}
+              </p>
+            ) : (
+              <button
+                onClick={() => {
+                  setTempSummary('')
+                  setEditingSummary(true)
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Click to add summary...
+              </button>
+            )}
+          </div>
 
-          {/* Domain (when available) */}
-          {metadata.domain && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Domain:</span>
-              <Badge variant="outline" className="text-xs">
-                {metadata.domain}
-              </Badge>
-            </div>
-          )}
-
-          {/* Emotional Polarity (when available) */}
+          {/* Emotional Polarity (read-only display) */}
           {metadata.emotionalPolarity && (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">Tone:</span>
@@ -411,13 +725,14 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
               </p>
             )}
 
-            {!metadata.connectionsDetected && metadata.enrichmentsDetected && (
+            {!metadata.connectionsDetected && (
               <Button
                 size="sm"
                 variant="outline"
                 className="w-full text-xs"
                 onClick={handleDetectConnections}
-                disabled={isDetecting}
+                disabled={isDetecting || !metadata.enrichmentsDetected}
+                title={!metadata.enrichmentsDetected ? 'Enrich chunk first before detecting connections' : 'Detect connections for this chunk'}
               >
                 {isDetecting ? (
                   <>

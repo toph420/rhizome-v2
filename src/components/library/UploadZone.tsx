@@ -321,6 +321,9 @@ export function UploadZone() {
       formData.append('document_type', editedMetadata.type)
       formData.append('author', editedMetadata.author)
       formData.append('title', editedMetadata.title)
+      if (editedMetadata.description) {
+        formData.append('description', editedMetadata.description)
+      }
       if (editedMetadata.year) {
         formData.append('publication_year', editedMetadata.year)
       }

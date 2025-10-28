@@ -80,16 +80,18 @@ export const BlockRenderer = memo(function BlockRenderer({
     [chunks, block.startOffset, block.endOffset, chunk?.id]
   )
 
-  // Calculate accurate Y positions for chunks that start mid-block
+  // Calculate accurate Y positions for chunks (including first-block chunk)
   useEffect(() => {
-    if (!contentRef.current || chunksStartingInBlock.length === 0) return
+    if (!contentRef.current) return
+    if (!chunk && chunksStartingInBlock.length === 0) return
 
     const positions = new Map<string, number>()
     const contentEl = contentRef.current
     const blockTop = contentEl.getBoundingClientRect().top
 
-    chunksStartingInBlock.forEach((chunkInBlock) => {
-      const relativeOffset = chunkInBlock.start_offset - block.startOffset
+    // Helper function to calculate position for a chunk at a given offset
+    const calculatePosition = (chunkId: string, chunkStartOffset: number) => {
+      const relativeOffset = chunkStartOffset - block.startOffset
 
       // Walk through text nodes to find position at offset
       let currentOffset = 0
@@ -113,7 +115,7 @@ export const BlockRenderer = memo(function BlockRenderer({
             range.setEnd(node, Math.min(offsetInNode + 1, textLength))
             const rect = range.getBoundingClientRect()
             const yPosition = rect.top - blockTop
-            positions.set(chunkInBlock.id, yPosition)
+            positions.set(chunkId, yPosition)
           } catch (e) {
             // If range creation fails, fallback to default positioning
             console.warn('Failed to calculate chunk position:', e)
@@ -123,10 +125,20 @@ export const BlockRenderer = memo(function BlockRenderer({
 
         currentOffset += textLength
       }
+    }
+
+    // Calculate position for first-block chunk (if this is the first block of the chunk)
+    if (chunk && block.chunkPosition === 0) {
+      calculatePosition(chunk.id, chunk.start_offset)
+    }
+
+    // Calculate positions for mid-block chunks
+    chunksStartingInBlock.forEach((chunkInBlock) => {
+      calculatePosition(chunkInBlock.id, chunkInBlock.start_offset)
     })
 
     setChunkPositions(positions)
-  }, [chunksStartingInBlock, block.startOffset])
+  }, [chunk, chunksStartingInBlock, block.startOffset, block.chunkPosition])
 
   // Inject annotations into HTML
   const annotatedHtml = injectAnnotations(
@@ -181,6 +193,11 @@ export const BlockRenderer = memo(function BlockRenderer({
           documentId={documentId}
           documentTitle={documentTitle}
           alwaysVisible={showChunkBoundaries}
+          style={
+            chunkPositions.has(chunk.id)
+              ? { top: `${chunkPositions.get(chunk.id)}px` }
+              : undefined // Fallback to default em-based positioning
+          }
         />
       )}
 

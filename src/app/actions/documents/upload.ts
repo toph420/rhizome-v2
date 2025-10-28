@@ -25,6 +25,7 @@ interface UploadConfig {
   detectConnections: boolean
   documentType: string | null
   author: string | null
+  description: string | null
   publicationYear: number | null
   publisher: string | null
   isbn: string | null
@@ -71,6 +72,7 @@ function extractUploadConfig(formData: FormData): UploadConfig {
 
   const documentType = formData.get('document_type') as string | null
   const author = formData.get('author') as string | null
+  const description = formData.get('description') as string | null
   const publicationYear = formData.get('publication_year')
     ? parseInt(formData.get('publication_year') as string)
     : null
@@ -101,6 +103,7 @@ function extractUploadConfig(formData: FormData): UploadConfig {
     detectConnections,
     documentType,
     author,
+    description,
     publicationYear,
     publisher,
     isbn
@@ -269,6 +272,7 @@ async function insertDocumentRecord(
       id: documentId,
       user_id: userId,
       title: data.title,
+      description: data.config.description,
       storage_path: data.storagePath,
       source_type: data.config.sourceType,
       source_url: data.config.sourceUrl,

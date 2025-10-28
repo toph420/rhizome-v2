@@ -602,7 +602,17 @@ export async function refetchChunks(chunkIds: string[]) {
       domain_metadata,
       bboxes,
       page_start,
-      page_end
+      page_end,
+      enrichments_detected,
+      enrichments_detected_at,
+      enrichment_skipped_reason,
+      connections_detected,
+      connections_detected_at,
+      detection_skipped_reason,
+      position_confidence,
+      position_method,
+      position_validated,
+      section_marker
     `)
     .in('id', chunkIds)
     .order('chunk_index', { ascending: true })

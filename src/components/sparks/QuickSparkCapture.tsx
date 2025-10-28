@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Zap, Loader2, X, Tag, Link, Hash, Quote, Highlighter } from 'lucide-react'
 import { createSpark, updateSpark, linkAnnotationToSpark } from '@/app/actions/sparks'
 import { getAnnotationsByIds } from '@/app/actions/annotations'
-import { extractTags, extractChunkIds } from '@/lib/sparks/extractors'
+import { extractTags, extractChunkIds, extractShortChunkRefs } from '@/lib/sparks/extractors'
 import type { SparkContext, SparkSelection } from '@/lib/sparks/types'
 import type { StoredAnnotation } from '@/types/annotations'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -101,7 +101,19 @@ export function QuickSparkCapture({
 
   // Extract tags and chunk IDs from debounced content
   const extractedTags = useMemo(() => extractTags(debouncedContent), [debouncedContent])
-  const extractedChunkIds = useMemo(() => extractChunkIds(debouncedContent), [debouncedContent])
+  const extractedChunkIds = useMemo(() => {
+    // Extract full chunk IDs (e.g., /chunk_abc123)
+    const fullIds = extractChunkIds(debouncedContent)
+
+    // Extract short chunk refs (e.g., /42, /c42) and resolve to full IDs
+    const shortRefs = extractShortChunkRefs(debouncedContent)
+    const resolvedShortIds = shortRefs
+      .map(index => chunks?.find(c => c.chunk_index === index)?.id)
+      .filter((id): id is string => id !== undefined)
+
+    // Combine and deduplicate
+    return Array.from(new Set([...fullIds, ...resolvedShortIds]))
+  }, [debouncedContent, chunks])
 
   // Pre-fill editing data when panel opens or when switching to different spark
   useEffect(() => {
@@ -490,7 +502,7 @@ export function QuickSparkCapture({
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="What's your thought? Use /chunk_id to link chunks, #tags for organization"
+                placeholder="What's your thought? Use /42 or /c42 to link chunks, #tags for organization"
                 className="min-h-[120px] resize-none font-mono text-sm"
                 disabled={loading}
               />
@@ -578,11 +590,16 @@ export function QuickSparkCapture({
                       <div className="flex items-center gap-1.5">
                         <Link className="w-3 h-3 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">Links:</span>
-                        {extractedChunkIds.map(chunkId => (
-                          <Badge key={chunkId} variant="outline" className="h-5 text-xs font-mono">
-                            /{chunkId}
-                          </Badge>
-                        ))}
+                        {extractedChunkIds.map(chunkId => {
+                          // Find chunk to get its index for display
+                          const chunk = chunks?.find(c => c.id === chunkId)
+                          const displayId = chunk ? `c${chunk.chunk_index}` : chunkId
+                          return (
+                            <Badge key={chunkId} variant="outline" className="h-5 text-xs font-mono">
+                              {displayId}
+                            </Badge>
+                          )
+                        })}
                       </div>
                     )}
                   </div>

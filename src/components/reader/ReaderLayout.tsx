@@ -246,7 +246,9 @@ export function ReaderLayout({
           console.log('[ReaderLayout] Sample chunk data:', {
             id: updatedChunks[0].id,
             themes: updatedChunks[0].themes,
-            summary: updatedChunks[0].summary?.substring(0, 50)
+            summary: updatedChunks[0].summary?.substring(0, 50),
+            enrichments_detected: updatedChunks[0].enrichments_detected,
+            connections_detected: updatedChunks[0].connections_detected
           })
         }
 

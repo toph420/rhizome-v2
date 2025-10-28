@@ -46,7 +46,8 @@ export {
 
 // Metadata actions
 export {
-  updateLastViewed
+  updateLastViewed,
+  updateDocumentMetadata
 } from './metadata'
 
 // Types
