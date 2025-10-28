@@ -61,6 +61,14 @@ export interface PositionComponent {
   recoveryMethod?: 'exact' | 'context' | 'chunk_bounded' | 'lost';
   /** True if fuzzy match needs manual review (confidence 0.75-0.85) */
   needsReview?: boolean;
+
+  // PDF ↔ Markdown sync metadata (for annotation portability across views)
+  /** Confidence score for PDF↔Markdown offset mapping (0.0-1.0). 1.0=exact match, 0.75+=fuzzy match */
+  syncConfidence?: number;
+  /** Method used to calculate markdown offsets from PDF coordinates */
+  syncMethod?: 'exact' | 'fuzzy' | 'bbox' | 'manual';
+  /** True if sync confidence is low and needs manual review (<0.85) */
+  syncNeedsReview?: boolean;
 }
 
 export interface VisualComponent {

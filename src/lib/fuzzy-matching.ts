@@ -286,6 +286,7 @@ export function calculateTrigramSimilarity(set1: Set<string>, set2: Set<string>)
  * @param contextSize - Context window size
  * @returns FuzzyMatchResult with confidence 0.3
  */
+
 function approximatePosition(
   chunkIndex: number,
   totalChunks: number,

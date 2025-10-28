@@ -18,6 +18,7 @@ import { PDFAnnotationButton } from './PDFAnnotationButton'
 import { PDFChunkOverlay } from './PDFChunkOverlay'
 import { toast } from 'sonner'
 import type { Chunk } from '@/types/annotations'
+import { calculateMarkdownOffsets, getConfidenceLevel } from '@/lib/reader/text-offset-calculator'
 
 interface PDFViewerProps {
   fileUrl: string
@@ -120,20 +121,8 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
     },
     onDrag: ({ offset: [x, y] }) => {
       // Pan handling for mobile (future enhancement)
-      console.log('[PDFViewer] Pan gesture detected:', x, y)
     }
   })
-
-  // Log selection for testing
-  useEffect(() => {
-    if (selection) {
-      console.log('[PDFViewer] Text selected:', {
-        text: selection.text.substring(0, 50),
-        page: selection.pageNumber,
-        rect: selection.pdfRect,
-      })
-    }
-  }, [selection])
 
   // Zoom presets
   const handleFitWidth = () => {
@@ -172,12 +161,43 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
     if (!selection) return
 
     try {
+      // Calculate markdown offsets using text-based matching
+      const offsetResult = calculateMarkdownOffsets(
+        selection.text,
+        selection.pdfRect.pageNumber,
+        chunks
+      )
+
+      // Log confidence for debugging
+      console.log('[PDFViewer] Offset calculation:', {
+        confidence: offsetResult.confidence,
+        confidenceLevel: getConfidenceLevel(offsetResult.confidence),
+        method: offsetResult.method,
+        startOffset: offsetResult.startOffset,
+        endOffset: offsetResult.endOffset,
+        matchedChunkId: offsetResult.matchedChunkId,
+      })
+
+      // Warn user if low confidence or no page info
+      if (offsetResult.debugInfo?.warning === 'no_page_info' && offsetResult.method !== 'not_found') {
+        toast.warning(
+          'Document missing page info - sync may be less accurate',
+          { duration: 4000 }
+        )
+      } else if (offsetResult.confidence < 0.85 && offsetResult.method !== 'not_found') {
+        toast.warning(
+          `Annotation created with ${getConfidenceLevel(offsetResult.confidence).toLowerCase()} confidence (${Math.round(offsetResult.confidence * 100)}%)`,
+          { duration: 4000 }
+        )
+      }
+
       const result = await createAnnotation({
         documentId,
         text: selection.text,
-        startOffset: 0, // Not used for PDF-only annotations
-        endOffset: 0,
-        chunkIds: [], // Will be calculated by backend if needed
+        // Use calculated offsets for markdown view sync
+        startOffset: offsetResult.startOffset,
+        endOffset: offsetResult.endOffset,
+        chunkIds: offsetResult.matchedChunkId ? [offsetResult.matchedChunkId] : [],
         color: 'yellow',
         textContext: {
           before: '',
@@ -191,10 +211,20 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
         pdfY: selection.pdfRect.y,
         pdfWidth: selection.pdfRect.width,
         pdfHeight: selection.pdfRect.height,
+        // Sync metadata (only if found)
+        syncConfidence: offsetResult.method !== 'not_found' ? offsetResult.confidence : undefined,
+        syncMethod: offsetResult.method !== 'not_found' ? offsetResult.method : undefined,
       })
 
       if (result.success) {
-        toast.success('Annotation created')
+        // Show success with sync status
+        if (offsetResult.method === 'exact') {
+          toast.success('Annotation created (exact match)')
+        } else if (offsetResult.method === 'fuzzy') {
+          toast.success('Annotation created (fuzzy match)')
+        } else {
+          toast.success('Annotation created (PDF only)')
+        }
 
         // Reload annotations to show the new one
         const fetchedAnnotations = await getAnnotations(documentId)

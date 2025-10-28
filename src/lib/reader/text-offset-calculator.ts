@@ -1,0 +1,322 @@
+/**
+ * Text-Based Offset Calculator for PDF ↔ Markdown Annotation Sync
+ *
+ * Calculates markdown character offsets from PDF text selections using:
+ * 1. Exact text matching (preferred)
+ * 2. Fuzzy matching with Levenshtein distance (OCR tolerance)
+ * 3. Multi-page search window (fallback)
+ *
+ * @module text-offset-calculator
+ */
+
+import { distance as levenshtein } from 'fastest-levenshtein'
+
+/**
+ * Minimal chunk data needed for offset calculation
+ * Compatible with full Chunk type from annotations.ts
+ */
+export interface ChunkForMatching {
+  id: string
+  content: string
+  start_offset: number
+  end_offset: number
+  page_start?: number | null
+  page_end?: number | null
+}
+
+/**
+ * Result of offset calculation with confidence scoring
+ */
+export interface OffsetCalculationResult {
+  /** Calculated start offset in markdown document */
+  startOffset: number
+  /** Calculated end offset in markdown document */
+  endOffset: number
+  /** Confidence score 0.0-1.0 (1.0 = exact match) */
+  confidence: number
+  /** Method used to calculate offsets */
+  method: 'exact' | 'fuzzy' | 'not_found'
+  /** ID of chunk where match was found */
+  matchedChunkId?: string
+  /** Debug info for low-confidence matches */
+  debugInfo?: {
+    searchedChunks: number
+    bestSimilarity?: number
+    originalText: string
+    matchedText?: string
+    warning?: 'no_page_info' // Indicates fallback to document-wide search
+  }
+}
+
+/**
+ * Configuration for fuzzy matching
+ */
+const FUZZY_CONFIG = {
+  /** Minimum confidence threshold (0.75 = 75% similarity required) */
+  MIN_CONFIDENCE: 0.75,
+  /** Window size for sliding window search (characters) */
+  WINDOW_SIZE: 100,
+  /** Maximum Levenshtein distance allowed (normalized by length) */
+  MAX_DISTANCE_RATIO: 0.25, // Allow 25% character differences
+}
+
+/**
+ * Normalize text for comparison (whitespace, case, punctuation)
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .replace(/['']/g, "'") // Normalize quotes
+    .replace(/[""]/g, '"')
+    .trim()
+}
+
+/**
+ * Calculate similarity ratio from Levenshtein distance
+ * Returns 0.0-1.0 where 1.0 is identical
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const maxLen = Math.max(str1.length, str2.length)
+  if (maxLen === 0) return 1.0
+
+  const dist = levenshtein(str1, str2)
+  return 1.0 - (dist / maxLen)
+}
+
+/**
+ * Find fuzzy match using sliding window approach
+ */
+function findFuzzyMatch(
+  searchText: string,
+  chunks: ChunkForMatching[]
+): OffsetCalculationResult {
+  const normalizedSearch = normalizeText(searchText)
+  const searchLen = searchText.length
+
+  let bestMatch: OffsetCalculationResult = {
+    startOffset: 0,
+    endOffset: 0,
+    confidence: 0.0,
+    method: 'not_found',
+  }
+
+  for (const chunk of chunks) {
+    const content = chunk.content
+    const normalizedContent = normalizeText(content)
+
+    // Sliding window search
+    for (let i = 0; i <= normalizedContent.length - searchLen; i++) {
+      const window = normalizedContent.slice(i, i + searchLen)
+      const similarity = calculateSimilarity(normalizedSearch, window)
+
+      if (similarity > bestMatch.confidence) {
+        // Map normalized position back to original content
+        // This is approximate but close enough for fuzzy matching
+        const offset = i
+
+        bestMatch = {
+          startOffset: chunk.start_offset + offset,
+          endOffset: chunk.start_offset + offset + searchLen,
+          confidence: similarity,
+          method: 'fuzzy',
+          matchedChunkId: chunk.id,
+          debugInfo: {
+            searchedChunks: chunks.length,
+            bestSimilarity: similarity,
+            originalText: searchText,
+            matchedText: content.slice(offset, offset + searchLen),
+          },
+        }
+      }
+
+      // Early exit if we found excellent match
+      if (similarity > 0.95) {
+        return bestMatch
+      }
+    }
+  }
+
+  return bestMatch
+}
+
+/**
+ * Calculate markdown offsets from PDF text selection
+ *
+ * Strategy:
+ * 1. Filter chunks by page range
+ * 2. Try exact text match first (fast path)
+ * 3. Fall back to fuzzy matching (OCR tolerance)
+ * 4. Expand search to ±1 page if needed
+ *
+ * @param text - Selected text from PDF
+ * @param pageNumber - Page where text was selected
+ * @param chunks - All document chunks with page mapping
+ * @returns Offset calculation result with confidence score
+ *
+ * @example
+ * ```typescript
+ * const result = calculateMarkdownOffsets(
+ *   "The key insight is that",
+ *   5,
+ *   documentChunks
+ * )
+ * if (result.confidence > 0.85) {
+ *   // High confidence - use offsets
+ *   createAnnotation({
+ *     startOffset: result.startOffset,
+ *     endOffset: result.endOffset
+ *   })
+ * }
+ * ```
+ */
+export function calculateMarkdownOffsets(
+  text: string,
+  pageNumber: number,
+  chunks: ChunkForMatching[]
+): OffsetCalculationResult {
+  // 1. Filter chunks that span the target page
+  const pageChunks = chunks.filter(
+    (c) =>
+      c.page_start !== null &&
+      c.page_start !== undefined &&
+      c.page_end !== null &&
+      c.page_end !== undefined &&
+      pageNumber >= c.page_start &&
+      pageNumber <= c.page_end
+  )
+
+  if (pageChunks.length === 0) {
+    // No chunks found on this page - try adjacent pages
+    const adjacentChunks = chunks.filter(
+      (c) =>
+        c.page_start !== null &&
+        c.page_start !== undefined &&
+        c.page_end !== null &&
+        c.page_end !== undefined &&
+        pageNumber >= c.page_start - 1 &&
+        pageNumber <= c.page_end + 1
+    )
+
+    if (adjacentChunks.length === 0) {
+      // Fallback: If no chunks have page information, search ALL chunks
+      // This happens when document was processed without page extraction (0% bbox coverage)
+      const chunksWithPageInfo = chunks.filter(
+        c => c.page_start !== null && c.page_start !== undefined
+      ).length
+
+      if (chunksWithPageInfo === 0 && chunks.length > 0) {
+        console.warn('[text-offset-calculator] No page info available, searching all chunks (slower, less accurate)')
+        const result = findMatch(text, chunks)
+        // Add warning flag to result
+        return {
+          ...result,
+          debugInfo: {
+            searchedChunks: chunks.length,
+            originalText: text,
+            warning: 'no_page_info',
+            ...(result.debugInfo || {}),
+          },
+        }
+      }
+
+      console.warn('[text-offset-calculator] No chunks found on page or adjacent pages')
+      return {
+        startOffset: 0,
+        endOffset: 0,
+        confidence: 0.0,
+        method: 'not_found',
+        debugInfo: {
+          searchedChunks: 0,
+          originalText: text,
+        },
+      }
+    }
+
+    // Use adjacent chunks for search
+    return findMatch(text, adjacentChunks)
+  }
+
+  return findMatch(text, pageChunks)
+}
+
+/**
+ * Internal: Find match in chunk list (exact then fuzzy)
+ */
+function findMatch(
+  text: string,
+  chunks: ChunkForMatching[]
+): OffsetCalculationResult {
+  // 2. Try exact text match first (case-sensitive)
+  for (const chunk of chunks) {
+    const index = chunk.content.indexOf(text)
+    if (index !== -1) {
+      return {
+        startOffset: chunk.start_offset + index,
+        endOffset: chunk.start_offset + index + text.length,
+        confidence: 1.0,
+        method: 'exact',
+        matchedChunkId: chunk.id,
+      }
+    }
+  }
+
+  // 3. Try case-insensitive exact match
+  const lowerText = text.toLowerCase()
+  for (const chunk of chunks) {
+    const index = chunk.content.toLowerCase().indexOf(lowerText)
+    if (index !== -1) {
+      return {
+        startOffset: chunk.start_offset + index,
+        endOffset: chunk.start_offset + index + text.length,
+        confidence: 0.95, // Slightly lower confidence for case mismatch
+        method: 'exact',
+        matchedChunkId: chunk.id,
+      }
+    }
+  }
+
+  // 4. Fall back to fuzzy matching (for OCR errors, whitespace differences)
+  const fuzzyMatch = findFuzzyMatch(text, chunks)
+  if (fuzzyMatch.confidence >= FUZZY_CONFIG.MIN_CONFIDENCE) {
+    return fuzzyMatch
+  }
+
+  // 5. Not found
+  return {
+    startOffset: 0,
+    endOffset: 0,
+    confidence: 0.0,
+    method: 'not_found',
+    debugInfo: {
+      searchedChunks: chunks.length,
+      bestSimilarity: fuzzyMatch.confidence,
+      originalText: text,
+    },
+  }
+}
+
+/**
+ * Validate offset calculation result
+ *
+ * Checks if result is suitable for annotation creation
+ */
+export function isValidOffset(result: OffsetCalculationResult): boolean {
+  return (
+    result.method !== 'not_found' &&
+    result.confidence >= FUZZY_CONFIG.MIN_CONFIDENCE &&
+    result.startOffset >= 0 &&
+    result.endOffset > result.startOffset
+  )
+}
+
+/**
+ * Get human-readable confidence level
+ */
+export function getConfidenceLevel(confidence: number): string {
+  if (confidence >= 0.95) return 'Excellent'
+  if (confidence >= 0.85) return 'High'
+  if (confidence >= 0.75) return 'Good'
+  if (confidence >= 0.60) return 'Fair'
+  return 'Low'
+}

@@ -72,6 +72,12 @@ export interface CreateAnnotationInput {
   /** Original chunk index for chunk-bounded search */
   originalChunkIndex?: number;
 
+  // PDF ↔ Markdown sync metadata
+  /** Confidence score for PDF↔Markdown offset mapping (0.0-1.0) */
+  syncConfidence?: number;
+  /** Method used to calculate markdown offsets from PDF coordinates */
+  syncMethod?: 'exact' | 'fuzzy' | 'bbox' | 'manual';
+
   // Spark references
   /** Array of spark entity IDs linked to this annotation */
   sparkRefs?: string[];
@@ -146,6 +152,10 @@ export class AnnotationOperations {
         recoveryConfidence: 1.0,
         recoveryMethod: 'exact',
         needsReview: false,
+        // PDF ↔ Markdown sync metadata
+        syncConfidence: input.syncConfidence,
+        syncMethod: input.syncMethod,
+        syncNeedsReview: input.syncConfidence ? input.syncConfidence < 0.85 : false,
       },
       Visual: {
         type: input.type,

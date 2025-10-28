@@ -39,6 +39,9 @@ const CreateAnnotationSchema = z.object({
   pdfY: z.number().optional(),
   pdfWidth: z.number().optional(),
   pdfHeight: z.number().optional(),
+  // PDF ↔ Markdown sync metadata
+  syncConfidence: z.number().min(0).max(1).optional(),
+  syncMethod: z.enum(['exact', 'fuzzy', 'bbox', 'manual']).optional(),
 })
 
 /**
@@ -102,6 +105,9 @@ export async function createAnnotation(
       pdfY: validated.pdfY,
       pdfWidth: validated.pdfWidth,
       pdfHeight: validated.pdfHeight,
+      // PDF ↔ Markdown sync metadata
+      syncConfidence: validated.syncConfidence,
+      syncMethod: validated.syncMethod,
     })
 
     console.log(`[Annotations] ✓ Created: ${entityId}`)
