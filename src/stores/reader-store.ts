@@ -1,23 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-
-/**
- * Chunk type matching the database schema.
- * Contains semantic metadata and offset information.
- */
-export interface Chunk {
-  id: string
-  chunk_index: number
-  start_offset: number
-  end_offset: number
-  content: string
-  summary?: string
-  themes?: string[]
-  concepts?: Array<{ text: string; importance: number }>
-  importance_score?: number
-  polarity?: number
-  embedding?: number[]
-}
+import type { Chunk } from '@/types/annotations'
 
 /**
  * Reader store state.
@@ -44,11 +27,17 @@ interface ReaderState {
   scrollToChunkId: string | null
   setScrollToChunkId: (chunkId: string | null) => void
 
+  // PDF viewer state (for PDF navigation)
+  pdfPageNumber: number  // Current page in PDF view
+  highlightedChunkId: string | null  // Temporarily highlighted chunk
+
   // Actions
   loadDocument: (docId: string, title: string, markdown: string, chunks: Chunk[]) => void
   updateScroll: (position: number, offsets: { start: number; end: number }) => void
   updateChunks: (updatedChunks: Chunk[]) => void
   clearDocument: () => void
+  setPdfPageNumber: (page: number) => void
+  setHighlightedChunkId: (chunkId: string | null) => void
 }
 
 /**
@@ -71,6 +60,8 @@ export const useReaderStore = create<ReaderState>()(
       visibleChunks: [],
       correctionModeActive: false,
       scrollToChunkId: null,
+      pdfPageNumber: 1,
+      highlightedChunkId: null,
 
       /**
        * Sets correction mode state.
@@ -187,15 +178,34 @@ export const useReaderStore = create<ReaderState>()(
         chunks: [],
         scrollPosition: 0,
         viewportOffsets: { start: 0, end: 0 },
-        visibleChunks: []
-      })
+        visibleChunks: [],
+        pdfPageNumber: 1,
+        highlightedChunkId: null
+      }),
+
+      /**
+       * Sets the current PDF page number for navigation.
+       * Used when navigating to chunks from ChunksTab or OutlineTab.
+       *
+       * @param page - Page number to navigate to
+       */
+      setPdfPageNumber: (page) => set({ pdfPageNumber: page }),
+
+      /**
+       * Sets temporarily highlighted chunk ID for visual feedback.
+       * Automatically cleared after 2 seconds by the caller.
+       *
+       * @param chunkId - Chunk ID to highlight, or null to clear
+       */
+      setHighlightedChunkId: (chunkId) => set({ highlightedChunkId: chunkId })
     }),
     {
       name: 'reader-storage',
       // Only persist document ID and scroll position for "resume reading"
       partialize: (state) => ({
         documentId: state.documentId,
-        scrollPosition: state.scrollPosition
+        scrollPosition: state.scrollPosition,
+        pdfPageNumber: state.pdfPageNumber  // Persist PDF page for resume reading
       })
     }
   )

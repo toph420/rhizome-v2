@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import { DocumentViewer } from './DocumentViewer'
 import { DocumentHeader } from './DocumentHeader'
 import { RightPanelV2 as RightPanel } from '../sidebar/RightPanel'
@@ -8,6 +9,13 @@ import { ConnectionHeatmap } from './ConnectionHeatmap'
 import { QuickSparkCapture } from '../sparks/QuickSparkCapture'
 import { CorrectionModePanel } from './CorrectionModePanel'
 import { CorrectionConfirmDialog } from './CorrectionConfirmDialog'
+import { LeftPanel } from '@/components/layout/LeftPanel'
+
+// Dynamic import PDFViewer to avoid SSR issues with PDF.js
+const PDFViewer = dynamic(
+  () => import('@/components/rhizome/pdf-viewer/PDFViewer').then(mod => ({ default: mod.PDFViewer })),
+  { ssr: false }
+)
 import { toast } from 'sonner'
 import { useReaderStore } from '@/stores/reader-store'
 import { useConnectionStore } from '@/stores/connection-store'
@@ -31,6 +39,7 @@ interface CorrectionModeState {
 interface ReaderLayoutProps {
   documentId: string
   markdownUrl: string
+  pdfUrl: string | null  // 🆕 ADD: PDF signed URL
   chunks: Chunk[]
   annotations: StoredAnnotation[]
   documentTitle: string
@@ -96,6 +105,7 @@ interface ReaderLayoutProps {
 export function ReaderLayout({
   documentId,
   markdownUrl,
+  pdfUrl,  // 🆕 ADD: PDF URL
   chunks,
   annotations,
   documentTitle,
@@ -104,6 +114,15 @@ export function ReaderLayout({
   chunkerType,
   reviewResults = null,
 }: ReaderLayoutProps) {
+  // 🆕 ADD: Viewer mode state
+  const [viewerMode, setViewerMode] = useState<'markdown' | 'pdf'>('markdown')
+  // 🆕 ADD: PDF metadata state
+  const [pdfMetadata, setPdfMetadata] = useState<any>(null)
+  // 🆕 ADD: PDF outline state (for LeftPanel Outline tab)
+  const [pdfOutline, setPdfOutline] = useState<any[]>([])
+  // 🆕 ADD: PDF numPages state (for LeftPanel Thumbnails tab)
+  const [pdfNumPages, setPdfNumPages] = useState<number>(0)
+
   // ReaderStore: Document content and scroll state
   const loadDocument = useReaderStore(state => state.loadDocument)
   const visibleChunks = useReaderStore(state => state.visibleChunks)
@@ -111,6 +130,10 @@ export function ReaderLayout({
   const setCorrectionModeStore = useReaderStore(state => state.setCorrectionMode)
   const setScrollToChunkId = useReaderStore(state => state.setScrollToChunkId)
   const updateChunks = useReaderStore(state => state.updateChunks)
+  // 🆕 ADD: PDF navigation methods and state
+  const pdfPageNumber = useReaderStore(state => state.pdfPageNumber)
+  const setPdfPageNumber = useReaderStore(state => state.setPdfPageNumber)
+  const setHighlightedChunkId = useReaderStore(state => state.setHighlightedChunkId)
 
   // ConnectionStore: Engine configuration and connections
   const setConnections = useConnectionStore(state => state.setConnections)
@@ -266,8 +289,9 @@ export function ReaderLayout({
    *
    * @param chunkId - Chunk identifier to navigate to
    * @param enterCorrectionMode - Whether to enter correction mode for this chunk
+   * @param mode - Optional mode to navigate to ('markdown' | 'pdf')
    */
-  const handleNavigateToChunk = useCallback((chunkId: string, enterCorrectionMode = false) => {
+  const handleNavigateToChunk = useCallback((chunkId: string, enterCorrectionMode = false, mode?: 'markdown' | 'pdf') => {
     // Find chunk data
     const chunk = chunks.find(c => c.id === chunkId)
 
@@ -280,7 +304,32 @@ export function ReaderLayout({
       return
     }
 
-    // Trigger scroll via ReaderStore (VirtualizedReader will handle it)
+    // 🆕 ADD: Switch to PDF mode if requested
+    if (mode === 'pdf' && viewerMode !== 'pdf') {
+      setViewerMode('pdf')
+    }
+
+    // 🆕 ADD: For PDF mode, navigate to page
+    if (viewerMode === 'pdf' || mode === 'pdf') {
+      if (!chunk.page_start) {
+        toast.error('Chunk has no page information')
+        return
+      }
+
+      // Set page number in PDFViewer (via ReaderStore)
+      setPdfPageNumber(chunk.page_start)
+      setHighlightedChunkId(chunk.id)
+
+      // Clear highlight after 2 seconds
+      setTimeout(() => {
+        setHighlightedChunkId(null)
+      }, 2000)
+
+      toast.success(`Navigated to page ${chunk.page_start}`)
+      return
+    }
+
+    // Markdown mode: Trigger scroll via ReaderStore (VirtualizedReader will handle it)
     setScrollToChunkId(chunkId)
 
     // Wait for scroll to complete, then highlight and enter correction mode if needed
@@ -335,7 +384,7 @@ export function ReaderLayout({
         }
       }
     }, 800)
-  }, [chunks, setCorrectionModeStore, setScrollToChunkId])
+  }, [chunks, setCorrectionModeStore, setScrollToChunkId, viewerMode, setViewerMode, setPdfPageNumber, setHighlightedChunkId])
 
   /**
    * Scrolls to annotation by finding element with data-annotation-id attribute.
@@ -442,6 +491,15 @@ export function ReaderLayout({
   }, [])
 
   /**
+   * 🆕 ADD: PDF page navigation handler for LeftPanel Outline tab.
+   * Sets the page number in ReaderStore, which PDFViewer subscribes to.
+   */
+  const handlePageNavigate = useCallback((page: number) => {
+    setPdfPageNumber(page)
+    toast.success(`Navigated to page ${page}`)
+  }, [setPdfPageNumber])
+
+  /**
    * Text selection handler for correction mode.
    * Calculates offsets from DOM selection and shows confirmation dialog.
    */
@@ -502,7 +560,7 @@ export function ReaderLayout({
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Enhanced document header with reading modes + Quick Spark - sticky below TopNav */}
+      {/* Enhanced document header with reading modes + Quick Spark + View toggle - sticky below TopNav */}
       <div className="sticky top-14 z-40 bg-background">
         <DocumentHeader
         documentId={documentId}
@@ -514,38 +572,69 @@ export function ReaderLayout({
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onQuickSpark={openSparkCapture}
+        viewerMode={viewerMode}
+        onViewerModeChange={setViewerMode}
+        pdfAvailable={!!pdfUrl}
       />
       </div>
 
-      <div className="flex-1 overflow-hidden relative">
-        {/* Connection density heatmap in left margin */}
-        {viewMode === 'explore' && (
-          <ConnectionHeatmap
+      <div className="flex-1 flex overflow-hidden">
+        {/* 🆕 ADD: LeftPanel for PDF mode */}
+        <LeftPanel
+          documentId={documentId}
+          pdfMetadata={pdfMetadata}
+          outline={pdfOutline}
+          fileUrl={pdfUrl || undefined}
+          numPages={pdfNumPages}
+          currentPage={pdfPageNumber}
+          chunks={chunks}
+          onPageNavigate={handlePageNavigate}
+        />
+
+        {/* Main viewer area */}
+        <div className="flex-1 overflow-hidden relative">
+          {/* Connection density heatmap in left margin (markdown only) */}
+          {viewMode === 'explore' && viewerMode === 'markdown' && (
+            <ConnectionHeatmap
+              documentId={documentId}
+              chunks={chunks}
+            />
+          )}
+
+          {/* Conditional viewer based on mode */}
+          {viewerMode === 'markdown' ? (
+            <DocumentViewer
+              documentId={documentId}
+              markdownUrl={markdownUrl}
+              chunks={chunks}
+              annotations={annotations}
+            />
+          ) : (
+            pdfUrl && (
+              <PDFViewer
+                fileUrl={pdfUrl}
+                documentId={documentId}
+                onMetadataLoad={setPdfMetadata}
+                onOutlineLoad={setPdfOutline}
+                onNumPagesLoad={setPdfNumPages}
+                chunks={chunks}
+              />
+            )
+          )}
+        </div>
+
+        {/* Right panel with 7 tabs - hidden in Focus mode */}
+        {viewMode !== 'focus' && (
+          <RightPanel
             documentId={documentId}
+            visibleChunkIds={visibleChunks.map(c => c.id)}
+            reviewResults={reviewResults}
+            onAnnotationClick={handleAnnotationClick}
+            onNavigateToChunk={handleNavigateToChunk}
             chunks={chunks}
           />
         )}
-
-        {/* Main document viewer - VirtualizedReader now self-contained */}
-        <DocumentViewer
-          documentId={documentId}
-          markdownUrl={markdownUrl}
-          chunks={chunks}
-          annotations={annotations}
-        />
       </div>
-
-      {/* Right panel with 7 tabs - hidden in Focus mode */}
-      {viewMode !== 'focus' && (
-        <RightPanel
-          documentId={documentId}
-          visibleChunkIds={visibleChunks.map(c => c.id)}
-          reviewResults={reviewResults}
-          onAnnotationClick={handleAnnotationClick}
-          onNavigateToChunk={handleNavigateToChunk}
-          chunks={chunks}
-        />
-      )}
 
       {/* Quick Spark Capture (⌘K) - handles own visibility */}
       <QuickSparkCapture

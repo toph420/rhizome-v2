@@ -140,7 +140,31 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
     
     const signedUrl = data.signedUrl
     const job = await getDocumentJob(id)
-    
+
+    // 🆕 ADD: Generate PDF signed URL
+    let pdfSignedUrl: string | null = null
+
+    // Check if original PDF exists in storage
+    const { data: pdfData, error: pdfError } = await adminClient.storage
+      .from('documents')
+      .createSignedUrl(`${doc.storage_path}/source.pdf`, 3600)
+
+    if (!pdfError && pdfData) {
+      pdfSignedUrl = pdfData.signedUrl
+
+      // File size warning for large PDFs (personal tool philosophy)
+      const { data: fileData } = await adminClient.storage
+        .from('documents')
+        .list(doc.storage_path, { search: 'source.pdf' })
+
+      const fileSizeMB = fileData?.[0]?.metadata?.size ? fileData[0].metadata.size / (1024 * 1024) : 0
+
+      // No artificial limits, just warnings
+      if (fileSizeMB > 100) {
+        console.warn(`[PDF Viewer] Large PDF: ${fileSizeMB.toFixed(2)}MB - may take longer to load`)
+      }
+    }
+
     // Query chunks ordered by index with metadata
     const { data: chunks, error: chunksError } = await supabase
       .from('chunks')
@@ -148,6 +172,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
         id,
         content,
         chunk_index,
+        chunker_type,
         start_offset,
         end_offset,
         themes,
@@ -155,7 +180,10 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
         importance_score,
         emotional_metadata,
         conceptual_metadata,
-        domain_metadata
+        domain_metadata,
+        bboxes,
+        page_start,
+        page_end
       `)
       .eq('document_id', id)
       .order('chunk_index', { ascending: true })
@@ -226,6 +254,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
         <ReaderLayout
           documentId={id}
           markdownUrl={signedUrl}
+          pdfUrl={pdfSignedUrl}
           chunks={chunks}
           annotations={annotations}
           documentTitle={doc.title}

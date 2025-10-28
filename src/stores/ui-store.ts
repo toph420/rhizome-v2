@@ -4,16 +4,21 @@ import type { StoredAnnotation, TextSelection } from '@/types/annotations'
 
 type ViewMode = 'explore' | 'focus' | 'study'
 type SidebarTab = 'connections' | 'annotations' | 'sparks' | 'cards' | 'review' | 'tune' | 'study' | 'chunks'
+type LeftPanelTab = 'metadata' | 'outline' | 'thumbnails' | 'heatmap'
 
 interface UIState {
   // View mode
   viewMode: ViewMode
 
-  // Sidebar
+  // Sidebar (RightPanel)
   sidebarCollapsed: boolean
   activeTab: SidebarTab
   expandedConnections: Set<string>
   expandedAnnotations: Set<string>
+
+  // LeftPanel (new)
+  leftPanelOpen: boolean
+  leftPanelTab: LeftPanelTab
 
   // Reader display settings
   showChunkBoundaries: boolean
@@ -37,6 +42,8 @@ interface UIState {
   toggleConnectionExpanded: (id: string) => void
   toggleAnnotationExpanded: (id: string) => void
   toggleSetting: (setting: 'showChunkBoundaries' | 'showHeatmap') => void
+  toggleLeftPanel: () => void
+  setLeftPanelTab: (tab: LeftPanelTab) => void
   openQuickCapture: () => void
   closeQuickCapture: () => void
   setActiveAnnotation: (annotation: StoredAnnotation | null) => void
@@ -63,6 +70,8 @@ export const useUIStore = create<UIState>()(
       activeTab: 'connections',
       expandedConnections: new Set(),
       expandedAnnotations: new Set(),
+      leftPanelOpen: true, // Open by default on desktop
+      leftPanelTab: 'metadata',
       showChunkBoundaries: true,
       showHeatmap: true,
       quickCaptureOpen: false,
@@ -120,6 +129,9 @@ export const useUIStore = create<UIState>()(
       toggleSetting: (setting) => {
         set({ [setting]: !get()[setting] })
       },
+
+      toggleLeftPanel: () => set(state => ({ leftPanelOpen: !state.leftPanelOpen })),
+      setLeftPanelTab: (tab) => set({ leftPanelTab: tab }),
 
       openQuickCapture: () =>
         set({ quickCaptureOpen: true }),
@@ -179,6 +191,8 @@ export const useUIStore = create<UIState>()(
         viewMode: state.viewMode,
         sidebarCollapsed: state.sidebarCollapsed,
         activeTab: state.activeTab,
+        leftPanelOpen: state.leftPanelOpen,
+        leftPanelTab: state.leftPanelTab,
         showChunkBoundaries: state.showChunkBoundaries,
         showHeatmap: state.showHeatmap,
         // Don't persist expanded states, quickCaptureOpen, or activeAnnotation

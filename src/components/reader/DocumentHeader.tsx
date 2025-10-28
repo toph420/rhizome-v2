@@ -7,6 +7,7 @@ import { Compass, BookOpen, GraduationCap, Zap, ArrowLeft } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useRouter } from 'next/navigation'
 import { chunkerLabels, chunkerDescriptions, chunkerColors, type ChunkerType } from '@/types/chunker'
+import { cn } from '@/lib/utils'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -18,6 +19,9 @@ interface DocumentHeaderProps {
   viewMode?: 'explore' | 'focus' | 'study'
   onViewModeChange?: (mode: 'explore' | 'focus' | 'study') => void
   onQuickSpark?: () => void
+  viewerMode?: 'markdown' | 'pdf'  // 🆕 ADD
+  onViewerModeChange?: (mode: 'markdown' | 'pdf') => void  // 🆕 ADD
+  pdfAvailable?: boolean  // 🆕 ADD
 }
 
 /**
@@ -33,6 +37,9 @@ export function DocumentHeader({
   viewMode = 'explore',
   onViewModeChange,
   onQuickSpark,
+  viewerMode = 'markdown',  // 🆕 ADD
+  onViewerModeChange,  // 🆕 ADD
+  pdfAvailable = false,  // 🆕 ADD
 }: DocumentHeaderProps) {
   const router = useRouter()
 
@@ -84,6 +91,34 @@ export function DocumentHeader({
       </div>
 
       <div className="flex items-center gap-2">
+        {/* 🆕 ADD: View mode toggle (only if PDF available) */}
+        {pdfAvailable && onViewerModeChange && (
+          <div className="flex items-center gap-2 border rounded-md p-1 mr-2">
+            <button
+              onClick={() => onViewerModeChange('markdown')}
+              className={cn(
+                'px-3 py-1 rounded text-sm transition-colors',
+                viewerMode === 'markdown'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              )}
+            >
+              Markdown
+            </button>
+            <button
+              onClick={() => onViewerModeChange('pdf')}
+              className={cn(
+                'px-3 py-1 rounded text-sm transition-colors',
+                viewerMode === 'pdf'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              )}
+            >
+              PDF
+            </button>
+          </div>
+        )}
+
         {/* Reading Mode Toggle */}
         {onViewModeChange && (
           <ToggleGroup
