@@ -285,9 +285,17 @@ async function runDoclingScript(
       lineBuffer = lines[lines.length - 1]
     })
 
-    // Handle stderr (Python errors)
+    // Handle stderr (Python errors and debug logs)
     python.stderr.on('data', (data: Buffer) => {
-      stderrData += data.toString()
+      const text = data.toString()
+      stderrData += text
+
+      // Log stderr in real-time (includes Phase 2A debug logs)
+      // Split by lines to preserve formatting
+      const lines = text.split('\n').filter(l => l.trim())
+      for (const line of lines) {
+        console.error(line)  // Use console.error to match stderr
+      }
     })
 
     // Handle process exit

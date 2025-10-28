@@ -213,11 +213,15 @@ export function aggregateMetadata(
     Math.max(...charspans.map(cs => cs[1]))
   ] as [number, number] : null
 
+  console.log(`[Phase2A Transfer] Charspans: found=${charspans.length}, result=${JSON.stringify(aggregatedCharspan)}`)
+
   // Phase 2A: Aggregate content_layer (prefer BODY over FURNITURE)
   const layers = overlappingChunks
     .map(c => c.chunk.meta.content_layer)
     .filter(l => l !== null && l !== undefined)
   const content_layer = layers.includes('BODY') ? 'BODY' : (layers[0] || null)
+
+  console.log(`[Phase2A Transfer] Layers: found=${layers.length}, values=${JSON.stringify(layers)}, result=${content_layer}`)
 
   // Phase 2A: Aggregate content_label (prefer semantic types)
   const labels = overlappingChunks
@@ -225,6 +229,8 @@ export function aggregateMetadata(
     .filter(l => l !== null && l !== undefined)
   const labelPriority = ['PARAGRAPH', 'CODE', 'FORMULA', 'LIST_ITEM']
   const content_label = labels.find(l => labelPriority.includes(l)) || labels[0] || null
+
+  console.log(`[Phase2A Transfer] Labels: found=${labels.length}, values=${JSON.stringify(labels)}, result=${content_label}`)
 
   // Phase 2A: Take first non-null for chunk-specific fields
   const section_level = overlappingChunks

@@ -101,6 +101,18 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
     """
     Extract rich metadata from HybridChunker chunk.
 
+    CRITICAL: Phase 2A metadata lives in chunk.meta.doc_items, NOT on chunk itself!
+
+    Structure:
+      chunk.text - text content
+      chunk.meta.doc_items[] - list of DocItem objects containing:
+        - content_layer: "body" | "furniture" | "background" | "invisible" | "notes"
+        - label: "PARAGRAPH" | "PAGE_HEADER" | "CODE" | "FORMULA" | etc.
+        - prov[]: list of ProvenanceItem objects with:
+          - page_no: int
+          - bbox: {l, t, r, b}
+          - charspan: [start, end]
+
     Args:
         chunk: HybridChunker chunk object
         doc: Docling Document object
@@ -124,6 +136,10 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
             'hyperlink': str | None
         }
     """
+    # 🔍 DEBUG: Function entry point
+    print(f"[Phase2A] extract_chunk_metadata() CALLED", file=sys.stderr)
+    sys.stderr.flush()
+
     meta = {
         'page_start': None,
         'page_end': None,
@@ -131,10 +147,10 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
         'heading_level': None,
         'section_marker': None,
         'bboxes': [],
-        # Phase 2A enhancements
+        # Phase 2A enhancements (no defaults - we'll aggregate from doc_items)
         'charspan': None,
-        'content_layer': 'BODY',  # Default to BODY
-        'content_label': 'PARAGRAPH',  # Default to PARAGRAPH
+        'content_layer': None,
+        'content_label': None,
         'section_level': None,
         'list_enumerated': None,
         'list_marker': None,
@@ -142,91 +158,152 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
         'hyperlink': None
     }
 
-    try:
-        # Extract page numbers and charspan from chunk provenance
-        if hasattr(chunk, 'meta') and 'prov' in chunk.meta:
-            prov = chunk.meta['prov']
-            if prov:
-                # Get first and last page numbers
-                pages = []
-                for p in prov:
-                    if hasattr(p, 'page'):
-                        pages.append(p.page)
+    # 🔍 DEBUG: Log chunk structure
+    print(f"[Phase2A Debug] Chunk class: {chunk.__class__.__name__}", file=sys.stderr)
+    sys.stderr.flush()
+    print(f"[Phase2A Debug] Has meta: {hasattr(chunk, 'meta')}", file=sys.stderr)
+    if hasattr(chunk, 'meta') and chunk.meta:
+        print(f"[Phase2A Debug] Meta has doc_items: {hasattr(chunk.meta, 'doc_items')}", file=sys.stderr)
+        if hasattr(chunk.meta, 'doc_items'):
+            doc_items = chunk.meta.doc_items if chunk.meta.doc_items else []
+            print(f"[Phase2A Debug] doc_items count: {len(doc_items)}", file=sys.stderr)
 
+    try:
+        # =====================================================================
+        # PHASE 2A: Extract metadata from chunk.meta.doc_items
+        # =====================================================================
+
+        if hasattr(chunk, 'meta') and chunk.meta and hasattr(chunk.meta, 'doc_items'):
+            doc_items = chunk.meta.doc_items
+
+            if doc_items:
+                print(f"[Phase2A Debug] Processing {len(doc_items)} doc_items", file=sys.stderr)
+
+                # Aggregation containers
+                pages = []
+                charspans = []
+                bboxes_list = []
+                content_layers = []
+                content_labels = []
+
+                # Iterate through all doc_items in this chunk
+                for idx, doc_item in enumerate(doc_items):
+                    print(f"[Phase2A Debug] DocItem {idx}: class={doc_item.__class__.__name__}", file=sys.stderr)
+
+                    # Extract content_layer (CRITICAL for noise filtering)
+                    if hasattr(doc_item, 'content_layer') and doc_item.content_layer:
+                        # Get enum value (e.g., "body") not string repr (e.g., "ContentLayer.body")
+                        layer = doc_item.content_layer.value if hasattr(doc_item.content_layer, 'value') else str(doc_item.content_layer)
+                        # Normalize to uppercase for consistency
+                        layer = layer.upper()
+                        content_layers.append(layer)
+                        print(f"[Phase2A Debug] DocItem {idx}: content_layer={layer}", file=sys.stderr)
+
+                    # Extract label (CRITICAL for classification)
+                    if hasattr(doc_item, 'label') and doc_item.label:
+                        # Get enum value (e.g., "PARAGRAPH") not string repr (e.g., "DocItemLabel.PARAGRAPH")
+                        label = doc_item.label.value if hasattr(doc_item.label, 'value') else str(doc_item.label)
+                        # Labels are already uppercase in Docling, but ensure consistency
+                        label = label.upper()
+                        content_labels.append(label)
+                        print(f"[Phase2A Debug] DocItem {idx}: label={label}", file=sys.stderr)
+
+                    # Extract provenance (page_no, bbox, charspan)
+                    if hasattr(doc_item, 'prov') and doc_item.prov:
+                        for prov_idx, prov in enumerate(doc_item.prov):
+                            # Page number
+                            if hasattr(prov, 'page_no'):
+                                pages.append(prov.page_no)
+
+                            # Charspan [start, end]
+                            if hasattr(prov, 'charspan') and prov.charspan:
+                                charspans.append(tuple(prov.charspan))
+
+                            # Bounding box {l, t, r, b}
+                            if hasattr(prov, 'bbox') and prov.bbox:
+                                bbox = prov.bbox
+                                if all(hasattr(bbox, attr) for attr in ['l', 't', 'r', 'b']):
+                                    bboxes_list.append({
+                                        'page': prov.page_no,
+                                        'l': float(bbox.l),
+                                        't': float(bbox.t),
+                                        'r': float(bbox.r),
+                                        'b': float(bbox.b)
+                                    })
+
+                # Aggregate Phase 2A metadata
                 if pages:
                     meta['page_start'] = min(pages)
                     meta['page_end'] = max(pages)
-
-                # Extract character span (CRITICAL for precise annotation sync)
-                charspans = []
-                for p in prov:
-                    if hasattr(p, 'charspan') and p.charspan:
-                        charspans.append(p.charspan)
+                    print(f"[Phase2A Debug] Aggregated pages: {meta['page_start']}-{meta['page_end']}", file=sys.stderr)
 
                 if charspans:
-                    # Get earliest start and latest end
+                    # Get earliest start, latest end
                     meta['charspan'] = (
                         min(cs[0] for cs in charspans),
                         max(cs[1] for cs in charspans)
                     )
+                    print(f"[Phase2A Debug] Aggregated charspan: {meta['charspan']} (from {len(charspans)} prov items)", file=sys.stderr)
 
-        # Extract heading path (e.g., ["Chapter 1", "Section 1.1"])
-        if hasattr(chunk, 'meta') and 'headings' in chunk.meta:
-            heading_data = chunk.meta['headings']
-            if isinstance(heading_data, list):
+                if bboxes_list:
+                    meta['bboxes'] = bboxes_list
+                    print(f"[Phase2A Debug] Aggregated {len(bboxes_list)} bboxes", file=sys.stderr)
+
+                # Use most common content_layer
+                if content_layers:
+                    from collections import Counter
+                    most_common_layer = Counter(content_layers).most_common(1)[0][0]
+                    meta['content_layer'] = most_common_layer
+                    print(f"[Phase2A Debug] Most common content_layer: {most_common_layer} (from {content_layers})", file=sys.stderr)
+
+                # Use most common content_label
+                if content_labels:
+                    from collections import Counter
+                    most_common_label = Counter(content_labels).most_common(1)[0][0]
+                    meta['content_label'] = most_common_label
+                    print(f"[Phase2A Debug] Most common content_label: {most_common_label} (from {content_labels})", file=sys.stderr)
+            else:
+                print(f"[Phase2A Debug] doc_items is empty", file=sys.stderr)
+        else:
+            print(f"[Phase2A Debug] No doc_items in chunk.meta", file=sys.stderr)
+
+        # =====================================================================
+        # Extract heading path (from chunk.meta.headings)
+        # =====================================================================
+        if hasattr(chunk, 'meta') and chunk.meta and hasattr(chunk.meta, 'headings'):
+            heading_data = chunk.meta.headings
+            if heading_data and isinstance(heading_data, list):
                 meta['heading_path'] = [str(h) for h in heading_data]
                 meta['heading_level'] = len(meta['heading_path'])
+                print(f"[Phase2A Debug] Headings: {meta['heading_path']}", file=sys.stderr)
 
-        # Extract bounding boxes for PDF coordinate highlighting
-        if hasattr(chunk, 'meta') and 'prov' in chunk.meta:
-            for prov in chunk.meta['prov']:
-                if hasattr(prov, 'bbox') and hasattr(prov, 'page'):
-                    bbox = prov.bbox
-                    # Only add bbox if all coordinates exist
-                    if all(hasattr(bbox, attr) for attr in ['l', 't', 'r', 'b']):
-                        meta['bboxes'].append({
-                            'page': prov.page,
-                            'l': float(bbox.l),  # left
-                            't': float(bbox.t),  # top
-                            'r': float(bbox.r),  # right
-                            'b': float(bbox.b)   # bottom
-                        })
+        # =====================================================================
+        # Apply defaults if Phase 2A fields are still None
+        # =====================================================================
+        if meta['content_layer'] is None:
+            meta['content_layer'] = 'BODY'  # Safe default
+            print(f"[Phase2A Debug] Using default content_layer=BODY", file=sys.stderr)
 
-        # Extract content layer (CRITICAL for noise filtering)
-        if hasattr(chunk, 'content_layer'):
-            meta['content_layer'] = chunk.content_layer
-
-        # Extract content label (CRITICAL for classification)
-        if hasattr(chunk, 'label'):
-            meta['content_label'] = chunk.label
-
-        # Extract section level (enhanced TOC)
-        if hasattr(chunk, '__class__') and chunk.__class__.__name__ == 'SectionHeaderItem':
-            if hasattr(chunk, 'level'):
-                meta['section_level'] = chunk.level
-
-        # Extract list metadata
-        if hasattr(chunk, '__class__') and chunk.__class__.__name__ == 'ListItem':
-            if hasattr(chunk, 'enumerated'):
-                meta['list_enumerated'] = chunk.enumerated
-            if hasattr(chunk, 'marker'):
-                meta['list_marker'] = chunk.marker
-
-        # Extract code language
-        if hasattr(chunk, '__class__') and chunk.__class__.__name__ == 'CodeItem':
-            if hasattr(chunk, 'code_language'):
-                meta['code_language'] = chunk.code_language
-
-        # Extract hyperlink
-        if hasattr(chunk, 'hyperlink') and chunk.hyperlink:
-            meta['hyperlink'] = str(chunk.hyperlink)
-
-        # section_marker would be used for EPUB support (future)
-        # e.g., "chapter_003" from EPUB spine
+        if meta['content_label'] is None:
+            meta['content_label'] = 'PARAGRAPH'  # Safe default
+            print(f"[Phase2A Debug] Using default content_label=PARAGRAPH", file=sys.stderr)
 
     except Exception as e:
         # Don't fail chunking if metadata extraction fails
-        print(f"Warning: Failed to extract chunk metadata: {e}", file=sys.stderr)
+        print(f"[Phase2A Error] Failed to extract chunk metadata: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+
+    # 🔍 DEBUG: Log final Phase 2A metadata summary
+    phase2a_summary = {
+        'charspan': f"{meta['charspan']}" if meta['charspan'] else 'NULL',
+        'content_layer': meta['content_layer'] or 'NULL',
+        'content_label': meta['content_label'] or 'NULL',
+        'page_range': f"{meta['page_start']}-{meta['page_end']}" if meta['page_start'] else 'NULL',
+        'bboxes': len(meta['bboxes']) if meta['bboxes'] else 0,
+        'headings': len(meta['heading_path']) if meta['heading_path'] else 0
+    }
+    print(f"[Phase2A Summary] {phase2a_summary}", file=sys.stderr)
 
     return meta
 
