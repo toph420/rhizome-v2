@@ -141,6 +141,7 @@ export function VirtualizedReader() {
     // Start with store annotations converted to simple format
     // IMPORTANT: Read offsets from position component (has recovered offsets after reprocessing)
     // annotation.range has ORIGINAL offsets, position has CURRENT/RECOVERED offsets
+    // NEW: Include text for search-based highlighting (offsets might be wrong)
     const storeAnnotationsSimple = annotations
       .filter(ann => ann.components.Position && ann.components.Visual)
       .map(ann => ({
@@ -148,6 +149,7 @@ export function VirtualizedReader() {
         startOffset: ann.components.Position!.startOffset,
         endOffset: ann.components.Position!.endOffset,
         color: ann.components.Visual!.color,
+        text: ann.components.Position!.originalText,  // FIXED: Get text from Position, not Content
       }))
 
     // Add optimistic annotations
@@ -156,6 +158,7 @@ export function VirtualizedReader() {
       startOffset: number
       endOffset: number
       color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
+      text?: string
     }> = []
 
     optimisticAnnotations.forEach((annotation) => {
@@ -168,6 +171,7 @@ export function VirtualizedReader() {
         startOffset: annotation.start_offset,
         endOffset: annotation.end_offset,
         color: annotation.color as 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink',
+        text: annotation.text,  // NEW: Include text for search-based matching
       })
     })
 
