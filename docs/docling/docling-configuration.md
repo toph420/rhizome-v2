@@ -773,6 +773,184 @@ WHERE document_id = 'YOUR_DOCUMENT_ID' AND is_current = true;
 
 ---
 
+## Phase 2B Text Formatting (Known Limitation)
+
+**Feature**: Extract text-level formatting (bold, italic, underline, strikethrough, subscript/superscript).
+
+**Status**: Infrastructure complete, **blocked by Docling parser limitation** (2025-10-28)
+
+### Why Formatting Extraction Doesn't Work
+
+**Docling recognizes formatting but doesn't populate the structured `Formatting` attribute:**
+
+```python
+# What Docling DOES:
+export_to_markdown() → "**bold text**"  ✅ Markdown syntax preserved
+
+# What Docling DOESN'T DO:
+TextItem.formatting.bold = True  ❌ Attribute stays None
+```
+
+**From Docling's official FAQ:**
+> "Currently text styles are **not supported** in the `DoclingDocument` format."
+
+### Research Findings (2025-10-28)
+
+**What we tested:**
+1. **HTML→PDF** (native PDF): 0% formatting coverage
+2. **DOCX file** (native formatting): 0% formatting coverage
+3. **Markdown export**: Formatting preserved as `**bold**` syntax ✅
+
+**Conclusion**:
+- Docling's parser detects formatting for markdown export
+- But doesn't populate `TextItem.formatting` attribute during parsing
+- Schema exists for **programmatic document creation**, not parsing
+- This is a documented limitation, not a bug
+
+### Architecture: Why Schema Exists But Isn't Populated
+
+**The `Formatting` class exists in docling-core:**
+
+```python
+class Formatting(BaseModel):
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strikethrough: bool = False
+    script: Script = Script.BASELINE  # baseline | sub | super
+
+class TextItem(DocItem):
+    formatting: Optional[Formatting] = None  # ← Always None from parser
+```
+
+**Use cases where it DOES work:**
+```python
+# Creating documents programmatically
+doc.add_text(
+    text="Bold text",
+    formatting=Formatting(bold=True)  ✅ Works for document creation
+)
+```
+
+**Use cases where it DOESN'T work:**
+```python
+# Parsing documents
+result = converter.convert("document.pdf")
+for item in result.document.iterate_items():
+    print(item.formatting)  # ❌ Always None
+```
+
+### Our Implementation Status
+
+**All infrastructure is ready and waiting:**
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Python extraction | ✅ Complete | `worker/scripts/docling_extract.py:235-260` |
+| Metadata aggregation | ✅ Complete | `worker/lib/chonkie/metadata-transfer.ts:265-295` |
+| TypeScript types | ✅ Complete | `worker/types/processor.ts`, `worker/lib/docling-extractor.ts` |
+| Database schema | ✅ Complete | `chunks.formatting` JSONB column (migration 074) |
+| Database INSERT | ✅ Complete | `document-processing-manager.ts:453` |
+| Docling parser | ❌ Not implemented | Awaiting Docling enhancement |
+
+**When Docling implements formatting extraction:**
+- ✅ No code changes needed
+- ✅ Will work automatically
+- ✅ All infrastructure already in place
+
+### Testing Evidence
+
+**Test: DOCX with bold/italic text** (2025-10-28)
+
+```bash
+# Created test document with formatting
+python3 -c "
+from docx import Document
+doc = Document()
+p = doc.add_paragraph()
+p.add_run('Normal. ').bold = False
+p.add_run('Bold. ').bold = True
+p.add_run('Italic. ').italic = True
+doc.save('/tmp/test.docx')
+"
+
+# Processed through Docling
+python3 scripts/docling_extract.py /tmp/test.docx '{"enable_chunking": true}'
+```
+
+**Results:**
+```python
+# Markdown output (formatting preserved):
+"Normal. **Bold.** *Italic.*"  ✅ Detected
+
+# Debug logs (formatting not populated):
+[Phase2B Debug] DocItem 0: has_formatting=False, formatting_obj=None
+[Phase2B Debug] DocItem 1: has_formatting=False, formatting_obj=None
+
+# Database result:
+chunks.formatting → NULL  ❌ Not extracted
+```
+
+### Alternatives & Workarounds
+
+#### Option 1: Parse Markdown Syntax (Not Recommended)
+```typescript
+// Extract formatting from markdown output
+const hasBold = markdown.includes('**')
+const hasItalic = markdown.includes('*')
+
+// Problems:
+// - Loses position information (all or nothing)
+// - Fragile (markdown syntax can appear in code blocks)
+// - Can't map to specific chunks
+```
+
+#### Option 2: Font Name Inference for PDFs (Complex)
+```python
+# PDFs store font names, not "bold" flags
+font_name = "Arial-Bold"  # Separate font file
+
+# Could infer formatting:
+is_bold = "-Bold" in font_name or "-BoldOblique" in font_name
+
+# Problems:
+// - No standard (some fonts: "ArialBold", "Arial,Bold", "Arial_Bold")
+// - Doesn't work for DOCX/EPUB (no font names)
+// - High complexity, low accuracy
+```
+
+#### Option 3: Wait for Docling Enhancement (Recommended ✅)
+```markdown
+**Status**: Infrastructure complete, ready for Docling v2.x.x
+**Monitoring**: https://github.com/docling-project/docling/issues
+**Our readiness**: 100% (all code in place)
+```
+
+### Future Enhancement Path
+
+**When Docling adds formatting extraction:**
+
+1. ✅ **No migration needed** - Schema already supports it
+2. ✅ **No code changes needed** - Extraction already implemented
+3. ✅ **Works automatically** - Pipeline picks it up immediately
+
+**Potential contribution opportunity:**
+- Docling FAQ states: "If you are interested in contributing this feature, please open a discussion topic to brainstorm on the design."
+- Our implementation could serve as reference for how downstream systems expect the data
+
+### Conclusion
+
+**Phase 2B is "infrastructure complete, awaiting upstream support":**
+
+- ✅ Our code is correct and ready
+- ✅ Database schema supports formatting
+- ✅ All extraction/transfer/storage logic implemented
+- ❌ Docling parser doesn't populate the data (yet)
+
+**Recommendation**: Accept current limitation, monitor Docling releases for formatting support.
+
+---
+
 ## Related Documentation
 
 - **Docling Official Docs**: https://docling-project.github.io/docling/
