@@ -107,6 +107,16 @@ export interface ProcessedChunk {
   /** Hyperlink URL or path - preserved from source document */
   hyperlink?: string | null
 
+  // === PHASE 2B: Text Formatting (Migration 074) ===
+  /** Text formatting metadata for rich markdown export */
+  formatting?: {
+    bold: boolean
+    italic: boolean
+    underline: boolean
+    strikethrough: boolean
+    script: 'baseline' | 'sub' | 'super'
+  } | null
+
   /** Position matching confidence (exact, high, medium, synthetic) */
   position_confidence?: string
   /** Position matching method used */

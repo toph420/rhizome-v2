@@ -68,6 +68,16 @@ export interface DoclingChunk {
     code_language?: string
     /** Hyperlink URL or file path */
     hyperlink?: string
+
+    // Phase 2B: Text formatting
+    /** Text formatting: {bold, italic, underline, strikethrough, script} */
+    formatting?: {
+      bold: boolean
+      italic: boolean
+      underline: boolean
+      strikethrough: boolean
+      script: 'baseline' | 'sub' | 'super'
+    } | null
   }
 }
 

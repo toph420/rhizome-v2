@@ -1386,12 +1386,52 @@ Example: Annotation in chunk with charspan [0,2063)
 
 ---
 
-### Phase 2B: Text Formatting & Rich Metadata (MEDIUM PRIORITY)
+### Phase 2B: Text Formatting & Rich Metadata 🔍 INFRASTRUCTURE COMPLETE - BLOCKED BY DOCLING
 
 **Goal**: Extract text formatting, code language, and other rich metadata for better markdown export.
 
-**Estimated Time**: 2-3 hours
-**Dependencies**: Phase 2A complete
+**Status**: Infrastructure complete (2025-10-28), **blocked by Docling parser limitation**
+**Reality**: Docling doesn't populate `formatting` attribute during parsing (known limitation per FAQ)
+**Estimated Time**: 2-3 hours (code complete, awaiting Docling enhancement)
+**Dependencies**: Phase 2A complete ✅
+
+**⚠️ CRITICAL FINDING (2025-10-28)**:
+
+**Docling recognizes formatting but doesn't populate the `Formatting` object:**
+- ✅ Markdown export produces `**bold**` and `*italic*` syntax correctly
+- ✅ Schema supports `TextItem.formatting` with bold/italic/underline/strikethrough/script
+- ❌ PDF/DOCX parsing leaves `formatting` attribute as `null`
+- ❌ Confirmed via testing: HTML→PDF (native) and DOCX both show 0% formatting coverage
+
+**From Docling FAQ:**
+> "Currently text styles are **not supported** in the `DoclingDocument` format."
+
+**Why this happens:**
+- Docling's parser detects formatting for markdown export
+- But doesn't populate the structured `Formatting` object on `TextItem`
+- Schema exists for programmatic document creation, not parsing
+- This is a known limitation documented in official FAQ
+
+**Evidence chain:**
+```python
+# Test results (formatting_test.docx):
+Markdown output: "**This is bold text.**"  ✅ Bold detected
+TextItem.formatting: None                  ❌ Not populated
+chunk.meta.formatting: null                ❌ Never reaches database
+```
+
+**All infrastructure is ready:**
+- ✅ Python extraction code (lines 235-260)
+- ✅ TypeScript types with formatting field
+- ✅ Metadata transfer aggregation (lines 265-295)
+- ✅ Database schema with `formatting` JSONB column
+- ✅ Database INSERT includes formatting field
+- ❌ Docling parser doesn't provide source data
+
+**Will work automatically when:**
+- Docling implements formatting extraction in parser
+- User uploads documents from sources that preserve formatting programmatically
+- No code changes needed on our side
 
 #### Step 2B.1: Add Formatting Metadata
 

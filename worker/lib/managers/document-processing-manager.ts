@@ -449,6 +449,9 @@ export class DocumentProcessingManager extends HandlerJobManager {
       code_language: (chunk as any).code_language,
       hyperlink: (chunk as any).hyperlink,
 
+      // Phase 2B: Text formatting (from metadata transfer)
+      formatting: (chunk as any).formatting,
+
       // Chonkie metadata (from metadata transfer)
       chunker_type: (chunk as any).chunker_type,
       token_count: (chunk as any).token_count,

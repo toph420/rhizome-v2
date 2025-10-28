@@ -160,6 +160,14 @@ export function aggregateMetadata(
   list_marker: string | null
   code_language: string | null
   hyperlink: string | null
+  // Phase 2B: Text formatting
+  formatting: {
+    bold: boolean
+    italic: boolean
+    underline: boolean
+    strikethrough: boolean
+    script: string
+  } | null
 } {
   if (overlappingChunks.length === 0) {
     return {
@@ -176,6 +184,7 @@ export function aggregateMetadata(
       list_marker: null,
       code_language: null,
       hyperlink: null,
+      formatting: null,
     }
   }
 
@@ -253,6 +262,38 @@ export function aggregateMetadata(
     .map(c => c.chunk.meta.hyperlink)
     .find(hl => hl !== null && hl !== undefined) || null
 
+  // Phase 2B: Aggregate formatting (if ANY doc_item has formatting, preserve it)
+  const formattings = overlappingChunks
+    .map(c => c.chunk.meta.formatting)
+    .filter(f => f !== null && f !== undefined)
+
+  let aggregatedFormatting = null
+  if (formattings.length > 0) {
+    // If ANY chunk has formatting, aggregate all formatting flags
+    aggregatedFormatting = {
+      bold: formattings.some(f => f.bold),
+      italic: formattings.some(f => f.italic),
+      underline: formattings.some(f => f.underline),
+      strikethrough: formattings.some(f => f.strikethrough),
+      script: 'baseline' as const
+    }
+
+    // For script, use most common non-baseline value
+    const scripts = formattings.map(f => f.script).filter(s => s !== 'baseline')
+    if (scripts.length > 0) {
+      // Count occurrences
+      const scriptCounts: Record<string, number> = {}
+      scripts.forEach(s => {
+        scriptCounts[s] = (scriptCounts[s] || 0) + 1
+      })
+      // Find most common
+      const mostCommon = Object.entries(scriptCounts).sort((a, b) => b[1] - a[1])[0][0]
+      aggregatedFormatting.script = mostCommon
+    }
+
+    console.log(`[Phase2B Transfer] Formatting: found=${formattings.length}, result=${JSON.stringify(aggregatedFormatting)}`)
+  }
+
   // Phase 2A: Validate metadata before returning
   const phase2AMetadata = {
     charspan: aggregatedCharspan,
@@ -274,6 +315,7 @@ export function aggregateMetadata(
     section_marker: sectionMarkers.length > 0 ? sectionMarkers[0] : null,
     bboxes: allBboxes.length > 0 ? allBboxes : null,
     ...phase2AMetadata, // Spread validated Phase 2A fields
+    formatting: aggregatedFormatting, // Phase 2B formatting
   }
 }
 

@@ -67,6 +67,20 @@ def extract_document_structure(doc) -> Dict[str, Any]:
     }
 
     try:
+        # Phase 2B Debug: Check if original doc_items have formatting
+        formatting_count = 0
+        total_items = 0
+        for idx, item in enumerate(doc.iterate_items()):
+            if idx < 10:  # Check first 10 items
+                has_fmt = hasattr(item, 'formatting')
+                fmt_obj = getattr(item, 'formatting', None) if has_fmt else None
+                total_items += 1
+                if has_fmt and fmt_obj:
+                    formatting_count += 1
+                print(f"[Phase2B OriginalDoc] Item {idx}: type={type(item).__name__}, has_formatting={has_fmt}, formatting={fmt_obj}", file=sys.stderr)
+        print(f"[Phase2B OriginalDoc] Summary: {formatting_count}/{total_items} items have formatting", file=sys.stderr)
+        sys.stderr.flush()
+
         # Extract headings from document hierarchy
         for item in doc.iterate_items():
             # Docling labels: title, heading, section_header
@@ -155,7 +169,9 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
         'list_enumerated': None,
         'list_marker': None,
         'code_language': None,
-        'hyperlink': None
+        'hyperlink': None,
+        # Phase 2B: Text formatting
+        'formatting': None
     }
 
     # 🔍 DEBUG: Log chunk structure
@@ -185,6 +201,14 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                 bboxes_list = []
                 content_layers = []
                 content_labels = []
+                # Phase 2B: Formatting aggregation
+                formatting_data = {
+                    'bold': [],
+                    'italic': [],
+                    'underline': [],
+                    'strikethrough': [],
+                    'script': []
+                }
 
                 # Iterate through all doc_items in this chunk
                 for idx, doc_item in enumerate(doc_items):
@@ -207,6 +231,32 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                         label = label.upper()
                         content_labels.append(label)
                         print(f"[Phase2A Debug] DocItem {idx}: label={label}", file=sys.stderr)
+
+                    # Phase 2B: Extract formatting (bold, italic, underline, etc.)
+                    # Debug: Check if formatting attribute exists
+                    has_formatting_attr = hasattr(doc_item, 'formatting')
+                    formatting_obj = getattr(doc_item, 'formatting', None) if has_formatting_attr else None
+                    print(f"[Phase2B Debug] DocItem {idx}: has_formatting={has_formatting_attr}, formatting_obj={formatting_obj}", file=sys.stderr)
+                    sys.stderr.flush()
+
+                    if has_formatting_attr and formatting_obj:
+                        fmt = doc_item.formatting
+                        # Extract boolean formatting flags
+                        if hasattr(fmt, 'bold'):
+                            formatting_data['bold'].append(fmt.bold)
+                            print(f"[Phase2B Debug] DocItem {idx}: bold={fmt.bold}", file=sys.stderr)
+                        if hasattr(fmt, 'italic'):
+                            formatting_data['italic'].append(fmt.italic)
+                            print(f"[Phase2B Debug] DocItem {idx}: italic={fmt.italic}", file=sys.stderr)
+                        if hasattr(fmt, 'underline'):
+                            formatting_data['underline'].append(fmt.underline)
+                        if hasattr(fmt, 'strikethrough'):
+                            formatting_data['strikethrough'].append(fmt.strikethrough)
+                        # Extract script enum (baseline, sub, super)
+                        if hasattr(fmt, 'script'):
+                            script_value = fmt.script.value if hasattr(fmt.script, 'value') else str(fmt.script)
+                            formatting_data['script'].append(script_value)
+                        print(f"[Phase2B Debug] DocItem {idx}: formatting extracted={fmt}", file=sys.stderr)
 
                     # Extract provenance (page_no, bbox, charspan)
                     if hasattr(doc_item, 'prov') and doc_item.prov:
@@ -262,6 +312,30 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                     most_common_label = Counter(content_labels).most_common(1)[0][0]
                     meta['content_label'] = most_common_label
                     print(f"[Phase2A Debug] Most common content_label: {most_common_label} (from {content_labels})", file=sys.stderr)
+
+                # Phase 2B: Aggregate formatting
+                # Strategy: If ANY doc_item has formatting=True, preserve it in chunk
+                if any(formatting_data['bold']) or any(formatting_data['italic']) or \
+                   any(formatting_data['underline']) or any(formatting_data['strikethrough']) or \
+                   any(s != 'baseline' for s in formatting_data['script']):
+                    meta['formatting'] = {
+                        'bold': any(formatting_data['bold']),
+                        'italic': any(formatting_data['italic']),
+                        'underline': any(formatting_data['underline']),
+                        'strikethrough': any(formatting_data['strikethrough']),
+                        'script': None  # Will be set below
+                    }
+
+                    # For script, use most common non-baseline value
+                    non_baseline_scripts = [s for s in formatting_data['script'] if s != 'baseline']
+                    if non_baseline_scripts:
+                        from collections import Counter
+                        most_common_script = Counter(non_baseline_scripts).most_common(1)[0][0]
+                        meta['formatting']['script'] = most_common_script
+                    else:
+                        meta['formatting']['script'] = 'baseline'
+
+                    print(f"[Phase2B Debug] Aggregated formatting: {meta['formatting']}", file=sys.stderr)
             else:
                 print(f"[Phase2A Debug] doc_items is empty", file=sys.stderr)
         else:
@@ -369,8 +443,9 @@ def extract_with_chunking(pdf_path: str, options: Dict[str, Any]) -> Dict[str, A
     emit_progress('extraction', 40, f'Extraction complete ({len(doc.pages)} pages)')
 
     # Extract structure (headings, hierarchy)
-    emit_progress('extraction', 45, 'Extracting document structure')
+    emit_progress('extraction', 45, 'Extracting document structure + checking formatting')
     structure = extract_document_structure(doc)
+    emit_progress('extraction', 46, f'Structure extracted, checked formatting on doc items')
 
     # Optionally run chunking
     chunks = None

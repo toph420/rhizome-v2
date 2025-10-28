@@ -74,6 +74,19 @@ export interface Chunk {
   section_marker: string | null
   bboxes: Json | null
 
+  // Phase 2A: Enhanced Docling metadata (migration 073)
+  charspan: Json | null  // [start, end] tuple
+  content_layer: string | null  // BODY, FURNITURE, BACKGROUND, etc.
+  content_label: string | null  // PARAGRAPH, CODE, FORMULA, etc.
+  section_level: number | null  // 1-100 explicit level
+  list_enumerated: boolean | null  // True for numbered lists
+  list_marker: string | null  // "1.", "•", "a)", etc.
+  code_language: string | null  // Programming language
+  hyperlink: string | null  // URL or file path
+
+  // Phase 2B: Text formatting (migration 074)
+  formatting: Json | null  // {bold, italic, underline, strikethrough, script}
+
   // Metadata transfer quality (NEW in migration 050)
   /** Number of Docling chunks that overlapped (0 = interpolated) */
   metadata_overlap_count: number | null
@@ -148,6 +161,19 @@ export interface ChunkInsert {
   section_marker?: string | null
   bboxes?: Json | null
 
+  // Phase 2A: Enhanced Docling metadata (migration 073)
+  charspan?: Json | null
+  content_layer?: string | null
+  content_label?: string | null
+  section_level?: number | null
+  list_enumerated?: boolean | null
+  list_marker?: string | null
+  code_language?: string | null
+  hyperlink?: string | null
+
+  // Phase 2B: Text formatting (migration 074)
+  formatting?: Json | null
+
   // Metadata transfer quality (defaults: 0, 'high', false)
   metadata_overlap_count?: number | null
   metadata_confidence?: 'high' | 'medium' | 'low' | null
@@ -206,6 +232,19 @@ export interface ChunkUpdate {
   page_label?: string | null
   section_marker?: string | null
   bboxes?: Json | null
+
+  // Phase 2A: Enhanced Docling metadata (migration 073)
+  charspan?: Json | null
+  content_layer?: string | null
+  content_label?: string | null
+  section_level?: number | null
+  list_enumerated?: boolean | null
+  list_marker?: string | null
+  code_language?: string | null
+  hyperlink?: string | null
+
+  // Phase 2B: Text formatting (migration 074)
+  formatting?: Json | null
 
   metadata_overlap_count?: number | null
   metadata_confidence?: 'high' | 'medium' | 'low' | null
