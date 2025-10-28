@@ -1,30 +1,38 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { SupabaseClient, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/rhizome/card'
-import { Button } from '@/components/rhizome/button'
-import { Badge } from '@/components/rhizome/badge'
-import { FileText, Eye, Loader2, Trash2, Pause, Play, ExternalLink } from 'lucide-react'
-import Link from 'next/link'
+import { Card, CardContent } from '@/components/rhizome/card'
+import { Loader2 } from 'lucide-react'
 import { deleteDocument } from '@/app/actions/delete-document'
 import { exportToObsidian } from '@/app/actions/integrations'
 import { continueDocumentProcessing, getJobStatus } from '@/app/actions/documents'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
+import { DocumentCard } from '@/components/rhizome/document-card'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
 interface Document {
   id: string
   title: string
+  author?: string | null
+  description?: string | null
+  publication_date?: string | null
   processing_status: string
-  processing_stage?: string
+  processing_stage?: string | null
   review_stage?: 'docling_extraction' | 'ai_cleanup' | null
   created_at: string
   markdown_available: boolean
   embeddings_available: boolean
-  obsidian_uri?: string | null  // ✅ Add Obsidian URI from job
+  obsidian_uri?: string | null
+  source_type?: string | null
+  source_url?: string | null
+  page_count?: number | null
+  word_count?: number | null
+  language?: string | null
+  publisher?: string | null
+  chunker_type?: string | null
 }
 
 /**
@@ -39,6 +47,14 @@ export function DocumentList() {
   const [processing, setProcessing] = useState<string | null>(null)
   const { registerJob } = useBackgroundJobsStore()
   const router = useRouter()
+
+  // Use ref to track latest documents for polling without causing re-subscriptions
+  const documentsRef = useRef<Document[]>(documents)
+
+  // Update ref whenever documents change
+  useEffect(() => {
+    documentsRef.current = documents
+  }, [documents])
 
   useEffect(() => {
     const supabase = createClient()
@@ -60,10 +76,13 @@ export function DocumentList() {
     }
   }, [])
 
+  // Realtime subscription (only depends on userId - never recreates unless userId changes)
   useEffect(() => {
     if (!userId) return
 
     const supabase = createClient()
+
+    console.log('[DocumentList] 🔌 Setting up realtime subscription for user:', userId)
 
     // Subscribe to document changes (real-time)
     const channel = supabase
@@ -113,9 +132,25 @@ export function DocumentList() {
       })
       .subscribe()
 
-    // Fallback polling for processing/review documents (every 3 seconds)
+    return () => {
+      console.log('[DocumentList] 🔌 Cleaning up realtime subscription')
+      supabase.removeChannel(channel)
+    }
+  }, [userId]) // ✅ Only userId - subscription never recreates!
+
+  // Fallback polling for processing/review documents (separate effect)
+  useEffect(() => {
+    if (!userId) return
+
+    const supabase = createClient()
+
+    console.log('[DocumentList] 🔄 Setting up polling interval for active jobs')
+
+    // Fallback polling every 3 seconds for processing/review documents
     // More aggressive to handle realtime failures
     const pollInterval = setInterval(async () => {
+      const currentDocs = documentsRef.current
+
       // Query for any documents in processing or review status
       const { data: activeJobs } = await supabase
         .from('documents')
@@ -127,17 +162,17 @@ export function DocumentList() {
 
       // Check if we have NEW documents in processing/review that aren't in our list yet
       const newActiveJobs = activeJobs.filter(job =>
-        !documents.some(doc => doc.id === job.id)
+        !currentDocs.some(doc => doc.id === job.id)
       )
 
       // Check if any existing documents changed status
       const statusChanged = activeJobs.some(job => {
-        const existing = documents.find(doc => doc.id === job.id)
+        const existing = currentDocs.find(doc => doc.id === job.id)
         return existing && existing.processing_status !== job.processing_status
       })
 
       // Check if any documents LEFT processing/review status
-      const completedJobs = documents.filter(doc =>
+      const completedJobs = currentDocs.filter(doc =>
         (doc.processing_status === 'processing' || doc.processing_status === 'awaiting_manual_review') &&
         !activeJobs.some(job => job.id === doc.id)
       )
@@ -153,16 +188,35 @@ export function DocumentList() {
     }, 3000)
 
     return () => {
-      supabase.removeChannel(channel)
+      console.log('[DocumentList] 🔄 Cleaning up polling interval')
       clearInterval(pollInterval)
     }
-  }, [userId, documents])
+  }, [userId]) // ✅ Only userId - polling uses ref for current documents
 
   async function loadDocuments(supabase: SupabaseClient, userId: string) {
     setLoading(true)
     const { data } = await supabase
       .from('documents')
-      .select('id, title, processing_status, processing_stage, review_stage, created_at, markdown_available, embeddings_available')
+      .select(`
+        id,
+        title,
+        author,
+        description,
+        publication_date,
+        processing_status,
+        processing_stage,
+        review_stage,
+        created_at,
+        markdown_available,
+        embeddings_available,
+        source_type,
+        source_url,
+        page_count,
+        word_count,
+        language,
+        publisher,
+        chunker_type
+      `)
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
@@ -378,154 +432,24 @@ export function DocumentList() {
 
   return (
     <div className="space-y-4">
-      {documents.map((doc) => {
-        const isCompleted = doc.processing_status === 'completed'
-        const isProcessing = doc.processing_status === 'processing'
-        const isFailed = doc.processing_status === 'failed'
-        const isAwaitingReview = doc.processing_status === 'awaiting_manual_review'
-
-        return (
-          <Card key={doc.id} data-testid="document-card">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <CardTitle className="truncate" data-testid="document-title">{doc.title}</CardTitle>
-                  <CardDescription className="flex items-center gap-2 mt-1">
-                    <Badge variant={
-                      isCompleted ? 'default' :
-                      isProcessing ? 'secondary' :
-                      isFailed ? 'destructive' :
-                      isAwaitingReview ? 'secondary' :
-                      'outline'
-                    } data-testid="status-badge">
-                      {isAwaitingReview && <Pause className="h-3 w-3 mr-1" />}
-                      {doc.processing_status}
-                    </Badge>
-                    {doc.processing_stage && (
-                      <span className="text-xs">{doc.processing_stage}</span>
-                    )}
-                  </CardDescription>
-                </div>
-                <div className="flex gap-2 ml-4">
-                  {isCompleted && doc.markdown_available && (
-                    <>
-                      <Link href={`/documents/${doc.id}/preview`}>
-                        <Button variant="outline" size="sm" data-testid="preview-button">
-                          <Eye className="h-4 w-4 mr-2" />
-                          Preview
-                        </Button>
-                      </Link>
-                      <Link href={`/read/${doc.id}`}>
-                        <Button size="sm" data-testid="read-button">
-                          <FileText className="h-4 w-4 mr-2" />
-                          Read
-                        </Button>
-                      </Link>
-                    </>
-                  )}
-                  {isProcessing && (
-                    <Button variant="outline" size="sm" disabled data-testid="processing-button">
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Processing
-                    </Button>
-                  )}
-                  {isAwaitingReview && (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openInObsidian(doc.id, doc.obsidian_uri || undefined)}
-                        data-testid="review-obsidian-button"
-                      >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Review in Obsidian
-                      </Button>
-                      {doc.review_stage === 'docling_extraction' ? (
-                        // After Docling extraction: Offer two options
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => continueProcessing(doc.id, true)}
-                            disabled={processing === doc.id}
-                            data-testid="skip-ai-cleanup-button"
-                          >
-                            {processing === doc.id ? (
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : (
-                              <Play className="h-4 w-4 mr-2" />
-                            )}
-                            Skip AI Cleanup
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => continueProcessing(doc.id, false)}
-                            disabled={processing === doc.id}
-                            data-testid="continue-with-ai-button"
-                          >
-                            {processing === doc.id ? (
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : (
-                              <Play className="h-4 w-4 mr-2" />
-                            )}
-                            Continue with AI Cleanup
-                          </Button>
-                        </>
-                      ) : (
-                        // After AI cleanup: Just continue to chunking
-                        <Button
-                          size="sm"
-                          onClick={() => continueProcessing(doc.id, false)}
-                          disabled={processing === doc.id}
-                          data-testid="continue-processing-button"
-                        >
-                          {processing === doc.id ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <Play className="h-4 w-4 mr-2" />
-                          )}
-                          Continue Processing
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(doc.id, doc.title)}
-                    disabled={deleting === doc.id}
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                    data-testid="delete-button"
-                  >
-                    {deleting === doc.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span data-testid="document-created">Created {new Date(doc.created_at).toLocaleDateString()}</span>
-                {doc.markdown_available && (
-                  <>
-                    <span>•</span>
-                    <span data-testid="markdown-available">✓ Markdown</span>
-                  </>
-                )}
-                {doc.embeddings_available && (
-                  <>
-                    <span>•</span>
-                    <span data-testid="embeddings-available">✓ Embeddings</span>
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )
-      })}
+      {documents.map((doc) => (
+        <DocumentCard
+          key={doc.id}
+          document={doc}
+          onDeleted={() => {
+            if (userId) {
+              const supabase = createClient()
+              loadDocuments(supabase, userId)
+            }
+          }}
+          // onUpdated removed - Supabase realtime subscription handles metadata updates automatically
+          onContinueProcessing={continueProcessing}
+          onOpenObsidian={openInObsidian}
+          onDelete={handleDelete}
+          processing={processing}
+          deleting={deleting}
+        />
+      ))}
     </div>
   )
 }
