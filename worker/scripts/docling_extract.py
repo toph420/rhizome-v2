@@ -112,7 +112,16 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
             'heading_path': list[str],
             'heading_level': int | None,
             'section_marker': str | None,
-            'bboxes': list[dict]
+            'bboxes': list[dict],
+            # Phase 2A enhancements:
+            'charspan': tuple[int, int] | None,
+            'content_layer': str | None,
+            'content_label': str | None,
+            'section_level': int | None,
+            'list_enumerated': bool | None,
+            'list_marker': str | None,
+            'code_language': str | None,
+            'hyperlink': str | None
         }
     """
     meta = {
@@ -121,11 +130,20 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
         'heading_path': [],
         'heading_level': None,
         'section_marker': None,
-        'bboxes': []
+        'bboxes': [],
+        # Phase 2A enhancements
+        'charspan': None,
+        'content_layer': 'BODY',  # Default to BODY
+        'content_label': 'PARAGRAPH',  # Default to PARAGRAPH
+        'section_level': None,
+        'list_enumerated': None,
+        'list_marker': None,
+        'code_language': None,
+        'hyperlink': None
     }
 
     try:
-        # Extract page numbers from chunk provenance
+        # Extract page numbers and charspan from chunk provenance
         if hasattr(chunk, 'meta') and 'prov' in chunk.meta:
             prov = chunk.meta['prov']
             if prov:
@@ -138,6 +156,19 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                 if pages:
                     meta['page_start'] = min(pages)
                     meta['page_end'] = max(pages)
+
+                # Extract character span (CRITICAL for precise annotation sync)
+                charspans = []
+                for p in prov:
+                    if hasattr(p, 'charspan') and p.charspan:
+                        charspans.append(p.charspan)
+
+                if charspans:
+                    # Get earliest start and latest end
+                    meta['charspan'] = (
+                        min(cs[0] for cs in charspans),
+                        max(cs[1] for cs in charspans)
+                    )
 
         # Extract heading path (e.g., ["Chapter 1", "Section 1.1"])
         if hasattr(chunk, 'meta') and 'headings' in chunk.meta:
@@ -160,6 +191,35 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                             'r': float(bbox.r),  # right
                             'b': float(bbox.b)   # bottom
                         })
+
+        # Extract content layer (CRITICAL for noise filtering)
+        if hasattr(chunk, 'content_layer'):
+            meta['content_layer'] = chunk.content_layer
+
+        # Extract content label (CRITICAL for classification)
+        if hasattr(chunk, 'label'):
+            meta['content_label'] = chunk.label
+
+        # Extract section level (enhanced TOC)
+        if hasattr(chunk, '__class__') and chunk.__class__.__name__ == 'SectionHeaderItem':
+            if hasattr(chunk, 'level'):
+                meta['section_level'] = chunk.level
+
+        # Extract list metadata
+        if hasattr(chunk, '__class__') and chunk.__class__.__name__ == 'ListItem':
+            if hasattr(chunk, 'enumerated'):
+                meta['list_enumerated'] = chunk.enumerated
+            if hasattr(chunk, 'marker'):
+                meta['list_marker'] = chunk.marker
+
+        # Extract code language
+        if hasattr(chunk, '__class__') and chunk.__class__.__name__ == 'CodeItem':
+            if hasattr(chunk, 'code_language'):
+                meta['code_language'] = chunk.code_language
+
+        # Extract hyperlink
+        if hasattr(chunk, 'hyperlink') and chunk.hyperlink:
+            meta['hyperlink'] = str(chunk.hyperlink)
 
         # section_marker would be used for EPUB support (future)
         # e.g., "chapter_003" from EPUB spine
