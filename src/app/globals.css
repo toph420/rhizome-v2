@@ -9,6 +9,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
+  
 
 :root {
   --background: oklch(96.79% 0.0654 102.26);
@@ -29,6 +30,7 @@
   --translateRevX: -4px;
   --translateRevY: -4px;
   --radius-val: 10px;
+  
 
   /* Font Selection - Change these to switch fonts:
       Available fonts (imported via @import above):
