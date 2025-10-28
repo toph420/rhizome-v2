@@ -46,10 +46,16 @@ export function LeftPanel({
   const setCollapsed = useUIStore(state => state.setLeftPanelCollapsed)
   const activeTab = useUIStore(state => state.leftPanelTab)
   const setActiveTab = useUIStore(state => state.setLeftPanelTab)
+  const documentHeaderHeight = useUIStore(state => state.documentHeaderHeight)
+
+  // Dynamic positioning: TopNav (57px) + DocumentHeader (measured by ResizeObserver)
+  const navHeight = 57 // h-14 (56px) + border-b (1px)
+  const topOffset = navHeight + documentHeaderHeight
 
   return (
     <motion.div
-      className="relative border-r-2 border-border bg-background overflow-hidden flex flex-col shadow-base"
+      className="fixed left-0 bottom-0 border-r-2 border-border z-30 bg-secondary-background flex flex-col"
+      style={{ top: `${topOffset}px` }}
       initial={false}
       animate={{
         width: collapsed ? 48 : 300 // w-12 : w-[300px]
@@ -69,6 +75,17 @@ export function LeftPanel({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
         >
+          {/* Expand button as first icon */}
+          <motion.button
+            className="sidebar-icon-btn"
+            onClick={() => setCollapsed(false)}
+            title="Expand panel"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <ChevronRight className="h-5 w-5" />
+          </motion.button>
+
           <TooltipProvider>
             {tabs.map(({ id, icon: Icon, label }) => (
               <Tooltip key={id}>
@@ -81,10 +98,8 @@ export function LeftPanel({
                       setCollapsed(false) // Expand when clicking icon
                     }}
                     className={cn(
-                      "h-10 w-10 border-2 border-border rounded-base shadow-base",
-                      "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
-                      "transition-all flex items-center justify-center",
-                      activeTab === id && "bg-main text-main-foreground shadow-none translate-x-1 translate-y-1"
+                      "sidebar-icon-btn",
+                      activeTab === id && "active"
                     )}
                   >
                     <Icon className="h-5 w-5" />
@@ -104,13 +119,13 @@ export function LeftPanel({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ delay: 0.3, duration: 0.2 }}
         >
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="flex-1 flex flex-col">
-            <TabsList className="grid grid-cols-4 w-full border-b rounded-none">
+            <TabsList className="grid grid-cols-4 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
               {tabs.map(({ id, icon: Icon }) => (
                 <TabsTrigger key={id} value={id} className="flex items-center justify-center">
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-4 w-4" />
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -141,25 +156,26 @@ export function LeftPanel({
         </motion.div>
       )}
 
-      {/* COLLAPSE BUTTON: Positioned outside panel */}
-      <motion.button
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        onClick={() => setCollapsed(!collapsed)}
-        className={cn(
-          "absolute -right-6 top-20 h-12 w-6",
-          "border-2 border-border rounded-base shadow-base bg-background",
-          "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
-          "transition-all z-50 flex items-center justify-center"
-        )}
-      >
-        {collapsed ? (
-          <ChevronRight className="h-4 w-4" />
-        ) : (
-          <ChevronLeft className="h-4 w-4" />
-        )}
-      </motion.button>
+      {/* COLLAPSE BUTTON: Positioned outside expanded panel */}
+      {!collapsed && (
+        <motion.button
+          className={cn(
+            "absolute -right-6 top-4 p-1.5 rounded-base border-2 border-border bg-secondary-background",
+            "hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none",
+            "transition-all shadow-base z-50"
+          )}
+          onClick={() => setCollapsed(true)}
+          title="Collapse panel"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.8 }}
+          transition={{ delay: 0.3 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+        >
+          <ChevronLeft className="h-3 w-3" />
+        </motion.button>
+      )}
     </motion.div>
   )
 }
