@@ -70,7 +70,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   // Debug: Log enrichment status changes
   useEffect(() => {
     const storeChunk = storeChunks.find(c => c.id === chunk.id)
-    console.log(`[ChunkMetadataIcon c${chunkIndex}] freshChunkEnriched=${freshChunk.enrichments_detected}, propEnriched=${chunk.enrichments_detected}, storeHas=${!!storeChunk}, storeEnriched=${storeChunk?.enrichments_detected}`)
+    //console.log(`[ChunkMetadataIcon c${chunkIndex}] freshChunkEnriched=${freshChunk.enrichments_detected}, propEnriched=${chunk.enrichments_detected}, storeHas=${!!storeChunk}, storeEnriched=${storeChunk?.enrichments_detected}`)
   }, [freshChunk.enrichments_detected, storeChunks.length, chunkIndex, chunk.id, chunk.enrichments_detected])
 
   // Format job title with document name
@@ -258,7 +258,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   // Debug: Log metadata when button state might change
   useEffect(() => {
     if (!metadata.connectionsDetected) {
-      console.log(`[ChunkMetadataIcon c${chunkIndex}] DetectBtn: enriched=${metadata.enrichmentsDetected}, disabled=${!metadata.enrichmentsDetected}, connected=${metadata.connectionsDetected}`)
+      // console.log(`[ChunkMetadataIcon c${chunkIndex}] DetectBtn: enriched=${metadata.enrichmentsDetected}, disabled=${!metadata.enrichmentsDetected}, connected=${metadata.connectionsDetected}`)
     }
   }, [metadata.enrichmentsDetected, metadata.connectionsDetected, chunkIndex])
 

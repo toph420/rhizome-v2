@@ -102,8 +102,10 @@ export function DocumentList() {
         })
 
         if (payload.eventType === 'INSERT') {
-          console.log('[DocumentList] INSERT event - adding new document')
-          setDocuments(prev => [payload.new as Document, ...prev])
+          console.log('[DocumentList] INSERT event - reloading to fetch complete data')
+          // Don't use payload directly - it may be missing fields
+          // Reload all documents to get complete data including metadata
+          loadDocuments(supabase, userId)
         } else if (payload.eventType === 'UPDATE') {
           const newDoc = payload.new as Document
           console.log('[DocumentList] UPDATE event:', {
@@ -113,14 +115,17 @@ export function DocumentList() {
             isReviewStatus: newDoc.processing_status === 'awaiting_manual_review'
           })
 
-          // If document entered review or completed status, reload all to fetch complete data
+          // For status changes or important updates, reload to fetch complete data
+          // This ensures we have all metadata fields, stats, and separately-fetched data
           if (newDoc.processing_status === 'awaiting_manual_review' ||
-              newDoc.processing_status === 'completed') {
-            console.log('[DocumentList] ✅ Document status change - reloading to fetch complete data')
+              newDoc.processing_status === 'completed' ||
+              newDoc.processing_status === 'failed') {
+            console.log('[DocumentList] ✅ Status change to', newDoc.processing_status, '- reloading complete data')
             loadDocuments(supabase, userId)
           } else {
             console.log('[DocumentList] Regular update - incremental status change')
-            // For other updates, just update the document directly
+            // For other updates (like metadata edits), just update the document directly
+            // The payload should have all fields for these types of updates
             setDocuments(prev => prev.map(doc =>
               doc.id === newDoc.id ? newDoc : doc
             ))

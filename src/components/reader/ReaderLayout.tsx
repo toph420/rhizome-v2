@@ -46,6 +46,7 @@ interface ReaderLayoutProps {
   wordCount?: number
   connectionCount?: number
   chunkerType?: string | null
+  doclingMarkdown?: string  // Phase 1A: Docling extraction for charspan search
   reviewResults?: {
     success: Array<{
       id: string
@@ -112,6 +113,7 @@ export function ReaderLayout({
   wordCount,
   connectionCount,
   chunkerType,
+  doclingMarkdown,  // Phase 1A: Docling extraction for charspan search
   reviewResults = null,
 }: ReaderLayoutProps) {
   // 🆕 ADD: Viewer mode state
@@ -621,6 +623,7 @@ export function ReaderLayout({
                 onOutlineLoad={setPdfOutline}
                 onNumPagesLoad={setPdfNumPages}
                 chunks={chunks}
+                doclingMarkdown={doclingMarkdown}
               />
             )
           )}

@@ -2,6 +2,8 @@ import { Suspense } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/rhizome/card'
 import { Button } from '@/components/rhizome/button'
 import { Skeleton } from '@/components/rhizome/skeleton'
+import { StatCard } from '@/components/rhizome/stat-card'
+import { FileText, Database, Network, CheckCircle2, Zap, AlertCircle } from 'lucide-react'
 
 /**
  * Homepage - Diagonal Cascade Layout
@@ -121,6 +123,99 @@ export default async function HomePage() {
 /* ==================== PLACEHOLDER COMPONENTS ==================== */
 /* TODO: Move these to separate client component files in /components/homepage/ */
 
+/**
+ * StatCard - Neobrutalist stat display component
+ *
+ * Aesthetic Playground - Testing multiple variants:
+ * - primary: bg-main (yellow-green) for key metrics
+ * - vibrant-*: Colorful highlights using vibrant palette
+ * - neutral: White background for standard stats
+ * - success/warning/danger: Semantic status colors
+ * - compact: Smaller variant for processing queue
+ */
+interface StatCardProps {
+  label: string
+  value: string | number
+  variant?: 'primary' | 'vibrant-pink' | 'vibrant-purple' | 'vibrant-orange' | 'neutral' | 'success' | 'warning' | 'danger'
+  icon?: React.ReactNode
+  onClick?: () => void
+  compact?: boolean
+}
+
+function StatCard({ label, value, variant = 'neutral', icon, onClick, compact = false }: StatCardProps) {
+  const Component = onClick ? 'button' : 'div'
+
+  // Variant-specific background colors
+  const variantStyles = {
+    primary: 'bg-main border-border',
+    'vibrant-pink': 'bg-[var(--color-vibrant-pink)] border-border text-white',
+    'vibrant-purple': 'bg-[var(--color-vibrant-purple)] border-border text-white',
+    'vibrant-orange': 'bg-[var(--color-vibrant-orange)] border-border text-white',
+    neutral: 'bg-secondary-background border-border',
+    success: 'bg-green-100 border-green-600',
+    warning: 'bg-orange-100 border-orange-600',
+    danger: 'bg-red-100 border-red-600',
+  }
+
+  // Compact mode for smaller stats
+  const sizeStyles = compact
+    ? 'p-2 gap-1'
+    : 'p-3 gap-2'
+
+  return (
+    <Component
+      onClick={onClick}
+      className={cn(
+        // Base neobrutalist styling
+        'rounded-base border-2 shadow-shadow font-base',
+        'transition-all duration-200',
+        // Hover effect - neobrutalist "push"
+        onClick && 'cursor-pointer hover:translate-x-boxShadowX hover:translate-y-boxShadowY hover:shadow-none',
+        // Variant colors
+        variantStyles[variant],
+        // Size
+        sizeStyles,
+        // Layout
+        'flex flex-col items-start justify-between'
+      )}
+    >
+      {/* Icon + Value Row */}
+      <div className="flex items-center justify-between w-full">
+        <div className={cn(
+          'font-heading font-black',
+          compact ? 'text-lg' : 'text-2xl',
+          variant === 'vibrant-pink' || variant === 'vibrant-purple' || variant === 'vibrant-orange'
+            ? 'text-white'
+            : 'text-foreground'
+        )}>
+          {typeof value === 'number' ? value.toLocaleString() : value}
+        </div>
+        {icon && (
+          <div className={cn(
+            'shrink-0',
+            variant === 'vibrant-pink' || variant === 'vibrant-purple' || variant === 'vibrant-orange'
+              ? 'text-white/80'
+              : 'text-muted-foreground'
+          )}>
+            {icon}
+          </div>
+        )}
+      </div>
+
+      {/* Label */}
+      <div className={cn(
+        'uppercase tracking-wider font-base font-medium',
+        compact ? 'text-[10px]' : 'text-xs',
+        variant === 'vibrant-pink' || variant === 'vibrant-purple' || variant === 'vibrant-orange'
+          ? 'text-white/70'
+          : 'text-muted-foreground'
+      )}>
+        {label}
+      </div>
+    </Component>
+  )
+}
+
 function HeroCard() {
   return (
     <Card className="h-full border-0 shadow-none rounded-none">
@@ -185,23 +280,62 @@ function LibraryGrid() {
 
 function StatsPanel() {
   return (
-    <div className="h-full flex flex-col justify-between">
+    <div className="h-full flex flex-col justify-between gap-3">
       <div>
         <h3 className="font-heading text-sm font-bold mb-3">Stats & Processing</h3>
-        <div className="space-y-2 text-sm">
-          <p>47 documents</p>
-          <p>12,483 chunks</p>
-          <p>891 connections</p>
+        <div className="grid grid-cols-1 gap-2">
+          {/* Primary Variant - bg-main accent */}
+          <StatCard
+            label="documents"
+            value={47}
+            variant="primary"
+            icon={<FileText className="w-4 h-4" />}
+            onClick={() => console.log('Navigate to documents')}
+          />
+
+          {/* Vibrant Variants - colorful highlights */}
+          <StatCard
+            label="chunks"
+            value="12.4K"
+            variant="vibrant-pink"
+            icon={<Database className="w-4 h-4" />}
+          />
+
+          <StatCard
+            label="connections"
+            value={891}
+            variant="vibrant-purple"
+            icon={<Network className="w-4 h-4" />}
+          />
         </div>
       </div>
+
       <div className="space-y-2">
-        <p className="text-sm font-medium">Processing:</p>
-        <div className="flex gap-2 text-sm">
-          <span>✓ 44</span>
-          <span>⚡ 2</span>
-          <span>⚠ 1</span>
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Processing Queue</p>
+        <div className="grid grid-cols-3 gap-2">
+          <StatCard
+            label="completed"
+            value={44}
+            variant="success"
+            icon={<CheckCircle2 className="w-3 h-3" />}
+            compact
+          />
+          <StatCard
+            label="active"
+            value={2}
+            variant="warning"
+            icon={<Zap className="w-3 h-3" />}
+            compact
+          />
+          <StatCard
+            label="failed"
+            value={1}
+            variant="danger"
+            icon={<AlertCircle className="w-3 h-3" />}
+            compact
+          />
         </div>
-        <Button variant="outline" className="w-full text-xs">View graph →</Button>
+        <Button variant="neutral" className="w-full text-xs">View Processing Graph →</Button>
       </div>
     </div>
   )
