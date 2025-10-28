@@ -41,7 +41,7 @@ const CreateAnnotationSchema = z.object({
   pdfHeight: z.number().optional(),
   // PDF ↔ Markdown sync metadata
   syncConfidence: z.number().min(0).max(1).optional(),
-  syncMethod: z.enum(['exact', 'fuzzy', 'bbox', 'manual']).optional(),
+  syncMethod: z.enum(['charspan_window', 'exact', 'fuzzy', 'bbox', 'manual']).optional(),
 })
 
 /**

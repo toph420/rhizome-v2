@@ -146,92 +146,105 @@ function findFuzzyMatch(
 }
 
 /**
- * Try charspan-based search for high precision (Phase 2A)
+ * Fuzzy search within chunks (Phase 2A Fixed - Coordinate System)
  *
- * Uses charspan metadata as search window, providing:
- * - 100x reduction in search space (1000 chars vs 100,000 chars)
- * - 99%+ accuracy vs 95% with full content search
- * - Better multi-instance handling (same text appears multiple times)
+ * COORDINATE SYSTEM FIX:
+ * - charspan values point to docling.md (raw Docling output)
+ * - chunk offsets point to content.md (AI-cleaned markdown)
+ * - These are DIFFERENT documents - can't mix coordinate systems
+ *
+ * Solution: Do fuzzy matching WITHIN chunk boundaries
+ * - Much faster than full-document fuzzy search (2K chars vs 100K chars)
+ * - Tolerant of encoding/whitespace differences (unlike exact match)
+ * - Still uses chunk offsets (correct coordinate system)
  *
  * @param text - Selected text from PDF
  * @param pageChunks - Chunks already filtered by page
- * @param cleanedMarkdown - Full cleaned markdown document (for charspan lookups)
- * @returns Match result if found via charspan, null otherwise
+ * @returns Match result if found via fuzzy matching in chunks
  */
-function tryCharspanSearch(
+function tryChunkContentSearch(
   text: string,
-  pageChunks: ChunkForMatching[],
-  cleanedMarkdown?: string
+  pageChunks: ChunkForMatching[]
 ): OffsetCalculationResult | null {
-  // Skip if no cleaned markdown provided
-  if (!cleanedMarkdown) {
-    return null
-  }
+  // Sort by chunk size (smaller = more precise context)
+  const sortedChunks = [...pageChunks].sort((a, b) =>
+    a.content.length - b.content.length
+  )
 
-  // Filter chunks that have charspan data
-  const chunksWithCharspan = pageChunks
-    .filter((c) => c.charspan && Array.isArray(c.charspan) && c.charspan.length === 2)
-    .sort((a, b) => {
-      // Sort by charspan size (smaller = more precise)
-      const sizeA = a.charspan![1] - a.charspan![0]
-      const sizeB = b.charspan![1] - b.charspan![0]
-      return sizeA - sizeB
-    })
+  console.log('[tryChunkContentSearch] Fuzzy matching in', sortedChunks.length, 'chunks')
+  console.log('[tryChunkContentSearch] Search text length:', text.length)
 
-  if (chunksWithCharspan.length === 0) {
-    return null // No charspan data available
-  }
-
-  // Search within each charspan window
-  for (const chunk of chunksWithCharspan) {
-    const [charStart, charEnd] = chunk.charspan!
-
-    // Validate charspan range
-    if (charStart < 0 || charEnd > cleanedMarkdown.length || charStart >= charEnd) {
-      console.warn('[text-offset-calculator] Invalid charspan range:', chunk.charspan)
-      continue
-    }
-
-    // Extract text from charspan window in cleaned markdown
-    const windowText = cleanedMarkdown.slice(charStart, charEnd)
-
-    // Look for annotation text within this window (case-sensitive first)
-    let index = windowText.indexOf(text)
-    let caseInsensitive = false
+  // Try exact match first (fast path)
+  for (const chunk of sortedChunks) {
+    let index = chunk.content.indexOf(text)
 
     if (index === -1) {
       // Try case-insensitive
-      index = windowText.toLowerCase().indexOf(text.toLowerCase())
-      caseInsensitive = true
+      index = chunk.content.toLowerCase().indexOf(text.toLowerCase())
     }
 
     if (index !== -1) {
-      // Found within charspan window!
-      // The charspan gives us position in cleaned markdown
-      // We need to map that to the chunk's offset
-      const absoluteOffsetInMarkdown = charStart + index
-
-      // Find relative position within chunk content
-      // (chunk.start_offset is the offset in the final Chonkie chunks)
-      const relativeOffset = absoluteOffsetInMarkdown - chunk.start_offset
-
+      console.log('[tryChunkContentSearch] Exact match in chunk:', chunk.id)
       return {
-        startOffset: chunk.start_offset + relativeOffset,
-        endOffset: chunk.start_offset + relativeOffset + text.length,
-        confidence: caseInsensitive ? 0.99 : 1.0, // Very high confidence
-        method: 'charspan_window',
+        startOffset: chunk.start_offset + index,
+        endOffset: chunk.start_offset + index + text.length,
+        confidence: 1.0,
+        method: 'exact',
         matchedChunkId: chunk.id,
-        debugInfo: {
-          searchedChunks: chunksWithCharspan.length,
-          originalText: text,
-          matchedText: windowText.slice(index, index + text.length),
-          charspanUsed: true,
-        },
       }
     }
   }
 
-  return null // Not found in any charspan window
+  // Fall back to fuzzy matching within chunks (still faster than full doc)
+  const normalizedSearch = normalizeText(text)
+  const searchLen = text.length
+
+  let bestMatch: OffsetCalculationResult = {
+    startOffset: 0,
+    endOffset: 0,
+    confidence: 0.0,
+    method: 'not_found',
+  }
+
+  for (const chunk of sortedChunks) {
+    const normalizedContent = normalizeText(chunk.content)
+
+    // Sliding window search within this chunk
+    for (let i = 0; i <= normalizedContent.length - searchLen; i++) {
+      const window = normalizedContent.slice(i, i + searchLen)
+      const similarity = calculateSimilarity(normalizedSearch, window)
+
+      if (similarity > bestMatch.confidence) {
+        bestMatch = {
+          startOffset: chunk.start_offset + i,
+          endOffset: chunk.start_offset + i + searchLen,
+          confidence: similarity,
+          method: 'fuzzy',
+          matchedChunkId: chunk.id,
+          debugInfo: {
+            searchedChunks: sortedChunks.length,
+            bestSimilarity: similarity,
+            originalText: text,
+            matchedText: chunk.content.slice(i, i + searchLen),
+          },
+        }
+      }
+
+      // Early exit if excellent match
+      if (similarity > 0.95) {
+        console.log('[tryChunkContentSearch] Fuzzy match in chunk:', chunk.id, 'similarity:', similarity)
+        return bestMatch
+      }
+    }
+  }
+
+  if (bestMatch.confidence >= FUZZY_CONFIG.MIN_CONFIDENCE) {
+    console.log('[tryChunkContentSearch] Fuzzy match found:', bestMatch.confidence)
+    return bestMatch
+  }
+
+  console.log('[tryChunkContentSearch] No match above threshold')
+  return null
 }
 
 /**
@@ -247,7 +260,7 @@ function tryCharspanSearch(
  * @param text - Selected text from PDF
  * @param pageNumber - Page where text was selected
  * @param chunks - All document chunks with page mapping
- * @param cleanedMarkdown - Optional full cleaned markdown (enables charspan search)
+ * @param doclingMarkdown - Optional Docling extraction markdown (enables charspan search)
  * @returns Offset calculation result with confidence score
  *
  * @example
@@ -256,7 +269,7 @@ function tryCharspanSearch(
  *   "The key insight is that",
  *   5,
  *   documentChunks,
- *   cleanedMarkdown  // NEW: Optional for Phase 2A charspan search
+ *   doclingMarkdown  // NEW: Optional for Phase 2A charspan search
  * )
  * if (result.confidence > 0.85) {
  *   // High confidence - use offsets
@@ -271,7 +284,7 @@ export function calculateMarkdownOffsets(
   text: string,
   pageNumber: number,
   chunks: ChunkForMatching[],
-  cleanedMarkdown?: string  // NEW: Optional for Phase 2A charspan search
+  doclingMarkdown?: string  // NEW: Optional for Phase 2A charspan search
 ): OffsetCalculationResult {
   // 1. Filter chunks that span the target page
   const pageChunks = chunks.filter(
@@ -306,17 +319,15 @@ export function calculateMarkdownOffsets(
       if (chunksWithPageInfo === 0 && chunks.length > 0) {
         console.warn('[text-offset-calculator] No page info available, searching all chunks (slower, less accurate)')
 
-        // Phase 2A: Try charspan search first even without page info
-        if (cleanedMarkdown) {
-          const charspanResult = tryCharspanSearch(text, chunks, cleanedMarkdown)
-          if (charspanResult) {
-            return {
-              ...charspanResult,
-              debugInfo: {
-                ...(charspanResult.debugInfo || {}),
-                warning: 'no_page_info',
-              },
-            }
+        // Phase 2A Fixed: Try chunk content search first even without page info
+        const chunkResult = tryChunkContentSearch(text, chunks)
+        if (chunkResult) {
+          return {
+            ...chunkResult,
+            debugInfo: {
+              ...(chunkResult.debugInfo || {}),
+              warning: 'no_page_info',
+            },
           }
         }
 
@@ -346,27 +357,26 @@ export function calculateMarkdownOffsets(
       }
     }
 
-    // Phase 2A: Try charspan search on adjacent chunks first
-    if (cleanedMarkdown) {
-      const charspanResult = tryCharspanSearch(text, adjacentChunks, cleanedMarkdown)
-      if (charspanResult) {
-        return charspanResult
-      }
+    // Phase 2A Fixed: Try chunk content search on adjacent chunks first
+    const chunkResult = tryChunkContentSearch(text, adjacentChunks)
+    if (chunkResult) {
+      return chunkResult
     }
 
     // Use adjacent chunks for search
     return findMatch(text, adjacentChunks)
   }
 
-  // Phase 2A: Try charspan-based search first (most precise)
-  if (cleanedMarkdown) {
-    const charspanResult = tryCharspanSearch(text, pageChunks, cleanedMarkdown)
-    if (charspanResult) {
-      return charspanResult
-    }
+  // Phase 2A Fixed: Fuzzy matching within chunk boundaries
+  // Much faster than full-document search (scoped to page chunks)
+  // Coordinate system: Uses chunk.start_offset (content.md positions)
+  const chunkResult = tryChunkContentSearch(text, pageChunks)
+  if (chunkResult) {
+    return chunkResult
   }
 
-  // Fall back to existing Phase 1 logic
+  // Final fallback: Full-document fuzzy search (slowest, most comprehensive)
+  console.log('[text-offset-calculator] Chunk search failed, trying full document')
   return findMatch(text, pageChunks)
 }
 
