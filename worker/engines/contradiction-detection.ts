@@ -57,9 +57,10 @@ export async function runContradictionDetection(
   // Get chunks with conceptual and emotional metadata
   // During reprocessing: query by reprocessing_batch (chunks not yet marked is_current: true)
   // During normal processing: query by is_current: true
+  // Phase 2A: Include content_layer and content_label for noise filtering
   let sourceQuery = supabase
     .from('chunks')
-    .select('id, document_id, conceptual_metadata, emotional_metadata, importance_score, content, summary')
+    .select('id, document_id, conceptual_metadata, emotional_metadata, importance_score, content, summary, content_layer, content_label')
     .eq('document_id', documentId)
     .not('conceptual_metadata', 'is', null)
     .not('emotional_metadata', 'is', null);
@@ -75,10 +76,36 @@ export async function runContradictionDetection(
     sourceQuery = sourceQuery.eq('is_current', true);
   }
 
-  const { data: sourceChunks, error } = await sourceQuery;
+  const { data: rawSourceChunks, error } = await sourceQuery;
 
-  if (error || !sourceChunks?.length) {
+  if (error || !rawSourceChunks?.length) {
     console.log('[ContradictionDetection] No chunks with required metadata');
+    return [];
+  }
+
+  // Phase 2A: Filter out noisy chunks (headers, footers, furniture)
+  const sourceChunks = rawSourceChunks.filter(chunk => {
+    // Only use BODY content (skip headers/footers/watermarks)
+    if (chunk.content_layer && chunk.content_layer !== 'BODY') {
+      return false;
+    }
+
+    // Skip non-semantic content
+    const noisyLabels = ['PAGE_HEADER', 'PAGE_FOOTER', 'FOOTNOTE', 'REFERENCE'];
+    if (chunk.content_label && noisyLabels.includes(chunk.content_label)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const filteredCount = rawSourceChunks.length - sourceChunks.length;
+  if (filteredCount > 0) {
+    console.log(`[ContradictionDetection] Filtered ${filteredCount} noisy chunks (headers/footers/furniture)`);
+  }
+
+  if (!sourceChunks.length) {
+    console.log('[ContradictionDetection] No clean chunks remaining after filtering');
     return [];
   }
 

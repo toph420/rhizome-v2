@@ -50,6 +50,24 @@ export interface DoclingChunk {
       r: number  // right
       b: number  // bottom
     }>
+
+    // Phase 2A enhancements
+    /** Character range in cleaned markdown (before chunking) - enables 99%+ annotation accuracy */
+    charspan?: [number, number]
+    /** Content layer: BODY, FURNITURE, BACKGROUND, INVISIBLE, NOTES */
+    content_layer?: string
+    /** Content type: PARAGRAPH, CODE, FORMULA, LIST_ITEM, CAPTION, etc. */
+    content_label?: string
+    /** Explicit section level (1-100) from Docling structure */
+    section_level?: number
+    /** Whether list is enumerated (numbered) */
+    list_enumerated?: boolean
+    /** List marker: "1.", "•", "a)", etc. */
+    list_marker?: string
+    /** Programming language for code blocks */
+    code_language?: string
+    /** Hyperlink URL or file path */
+    hyperlink?: string
   }
 }
 

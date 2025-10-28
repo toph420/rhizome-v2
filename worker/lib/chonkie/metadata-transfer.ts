@@ -71,6 +71,61 @@ export function calculateOverlapPercentage(
 }
 
 // ============================================================================
+// Phase 2A: Validation & Error Handling
+// ============================================================================
+
+/**
+ * Validate and sanitize Phase 2A metadata fields.
+ *
+ * Prevents invalid data from entering the database:
+ * - Charspan format validation (array, length 2, valid range)
+ * - Content layer enum validation (BODY, FURNITURE, etc.)
+ * - Section level range validation (1-100)
+ * - NULL-safe handling for backward compatibility
+ */
+function validatePhase2AMetadata(meta: {
+  charspan: [number, number] | null
+  content_layer: string | null
+  content_label: string | null
+  section_level: number | null
+  list_enumerated: boolean | null
+  list_marker: string | null
+  code_language: string | null
+  hyperlink: string | null
+}): void {
+  // Validate charspan format
+  if (meta.charspan !== null) {
+    if (!Array.isArray(meta.charspan) || meta.charspan.length !== 2) {
+      console.warn('[MetadataTransfer] Invalid charspan format:', meta.charspan)
+      meta.charspan = null
+    } else if (meta.charspan[0] < 0 || meta.charspan[0] >= meta.charspan[1]) {
+      console.warn('[MetadataTransfer] Invalid charspan range:', meta.charspan)
+      meta.charspan = null
+    }
+  }
+
+  // Validate content_layer enum
+  const validLayers = ['BODY', 'FURNITURE', 'BACKGROUND', 'INVISIBLE', 'NOTES']
+  if (meta.content_layer !== null && !validLayers.includes(meta.content_layer)) {
+    console.warn('[MetadataTransfer] Invalid content_layer:', meta.content_layer)
+    meta.content_layer = null
+  }
+
+  // Validate section_level range (1-100)
+  if (meta.section_level !== null) {
+    if (meta.section_level < 1 || meta.section_level > 100) {
+      console.warn('[MetadataTransfer] Invalid section_level:', meta.section_level)
+      meta.section_level = null
+    }
+  }
+
+  // No validation needed for other fields:
+  // - content_label: Any string value is valid (Docling schema is open)
+  // - list_enumerated: boolean or null
+  // - list_marker, code_language, hyperlink: Any string is valid
+}
+
+// ============================================================================
 // Metadata Aggregation
 // ============================================================================
 
@@ -83,6 +138,7 @@ export function calculateOverlapPercentage(
  * - page_end: Latest page number
  * - bboxes: Concatenate all bounding boxes
  * - section_marker: First non-null (EPUBs only)
+ * - Phase 2A fields: Validated and aggregated (charspan, content_layer, etc.)
  *
  * Multiple overlaps are GOOD - they provide richer metadata coverage.
  * A Chonkie chunk spanning multiple Docling chunks gets metadata from all of them.
@@ -95,6 +151,15 @@ export function aggregateMetadata(
   page_end: number | null
   section_marker: string | null
   bboxes: any[] | null
+  // Phase 2A enhancements
+  charspan: [number, number] | null
+  content_layer: string | null
+  content_label: string | null
+  section_level: number | null
+  list_enumerated: boolean | null
+  list_marker: string | null
+  code_language: string | null
+  hyperlink: string | null
 } {
   if (overlappingChunks.length === 0) {
     return {
@@ -102,7 +167,15 @@ export function aggregateMetadata(
       page_start: null,
       page_end: null,
       section_marker: null,
-      bboxes: null
+      bboxes: null,
+      charspan: null,
+      content_layer: null,
+      content_label: null,
+      section_level: null,
+      list_enumerated: null,
+      list_marker: null,
+      code_language: null,
+      hyperlink: null,
     }
   }
 
@@ -130,12 +203,71 @@ export function aggregateMetadata(
     .map(c => c.chunk.meta.section_marker)
     .filter(s => s !== null && s !== undefined)
 
+  // Phase 2A: Aggregate charspan (earliest start, latest end)
+  const charspans = overlappingChunks
+    .map(c => c.chunk.meta.charspan)
+    .filter(cs => cs !== null && cs !== undefined) as [number, number][]
+
+  const aggregatedCharspan = charspans.length > 0 ? [
+    Math.min(...charspans.map(cs => cs[0])),
+    Math.max(...charspans.map(cs => cs[1]))
+  ] as [number, number] : null
+
+  // Phase 2A: Aggregate content_layer (prefer BODY over FURNITURE)
+  const layers = overlappingChunks
+    .map(c => c.chunk.meta.content_layer)
+    .filter(l => l !== null && l !== undefined)
+  const content_layer = layers.includes('BODY') ? 'BODY' : (layers[0] || null)
+
+  // Phase 2A: Aggregate content_label (prefer semantic types)
+  const labels = overlappingChunks
+    .map(c => c.chunk.meta.content_label)
+    .filter(l => l !== null && l !== undefined)
+  const labelPriority = ['PARAGRAPH', 'CODE', 'FORMULA', 'LIST_ITEM']
+  const content_label = labels.find(l => labelPriority.includes(l)) || labels[0] || null
+
+  // Phase 2A: Take first non-null for chunk-specific fields
+  const section_level = overlappingChunks
+    .map(c => c.chunk.meta.section_level)
+    .find(sl => sl !== null && sl !== undefined) || null
+
+  const list_enumerated = overlappingChunks
+    .map(c => c.chunk.meta.list_enumerated)
+    .find(le => le !== null && le !== undefined) || null
+
+  const list_marker = overlappingChunks
+    .map(c => c.chunk.meta.list_marker)
+    .find(lm => lm !== null && lm !== undefined) || null
+
+  const code_language = overlappingChunks
+    .map(c => c.chunk.meta.code_language)
+    .find(cl => cl !== null && cl !== undefined) || null
+
+  const hyperlink = overlappingChunks
+    .map(c => c.chunk.meta.hyperlink)
+    .find(hl => hl !== null && hl !== undefined) || null
+
+  // Phase 2A: Validate metadata before returning
+  const phase2AMetadata = {
+    charspan: aggregatedCharspan,
+    content_layer,
+    content_label,
+    section_level,
+    list_enumerated,
+    list_marker,
+    code_language,
+    hyperlink,
+  }
+
+  validatePhase2AMetadata(phase2AMetadata)
+
   return {
     heading_path: uniqueHeadings.length > 0 ? uniqueHeadings : null,
     page_start: pages.length > 0 ? Math.min(...pages.map(p => p.start!)) : null,
     page_end: pages.length > 0 ? Math.max(...pages.map(p => p.end!)) : null,
     section_marker: sectionMarkers.length > 0 ? sectionMarkers[0] : null,
-    bboxes: allBboxes.length > 0 ? allBboxes : null
+    bboxes: allBboxes.length > 0 ? allBboxes : null,
+    ...phase2AMetadata, // Spread validated Phase 2A fields
   }
 }
 
@@ -201,6 +333,15 @@ function interpolateMetadata(
   page_end: number | null
   section_marker: string | null
   bboxes: any[] | null
+  // Phase 2A enhancements
+  charspan: [number, number] | null
+  content_layer: string | null
+  content_label: string | null
+  section_level: number | null
+  list_enumerated: boolean | null
+  list_marker: string | null
+  code_language: string | null
+  hyperlink: string | null
   interpolated: true
 } {
   // Find nearest Docling chunks before and after
@@ -221,6 +362,14 @@ function interpolateMetadata(
       page_end: null,
       section_marker: null,
       bboxes: null,
+      charspan: null,
+      content_layer: null,
+      content_label: null,
+      section_level: null,
+      list_enumerated: null,
+      list_marker: null,
+      code_language: null,
+      hyperlink: null,
       interpolated: true
     }
   }
@@ -231,6 +380,14 @@ function interpolateMetadata(
     page_end: source.chunk.meta.page_end,
     section_marker: source.chunk.meta.section_marker,
     bboxes: source.chunk.meta.bboxes,
+    charspan: source.chunk.meta.charspan,
+    content_layer: source.chunk.meta.content_layer,
+    content_label: source.chunk.meta.content_label,
+    section_level: source.chunk.meta.section_level,
+    list_enumerated: source.chunk.meta.list_enumerated,
+    list_marker: source.chunk.meta.list_marker,
+    code_language: source.chunk.meta.code_language,
+    hyperlink: source.chunk.meta.hyperlink,
     interpolated: true
   }
 }
@@ -323,6 +480,16 @@ export async function transferMetadataToChonkieChunks(
       page_end: metadata.page_end,
       section_marker: metadata.section_marker,
       bboxes: metadata.bboxes,
+
+      // Phase 2A: Enhanced Docling metadata
+      charspan: metadata.charspan,
+      content_layer: metadata.content_layer,
+      content_label: metadata.content_label,
+      section_level: metadata.section_level,
+      list_enumerated: metadata.list_enumerated,
+      list_marker: metadata.list_marker,
+      code_language: metadata.code_language,
+      hyperlink: metadata.hyperlink,
 
       // Chonkie metadata
       chunker_type: chonkieChunk.chunker_type as ChunkerType,

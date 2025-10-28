@@ -65,6 +65,7 @@ export async function runThematicBridge(
   // Get high-importance chunks from source document
   // During reprocessing: query by reprocessing_batch
   // During normal processing: query by is_current: true
+  // Phase 2A: Include content_layer and content_label for noise filtering
   let sourceQuery = supabase
     .from('chunks')
     .select(`
@@ -73,7 +74,9 @@ export async function runThematicBridge(
       content,
       summary,
       domain_metadata,
-      importance_score
+      importance_score,
+      content_layer,
+      content_label
     `)
     .eq('document_id', documentId)
     .not('domain_metadata', 'is', null)
@@ -96,14 +99,40 @@ export async function runThematicBridge(
     sourceQuery = sourceQuery.eq('is_current', true);
   }
 
-  const { data: sourceChunks, error } = await sourceQuery;
+  const { data: rawSourceChunks, error } = await sourceQuery;
 
-  if (error || !sourceChunks?.length) {
+  if (error || !rawSourceChunks?.length) {
     console.log('[ThematicBridge] No high-importance chunks with domain metadata');
     return [];
   }
 
-  console.log(`[ThematicBridge] Analyzing ${sourceChunks.length} high-importance chunks`);
+  // Phase 2A: Filter out noisy chunks (headers, footers, furniture)
+  const sourceChunks = rawSourceChunks.filter(chunk => {
+    // Only use BODY content (skip headers/footers/watermarks)
+    if (chunk.content_layer && chunk.content_layer !== 'BODY') {
+      return false;
+    }
+
+    // Skip non-semantic content
+    const noisyLabels = ['PAGE_HEADER', 'PAGE_FOOTER', 'FOOTNOTE', 'REFERENCE'];
+    if (chunk.content_label && noisyLabels.includes(chunk.content_label)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const filteredCount = rawSourceChunks.length - sourceChunks.length;
+  if (filteredCount > 0) {
+    console.log(`[ThematicBridge] Filtered ${filteredCount} noisy chunks (headers/footers/furniture)`);
+  }
+
+  if (!sourceChunks.length) {
+    console.log('[ThematicBridge] No clean chunks remaining after filtering');
+    return [];
+  }
+
+  console.log(`[ThematicBridge] Analyzing ${sourceChunks.length} high-importance clean chunks`);
 
   const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_AI_API_KEY! });
 

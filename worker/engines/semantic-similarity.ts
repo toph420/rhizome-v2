@@ -76,9 +76,10 @@ export async function runSemanticSimilarity(
   // Get all chunks from this document with embeddings
   // During reprocessing: query by reprocessing_batch (chunks not yet marked is_current: true)
   // During normal processing: query by is_current: true
+  // Phase 2A: Include content_layer and content_label for noise filtering
   let query = supabase
     .from('chunks')
-    .select('id, document_id, embedding, importance_score')
+    .select('id, document_id, embedding, importance_score, content_layer, content_label')
     .eq('document_id', documentId)
     .not('embedding', 'is', null);
 
@@ -93,19 +94,40 @@ export async function runSemanticSimilarity(
     query = query.eq('is_current', true);
   }
 
-  const { data: sourceChunks, error: fetchError } = await query;
+  const { data: rawSourceChunks, error: fetchError } = await query;
 
   if (fetchError) {
     console.error('[SemanticSimilarity] Failed to fetch chunks:', fetchError);
     throw fetchError;
   }
 
-  if (!sourceChunks || sourceChunks.length === 0) {
+  if (!rawSourceChunks || rawSourceChunks.length === 0) {
     console.log('[SemanticSimilarity] No chunks with embeddings found');
     return [];
   }
 
-  console.log(`[SemanticSimilarity] Processing ${sourceChunks.length} chunks`);
+  // Phase 2A: Filter out noisy chunks (headers, footers, furniture)
+  const sourceChunks = rawSourceChunks.filter(chunk => {
+    // Only use BODY content (skip headers/footers/watermarks)
+    if (chunk.content_layer && chunk.content_layer !== 'BODY') {
+      return false;
+    }
+
+    // Skip non-semantic content
+    const noisyLabels = ['PAGE_HEADER', 'PAGE_FOOTER', 'FOOTNOTE', 'REFERENCE'];
+    if (chunk.content_label && noisyLabels.includes(chunk.content_label)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const filteredCount = rawSourceChunks.length - sourceChunks.length;
+  if (filteredCount > 0) {
+    console.log(`[SemanticSimilarity] Filtered ${filteredCount} noisy chunks (headers/footers/furniture)`);
+  }
+
+  console.log(`[SemanticSimilarity] Processing ${sourceChunks.length} clean chunks`);
 
   const connections: ChunkConnection[] = [];
   let totalMatches = 0;
