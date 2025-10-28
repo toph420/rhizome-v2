@@ -70,6 +70,7 @@ export interface Chunk {
   id: string
   content: string
   chunk_index: number
+  chunker_type: 'hybrid' | 'token' | 'sentence' | 'recursive' | 'semantic' | 'late' | 'code' | 'neural' | 'slumber' | 'table'
   start_offset: number  // Required for multi-chunk detection
   end_offset: number    // Required for multi-chunk detection
 
@@ -116,6 +117,7 @@ export interface Chunk {
   page_start?: number | null
   page_end?: number | null
   section_marker?: string | null
+  bboxes?: any[]  // Bounding boxes from Docling (JSONB array)
 
   // Connection detection tracking (from migration 053)
   connections_detected?: boolean

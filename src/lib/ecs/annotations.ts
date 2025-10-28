@@ -43,6 +43,26 @@ export interface CreateAnnotationInput {
   /** Page label if available (optional) */
   pageLabel?: string;
 
+  // PDF coordinate fields (optional - for PDF annotations)
+  /** PDF page number (1-indexed) */
+  pdfPageNumber?: number;
+  /** Multiple rectangles for multi-line selections */
+  pdfRects?: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    pageNumber: number;
+  }>;
+  /** Legacy single rect coordinates */
+  pdfX?: number;
+  /** Y coordinate in PDF coordinate system */
+  pdfY?: number;
+  /** Selection width in PDF coordinates */
+  pdfWidth?: number;
+  /** Selection height in PDF coordinates */
+  pdfHeight?: number;
+
   // Recovery metadata
   /** Surrounding text for context-guided fuzzy matching (±100 chars) */
   textContext?: {
@@ -115,6 +135,13 @@ export class AnnotationOperations {
         pageLabel: input.pageLabel,
         textContext: input.textContext,
         originalChunkIndex: input.originalChunkIndex,
+        // PDF coordinate fields (optional)
+        pdfPageNumber: input.pdfPageNumber ?? null,
+        pdfRects: input.pdfRects ?? null, // Multiple rects for multi-line
+        pdfX: input.pdfX ?? null,
+        pdfY: input.pdfY ?? null,
+        pdfWidth: input.pdfWidth ?? null,
+        pdfHeight: input.pdfHeight ?? null,
         // Recovery fields initialized
         recoveryConfidence: 1.0,
         recoveryMethod: 'exact',

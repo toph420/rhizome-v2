@@ -25,6 +25,20 @@ const CreateAnnotationSchema = z.object({
     content: z.string(),
     after: z.string(),
   }),
+  // PDF coordinate fields - support multiple rects for multi-line
+  pdfPageNumber: z.number().int().positive().optional(),
+  pdfRects: z.array(z.object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number(),
+    pageNumber: z.number().int().positive(),
+  })).optional(),
+  // Legacy single rect (deprecated but kept for compatibility)
+  pdfX: z.number().optional(),
+  pdfY: z.number().optional(),
+  pdfWidth: z.number().optional(),
+  pdfHeight: z.number().optional(),
 })
 
 /**
@@ -81,6 +95,13 @@ export async function createAnnotation(
         after: validated.textContext.after,
       },
       originalChunkIndex: chunkIndex >= 0 ? chunkIndex : undefined,
+      // PDF coordinates (optional) - prefer pdfRects over single rect
+      pdfPageNumber: validated.pdfPageNumber,
+      pdfRects: validated.pdfRects,
+      pdfX: validated.pdfX,
+      pdfY: validated.pdfY,
+      pdfWidth: validated.pdfWidth,
+      pdfHeight: validated.pdfHeight,
     })
 
     console.log(`[Annotations] ✓ Created: ${entityId}`)

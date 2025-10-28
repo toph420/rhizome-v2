@@ -590,6 +590,7 @@ export async function refetchChunks(chunkIds: string[]) {
     .select(`
       id,
       chunk_index,
+      chunker_type,
       start_offset,
       end_offset,
       content,
@@ -598,7 +599,10 @@ export async function refetchChunks(chunkIds: string[]) {
       importance_score,
       emotional_metadata,
       conceptual_metadata,
-      domain_metadata
+      domain_metadata,
+      bboxes,
+      page_start,
+      page_end
     `)
     .in('id', chunkIds)
     .order('chunk_index', { ascending: true })

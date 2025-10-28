@@ -181,9 +181,44 @@ export async function extractPdfMetadata(fileBuffer: ArrayBuffer) {
  *
  * @param storagePath - Path to PDF in Supabase Storage (e.g., "temp/user-id/file.pdf")
  */
+/**
+ * Upload PDF to temp storage for metadata extraction.
+ * Uses admin client to bypass RLS in dev mode.
+ */
+export async function uploadPdfToTempStorage(file: File): Promise<string> {
+  const { createAdminClient } = await import('@/lib/supabase/admin')
+  const supabase = createAdminClient()
+
+  // Get user ID
+  const { getCurrentUser } = await import('@/lib/auth')
+  const user = await getCurrentUser()
+  if (!user) {
+    throw new Error('User not authenticated')
+  }
+
+  // Generate temp path
+  const tempId = crypto.randomUUID()
+  const tempPath = `temp/${user.id}/${tempId}.pdf`
+
+  console.log('[uploadPdfToTempStorage] Uploading to:', tempPath)
+
+  // Upload to storage (admin client bypasses RLS)
+  const { error: uploadError } = await supabase.storage
+    .from('documents')
+    .upload(tempPath, file)
+
+  if (uploadError) {
+    console.error('[uploadPdfToTempStorage] Upload failed:', uploadError)
+    throw new Error(`Failed to upload to temp storage: ${uploadError.message}`)
+  }
+
+  console.log('[uploadPdfToTempStorage] Upload successful:', tempPath)
+  return tempPath
+}
+
 export async function extractPdfMetadataFromStorage(storagePath: string) {
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createAdminClient } = await import('@/lib/supabase/admin')
+  const supabase = createAdminClient()
 
   console.log('[extractPdfMetadataFromStorage] Downloading from storage:', storagePath)
 

@@ -27,6 +27,26 @@ export interface PositionComponent {
   /** Page label if available (e.g., "iv", "42", "A-3") */
   pageLabel?: string;
 
+  // PDF coordinate fields (optional - null for markdown-only annotations)
+  /** PDF page number (1-indexed, matches PDF.js convention) */
+  pdfPageNumber?: number | null;
+  /** Multiple rectangles for multi-line selections */
+  pdfRects?: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    pageNumber: number;
+  }> | null;
+  /** Legacy single rect - X coordinate in PDF coordinate system (bottom-left origin) */
+  pdfX?: number | null;
+  /** Legacy single rect - Y coordinate in PDF coordinate system (bottom-left origin) */
+  pdfY?: number | null;
+  /** Legacy single rect - Selection width in PDF coordinates */
+  pdfWidth?: number | null;
+  /** Legacy single rect - Selection height in PDF coordinates */
+  pdfHeight?: number | null;
+
   // Fuzzy matching fields for annotation recovery (migration 033)
   /** Surrounding text for context-guided fuzzy matching (±100 chars) */
   textContext?: {
