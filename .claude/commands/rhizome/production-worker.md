@@ -6,6 +6,8 @@ description: Start the production worker in rhizome-v2 worktree (connects to clo
 
 Start the background worker in the production worktree to process jobs from the cloud database.
 
+> **Quick Access**: You can also use `/rhizome:worker prod` for a streamlined production worker start. This command provides more detailed documentation and monitoring guidance.
+
 ## Instructions
 
 You are starting the production worker that processes background jobs for the deployed Rhizome application.
