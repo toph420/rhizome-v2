@@ -8,7 +8,8 @@ import {
   extractTextMetadata,
   extractEpubMetadata,
   extractPdfMetadata,
-  extractPdfMetadataFromStorage
+  extractPdfMetadataFromStorage,
+  uploadPdfToTempStorage
 } from '@/app/actions/metadata-extraction'
 import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 import { useUploadStore } from '@/stores/upload-store'
@@ -179,28 +180,8 @@ export function UploadZone() {
         // PDF extraction - Storage-first approach to avoid 413 errors
         console.log('📤 Uploading PDF to temp storage for metadata extraction...')
 
-        // Get Supabase client
-        const supabase = createClient()
-
-        // Get current user (needed for temp path)
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          throw new Error('User not authenticated')
-        }
-
-        // Generate temp path
-        const tempId = crypto.randomUUID()
-        const tempPath = `temp/${user.id}/${tempId}.pdf`
-
-        // Upload to storage (no HTTP body size limit)
-        const { error: uploadError } = await supabase.storage
-          .from('documents')
-          .upload(tempPath, file)
-
-        if (uploadError) {
-          console.error('❌ Temp storage upload failed:', uploadError)
-          throw new Error(`Failed to upload to temp storage: ${uploadError.message}`)
-        }
+        // Upload via server action (uses admin client to bypass RLS)
+        const tempPath = await uploadPdfToTempStorage(file)
 
         console.log('✅ Uploaded to temp storage:', tempPath)
 
