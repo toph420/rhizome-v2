@@ -61,8 +61,33 @@
 | **Solution:** Text-based coordinate mapping (Phase 1 of sync plan) | | | | |
 | **Plan:** `thoughts/plans/2025-10-27_pdf-annotation-sync.md` (896 lines) | | | | |
 
+### PDF↔Markdown Sync Implementation (October 27, 2025 - Evening)
+
+**Status**: ✅ **Phase 1 Complete - Working**
+
+**Files Created/Modified**:
+- `src/lib/reader/text-offset-calculator.ts` (new) - Text matching with exact + fuzzy Levenshtein
+- `src/components/rhizome/pdf-viewer/PDFViewer.tsx` - Calculates offsets during annotation creation
+- `src/lib/ecs/components.ts` - Added sync metadata fields (syncConfidence, syncMethod, syncNeedsReview)
+- `src/lib/ecs/annotations.ts` - Store sync metadata in Position component
+- `src/app/actions/annotations.ts` - Zod validation for sync fields
+
+**Implementation**:
+- 3-tier matching: exact → case-insensitive → fuzzy (Levenshtein)
+- Document-wide fallback when page info unavailable (0% bbox coverage)
+- Sync metadata tracked with confidence scores
+- User warnings for low confidence or missing page data
+
+**Testing Results**:
+- ✅ PDF annotations now appear in markdown view
+- ✅ Exact text matching works (confidence 1.0)
+- ✅ Fuzzy matching works for OCR errors (confidence 0.75+)
+- ✅ Graceful degradation without page information
+- ⚠️ Document-wide search slower but functional (46 chunks searched)
+
 ### Investigation Required
-- ⚠️ **Bbox Coverage 0%**: Why are bboxes empty when extraction code exists in Docling Python script?
+- ⚠️ **Page Coverage 0%**: All chunks have `page_start: null`, `page_end: null`
+- ⚠️ **Bbox Coverage 0%**: Empty bbox arrays despite extraction code in Docling script
 - ⚠️ **Verify `enableChunking` flag** in PDF processor
 - ⚠️ **Test with newly processed PDF** to check if issue is document-specific
 - ⚠️ **Check if Chonkie preserves Docling metadata** during chunking
@@ -534,52 +559,110 @@
 
 ---
 
-## 📊 Test Results Template
+## 📊 Test Results
 
 ### Test Session Information
 ```
-Date: _______________
-Tester: _______________
-Browser: _______________ (version: ___)
-Device: _______________ (desktop/mobile/tablet)
+Date: October 27, 2025 (afternoon)
+Tester: Manual Testing Session
+Browser: Chrome (latest)
+Device: Desktop (macOS)
 Test PDFs Used:
-1. _______________
-2. _______________
-3. _______________
+1. fb8e50c3-5c33-4b00-8c34-0f22fa2579e7 - "Deleuze, Freud and the Three Syntheses"
+2. 961851b8-7fc0-40b0-a83c-29c14c486477 - "War Fever" by J.G. Ballard (initial testing)
 ```
 
 ### Phase Results
-- [ ] **Phase 1: Foundation** - ✅ Pass / ⚠️ Issues / ❌ Fail
-  - Issues found: _______________
+- [x] **Phase 1: Foundation** - ⚠️ **Issues Found & Fixed**
+  - Issues found: Zoom controls (Fit Page vs 100% identical), No chunk statistics in metadata
+  - Status: All issues resolved, phase complete
 
-- [ ] **Phase 2: Text Selection & Metadata** - ✅ Pass / ⚠️ Issues / ❌ Fail
-  - Issues found: _______________
+- [x] **Phase 2: Text Selection & Metadata** - ⚠️ **Issues Found & Fixed**
+  - Issues found: Clunky text selection with indicator interference
+  - Status: Selection moved to bottom-right, metadata enhanced with chunk stats
 
-- [ ] **Phase 3: ECS Annotation Integration** - ✅ Pass / ⚠️ Issues / ❌ Fail
-  - Issues found: _______________
+- [x] **Phase 3: ECS Annotation Integration** - ⚠️ **Issues Found & Fixed**
+  - Issues found: Zoom scaling misalignment, Multi-line selection boxes incorrect, PDF↔Markdown sync missing
+  - Status: Zoom scaling fixed, multi-line boxes fixed, sync issue documented with implementation plan
 
-- [ ] **Phase 4: Chunk Visualization** - ✅ Pass / ⚠️ Issues / ❌ Fail
-  - Issues found: _______________
+- [ ] **Phase 4: Chunk Visualization** - ⏳ **Pending Testing**
+  - Blocked by: 0% bbox coverage in test documents
+  - Investigation needed: Why bboxes not being saved despite extraction code existing
 
-- [ ] **Phase 5: Connection Integration** - ✅ Pass / ⚠️ Issues / ❌ Fail
-  - Issues found: _______________
+- [ ] **Phase 5: Connection Integration** - ⏳ **Pending Testing**
+  - Blocked by: Test documents have no connections detected
+  - Need: Document with connections for comprehensive testing
 
-### Critical Issues Found
-```
-Priority | Issue Description | Steps to Reproduce | Phase
----------|-------------------|-------------------|-------
-High     |                   |                   |
-Medium   |                   |                   |
-Low      |                   |                   |
-```
+### Detailed Test Results by Phase
+
+#### Phase 1: Foundation ✅
+**PDF Loading & Navigation:**
+- ✅ PDF loads successfully without errors
+- ✅ Previous/Next navigation works perfectly
+- ✅ Page counter displays correctly
+- ✅ State preservation works (page number persists across refresh)
+
+**Zoom Controls:**
+- ✅ Fit Width works correctly
+- ✅ Fit Page now scales to viewport height properly (FIXED)
+- ✅ 100% shows actual size, distinct from Fit Page (FIXED)
+- ✅ Zoom In/Out works smoothly with 1.2x multiplier
+
+**LeftPanel:**
+- ✅ Panel visible at 300px width, no layout shifts
+- ✅ All 4 tabs render without errors
+- ✅ Toggle preservation works (PDF page state maintained)
+
+**Metadata Tab:**
+- ✅ Now displays chunk statistics (FIXED)
+- ✅ Shows: Total chunks (179), Chunks with bboxes (1 / 0%), Chunker type (recursive)
+
+**Outline Tab:**
+- ✅ Shows "No outline available" message (expected behavior for this PDF)
+
+#### Phase 2: Text Selection ✅
+**Selection Mechanics:**
+- ✅ Selection smooth and reliable after fix
+- ✅ Indicator at bottom-right (non-blocking) (FIXED)
+- ✅ Clear button works
+- ✅ Multi-line selection captures correctly
+- ✅ Selection works at different zoom levels
+
+#### Phase 3: Annotations ✅
+**Annotation Creation:**
+- ✅ Highlight button appears on selection
+- ✅ Yellow overlay renders correctly
+- ✅ Annotations persist across refresh
+- ✅ Multiple annotations on same page work
+
+**Zoom Scaling:**
+- ✅ Create at 100%, zoom to 150% - Stays aligned (FIXED)
+- ✅ Create at 150%, zoom to 100% - Stays aligned (FIXED)
+- ✅ Create at 75%, zoom anywhere - Stays aligned (FIXED)
+
+**Multi-Line Annotations:**
+- ✅ Each line gets individual highlight box (FIXED)
+- ✅ No whitespace highlighted between lines (FIXED)
+- ✅ Follows text precisely (FIXED)
+- ✅ Backward compatible (old single-rect annotations still work)
+
+**Known Issue:**
+- 🚨 **PDF↔Markdown Sync**: Annotations don't show in markdown view (Implementation plan created: `thoughts/plans/2025-10-27_pdf-annotation-sync.md`)
+
+#### Phase 4: Chunk Visualization ⏳
+- ⬜ **Not Tested** - 0% bbox coverage in test documents
+- 🔍 **Investigation Needed**: Why are bboxes empty when extraction code exists?
+
+#### Phase 5: Connection Integration ⏳
+- ⬜ **Not Tested** - No connections in test documents
+- 📝 **Note**: Will test empty states and thumbnails when suitable document available
 
 ### Performance Notes
 ```
 PDF Size | Pages | Load Time | Navigation Speed | Notes
 ---------|-------|-----------|------------------|-------
-Small    | 10    |           |                  |
-Medium   | 50    |           |                  |
-Large    | 200   |           |                  |
+8.9 MB   | ?     | ~2-3s     | Smooth (~200ms)  | "War Fever" - Scanned PDF
+?        | ?     | ~2-3s     | Smooth (~200ms)  | "Deleuze" - Main test doc
 ```
 
 ---
@@ -642,15 +725,34 @@ If something doesn't work:
 
 ---
 
-## 🚀 After Testing
+## 🚀 Next Steps
 
-### Next Steps After Manual Testing
-1. **Document all issues** found during testing
-2. **Prioritize critical bugs** (blocking vs. nice-to-have)
-3. **Decide on Phase 6**: Continue with performance optimization OR deploy current version
-4. **User feedback**: Consider testing with real users before Phase 6
+### Immediate Priorities (Next Session)
+1. **Implement PDF↔Markdown Sync** (Phase 1 from plan)
+   - Create `src/lib/reader/text-offset-calculator.ts`
+   - Update PDF annotation creation to calculate markdown offsets
+   - Test annotations visible in both views
+   - See: `thoughts/plans/2025-10-27_pdf-annotation-sync.md` for complete plan
 
-### Phase 6 Preview (If Continuing)
+2. **Investigate Bbox Coverage Issue**
+   - Why are bboxes empty when extraction code exists in Docling Python script?
+   - Verify `enableChunking` flag in PDF processor
+   - Test with newly processed PDF
+   - Check if Chonkie preserves Docling metadata
+
+3. **Complete Phase 4-5 Testing**
+   - Find/process document with connections for Phase 5 testing
+   - Test bbox rendering if investigation yields results
+   - Test fallback indicators (whole-page bars)
+   - Test thumbnails tab and heatmap empty states
+
+### Future Enhancements (Post-Testing)
+- **Bbox-based precision mapping** (when bbox coverage >70%)
+- **Docling image & table extraction**
+- **Bidirectional annotation sync** (Markdown→PDF)
+- **Manual offset adjustment UI** for edge cases
+
+### Phase 6 Considerations (Performance Optimization)
 - Virtualized rendering for 500+ page PDFs
 - Keyboard shortcuts (Cmd+0, Cmd+1, arrow keys)
 - Continuous scroll mode toggle
@@ -659,8 +761,18 @@ If something doesn't work:
 - Performance optimization (<300ms page nav, <100ms zoom)
 - LeftPanel responsive (bottom sheet on mobile)
 
+### Deployment Readiness
+**Current Status:** Phases 1-3 production-ready
+- ✅ Core PDF viewing works flawlessly
+- ✅ Annotations create and persist correctly
+- ✅ All critical bugs fixed
+- ⚠️ PDF↔Markdown sync missing (high priority)
+- ⚠️ Phases 4-5 untested (bbox/connections blocked by test data)
+
+**Recommendation:** Complete PDF↔Markdown sync before deploying to production
+
 ---
 
-**Document Version:** 1.0
-**Last Updated:** October 27, 2025
-**Status:** Ready for Manual Testing
+**Document Version:** 2.0
+**Last Updated:** October 27, 2025 (Post-Testing Session 2)
+**Status:** Phases 1-3 Complete ✅ | Phases 4-5 Pending | Sync Feature Required
