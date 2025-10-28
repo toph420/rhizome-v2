@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { Button } from '@/components/rhizome/button'
 import { Badge } from '@/components/rhizome/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/rhizome/tooltip'
@@ -8,6 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useRouter } from 'next/navigation'
 import { chunkerLabels, chunkerDescriptions, chunkerColors, type ChunkerType } from '@/types/chunker'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/stores/ui-store'
 
 interface DocumentHeaderProps {
   documentId: string
@@ -42,9 +44,25 @@ export function DocumentHeader({
   pdfAvailable = false,  // 🆕 ADD
 }: DocumentHeaderProps) {
   const router = useRouter()
+  const headerRef = useRef<HTMLElement>(null)
+  const setDocumentHeaderHeight = useUIStore(state => state.setDocumentHeaderHeight)
+
+  // Track header height for RightPanel positioning
+  useEffect(() => {
+    if (!headerRef.current) return
+
+    const observer = new ResizeObserver(entries => {
+      // Use offsetHeight to include padding and borders, not just content
+      const height = entries[0].target.offsetHeight
+      setDocumentHeaderHeight(height)
+    })
+
+    observer.observe(headerRef.current)
+    return () => observer.disconnect()
+  }, [setDocumentHeaderHeight])
 
   return (
-    <header className="flex items-center justify-between px-6 py-4 border-b bg-background">
+    <header ref={headerRef} className="flex items-center justify-between px-6 py-4 border-b bg-background">
       <div className="flex items-center gap-4 min-w-0 flex-1">
         <Button
           variant="ghost"

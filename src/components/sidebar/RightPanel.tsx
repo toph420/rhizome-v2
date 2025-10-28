@@ -118,10 +118,11 @@ export function RightPanelV2({
   const setCollapsed = useUIStore(state => state.setSidebarCollapsed)
   const activeTab = useUIStore(state => state.activeTab)
   const setActiveTab = useUIStore(state => state.setActiveTab)
+  const documentHeaderHeight = useUIStore(state => state.documentHeaderHeight)
 
-  // Fixed position: TopNav (56px h-14) + DocumentHeader (78px with py-4)
-  // Total: 134px from top
-  const topPosition = 'top-[134px]'
+  // Dynamic positioning: TopNav (57px: h-14 + border-b) + DocumentHeader (measured by ResizeObserver)
+  const navHeight = 57 // h-14 (56px) + border-b (1px)
+  const topOffset = navHeight + documentHeaderHeight
 
   // Auto-switch to annotations tab when recovery results have items needing review
   useEffect(() => {
@@ -138,9 +139,9 @@ export function RightPanelV2({
   return (
       <motion.div
         className={cn(
-          "fixed right-0 bottom-0 border-l-2 border-border z-40 bg-secondary-background",
-          topPosition
+          "fixed right-0 bottom-0 border-l-2 border-border z-30 bg-secondary-background"
         )}
+        style={{ top: `${topOffset}px` }}
         initial={false}
         animate={{
           width: collapsed ? 48 : 384 // w-12 : w-96

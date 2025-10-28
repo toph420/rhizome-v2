@@ -18,7 +18,11 @@ interface UIState {
 
   // LeftPanel (new)
   leftPanelOpen: boolean
+  leftPanelCollapsed: boolean
   leftPanelTab: LeftPanelTab
+
+  // DocumentHeader height (for dynamic RightPanel positioning)
+  documentHeaderHeight: number
 
   // Reader display settings
   showChunkBoundaries: boolean
@@ -43,7 +47,9 @@ interface UIState {
   toggleAnnotationExpanded: (id: string) => void
   toggleSetting: (setting: 'showChunkBoundaries' | 'showHeatmap') => void
   toggleLeftPanel: () => void
+  setLeftPanelCollapsed: (collapsed: boolean) => void
   setLeftPanelTab: (tab: LeftPanelTab) => void
+  setDocumentHeaderHeight: (height: number) => void
   openQuickCapture: () => void
   closeQuickCapture: () => void
   setActiveAnnotation: (annotation: StoredAnnotation | null) => void
@@ -71,7 +77,9 @@ export const useUIStore = create<UIState>()(
       expandedConnections: new Set(),
       expandedAnnotations: new Set(),
       leftPanelOpen: true, // Open by default on desktop
+      leftPanelCollapsed: false,
       leftPanelTab: 'metadata',
+      documentHeaderHeight: 78, // Default height, updated by ResizeObserver
       showChunkBoundaries: true,
       showHeatmap: true,
       quickCaptureOpen: false,
@@ -131,7 +139,9 @@ export const useUIStore = create<UIState>()(
       },
 
       toggleLeftPanel: () => set(state => ({ leftPanelOpen: !state.leftPanelOpen })),
+      setLeftPanelCollapsed: (collapsed) => set({ leftPanelCollapsed: collapsed }),
       setLeftPanelTab: (tab) => set({ leftPanelTab: tab }),
+      setDocumentHeaderHeight: (height) => set({ documentHeaderHeight: height }),
 
       openQuickCapture: () =>
         set({ quickCaptureOpen: true }),
@@ -192,10 +202,11 @@ export const useUIStore = create<UIState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         activeTab: state.activeTab,
         leftPanelOpen: state.leftPanelOpen,
+        leftPanelCollapsed: state.leftPanelCollapsed,
         leftPanelTab: state.leftPanelTab,
         showChunkBoundaries: state.showChunkBoundaries,
         showHeatmap: state.showHeatmap,
-        // Don't persist expanded states, quickCaptureOpen, or activeAnnotation
+        // Don't persist expanded states, quickCaptureOpen, activeAnnotation, or documentHeaderHeight
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -210,6 +221,7 @@ export const useUIStore = create<UIState>()(
           state.editingSparkContent = null
           state.editingSparkSelections = []
           state.linkedAnnotationIds = []  // NEW - Phase 6b
+          state.documentHeaderHeight = 78 // Reset to default, will be updated by ResizeObserver
         }
       },
     }

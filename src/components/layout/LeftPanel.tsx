@@ -1,23 +1,36 @@
 'use client'
 
+import { motion } from 'framer-motion'
+import { Info, List, Images, Activity, ChevronRight, ChevronLeft } from 'lucide-react'
 import { useUIStore } from '@/stores/ui-store'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/rhizome/tabs'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/rhizome/tooltip'
 import { MetadataTab } from './tabs/MetadataTab'
 import { OutlineTab } from './tabs/OutlineTab'
 import { HeatmapTab } from './tabs/HeatmapTab'
 import { ThumbnailsTab } from './tabs/ThumbnailsTabWrapper'
+import { cn } from '@/lib/utils'
 import type { Chunk } from '@/types/annotations'
 
 interface LeftPanelProps {
   documentId: string
   pdfMetadata?: any
-  outline?: any[]  // PDF outline/TOC
-  fileUrl?: string  // 🆕 ADD: For thumbnails
-  numPages?: number  // 🆕 ADD: Total page count
-  currentPage?: number  // 🆕 ADD: Current page for highlighting
-  chunks: Chunk[]  // 🆕 ADD: For heatmap
-  onPageNavigate?: (page: number) => void  // Navigation handler
+  outline?: any[]
+  fileUrl?: string
+  numPages?: number
+  currentPage?: number
+  chunks: Chunk[]
+  onPageNavigate?: (page: number) => void
 }
+
+type TabId = 'metadata' | 'outline' | 'thumbnails' | 'heatmap'
+
+const tabs: { id: TabId; icon: React.ComponentType<{ className?: string }>; label: string }[] = [
+  { id: 'metadata', icon: Info, label: 'Metadata' },
+  { id: 'outline', icon: List, label: 'Outline' },
+  { id: 'thumbnails', icon: Images, label: 'Pages' },
+  { id: 'heatmap', icon: Activity, label: 'Heatmap' },
+]
 
 export function LeftPanel({
   documentId,
@@ -29,54 +42,124 @@ export function LeftPanel({
   chunks,
   onPageNavigate
 }: LeftPanelProps) {
-  const isOpen = useUIStore(state => state.leftPanelOpen)
+  const collapsed = useUIStore(state => state.leftPanelCollapsed)
+  const setCollapsed = useUIStore(state => state.setLeftPanelCollapsed)
   const activeTab = useUIStore(state => state.leftPanelTab)
   const setActiveTab = useUIStore(state => state.setLeftPanelTab)
 
-  // Type-safe handler for tab changes
-  const handleTabChange = (value: string) => {
-    setActiveTab(value as 'metadata' | 'outline' | 'thumbnails' | 'heatmap')
-  }
-
-  if (!isOpen) return null
-
   return (
-    <div className="w-[300px] border-r bg-background overflow-hidden flex flex-col">
-      <div className="p-4 border-b">
-        <h2 className="text-sm font-semibold">Document Navigation</h2>
-      </div>
+    <motion.div
+      className="relative border-r-2 border-border bg-background overflow-hidden flex flex-col shadow-base"
+      initial={false}
+      animate={{
+        width: collapsed ? 48 : 300 // w-12 : w-[300px]
+      }}
+      transition={{
+        type: 'spring',
+        damping: 25,
+        stiffness: 300
+      }}
+    >
+      {/* COLLAPSED: Vertical icon stack */}
+      {collapsed && (
+        <motion.div
+          className="flex flex-col gap-2 p-2 h-full"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <TooltipProvider>
+            {tabs.map(({ id, icon: Icon, label }) => (
+              <Tooltip key={id}>
+                <TooltipTrigger asChild>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      setActiveTab(id)
+                      setCollapsed(false) // Expand when clicking icon
+                    }}
+                    className={cn(
+                      "h-10 w-10 border-2 border-border rounded-base shadow-base",
+                      "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
+                      "transition-all flex items-center justify-center",
+                      activeTab === id && "bg-main text-main-foreground shadow-none translate-x-1 translate-y-1"
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </motion.button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </TooltipProvider>
+        </motion.div>
+      )}
 
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col">
-        <TabsList className="w-full justify-start border-b rounded-none p-1">
-          <TabsTrigger value="metadata" className="text-xs">Metadata</TabsTrigger>
-          <TabsTrigger value="outline" className="text-xs">Outline</TabsTrigger>
-          <TabsTrigger value="thumbnails" className="text-xs">Pages</TabsTrigger>
-          <TabsTrigger value="heatmap" className="text-xs">Heatmap</TabsTrigger>
-        </TabsList>
+      {/* EXPANDED: Full tabs */}
+      {!collapsed && (
+        <motion.div
+          className="flex flex-col h-full"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabId)} className="flex-1 flex flex-col">
+            <TabsList className="grid grid-cols-4 w-full border-b rounded-none">
+              {tabs.map(({ id, icon: Icon }) => (
+                <TabsTrigger key={id} value={id} className="flex items-center justify-center">
+                  <Icon className="h-5 w-5" />
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-        <TabsContent value="metadata" className="flex-1 overflow-auto">
-          <MetadataTab documentId={documentId} pdfMetadata={pdfMetadata} chunks={chunks} />
-        </TabsContent>
+            <TabsContent value="metadata" className="flex-1 overflow-auto">
+              <MetadataTab documentId={documentId} pdfMetadata={pdfMetadata} chunks={chunks} />
+            </TabsContent>
 
-        <TabsContent value="outline" className="flex-1 overflow-auto">
-          <OutlineTab outline={outline} onPageNavigate={onPageNavigate} />
-        </TabsContent>
+            <TabsContent value="outline" className="flex-1 overflow-auto">
+              <OutlineTab outline={outline} onPageNavigate={onPageNavigate} />
+            </TabsContent>
 
-        <TabsContent value="thumbnails" className="flex-1 overflow-auto">
-          {activeTab === 'thumbnails' && (
-            <ThumbnailsTab
-              fileUrl={fileUrl}
-              numPages={numPages}
-              currentPage={currentPage}
-              onPageNavigate={onPageNavigate}
-            />
-          )}
-        </TabsContent>
+            <TabsContent value="thumbnails" className="flex-1 overflow-auto">
+              {activeTab === 'thumbnails' && (
+                <ThumbnailsTab
+                  fileUrl={fileUrl}
+                  numPages={numPages}
+                  currentPage={currentPage}
+                  onPageNavigate={onPageNavigate}
+                />
+              )}
+            </TabsContent>
 
-        <TabsContent value="heatmap" className="flex-1 overflow-auto">
-          <HeatmapTab documentId={documentId} currentPage={currentPage} chunks={chunks} />
-        </TabsContent>
-      </Tabs>
-    </div>
+            <TabsContent value="heatmap" className="flex-1 overflow-auto">
+              <HeatmapTab documentId={documentId} currentPage={currentPage} chunks={chunks} />
+            </TabsContent>
+          </Tabs>
+        </motion.div>
+      )}
+
+      {/* COLLAPSE BUTTON: Positioned outside panel */}
+      <motion.button
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        onClick={() => setCollapsed(!collapsed)}
+        className={cn(
+          "absolute -right-6 top-20 h-12 w-6",
+          "border-2 border-border rounded-base shadow-base bg-background",
+          "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
+          "transition-all z-50 flex items-center justify-center"
+        )}
+      >
+        {collapsed ? (
+          <ChevronRight className="h-4 w-4" />
+        ) : (
+          <ChevronLeft className="h-4 w-4" />
+        )}
+      </motion.button>
+    </motion.div>
   )
 }

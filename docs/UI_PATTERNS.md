@@ -1779,8 +1779,6 @@ export function FloatingAction() {
 }
 ```
 
-Excellent catch! The annotation layer is crucial and I missed it. Here's the comprehensive annotation layer pattern to add to `UI_PATTERNS.md`:
-
 ## Pattern 8: Annotation Layer (Document Overlay)
 
 ### The Challenge
