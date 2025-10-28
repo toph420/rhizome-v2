@@ -10,6 +10,59 @@ interface PDFAnnotationOverlayProps {
   onAnnotationClick?: (annotationId: string) => void
 }
 
+interface PdfRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Merge adjacent rectangles on the same line to create continuous highlights.
+ * PDF.js returns one rect per word, causing gaps. This merges them.
+ */
+function mergeRectangles(rects: PdfRect[]): PdfRect[] {
+  if (rects.length === 0) return []
+  if (rects.length === 1) return rects
+
+  // Sort by Y position (top to bottom), then X position (left to right)
+  const sorted = [...rects].sort((a, b) => {
+    const yDiff = a.y - b.y
+    if (Math.abs(yDiff) > 2) return yDiff // Different lines (2px tolerance)
+    return a.x - b.x // Same line, sort left to right
+  })
+
+  const merged: PdfRect[] = []
+  let current = { ...sorted[0] }
+
+  for (let i = 1; i < sorted.length; i++) {
+    const next = sorted[i]
+
+    // Check if rectangles are on the same line (similar Y and height)
+    const sameLine = Math.abs(current.y - next.y) < 2 &&
+                     Math.abs(current.height - next.height) < 2
+
+    // Check if rectangles are horizontally adjacent (gap < 5px)
+    const currentRight = current.x + current.width
+    const gap = next.x - currentRight
+    const adjacent = gap < 5 && gap > -5
+
+    if (sameLine && adjacent) {
+      // Merge: extend current rectangle to include next
+      current.width = (next.x + next.width) - current.x
+    } else {
+      // Start new merged rectangle
+      merged.push(current)
+      current = { ...next }
+    }
+  }
+
+  // Don't forget the last rectangle
+  merged.push(current)
+
+  return merged
+}
+
 export function PDFAnnotationOverlay({
   annotations,
   pageNumber,
@@ -36,8 +89,11 @@ export function PDFAnnotationOverlay({
 
         // Check for multi-rect annotation (new format)
         if (position?.pdfRects && position.pdfRects.length > 0) {
-          // Render multiple rectangles for multi-line selections
-          return position.pdfRects.map((rect, index) => {
+          // Merge adjacent rectangles to create continuous highlights
+          const mergedRects = mergeRectangles(position.pdfRects)
+
+          // Render merged rectangles (reduces 38 rects to ~3-5 clean highlights)
+          return mergedRects.map((rect, index) => {
             const x = rect.x * scale
             const y = rect.y * scale
             const width = rect.width * scale

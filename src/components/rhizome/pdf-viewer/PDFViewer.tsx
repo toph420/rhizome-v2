@@ -27,9 +27,10 @@ interface PDFViewerProps {
   onOutlineLoad?: (outline: any[]) => void  // Outline extraction callback
   onNumPagesLoad?: (numPages: number) => void  // 🆕 ADD: numPages callback
   chunks?: Chunk[]  // Optional chunks for visualization
+  doclingMarkdown?: string  // Phase 1A: Docling extraction for charspan search
 }
 
-export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, onNumPagesLoad, chunks = [] }: PDFViewerProps) {
+export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, onNumPagesLoad, chunks = [], doclingMarkdown }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0)
   const [scale, setScale] = useState(1.0)
   const [pageWidth, setPageWidth] = useState<number>(0)
@@ -132,17 +133,24 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
     }
   }
 
-  const handleFitPage = () => {
+  const handleFitPage = useCallback(() => {
     // Fit to visible viewport height
     if (pageHeight > 0) {
       const containerHeight = window.innerHeight - 200 // Account for header/controls
       setScale(containerHeight / pageHeight)
     }
-  }
+  }, [pageHeight])
 
   const handleActualSize = () => {
     setScale(1.0)
   }
+
+  // Auto-fit page when dimensions become available (default to "Fit Page")
+  useEffect(() => {
+    if (pageHeight > 0) {
+      handleFitPage()
+    }
+  }, [pageHeight, handleFitPage])
 
   // Annotation click handler
   const handleAnnotationClick = (annotationId: string) => {
@@ -161,11 +169,12 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
     if (!selection) return
 
     try {
-      // Calculate markdown offsets using text-based matching
+      // Phase 1A: Calculate markdown offsets using charspan-enhanced matching
       const offsetResult = calculateMarkdownOffsets(
         selection.text,
         selection.pdfRect.pageNumber,
-        chunks
+        chunks,
+        doclingMarkdown  // Phase 1A: Docling extraction for charspan search
       )
 
       // Log confidence for debugging
