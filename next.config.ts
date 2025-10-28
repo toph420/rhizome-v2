@@ -18,6 +18,13 @@ const nextConfig: NextConfig = {
       ...config.watchOptions,
       ignored: ['**/node_modules/**', '**/.git/**', '**/*.log'],
     }
+
+    // PDF.js configuration - disable canvas on both server and client
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvas: false,
+    }
+
     return config
   },
 
