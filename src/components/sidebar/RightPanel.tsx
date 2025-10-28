@@ -163,17 +163,13 @@ export function RightPanelV2({
         >
           {/* Toggle button as first icon */}
           <motion.button
-            className={cn(
-              "relative p-2 rounded-base border-2 border-border",
-              "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
-              "transition-all shadow-base"
-            )}
+            className="sidebar-icon-btn"
             onClick={() => setCollapsed(!collapsed)}
             title="Expand panel"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-5 w-5" />
           </motion.button>
 
           {TABS.map((tab) => {
@@ -184,10 +180,8 @@ export function RightPanelV2({
               <motion.button
                 key={tab.id}
                 className={cn(
-                  "relative p-2 rounded-base",
-                  "hover:translate-x-1 hover:translate-y-1 hover:shadow-none",
-                  "transition-all shadow-base",
-                  activeTab === tab.id && "shadow-none translate-x-1 translate-y-1"
+                  "sidebar-icon-btn",
+                  activeTab === tab.id && "active"
                 )}
                 onClick={() => {
                   setActiveTab(tab.id)
@@ -197,7 +191,7 @@ export function RightPanelV2({
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-5 w-5" />
                 {badgeCount !== undefined && badgeCount > 0 && (
                   <Badge
                     variant="default"
@@ -229,7 +223,7 @@ export function RightPanelV2({
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
         >
-          <ChevronRight className="h-3 w-3" />
+          <ChevronRight className="h-4 w-4" />
         </motion.button>
       )}
 
@@ -256,7 +250,7 @@ export function RightPanelV2({
                       className="flex items-center justify-center relative"
                       title={tab.label}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-5 w-5" />
                       {badgeCount !== undefined && badgeCount > 0 && (
                         <Badge
                           variant="default"

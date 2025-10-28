@@ -66,7 +66,7 @@ export interface PositionComponent {
   /** Confidence score for PDF↔Markdown offset mapping (0.0-1.0). 1.0=exact match, 0.75+=fuzzy match */
   syncConfidence?: number;
   /** Method used to calculate markdown offsets from PDF coordinates */
-  syncMethod?: 'exact' | 'fuzzy' | 'bbox' | 'manual';
+  syncMethod?: 'charspan_window' | 'exact' | 'fuzzy' | 'bbox' | 'manual';
   /** True if sync confidence is low and needs manual review (<0.85) */
   syncNeedsReview?: boolean;
 }

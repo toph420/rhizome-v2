@@ -125,7 +125,7 @@ export function LeftPanel({
             <TabsList className="grid grid-cols-4 gap-1 p-2 m-4 border-b-2 border-border flex-shrink-0">
               {tabs.map(({ id, icon: Icon }) => (
                 <TabsTrigger key={id} value={id} className="flex items-center justify-center">
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-5 w-5" />
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -173,7 +173,7 @@ export function LeftPanel({
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
         >
-          <ChevronLeft className="h-3 w-3" />
+          <ChevronLeft className="h-4 w-4" />
         </motion.button>
       )}
     </motion.div>

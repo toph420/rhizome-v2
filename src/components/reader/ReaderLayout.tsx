@@ -568,7 +568,6 @@ export function ReaderLayout({
         wordCount={wordCount}
         chunkCount={chunks.length}
         connectionCount={connectionCount}
-        chunkerType={chunkerType}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onQuickSpark={openSparkCapture}
@@ -579,17 +578,19 @@ export function ReaderLayout({
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* 🆕 ADD: LeftPanel for PDF mode */}
-        <LeftPanel
-          documentId={documentId}
-          pdfMetadata={pdfMetadata}
-          outline={pdfOutline}
-          fileUrl={pdfUrl || undefined}
-          numPages={pdfNumPages}
-          currentPage={pdfPageNumber}
-          chunks={chunks}
-          onPageNavigate={handlePageNavigate}
-        />
+        {/* LeftPanel - hidden in focus mode */}
+        {viewMode !== 'focus' && (
+          <LeftPanel
+            documentId={documentId}
+            pdfMetadata={pdfMetadata}
+            outline={pdfOutline}
+            fileUrl={pdfUrl || undefined}
+            numPages={pdfNumPages}
+            currentPage={pdfPageNumber}
+            chunks={chunks}
+            onPageNavigate={handlePageNavigate}
+          />
+        )}
 
         {/* Main viewer area */}
         <div className="flex-1 overflow-hidden relative">

@@ -370,6 +370,24 @@
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
   }
+
+  /* Sidebar icon buttons - no hover movement, only shadow change */
+  .sidebar-icon-btn {
+    @apply relative p-2 border-2 border-border;
+    @apply transition-all flex items-center justify-center;
+    border-radius: var(--radius-val);
+    box-shadow: var(--shadow);
+
+    &:hover {
+      box-shadow: none;
+      /* No translate - just shadow disappears on hover */
+    }
+
+    &.active {
+      @apply bg-main text-main-foreground;
+      box-shadow: none;
+    }
+  }
 }
 
 button:hover {

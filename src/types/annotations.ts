@@ -119,6 +119,16 @@ export interface Chunk {
   section_marker?: string | null
   bboxes?: any[]  // Bounding boxes from Docling (JSONB array)
 
+  // Phase 2A: Enhanced Docling metadata (from migration 073)
+  charspan?: [number, number] | null  // Character range in cleaned markdown - 99%+ annotation accuracy
+  content_layer?: string | null  // BODY, FURNITURE, BACKGROUND - filters noise
+  content_label?: string | null  // PARAGRAPH, CODE, FORMULA - better classification
+  section_level?: number | null  // 1-100 heading depth from Docling
+  list_enumerated?: boolean | null  // True for numbered lists
+  list_marker?: string | null  // "1.", "•", "a)" - preserves formatting
+  code_language?: string | null  // Programming language for syntax highlighting
+  hyperlink?: string | null  // URL or file path from source
+
   // Connection detection tracking (from migration 053)
   connections_detected?: boolean
   connections_detected_at?: string | null

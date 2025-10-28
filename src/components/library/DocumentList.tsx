@@ -94,12 +94,13 @@ export function DocumentList() {
             isReviewStatus: newDoc.processing_status === 'awaiting_manual_review'
           })
 
-          // If document entered review status, reload all to fetch Obsidian URI
-          if (newDoc.processing_status === 'awaiting_manual_review') {
-            console.log('[DocumentList] ✅ Document entered review - reloading to fetch URI')
+          // If document entered review or completed status, reload all to fetch complete data
+          if (newDoc.processing_status === 'awaiting_manual_review' ||
+              newDoc.processing_status === 'completed') {
+            console.log('[DocumentList] ✅ Document status change - reloading to fetch complete data')
             loadDocuments(supabase, userId)
           } else {
-            console.log('[DocumentList] Regular update - not review status')
+            console.log('[DocumentList] Regular update - incremental status change')
             // For other updates, just update the document directly
             setDocuments(prev => prev.map(doc =>
               doc.id === newDoc.id ? newDoc : doc
