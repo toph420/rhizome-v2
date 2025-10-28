@@ -236,7 +236,7 @@ export function DocumentList() {
               .eq('status', 'completed')
               .order('created_at', { ascending: false })
               .limit(1)
-              .single()
+              .maybeSingle()
 
             if (jobError) {
               console.error(`[DocumentList] Failed to fetch job for ${doc.title}:`, jobError)

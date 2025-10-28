@@ -17,6 +17,7 @@ import {
 import { generateFlashcards } from '@/app/actions/flashcards'
 import { useFlashcardStore } from '@/stores/flashcard-store'
 import { useReaderStore } from '@/stores/reader-store'
+import { useBackgroundJobsStore } from '@/stores/admin/background-jobs'
 
 interface GenerationPanelClientProps {
   documentId: string
@@ -25,6 +26,7 @@ interface GenerationPanelClientProps {
 export function GenerationPanelClient({ documentId }: GenerationPanelClientProps) {
   const { prompts, decks } = useFlashcardStore()
   const { visibleChunks } = useReaderStore()
+  const { registerJob } = useBackgroundJobsStore()
   const [sourceType, setSourceType] = useState<'document' | 'chunks'>('document')
   const [promptId, setPromptId] = useState('')
   const [count, setCount] = useState(5)
@@ -80,7 +82,12 @@ export function GenerationPanelClient({ documentId }: GenerationPanelClientProps
 
       if (result.success && result.jobId) {
         toast.success(`Generating ${count} cards...`)
-        // Job appears in ProcessingDock automatically
+
+        // Register job in store so ProcessingDock and JobsTab can track it
+        registerJob(result.jobId, 'generate_flashcards', {
+          documentId,
+          title: `${count} flashcards`,
+        })
       } else {
         toast.error(result.error || 'Generation failed')
       }

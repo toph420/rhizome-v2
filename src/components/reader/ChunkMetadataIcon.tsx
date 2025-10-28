@@ -264,7 +264,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
 
   // Use em-based positioning for better text alignment (scales with font size)
   // Default: top-[0.375em] aligns roughly with first line of text
-  const defaultStyle = { top: '0.375em', ...style }
+  const defaultStyle = { top: '1.85em', left:'-1.5em' }
 
   return (
     <HoverCard openDelay={200}>

@@ -72,19 +72,21 @@ export function FlashcardsTab({ documentId }: FlashcardsTabProps) {
   }
 
   return (
-    <Tabs defaultValue="generate" className="w-full">
-      <TabsList className="w-full grid grid-cols-2">
-        <TabsTrigger value="generate">Generate</TabsTrigger>
-        <TabsTrigger value="cards">Cards</TabsTrigger>
-      </TabsList>
+    <div className="p-6">
+      <Tabs defaultValue="generate" className="w-full">
+        <TabsList className="w-full grid grid-cols-2">
+          <TabsTrigger value="generate">Generate</TabsTrigger>
+          <TabsTrigger value="cards">Cards</TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="generate" className="mt-4">
-        <GenerationPanelClient documentId={documentId} />
-      </TabsContent>
+        <TabsContent value="generate" className="mt-4">
+          <GenerationPanelClient documentId={documentId} />
+        </TabsContent>
 
-      <TabsContent value="cards" className="mt-4">
-        <FlashcardsListClient documentId={documentId} />
-      </TabsContent>
-    </Tabs>
+        <TabsContent value="cards" className="mt-4">
+          <FlashcardsListClient documentId={documentId} />
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
