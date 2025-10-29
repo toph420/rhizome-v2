@@ -1,9 +1,9 @@
 import { marked } from 'marked'
 import type { Chunk } from '@/types/annotations'
 import {
-  injectHighlights,
-  type AnnotationForInjection,
-} from './highlight-injector'
+  injectAnnotations,
+  type AnnotationRange,
+} from '@/lib/annotations/inject'
 
 /**
  * Renderable block with chunk mapping and optional highlights.
@@ -31,7 +31,7 @@ export interface Block {
 export function parseMarkdownToBlocks(
   markdown: string,
   chunks: Chunk[],
-  annotations: AnnotationForInjection[] = []
+  annotations: AnnotationRange[] = []
 ): Block[] {
   const tokens = marked.lexer(markdown)
   const blocks: Block[] = []
@@ -71,12 +71,15 @@ export function parseMarkdownToBlocks(
 
     // Inject highlights if annotations provided
     if (annotations.length > 0) {
-      html = injectHighlights({
+      html = injectAnnotations(
         html,
-        blockStartOffset: offset,
-        blockEndOffset: endOffset,
-        annotations,
-      })
+        offset,           // blockStartOffset
+        endOffset,        // blockEndOffset
+        annotations.map(ann => ({
+          ...ann,
+          text: undefined  // Don't use text search for block-parser (offset-based is fine)
+        }))
+      )
     }
 
     // Extract depth for heading tokens
