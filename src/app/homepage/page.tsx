@@ -2,8 +2,7 @@ import { Suspense } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/rhizome/card'
 import { Button } from '@/components/rhizome/button'
 import { Skeleton } from '@/components/rhizome/skeleton'
-import { StatCard } from '@/components/rhizome/stat-card'
-import { FileText, Database, Network, CheckCircle2, Zap, AlertCircle } from 'lucide-react'
+import { StatsPanel } from '@/components/homepage/StatsPanel'
 
 /**
  * Homepage - Diagonal Cascade Layout
@@ -185,68 +184,6 @@ function LibraryGrid() {
   )
 }
 
-function StatsPanel() {
-  return (
-    <div className="h-full flex flex-col justify-between gap-3">
-      <div>
-        <h3 className="font-heading text-sm font-bold mb-3">Stats & Processing</h3>
-        <div className="grid grid-cols-1 gap-2">
-          {/* Primary Variant - bg-main accent */}
-          <StatCard
-            label="documents"
-            value={47}
-            variant="primary"
-            icon={<FileText className="w-4 h-4" />}
-            onClick={() => console.log('Navigate to documents')}
-          />
-
-          {/* Vibrant Variants - colorful highlights */}
-          <StatCard
-            label="chunks"
-            value="12.4K"
-            variant="vibrant-pink"
-            icon={<Database className="w-4 h-4" />}
-          />
-
-          <StatCard
-            label="connections"
-            value={891}
-            variant="vibrant-purple"
-            icon={<Network className="w-4 h-4" />}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Processing Queue</p>
-        <div className="grid grid-cols-3 gap-2">
-          <StatCard
-            label="completed"
-            value={44}
-            variant="success"
-            icon={<CheckCircle2 className="w-3 h-3" />}
-            compact
-          />
-          <StatCard
-            label="active"
-            value={2}
-            variant="warning"
-            icon={<Zap className="w-3 h-3" />}
-            compact
-          />
-          <StatCard
-            label="failed"
-            value={1}
-            variant="danger"
-            icon={<AlertCircle className="w-3 h-3" />}
-            compact
-          />
-        </div>
-        <Button variant="neutral" className="w-full text-xs">View Processing Graph →</Button>
-      </div>
-    </div>
-  )
-}
 
 function ConnectionsPanel() {
   return (
