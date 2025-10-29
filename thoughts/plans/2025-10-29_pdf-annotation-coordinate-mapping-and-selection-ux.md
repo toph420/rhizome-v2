@@ -837,6 +837,294 @@ echo "PyMuPDF>=1.23.0" >> worker/requirements.txt  # ✅ Complete
 
 ---
 
+## Phase 1.5: Improve PDF Selection & Bidirectional Matching
+
+### Overview
+
+**Current Status**:
+- ✅ Markdown → PDF: Working perfectly (98.9% accuracy, word-level precision)
+- ❌ PDF → PDF: Imprecise (screen coordinates, zoom issues, no word-level)
+- ⚠️ PDF → Markdown: Working but imprecise (~90% accuracy - NEEDS IMPROVEMENT)
+
+**Goal**: Apply PyMuPDF word-level precision to BOTH directions for consistent 95%+ accuracy
+
+### Problem 1: PDF Selection UX (Current Implementation)
+
+**File**: `src/hooks/usePDFSelection.ts`
+
+**Current Approach** (BROKEN):
+```typescript
+// Uses browser screen coordinates - IMPRECISE
+const rect = range.getBoundingClientRect()
+const pdfRect = {
+  x: rect.x,      // ❌ Screen coordinates, not PDF coordinates
+  y: rect.y,      // ❌ Affected by scroll position
+  width: rect.width,
+  height: rect.height
+}
+```
+
+**Problems**:
+- Screen coordinates instead of PDF coordinates
+- Affected by zoom level and scroll position
+- Not word-level precise (just bounding box of selection)
+- Creates imprecise, misaligned rectangles
+- Different precision than Markdown→PDF (inconsistent UX)
+
+### Solution 1: PyMuPDF-Based PDF Selection
+
+**Approach**: Use the SAME word-level precision we implemented for Markdown→PDF
+
+**Implementation Steps**:
+
+1. **Create PyMuPDF Selection Script**
+   - File: `worker/scripts/get_pdf_selection_rects.py` (NEW)
+   - Input: PDF path, page number, selected text
+   - Output: Precise word-level rectangles (JSON)
+   - Use `page.get_text("words")` + fuzzy matching
+
+2. **Create TypeScript Wrapper**
+   - File: `src/lib/python/pymupdf-selection.ts` (NEW)
+   - Server Action to call Python script
+   - Download PDF to temp file (same pattern as coordinate mapper)
+   - Return precise word-level rectangles
+
+3. **Update PDF Selection Hook**
+   - File: `src/hooks/usePDFSelection.ts` (MODIFY)
+   - After user selects text, call PyMuPDF Server Action
+   - Replace browser coordinates with precise rectangles
+   - Store multiple rectangles (word-level array)
+
+4. **Update Annotation Button**
+   - File: `src/components/rhizome/pdf-viewer/PDFAnnotationButton.tsx` (MODIFY)
+   - Handle multiple rectangles (not just single rect)
+   - Show precise word-level highlighting preview
+
+**Key Code** (NEW):
+```python
+# worker/scripts/get_pdf_selection_rects.py
+def get_selection_rectangles(pdf_path, page_num, selected_text):
+    """Get precise word-level rectangles for selected text in PDF."""
+    doc = fitz.open(pdf_path)
+    page = doc[page_num - 1]
+
+    # Strategy 1: Exact search with quads
+    quads = page.search_for(selected_text, quads=True)
+    if quads:
+        rects = [quad.rect for quad in quads]
+        return rects
+
+    # Strategy 2: Normalized whitespace
+    normalized = normalize_whitespace(selected_text)
+    quads = page.search_for(normalized, quads=True)
+    if quads:
+        return [quad.rect for quad in quads]
+
+    # Strategy 3: Fuzzy matching + word-level precision
+    page_text = page.get_text()
+    search_normalized = normalize_text_aggressive(selected_text).lower()
+    page_normalized = normalize_text_aggressive(page_text).lower()
+
+    # Find best match position
+    search_len = len(selected_text)
+    best_position = -1
+    best_ratio = 0.0
+
+    for i in range(0, len(page_normalized) - search_len + 1, 5):
+        window = page_normalized[i:i + search_len]
+        ratio = SequenceMatcher(None, search_normalized, window).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_position = i
+
+    if best_ratio >= 0.85:
+        # Get word-level rectangles at this position
+        word_rects = get_words_in_range(page, best_position, best_position + search_len, page_text)
+        return word_rects
+
+    return []  # Fallback to empty (will use screen coords as last resort)
+```
+
+**Expected Results**:
+- ✅ Pixel-perfect word-level rectangles
+- ✅ Same precision as Markdown→PDF
+- ✅ Works with zoomed/scrolled views
+- ✅ Consistent UX in both directions
+- ✅ 95%+ accuracy
+
+### Problem 2: PDF → Markdown Matching (Needs Improvement)
+
+**File**: `src/lib/reader/text-offset-calculator.ts`
+
+**Current Approach** (INSUFFICIENT):
+- Simple exact text search in content.md
+- No fuzzy matching
+- No word-level position awareness
+- Success rate: ~90% (TOO LOW - NOT ACCEPTABLE)
+
+**Problems**:
+- Fails when AI cleanup changes wording
+- No handling of quote/dash normalization
+- No similarity threshold
+- Inconsistent with Markdown→PDF precision
+
+### Solution 2: Apply Fuzzy Matching to PDF → Markdown
+
+**Implementation Steps**:
+
+1. **Add Fuzzy Matching to Text Offset Calculator**
+   - File: `src/lib/reader/text-offset-calculator.ts` (MODIFY)
+   - Use sliding window SequenceMatcher (same as Python)
+   - 85% similarity threshold
+   - Aggressive normalization (quotes, dashes, whitespace)
+
+2. **Use PyMuPDF for Precise Text Extraction** (Optional Enhancement)
+   - Extract text via `page.get_text("words")` instead of browser selection
+   - Better line break handling
+   - More accurate text representation
+
+3. **Use Word Positions for Search Range Estimation**
+   - Know approximate position in PDF page
+   - Estimate proportional position in markdown
+   - Narrow search range for faster matching
+
+**Key Code** (UPDATE):
+```typescript
+// src/lib/reader/text-offset-calculator.ts
+
+function fuzzySearchInMarkdown(
+  markdownContent: string,
+  searchText: string,
+  threshold: number = 0.85
+): { startOffset: number; endOffset: number; similarity: number } | null {
+  const searchLen = searchText.length
+  const searchNormalized = normalizeTextAggressive(searchText).toLowerCase()
+  const mdNormalized = normalizeTextAggressive(markdownContent).toLowerCase()
+
+  let bestMatch = null
+  let bestRatio = 0.0
+  let bestPosition = -1
+
+  // Sliding window search (step by 10 chars for performance)
+  for (let i = 0; i < mdNormalized.length - searchLen + 1; i += 10) {
+    const window = mdNormalized.slice(i, i + searchLen)
+    const ratio = sequenceSimilarity(searchNormalized, window)
+
+    if (ratio > bestRatio) {
+      bestRatio = ratio
+      bestPosition = i
+    }
+  }
+
+  if (bestRatio >= threshold) {
+    return {
+      startOffset: bestPosition,
+      endOffset: bestPosition + searchLen,
+      similarity: bestRatio
+    }
+  }
+
+  return null  // Fall back to page-level only
+}
+
+function normalizeTextAggressive(text: string): string {
+  // Same normalization as Python script
+  let normalized = text
+
+  // Normalize quotes (ALL Unicode variants)
+  normalized = normalized.replace(/[\u0022\u0027\u0060\u00B4\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F]/g, '@')
+
+  // Normalize dashes
+  normalized = normalized.replace(/[\u2010-\u2015\u2212]/g, '-')
+
+  // Remove soft hyphens
+  normalized = normalized.replace(/\u00AD/g, '')
+
+  // Collapse whitespace
+  normalized = normalized.replace(/\s+/g, ' ')
+
+  return normalized.trim()
+}
+```
+
+**Expected Results**:
+- ✅ 95%+ accuracy (matching Markdown→PDF)
+- ✅ Handles AI cleanup in both directions
+- ✅ Consistent precision across all workflows
+- ✅ Fast search with proportional position estimation
+
+### Success Criteria (Phase 1.5)
+
+**Automated Verification**:
+- [ ] TypeScript compiles: `npm run typecheck`
+- [ ] Python syntax valid: `python3 -m py_compile worker/scripts/get_pdf_selection_rects.py`
+- [ ] No linting errors: `npm run lint`
+
+**Manual Verification (PDF Selection)**:
+- [ ] Select text in PDF view
+- [ ] Expected: Server logs show PyMuPDF script execution
+- [ ] Expected: Multiple word-level rectangles returned
+- [ ] Click "Highlight" button
+- [ ] Switch to markdown view → annotation appears at correct position
+- [ ] Switch back to PDF view → rectangles are pixel-perfect
+- [ ] Test with zoomed view (150%) → rectangles scale correctly
+- [ ] Test with scrolled view → coordinates unaffected
+
+**Manual Verification (PDF → Markdown Matching)**:
+- [ ] Select text in PDF view
+- [ ] Expected: Fuzzy matching finds position in content.md
+- [ ] Expected: Similarity score logged (should be 85%+)
+- [ ] Create annotation → appears in markdown view at EXACT position
+- [ ] Test with AI-cleaned text (quotes/dashes different) → still matches
+- [ ] Test with 3 different documents → 95%+ success rate
+- [ ] Compare precision to Markdown→PDF → should be equivalent
+
+**Service Restarts**:
+- [ ] Next.js: Auto-reload verified for TypeScript changes
+- [ ] Worker: Not needed (Python scripts run via Server Actions)
+
+### Files to Create
+
+- [ ] `worker/scripts/get_pdf_selection_rects.py` - PyMuPDF selection script
+- [ ] `src/lib/python/pymupdf-selection.ts` - TypeScript IPC wrapper
+
+### Files to Modify
+
+- [ ] `src/hooks/usePDFSelection.ts` - Replace screen coords with PyMuPDF
+- [ ] `src/components/rhizome/pdf-viewer/PDFAnnotationButton.tsx` - Handle multiple rects
+- [ ] `src/lib/reader/text-offset-calculator.ts` - Add fuzzy matching
+- [ ] `src/components/rhizome/pdf-viewer/PDFAnnotationOverlay.tsx` - Handle multi-rect format
+
+### Time Estimate
+
+**Phase A (PDF Selection)**: 4-6 hours
+- Create PyMuPDF script: 1-2 hours
+- Create TypeScript wrapper: 1 hour
+- Update selection hook: 1-2 hours
+- Testing and refinement: 1-2 hours
+
+**Phase B (PDF → Markdown)**: 2-3 hours
+- Add fuzzy matching: 1-2 hours
+- Testing and refinement: 1 hour
+
+**Total**: 6-9 hours for complete bidirectional precision
+
+### Why This Matters
+
+**Current State**: Inconsistent precision creates poor UX
+- Markdown → PDF: 98.9% accuracy, pixel-perfect ✅
+- PDF → PDF: Imprecise, zoom-dependent ❌
+- PDF → Markdown: ~90% accuracy ❌
+
+**After Phase 1.5**: Consistent 95%+ precision in ALL directions
+- Markdown → PDF: 95%+ accuracy, pixel-perfect ✅
+- PDF → PDF: 95%+ accuracy, pixel-perfect ✅
+- PDF → Markdown: 95%+ accuracy, pixel-perfect ✅
+
+**User Experience**: Professional-grade annotation system that "just works" regardless of which view you start in.
+
+---
+
 ## Phase 2: Improve PDF Text Selection UX
 
 ### Overview

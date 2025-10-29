@@ -161,6 +161,155 @@ docs/
 
 ---
 
+## Coordinate Mapping Architecture
+
+### Overview
+
+Rhizome supports **bidirectional annotation sync** between Markdown and PDF views. This requires precise coordinate mapping in both directions:
+
+- **Markdown → PDF**: Find PDF rectangles for text selected in markdown view
+- **PDF → Markdown**: Find markdown offsets for text selected in PDF view
+
+### Markdown → PDF Mapping (PyMuPDF Multi-Strategy)
+
+**Challenge**: AI-cleaned markdown (content.md) often differs from original PDF text due to Gemini/Ollama rewording.
+
+**Solution**: 7-strategy cascade with fuzzy matching and word-level precision
+
+**File**: `worker/scripts/find_text_in_pdf.py`
+
+**Strategy Cascade**:
+
+1. **Exact Match** (`quads=True`)
+   - Try exact text search in PDF
+   - Success rate: ~30% (AI cleanup changes text)
+
+2. **Normalized Whitespace** (`quads=True`)
+   - Collapse whitespace, handle line breaks
+   - Success rate: ~20% (helps with formatting)
+
+3. **Aggressive Normalization** (`quads=True`)
+   - Normalize quotes, dashes, hyphenation
+   - Regex-based quote unification: `\u2018-\u201F` → `@`
+   - Success rate: ~15% (PDF vs markdown quote differences)
+
+4. **Fuzzy Similarity Matching** (Strategy 2.8) ⭐ **KEY INNOVATION**
+   - Sliding window with `difflib.SequenceMatcher`
+   - 85% threshold for long text, 90% for short text
+   - Finds character position despite AI rewording
+   - Success rate: ~95% (handles content differences)
+   - Returns similarity score for transparency
+
+5. **Word-Level Precision** ⭐ **PYMUPDF UTILITIES PATTERN**
+   - Uses `page.get_text("words")` for exact word rectangles
+   - Spatial filtering by character range
+   - No "couple words before" issue
+   - Pixel-perfect alignment
+   - Based on [PyMuPDF word-marking utilities](https://github.com/pymupdf/PyMuPDF-Utilities/tree/master/word%26line-marking)
+
+6. **Case-Insensitive Search**
+   - Fallback for capitalization differences
+   - Success rate: ~5%
+
+7. **Start+End Anchor Search**
+   - For very long text (>100 chars)
+   - Uses first/last 3 words as anchors
+   - Success rate: ~3%
+
+8. **Bbox Proportional Filtering** (Fallback)
+   - Uses existing `chunks.bboxes` data
+   - Filters proportionally by position in chunk
+   - Success rate: 70-85% (lower precision)
+
+9. **Page-Only** (Last Resort)
+   - Returns page number only
+   - Success rate: 50% (no precise coordinates)
+
+**Key Code**:
+
+```python
+# Strategy 2.8: Fuzzy matching with word-level precision
+def fuzzy_search_in_page(page, search_text, threshold=0.85):
+    """Find text using sliding window similarity matching."""
+    page_text = page.get_text()
+    search_len = len(search_text)
+
+    # Sliding window comparison
+    for i in range(0, len(page_normalized) - search_len + 1, step_size):
+        window = page_normalized[i:i + search_len]
+        ratio = SequenceMatcher(None, search_normalized, window).ratio()
+
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_position = i
+
+    if best_ratio >= threshold:
+        # WORD-LEVEL PRECISION: Get exact words in range
+        word_rects = get_words_in_range(
+            page,
+            best_position,
+            best_position + search_len,
+            page_text
+        )
+        return word_rects, best_ratio
+
+def get_words_in_range(page, start_pos, end_pos, page_text):
+    """Get precise word-level rectangles using page.get_text('words')."""
+    words = page.get_text("words")  # (x0, y0, x1, y1, "word", ...)
+
+    word_rects = []
+    char_pos = 0
+
+    for word_tuple in words:
+        x0, y0, x1, y1, word_text = word_tuple[:5]
+        word_start = char_pos
+        word_end = char_pos + len(word_text)
+
+        # Include word if it overlaps with target range
+        if word_end > start_pos and word_start < end_pos:
+            word_rects.append(fitz.Rect(x0, y0, x1, y1))
+
+        char_pos = word_end + 1  # +1 for space
+
+    return word_rects
+```
+
+**PyMuPDF Best Practices Adopted**:
+
+1. **`quads=True` on all searches**: PyMuPDF strongly recommends quads (4-corner coordinates) over simple rectangles for text marking
+2. **Word-level spatial filtering**: Recommended pattern from [PyMuPDF utilities](https://github.com/pymupdf/PyMuPDF-Utilities/blob/master/word%26line-marking/readme.md)
+3. **No PDF modification**: Read-only coordinate extraction from PDF structure
+
+**Visual Improvements**:
+
+- **Sentence Gap Bridging**: Merge threshold increased from 3px → 8px to bridge gaps after periods
+- **Thinner Borders**: 1px instead of 2px to reduce strikethrough artifacts
+- **Smart Merging**: Handles overlapping rectangles gracefully
+
+**File**: `src/components/rhizome/pdf-viewer/PDFAnnotationOverlay.tsx`
+
+```typescript
+// Smart gap handling for sentence boundaries
+const adjacent = gap < 8 && gap > -10  // Bridges "period + space"
+```
+
+### PDF → Markdown Mapping (Existing, Working Well)
+
+**Current Implementation**: `src/lib/reader/text-offset-calculator.ts`
+
+**Approach**:
+- Extract text from PDF selection
+- Search in content.md using fuzzy text matching
+- Calculate character offsets
+- Success rate: ~90%
+
+**Potential Improvements** (Future):
+- Use PyMuPDF `page.get_text("words")` for precise text extraction
+- Apply fuzzy matching to handle AI cleanup in reverse direction
+- Use word-level positions to narrow search range
+
+---
+
 ## Phase-by-Phase Implementation
 
 ### Phase 1: Foundation - Basic PDF Display
