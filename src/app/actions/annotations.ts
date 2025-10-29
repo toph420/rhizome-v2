@@ -5,7 +5,9 @@ import { createECS } from '@/lib/ecs'
 import { AnnotationOperations } from '@/lib/ecs/annotations'
 import { getCurrentUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
-import type { AnnotationEntity } from '@/types/annotations'
+import { calculatePdfCoordinatesFromDocling } from '@/lib/reader/pdf-coordinate-mapper'
+import { calculateMarkdownOffsets } from '@/lib/reader/text-offset-calculator'
+import type { AnnotationEntity, Chunk } from '@/types/annotations'
 
 /**
  * Zod schema for annotation creation.
@@ -41,7 +43,7 @@ const CreateAnnotationSchema = z.object({
   pdfHeight: z.number().optional(),
   // PDF ↔ Markdown sync metadata
   syncConfidence: z.number().min(0).max(1).optional(),
-  syncMethod: z.enum(['charspan_window', 'exact', 'fuzzy', 'bbox', 'manual']).optional(),
+  syncMethod: z.enum(['charspan_window', 'exact', 'fuzzy', 'bbox', 'docling_bbox', 'page_only', 'manual', 'pdf_selection']).optional(),
 })
 
 /**
@@ -529,5 +531,129 @@ export async function getAnnotationsByIds(
   } catch (error) {
     console.error('[getAnnotationsByIds] Failed:', error)
     return []
+  }
+}
+
+/**
+ * Calculate PDF coordinates from markdown offsets using Docling provenance.
+ * Server Action wrapper for client component access.
+ *
+ * @param documentId - Document UUID
+ * @param startOffset - Markdown start offset
+ * @param length - Length of selected text
+ * @param chunks - Chunks array from database
+ * @returns PDF coordinate result with confidence scoring
+ */
+export async function calculatePdfCoordinates(
+  documentId: string,
+  startOffset: number,
+  length: number,
+  chunks: Chunk[]
+): Promise<{
+  found: boolean
+  pageNumber?: number
+  rects?: Array<{ x: number; y: number; width: number; height: number; pageNumber: number }>
+  method?: 'docling_bbox' | 'page_only'
+  confidence?: number
+}> {
+  try {
+    // Call the utility function (runs in server context)
+    const result = await calculatePdfCoordinatesFromDocling(
+      documentId,
+      startOffset,
+      length,
+      chunks
+    )
+
+    // Transform rects to include pageNumber for createAnnotation schema
+    if (result.found && result.rects && result.pageNumber) {
+      return {
+        ...result,
+        rects: result.rects.map(rect => ({
+          ...rect,
+          pageNumber: result.pageNumber!
+        }))
+      }
+    }
+
+    return result
+  } catch (error) {
+    console.error('[calculatePdfCoordinates] Failed:', error)
+    return { found: false }
+  }
+}
+
+/**
+ * Calculate markdown offsets from PDF selection (bidirectional sync: PDF → Markdown).
+ * Server Action wrapper for text-offset-calculator.
+ *
+ * @param documentId - Document ID
+ * @param text - Selected text from PDF
+ * @param pageNumber - PDF page number
+ * @param chunks - Chunks with page metadata for mapping
+ * @returns Markdown offset result with confidence and method
+ */
+export async function calculatePdfOffsets(
+  documentId: string,
+  text: string,
+  pageNumber: number,
+  chunks: Chunk[]
+) {
+  try {
+    console.log('[calculatePdfOffsets] Input:', {
+      documentId,
+      text: text.substring(0, 50),
+      pageNumber,
+      chunksCount: chunks.length,
+    })
+
+    // Load docling markdown from storage if available
+    // This enables charspan-based matching per PDF annotation sync plan
+    const supabase = await createClient()
+    const { data: markdown } = await supabase.storage
+      .from('documents')
+      .download(`${documentId}/docling.md`)
+
+    let doclingMarkdown: string | undefined
+    if (markdown) {
+      doclingMarkdown = await markdown.text()
+      console.log('[calculatePdfOffsets] Loaded docling.md:', doclingMarkdown.length, 'chars')
+    }
+
+    // Calculate markdown offsets using text-offset-calculator
+    const result = calculateMarkdownOffsets(
+      text,
+      pageNumber,
+      chunks,
+      doclingMarkdown // Can be undefined - calculator handles it
+    )
+
+    console.log('[calculatePdfOffsets] Result:', result)
+
+    // If not found, return undefined method (PDF-only annotation)
+    if (result.method === 'not_found') {
+      return {
+        startOffset: 0,
+        endOffset: 0,
+        confidence: 0,
+        method: undefined as any, // Cast to match schema
+        matchedChunkId: undefined,
+      }
+    }
+
+    return {
+      ...result,
+      method: result.method as any, // Cast to match schema enum
+    }
+  } catch (error) {
+    console.error('[calculatePdfOffsets] Failed:', error)
+    // Return fallback with zero offsets (PDF-only annotation)
+    return {
+      startOffset: 0,
+      endOffset: 0,
+      confidence: 0,
+      method: undefined, // No method if not found - will be PDF-only annotation
+      matchedChunkId: undefined,
+    }
   }
 }
