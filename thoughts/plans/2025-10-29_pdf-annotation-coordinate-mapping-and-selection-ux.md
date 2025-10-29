@@ -1416,8 +1416,8 @@ const pythonResult = await extractPdfWithDocling(/* ... */)
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Worker builds without errors: `cd worker && npm run build`
-- [ ] TypeScript compiles: `npm run typecheck`
+- [x] Worker builds without errors: `cd worker && npm run build` ✅
+- [x] TypeScript compiles: `npm run typecheck` ✅ (only pre-existing test errors)
 
 #### Manual Verification:
 - [ ] Process a new PDF document
