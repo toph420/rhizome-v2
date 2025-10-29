@@ -43,7 +43,7 @@ const CreateAnnotationSchema = z.object({
   pdfHeight: z.number().optional(),
   // PDF ↔ Markdown sync metadata
   syncConfidence: z.number().min(0).max(1).optional(),
-  syncMethod: z.enum(['charspan_window', 'exact', 'fuzzy', 'bbox', 'docling_bbox', 'page_only', 'manual', 'pdf_selection']).optional(),
+  syncMethod: z.enum(['charspan_window', 'exact', 'fuzzy', 'bbox', 'docling_bbox', 'pymupdf', 'bbox_proportional', 'page_only', 'manual', 'pdf_selection']).optional(),
 })
 
 /**
@@ -553,7 +553,7 @@ export async function calculatePdfCoordinates(
   found: boolean
   pageNumber?: number
   rects?: Array<{ x: number; y: number; width: number; height: number; pageNumber: number }>
-  method?: 'docling_bbox' | 'page_only'
+  method?: 'pymupdf' | 'bbox_proportional' | 'page_only'
   confidence?: number
 }> {
   try {
@@ -576,7 +576,17 @@ export async function calculatePdfCoordinates(
       }
     }
 
-    return result
+    // If found but no rects/pageNumber, return as-is
+    if (result.found && !result.rects) {
+      return {
+        found: result.found,
+        pageNumber: result.pageNumber,
+        method: result.method,
+        confidence: result.confidence
+      }
+    }
+
+    return { found: false }
   } catch (error) {
     console.error('[calculatePdfCoordinates] Failed:', error)
     return { found: false }

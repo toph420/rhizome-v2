@@ -76,7 +76,7 @@ export interface CreateAnnotationInput {
   /** Confidence score for PDF↔Markdown offset mapping (0.0-1.0) */
   syncConfidence?: number;
   /** Method used to calculate markdown offsets from PDF coordinates or vice versa */
-  syncMethod?: 'charspan_window' | 'exact' | 'fuzzy' | 'bbox' | 'docling_bbox' | 'page_only' | 'manual' | 'pdf_selection';
+  syncMethod?: 'charspan_window' | 'exact' | 'fuzzy' | 'bbox' | 'docling_bbox' | 'pymupdf' | 'bbox_proportional' | 'page_only' | 'manual' | 'pdf_selection';
 
   // Spark references
   /** Array of spark entity IDs linked to this annotation */
