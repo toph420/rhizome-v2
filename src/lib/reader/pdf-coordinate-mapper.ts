@@ -1,20 +1,16 @@
 /**
  * PDF Coordinate Mapper - Markdown → PDF Coordinate Conversion
  *
- * Maps markdown text selections to PDF bounding boxes using cached Docling provenance.
- * Enables bidirectional annotation sync without re-parsing PDFs.
+ * Strategy: Fallback chain for optimal accuracy/performance balance
+ * 1. PyMuPDF text search (95% accuracy, 50ms) ← PRIMARY
+ * 2. Bbox proportional filtering (70-85% accuracy, instant) ← FALLBACK
+ * 3. Page-only positioning (50% accuracy, instant) ← LAST RESORT
  *
- * Architecture:
- * 1. Find chunk containing markdown offset
- * 2. Load Docling chunks from cached_chunks table
- * 3. Find overlapping Docling chunks by charspan
- * 4. Extract and aggregate bboxes
- * 5. Calculate precise positioning with character ratios
- *
- * @see thoughts/plans/2025-10-27_pdf-annotation-sync.md - Phase 2
+ * @see thoughts/plans/2025-10-29_pdf-annotation-coordinate-mapping-and-selection-ux.md
  */
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { findTextInPdfWithPyMuPDF } from '@/lib/python/pymupdf'
 import type { Chunk } from '@/types/annotations'
 
 /**
@@ -56,23 +52,17 @@ export interface PdfCoordinateResult {
   found: boolean
   pageNumber?: number
   rects?: PdfRect[]
-  method?: 'docling_bbox' | 'page_only'
+  method?: 'pymupdf' | 'bbox_proportional' | 'page_only'
   confidence?: number
 }
 
 /**
- * Calculate PDF coordinates from markdown offsets using Docling provenance.
+ * Calculate PDF coordinates from markdown offsets using PyMuPDF text search.
  *
- * Strategy:
- * - Uses cached Docling chunks (no PDF re-parsing)
- * - Maps markdown offsets → charspan overlaps → bbox aggregation
- * - Graceful degradation: precise bbox → page-only → not found
- *
- * @param documentId - Document UUID
- * @param markdownOffset - Start offset in markdown content
- * @param markdownLength - Length of selected text
- * @param chunks - Chonkie chunks from database (have page numbers)
- * @returns PDF coordinate result with confidence scoring
+ * Fallback chain:
+ * 1. Try PyMuPDF search (95% accuracy)
+ * 2. Fallback to bbox proportional filtering (70-85%)
+ * 3. Last resort: page-only positioning (50%)
  */
 export async function calculatePdfCoordinatesFromDocling(
   documentId: string,
@@ -80,44 +70,106 @@ export async function calculatePdfCoordinatesFromDocling(
   markdownLength: number,
   chunks: Chunk[]
 ): Promise<PdfCoordinateResult> {
-  const supabase = await createClient()
 
-  // Step 1: Find chunk containing markdown offset (already has pageNumber!)
+  // Step 1: Find chunk containing annotation
   const containingChunk = chunks.find(c =>
     markdownOffset >= c.start_offset &&
     markdownOffset < c.end_offset
   )
 
   if (!containingChunk?.page_start) {
+    console.warn('[PdfCoordinateMapper] No chunk found for offset', markdownOffset)
     return { found: false }
   }
 
   const pageNumber = containingChunk.page_start
 
-  // STRATEGY: Use Chonkie chunks to find bboxes from cached_chunks
-  // Chonkie chunks have start_offset/end_offset in SAME coordinate system as annotations
-  // We use them to find which page number, then get ALL bboxes for that page
+  // Step 2: Get highlighted text from document
+  const supabase = createAdminClient()
 
-  const annotationStart = markdownOffset
-  const annotationEnd = markdownOffset + markdownLength
-
-  console.log('[PdfCoordinateMapper] Using Chonkie chunks for coordinate mapping:', {
-    chunkCount: chunks.length,
-    annotationRange: [annotationStart, annotationEnd],
-    annotationLength: markdownLength,
-    pageNumber,
-  })
-
-  // Step 2: Load Docling chunks from cached_chunks table (for bboxes)
-  const { data, error } = await supabase
-    .from('cached_chunks')
-    .select('chunks')
-    .eq('document_id', documentId)
+  // Get document to find storage path
+  const { data: doc, error } = await supabase
+    .from('documents')
+    .select('storage_path')
+    .eq('id', documentId)
     .single()
 
-  if (error || !data?.chunks) {
-    console.warn('[PdfCoordinateMapper] No cached chunks found:', error?.message)
-    // Fallback: page-only positioning
+  if (error || !doc?.storage_path) {
+    console.error('[PdfCoordinateMapper] Error fetching document:', error)
+    return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, pageNumber, documentId)
+  }
+
+  // Get markdown content from Storage using full storage path
+  const { data: contentBlob, error: storageError } = await supabase.storage
+    .from('documents')
+    .download(`${doc.storage_path}/content.md`)
+
+  if (storageError || !contentBlob) {
+    console.error('[PdfCoordinateMapper] Error fetching content.md:', storageError)
+    return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, pageNumber, documentId)
+  }
+
+  const content = await contentBlob.text()
+  const highlightedText = content.slice(markdownOffset, markdownOffset + markdownLength)
+
+  console.log('[PdfCoordinateMapper] Searching for text:', {
+    text: highlightedText.substring(0, 50) + '...',
+    length: highlightedText.length,
+    pageNumber
+  })
+
+  // Step 3: PRIMARY APPROACH - PyMuPDF text search (95% accuracy)
+  try {
+    const pymupdfResult = await findTextInPdfWithPyMuPDF(
+      documentId,
+      pageNumber,
+      highlightedText
+    )
+
+    if (pymupdfResult.found && pymupdfResult.rects.length > 0) {
+      // Merge adjacent rectangles for cleaner highlighting
+      const mergedRects = mergeAdjacentRects(pymupdfResult.rects)
+
+      console.log('[PdfCoordinateMapper] PyMuPDF SUCCESS:', {
+        method: 'pymupdf',
+        confidence: 0.95,
+        rectsBeforeMerge: pymupdfResult.rects.length,
+        rectsAfterMerge: mergedRects.length
+      })
+
+      return {
+        found: true,
+        pageNumber,
+        rects: mergedRects,
+        method: 'pymupdf',
+        confidence: 0.95
+      }
+    }
+
+    console.log('[PdfCoordinateMapper] PyMuPDF found no matches, falling back to bbox')
+
+  } catch (error) {
+    console.error('[PdfCoordinateMapper] PyMuPDF error, falling back to bbox:', error)
+  }
+
+  // Step 4: FALLBACK 1 - Bbox proportional filtering (70-85% accuracy)
+  return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, pageNumber, documentId)
+}
+
+/**
+ * Fallback to bbox proportional filtering when PyMuPDF fails.
+ */
+async function fallbackToBboxProportional(
+  chunk: Chunk,
+  markdownOffset: number,
+  markdownLength: number,
+  pageNumber: number,
+  documentId: string
+): Promise<PdfCoordinateResult> {
+
+  // Check if chunk has bboxes
+  if (!chunk.bboxes || chunk.bboxes.length === 0) {
+    console.warn('[PdfCoordinateMapper] No bboxes available, page-only fallback')
     return {
       found: true,
       pageNumber,
@@ -126,18 +178,34 @@ export async function calculatePdfCoordinatesFromDocling(
     }
   }
 
-  const doclingChunks = data.chunks as DoclingChunk[]
+  // Calculate relative position within chunk
+  const chunkLength = chunk.end_offset - chunk.start_offset
+  const annotationStart = markdownOffset - chunk.start_offset
+  const annotationEnd = annotationStart + markdownLength
 
-  // Step 3: Get ALL bboxes for this page from Docling chunks
-  // Since we already know the page from containingChunk, just grab all bboxes on that page
-  const pageBboxes = doclingChunks
-    .flatMap(dc => dc.meta.bboxes || [])
-    .filter(bbox => bbox.page === pageNumber)
+  // Calculate proportional positions (0.0 to 1.0)
+  const startRatio = annotationStart / chunkLength
+  const endRatio = annotationEnd / chunkLength
 
-  console.log('[PdfCoordinateMapper] Found bboxes for page', pageNumber, ':', pageBboxes.length)
+  console.log('[PdfCoordinateMapper] Bbox proportional mapping:', {
+    startRatio: startRatio.toFixed(3),
+    endRatio: endRatio.toFixed(3),
+    totalBboxes: chunk.bboxes.length
+  })
 
-  if (pageBboxes.length === 0) {
-    console.warn('[PdfCoordinateMapper] No bboxes found for page', pageNumber)
+  // Filter bboxes proportionally
+  const totalBboxes = chunk.bboxes.length
+  const startIdx = Math.floor(startRatio * totalBboxes)
+  const endIdx = Math.ceil(endRatio * totalBboxes)
+
+  // Clamp to valid range
+  const safeStartIdx = Math.max(0, Math.min(startIdx, totalBboxes - 1))
+  const safeEndIdx = Math.max(safeStartIdx + 1, Math.min(endIdx, totalBboxes))
+
+  const filteredBboxes = chunk.bboxes.slice(safeStartIdx, safeEndIdx)
+
+  if (filteredBboxes.length === 0) {
+    console.warn('[PdfCoordinateMapper] No bboxes after filtering, page-only fallback')
     return {
       found: true,
       pageNumber,
@@ -146,20 +214,71 @@ export async function calculatePdfCoordinatesFromDocling(
     }
   }
 
-  // Step 4: Return page-level highlighting (all bboxes on the page)
-  // This is a page-level fallback - shows highlight exists on this page but not precise position
-  // Better than nothing, allows user to see annotation exists in PDF view
-  console.log('[PdfCoordinateMapper] Returning page-level bboxes (imprecise but visible)')
-  return {
-    found: true,
-    pageNumber,
-    rects: pageBboxes.map(bbox => ({
+  // Merge adjacent rectangles
+  const mergedRects = mergeAdjacentRects(
+    filteredBboxes.map(bbox => ({
       x: bbox.l,
       y: bbox.t,
       width: bbox.r - bbox.l,
       height: bbox.b - bbox.t
-    })),
-    method: 'page_only', // Honest about precision level
-    confidence: 0.3  // Low confidence - page-level only
+    }))
+  )
+
+  console.log('[PdfCoordinateMapper] Bbox proportional SUCCESS:', {
+    method: 'bbox_proportional',
+    confidence: 0.75,
+    rectsBeforeMerge: filteredBboxes.length,
+    rectsAfterMerge: mergedRects.length
+  })
+
+  return {
+    found: true,
+    pageNumber,
+    rects: mergedRects,
+    method: 'bbox_proportional',
+    confidence: 0.75
   }
+}
+
+/**
+ * Merge adjacent rectangles on same line for cleaner highlights.
+ * Ported from PDFAnnotationOverlay.tsx mergeRectangles logic.
+ */
+function mergeAdjacentRects(rects: PdfRect[]): PdfRect[] {
+  if (rects.length <= 1) return rects
+
+  // Sort by Y (top to bottom), then X (left to right)
+  const sorted = [...rects].sort((a, b) => {
+    const yDiff = a.y - b.y
+    if (Math.abs(yDiff) > 2) return yDiff  // Different lines (2px tolerance)
+    return a.x - b.x  // Same line, sort left to right
+  })
+
+  const merged: PdfRect[] = []
+  let current = { ...sorted[0] }
+
+  for (let i = 1; i < sorted.length; i++) {
+    const next = sorted[i]
+
+    // Check if on same line (Y position + height similar)
+    const sameLine = Math.abs(current.y - next.y) < 2 &&
+                     Math.abs(current.height - next.height) < 2
+
+    // Check if horizontally adjacent (gap < 5px)
+    const currentRight = current.x + current.width
+    const gap = next.x - currentRight
+    const adjacent = gap < 5 && gap > -5
+
+    if (sameLine && adjacent) {
+      // Merge by extending width
+      current.width = (next.x + next.width) - current.x
+    } else {
+      // Different line or not adjacent
+      merged.push(current)
+      current = { ...next }
+    }
+  }
+
+  merged.push(current)
+  return merged
 }

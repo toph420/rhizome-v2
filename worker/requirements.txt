@@ -4,6 +4,9 @@
 # Docling for PDF extraction with structural metadata
 docling==2.55.1
 
+# PyMuPDF for PDF text search with bounding box coordinates
+PyMuPDF>=1.23.0
+
 # PydanticAI with Ollama support for structured LLM outputs
 pydantic-ai[ollama]>=1.0.17
 
