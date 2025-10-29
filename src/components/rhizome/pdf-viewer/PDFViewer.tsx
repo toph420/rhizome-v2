@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import { useGesture } from '@use-gesture/react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -36,6 +36,10 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
   const [pageWidth, setPageWidth] = useState<number>(0)
   const [pageHeight, setPageHeight] = useState<number>(0)
   const [pdfMetadata, setPdfMetadata] = useState<any>(null)
+
+  // Refs to prevent infinite loop in auto-fit logic
+  const hasManuallyZoomedRef = useRef(false)
+  const hasAutoFittedRef = useRef(false)
 
   // Reader store for PDF navigation
   const pdfPageNumber = useReaderStore(state => state.pdfPageNumber)
@@ -146,11 +150,14 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
   }
 
   // Auto-fit page when dimensions become available (default to "Fit Page")
+  // Fixed infinite loop by removing handleFitPage from deps and using refs
   useEffect(() => {
-    if (pageHeight > 0) {
-      handleFitPage()
+    if (pageHeight > 0 && !hasAutoFittedRef.current && !hasManuallyZoomedRef.current) {
+      const containerHeight = window.innerHeight - 200
+      setScale(containerHeight / pageHeight)
+      hasAutoFittedRef.current = true
     }
-  }, [pageHeight, handleFitPage])
+  }, [pageHeight])
 
   // Annotation click handler
   const handleAnnotationClick = (annotationId: string) => {

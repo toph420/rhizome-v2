@@ -2,6 +2,10 @@
 @plugin "@tailwindcss/typography";
 @import "tw-animate-css";
 
+/* React-PDF Styles - Required for PDF text and annotation layers */
+@import "react-pdf/dist/esm/Page/AnnotationLayer.css";
+@import "react-pdf/dist/esm/Page/TextLayer.css";
+
 /* Google Fonts - Simple CSS import approach */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
@@ -392,4 +396,14 @@
 
 button:hover {
   cursor:pointer;
+}
+
+.pdf-highlight {
+  mix-blend-mode: multiply; /* Prevents opacity stacking if you still get overlaps */
+  /* or */
+  isolation: isolate; /* Creates new stacking context */
+}
+
+span [role="presentation"] {
+   /*box-shadow: 0 0 0 0.5px rgba(255, 235, 140, 0.8); /* Slightly extend the edges */
 }

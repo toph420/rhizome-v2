@@ -166,6 +166,25 @@ export class PDFProcessor extends SourceProcessor {
       structure: extractionResult.structure
     })
 
+    // Phase 1A: Save Docling markdown for charspan search
+    // CRITICAL: Save BEFORE any modifications - charspan values reference THIS version
+    if (isLocalMode && extractionResult.markdown) {
+      const storagePath = this.getStoragePath()
+      const { error: doclingMdError } = await this.supabase.storage
+        .from('documents')
+        .upload(`${storagePath}/docling.md`, extractionResult.markdown, {
+          contentType: 'text/markdown',
+          upsert: true
+        })
+
+      if (doclingMdError) {
+        console.warn('[PDFProcessor] Failed to save docling.md:', doclingMdError.message)
+        // Non-blocking - charspan search will fall back to Phase 1 logic
+      } else {
+        console.log('[PDFProcessor] Saved docling.md (raw extraction) for Phase 1A charspan search')
+      }
+    }
+
     // Stage 3: Local regex cleanup (52-55%)
     await this.updateProgress(53, 'cleanup_local', 'processing', 'Removing page artifacts')
 
