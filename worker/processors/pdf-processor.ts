@@ -27,6 +27,21 @@
  * Cost: $0 (100% local processing, no API calls)
  * Time: 3-25 minutes (varies by chunker strategy)
  * Reliability: 100% success rate (no network dependency)
+ *
+ * ===== COORDINATE SYSTEMS =====
+ * - PDF coordinate system: Native PDF points (used by PyMuPDF)
+ * - Markdown coordinate system: Character offsets in content.md
+ * - Chunks and annotations both use content.md offsets (same system ✅)
+ * - Bboxes in chunks.bboxes are in PDF coordinate system (fallback data)
+ *
+ * ===== ANNOTATION COORDINATE MAPPING =====
+ * - PDF → Markdown: Use PDF.js native coordinates (already working)
+ * - Markdown → PDF: Use PyMuPDF text search (95% accuracy, primary method)
+ * - Fallback: Use chunks.bboxes with proportional filtering (70-85% accuracy)
+ * - Do NOT use charspan for coordinate mapping (coordinate system mismatch)
+ *
+ * @see src/lib/reader/pdf-coordinate-mapper.ts for coordinate mapping implementation
+ * @see thoughts/plans/2025-10-29_pdf-annotation-coordinate-mapping-and-selection-ux.md for rationale
  */
 
 import { SourceProcessor } from './base.js'
@@ -166,24 +181,39 @@ export class PDFProcessor extends SourceProcessor {
       structure: extractionResult.structure
     })
 
-    // Phase 1A: Save Docling markdown for charspan search
-    // CRITICAL: Save BEFORE any modifications - charspan values reference THIS version
-    if (isLocalMode && extractionResult.markdown) {
-      const storagePath = this.getStoragePath()
-      const { error: doclingMdError } = await this.supabase.storage
-        .from('documents')
-        .upload(`${storagePath}/docling.md`, extractionResult.markdown, {
-          contentType: 'text/markdown',
-          upsert: true
-        })
-
-      if (doclingMdError) {
-        console.warn('[PDFProcessor] Failed to save docling.md:', doclingMdError.message)
-        // Non-blocking - charspan search will fall back to Phase 1 logic
-      } else {
-        console.log('[PDFProcessor] Saved docling.md (raw extraction) for Phase 1A charspan search')
-      }
-    }
+    // COMMENTED OUT: docling.md coordinate system mismatch
+    // This file was saved to map charspan values back to raw Docling output,
+    // but it creates a coordinate system mismatch:
+    // - charspan values point to docling.md (raw Docling output)
+    // - chunk offsets point to content.md (cleaned markdown)
+    // - annotation offsets point to content.md (same as chunks)
+    // Result: charspan-based coordinate mapping fails (no overlaps found)
+    //
+    // SOLUTION: Use PyMuPDF text search (95% accuracy) with fallback to chunks.bboxes
+    // PyMuPDF searches directly in PDF, no coordinate system transformations needed
+    // Bboxes stored in chunks.bboxes field serve as fallback (70-85% accuracy)
+    //
+    // If needed in future for debugging, can be re-enabled, but NOT used for
+    // coordinate mapping in production code.
+    //
+    // // Phase 1A: Save Docling markdown for charspan search
+    // // CRITICAL: Save BEFORE any modifications - charspan values reference THIS version
+    // if (isLocalMode && extractionResult.markdown) {
+    //   const storagePath = this.getStoragePath()
+    //   const { error: doclingMdError } = await this.supabase.storage
+    //     .from('documents')
+    //     .upload(`${storagePath}/docling.md`, extractionResult.markdown, {
+    //       contentType: 'text/markdown',
+    //       upsert: true
+    //     })
+    //
+    //   if (doclingMdError) {
+    //     console.warn('[PDFProcessor] Failed to save docling.md:', doclingMdError.message)
+    //     // Non-blocking - charspan search will fall back to Phase 1 logic
+    //   } else {
+    //     console.log('[PDFProcessor] Saved docling.md (raw extraction) for Phase 1A charspan search')
+    //   }
+    // }
 
     // Stage 3: Local regex cleanup (52-55%)
     await this.updateProgress(53, 'cleanup_local', 'processing', 'Removing page artifacts')
