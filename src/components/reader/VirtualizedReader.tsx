@@ -158,7 +158,7 @@ export function VirtualizedReader() {
       startOffset: number
       endOffset: number
       color: 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink'
-      text?: string
+      text: string  // Required to match store annotations
     }> = []
 
     optimisticAnnotations.forEach((annotation) => {
@@ -171,7 +171,7 @@ export function VirtualizedReader() {
         startOffset: annotation.start_offset,
         endOffset: annotation.end_offset,
         color: annotation.color as 'yellow' | 'green' | 'blue' | 'red' | 'purple' | 'orange' | 'pink',
-        text: annotation.text,  // NEW: Include text for search-based matching
+        text: annotation.text || '',  // Provide empty string fallback
       })
     })
 
@@ -227,11 +227,11 @@ export function VirtualizedReader() {
         ? (viewportStart / markdown.length) * 100
         : 0
 
-      console.log('[VirtualizedReader] Visible range:', {
-        blocks: `${range.startIndex}-${range.endIndex}`,
-        offsets: `${viewportStart}-${viewportEnd}`,
-        scrollPercent: scrollPosition.toFixed(1) + '%'
-      })
+      // console.log('[VirtualizedReader] Visible range:', {
+      //   blocks: `${range.startIndex}-${range.endIndex}`,
+      //   offsets: `${viewportStart}-${viewportEnd}`,
+      //   scrollPercent: scrollPosition.toFixed(1) + '%'
+      // })
 
       // Update ReaderStore (this triggers visibleChunks recalculation)
       updateScroll(scrollPosition, {

@@ -1,8 +1,19 @@
 # Homepage Reusable Components - Iterative Build Plan
 
-**Status**: Planning
+**Status**: In Progress (Phase 1 Complete ✅)
 **Created**: 2025-10-25
+**Updated**: 2025-10-28
 **Related**: `home-page-redesign-2025-10-25.md`
+**Implementation Log**: `docs/frontend/HOMEPAGE_COMPONENTS.md`
+
+---
+
+## 🎉 Progress Update (2025-10-28)
+
+**Completed**: ✅ Phase 1 (StatCard + StatsPanel) ✅ Phase 2 (ActivityItem + ActivityFeed)
+**Architecture Pattern Established**: Server/Client Component separation (DeckGrid pattern)
+**Pattern Changes**: Documented in implementation log
+**Next**: Phase 3 (DocumentCard + LibraryGrid)
 
 ---
 
@@ -19,17 +30,46 @@ Build reusable UI components by implementing them inline in the homepage mockup 
 - ✅ End up with extracted, reusable components
 - ✅ Don't break mockup during development
 
-**Pattern:**
+**Pattern (UPDATED 2025-10-28):**
 ```
 1. Replace placeholder inline in homepage/page.tsx
 2. Implement with real structure and Rhizome styling
-3. Add Server Action for data fetching
-4. Test with real data
-5. Validate layout, spacing, interactions, aesthetics
-6. Extract to components/rhizome/[component].tsx
-7. Import back to homepage
+3. Test with mock data initially
+4. Validate layout, spacing, interactions, aesthetics
+5. Extract to appropriate location:
+   - Reusable UI → components/rhizome/[component].tsx
+   - Section orchestrator → components/homepage/[Section].tsx ⭐ NEW
+6. Import back to homepage
+7. Add Server Action for data fetching (future phase)
 8. Mark TODO as complete ✅
 ```
+
+### 🏗️ Architecture Pattern Established (2025-10-28)
+
+**Following DeckGrid/DeckCard Pattern** (from flashcard system):
+
+```typescript
+// ✅ ESTABLISHED PATTERN
+src/app/homepage/page.tsx (Server Component)
+  └─ Imports section orchestrators
+
+src/components/homepage/StatsPanel.tsx (Client Component)
+  └─ Creates callback functions
+  └─ Manages interactive state
+  └─ Imports reusable UI components
+
+src/components/rhizome/stat-card.tsx (Client Component)
+  └─ Accepts callbacks as props
+  └─ Reusable across entire app
+```
+
+**Key Learnings**:
+- `'use client'` applies to entire file, not individual functions
+- Section orchestrators need separate files in `components/homepage/`
+- Cannot pass callback functions from Server Component to Client Component
+- Pattern matches existing DeckGrid/DeckCard implementation
+
+**See**: `docs/frontend/HOMEPAGE_COMPONENTS.md` for complete architecture documentation
 
 ---
 
@@ -38,10 +78,12 @@ Build reusable UI components by implementing them inline in the homepage mockup 
 ### Already Built ✅
 - `DeckCard` - Feature-rich with shortcuts, stats, study actions
 - `QuickSparkCapture` - Full panel with form, selections, metadata
+- **`StatCard`** ✅ (2025-10-28) - 8 variants, neobrutalist styling, compact mode
+- **`StatsPanel`** ✅ (2025-10-28) - Client Component orchestrator pattern established
 
 ### Need to Build 🔴
 
-#### 1. StatCard (Simplest - 30 min)
+#### 1. StatCard ✅ COMPLETE (Actual: 45 min)
 **Location**: Inline in `src/app/homepage/page.tsx` (StatsPanel section)
 **Why first**: Clear contract, simple UI, immediate value
 
@@ -62,11 +104,18 @@ interface StatCardProps {
 }
 ```
 
-**Extraction target**: `src/components/rhizome/stat-card.tsx`
+**Extraction target**: `src/components/rhizome/stat-card.tsx` ✅
 
 **Used in**: Homepage Stats, Dashboard, Admin Panel, any metrics display
 
-**Implementation Notes**:
+**Implementation Status**: ✅ Complete
+- 8 variants implemented (primary, vibrant-pink/purple/orange, neutral, success/warning/danger)
+- Compact mode working
+- Neobrutalist hover animation functional
+- Optional click handlers integrated
+- Fully documented in `docs/frontend/HOMEPAGE_COMPONENTS.md`
+
+**Implementation Notes (Original)**:
 - Use existing `Card` component as base
 - Follow neobrutalism styling (rounded-base, border-2, shadow-shadow)
 - Hover effect: translate + shadow removal

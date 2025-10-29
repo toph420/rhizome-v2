@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/rhizome/c
 import { Button } from '@/components/rhizome/button'
 import { Skeleton } from '@/components/rhizome/skeleton'
 import { StatsPanel } from '@/components/homepage/StatsPanel'
+import { ActivityFeed } from '@/components/homepage/ActivityFeed'
 
 /**
  * Homepage - Diagonal Cascade Layout
@@ -270,35 +271,6 @@ function QuickCaptureForm() {
   )
 }
 
-function ActivityFeed() {
-  return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-heading text-sm font-bold">Activity Feed</h3>
-        <div className="flex gap-2 text-xs">
-          <button className="hover:underline">All▾</button>
-          <button className="hover:underline">24h▾</button>
-        </div>
-      </div>
-      <div className="space-y-3 flex-1 overflow-y-auto">
-        {[
-          { time: '2h ago', icon: '✓', text: 'Validated Bridge connection' },
-          { time: '3h ago', icon: '📝', text: 'Annotation added' },
-          { time: '5h ago', icon: '⚡', text: 'Document processed' },
-          { time: '8h ago', icon: '💭', text: 'Spark captured' },
-          { time: 'Yesterday', icon: '📚', text: 'Document added' },
-          { time: '2 days ago', icon: '⚡', text: 'Processing started' },
-        ].map((item, i) => (
-          <div key={i} className="border-b border-border pb-2">
-            <p className="text-xs text-muted-foreground">{item.time}</p>
-            <p className="text-sm">{item.icon} {item.text}</p>
-          </div>
-        ))}
-      </div>
-      <Button variant="ghost" className="w-full mt-2 text-xs">Load more ↓</Button>
-    </div>
-  )
-}
 
 function FlashcardsPanel() {
   return (
