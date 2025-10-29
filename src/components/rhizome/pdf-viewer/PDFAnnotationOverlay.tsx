@@ -19,7 +19,12 @@ interface PdfRect {
 
 /**
  * Merge adjacent rectangles on the same line to create continuous highlights.
- * PDF.js returns one rect per word, causing gaps. This merges them.
+ *
+ * IMPROVED VERSION:
+ * - Smart gap threshold (8px) bridges sentence boundaries (period + space)
+ * - Better multi-line detection using height consistency
+ * - Handles overlapping rectangles gracefully
+ * - Creates smooth, continuous highlights without sentence gaps
  */
 function mergeRectangles(rects: PdfRect[]): PdfRect[] {
   if (rects.length === 0) return []
@@ -38,18 +43,33 @@ function mergeRectangles(rects: PdfRect[]): PdfRect[] {
   for (let i = 1; i < sorted.length; i++) {
     const next = sorted[i]
 
-    // Check if rectangles are on the same line (similar Y and height)
-    const sameLine = Math.abs(current.y - next.y) < 2 &&
-                     Math.abs(current.height - next.height) < 2
+    // Check if rectangles are on the same line
+    // Must have similar Y position AND similar height
+    const yTolerance = 3 // 3px tolerance for Y position
+    const heightTolerance = 3 // 3px tolerance for height
+    const sameLine =
+      Math.abs(current.y - next.y) < yTolerance &&
+      Math.abs(current.height - next.height) < heightTolerance
 
-    // Check if rectangles are horizontally adjacent (gap < 5px)
+    // Check if rectangles are horizontally adjacent or overlapping
     const currentRight = current.x + current.width
     const gap = next.x - currentRight
-    const adjacent = gap < 5 && gap > -5
+
+    // IMPROVED: Smart gap handling for sentence boundaries
+    // Regular word spacing: < 3px
+    // Sentence spacing (period + space): < 8px (bridges gaps after periods)
+    // Different chunks: >= 8px
+    const adjacent = gap < 8 && gap > -10 // Allow sentence spacing and small overlap
 
     if (sameLine && adjacent) {
       // Merge: extend current rectangle to include next
-      current.width = (next.x + next.width) - current.x
+      // Handle overlapping rectangles by taking the max end position
+      const newRight = Math.max(currentRight, next.x + next.width)
+      current.width = newRight - current.x
+      // Keep the taller height for better coverage
+      current.height = Math.max(current.height, next.height)
+      // Use the higher Y position (further down) for alignment
+      current.y = Math.min(current.y, next.y)
     } else {
       // Start new merged rectangle
       merged.push(current)
@@ -103,14 +123,17 @@ export function PDFAnnotationOverlay({
               <div
                 key={`${annotation.id}-${index}`}
                 data-annotation-id={annotation.id}
-                className="absolute pointer-events-auto cursor-pointer transition-opacity hover:opacity-80"
+                className="absolute pointer-events-auto cursor-pointer transition-all hover:opacity-90"
                 style={{
                   left: `${x}px`,
                   top: `${y}px`,
                   width: `${width}px`,
                   height: `${height}px`,
-                  backgroundColor: getColorValue(visual?.color || 'yellow', 0.3),
-                  border: `2px solid ${getColorValue(visual?.color || 'yellow', 0.6)}`,
+                  backgroundColor: getColorValue(visual?.color || 'yellow', 0.35),
+                  // IMPROVED: Thinner border (1px instead of 2px) to reduce strikethrough effect
+                  border: `1px solid ${getColorValue(visual?.color || 'yellow', 0.5)}`,
+                  borderRadius: '2px', // Slight rounding for smoother look
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)', // Subtle shadow for depth
                 }}
                 onClick={() => onAnnotationClick?.(annotation.id)}
                 title={annotation.components.Content?.note || 'Click to edit'}
@@ -134,14 +157,16 @@ export function PDFAnnotationOverlay({
           <div
             key={annotation.id}
             data-annotation-id={annotation.id}
-            className="absolute pointer-events-auto cursor-pointer transition-opacity hover:opacity-80"
+            className="absolute pointer-events-auto cursor-pointer transition-all hover:opacity-90"
             style={{
               left: `${x}px`,
               top: `${y}px`,
               width: `${width}px`,
               height: `${height}px`,
-              backgroundColor: getColorValue(visual?.color || 'yellow', 0.3),
-              border: `2px solid ${getColorValue(visual?.color || 'yellow', 0.6)}`,
+              backgroundColor: getColorValue(visual?.color || 'yellow', 0.35),
+              border: `1px solid ${getColorValue(visual?.color || 'yellow', 0.5)}`,
+              borderRadius: '2px',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
             }}
             onClick={() => onAnnotationClick?.(annotation.id)}
             title={annotation.components.Content?.note || 'Click to edit'}
