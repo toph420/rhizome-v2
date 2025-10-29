@@ -82,7 +82,21 @@ export async function calculatePdfCoordinatesFromDocling(
     return { found: false }
   }
 
-  const pageNumber = containingChunk.page_start
+  // Calculate which page within the chunk's range based on offset position
+  const chunkLength = containingChunk.end_offset - containingChunk.start_offset
+  const annotationPosition = markdownOffset - containingChunk.start_offset
+  const positionRatio = annotationPosition / chunkLength
+
+  const pageRange = (containingChunk.page_end || containingChunk.page_start) - containingChunk.page_start + 1
+  const estimatedPageOffset = Math.floor(positionRatio * pageRange)
+  const estimatedPageNumber = containingChunk.page_start + estimatedPageOffset
+
+  console.log('[PdfCoordinateMapper] Chunk page range:', {
+    pageStart: containingChunk.page_start,
+    pageEnd: containingChunk.page_end || containingChunk.page_start,
+    estimatedPage: estimatedPageNumber,
+    positionRatio: positionRatio.toFixed(3)
+  })
 
   // Step 2: Get highlighted text from document
   const supabase = createAdminClient()
@@ -96,7 +110,7 @@ export async function calculatePdfCoordinatesFromDocling(
 
   if (error || !doc?.storage_path) {
     console.error('[PdfCoordinateMapper] Error fetching document:', error)
-    return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, pageNumber, documentId)
+    return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, estimatedPageNumber, documentId)
   }
 
   // Get markdown content from Storage using full storage path
@@ -106,54 +120,70 @@ export async function calculatePdfCoordinatesFromDocling(
 
   if (storageError || !contentBlob) {
     console.error('[PdfCoordinateMapper] Error fetching content.md:', storageError)
-    return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, pageNumber, documentId)
+    return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, estimatedPageNumber, documentId)
   }
 
   const content = await contentBlob.text()
   const highlightedText = content.slice(markdownOffset, markdownOffset + markdownLength)
 
+  // Step 3: PRIMARY APPROACH - PyMuPDF text search across page range (95% accuracy)
+  // Search all pages in chunk's range to find the text
+  const searchPages = []
+  for (let page = containingChunk.page_start; page <= (containingChunk.page_end || containingChunk.page_start); page++) {
+    searchPages.push(page)
+  }
+
   console.log('[PdfCoordinateMapper] Searching for text:', {
     text: highlightedText.substring(0, 50) + '...',
     length: highlightedText.length,
-    pageNumber
+    searchPages: searchPages,
+    estimatedPage: estimatedPageNumber
   })
 
-  // Step 3: PRIMARY APPROACH - PyMuPDF text search (95% accuracy)
-  try {
-    const pymupdfResult = await findTextInPdfWithPyMuPDF(
-      documentId,
-      pageNumber,
-      highlightedText
-    )
+  // Try estimated page first (most likely), then other pages in range
+  const pagesToSearch = [
+    estimatedPageNumber,
+    ...searchPages.filter(p => p !== estimatedPageNumber)
+  ]
 
-    if (pymupdfResult.found && pymupdfResult.rects.length > 0) {
-      // Merge adjacent rectangles for cleaner highlighting
-      const mergedRects = mergeAdjacentRects(pymupdfResult.rects)
-
-      console.log('[PdfCoordinateMapper] PyMuPDF SUCCESS:', {
-        method: 'pymupdf',
-        confidence: 0.95,
-        rectsBeforeMerge: pymupdfResult.rects.length,
-        rectsAfterMerge: mergedRects.length
-      })
-
-      return {
-        found: true,
+  for (const pageNumber of pagesToSearch) {
+    try {
+      const pymupdfResult = await findTextInPdfWithPyMuPDF(
+        documentId,
         pageNumber,
-        rects: mergedRects,
-        method: 'pymupdf',
-        confidence: 0.95
+        highlightedText
+      )
+
+      if (pymupdfResult.found && pymupdfResult.rects.length > 0) {
+        // Merge adjacent rectangles for cleaner highlighting
+        const mergedRects = mergeAdjacentRects(pymupdfResult.rects)
+
+        console.log('[PdfCoordinateMapper] PyMuPDF SUCCESS:', {
+          method: 'pymupdf',
+          confidence: 0.95,
+          foundOnPage: pageNumber,
+          estimatedPage: estimatedPageNumber,
+          rectsBeforeMerge: pymupdfResult.rects.length,
+          rectsAfterMerge: mergedRects.length
+        })
+
+        return {
+          found: true,
+          pageNumber,
+          rects: mergedRects,
+          method: 'pymupdf',
+          confidence: 0.95
+        }
       }
+    } catch (error) {
+      console.error(`[PdfCoordinateMapper] PyMuPDF error on page ${pageNumber}:`, error)
     }
-
-    console.log('[PdfCoordinateMapper] PyMuPDF found no matches, falling back to bbox')
-
-  } catch (error) {
-    console.error('[PdfCoordinateMapper] PyMuPDF error, falling back to bbox:', error)
   }
 
+  console.log('[PdfCoordinateMapper] PyMuPDF found no matches on any page in range, falling back to bbox')
+
   // Step 4: FALLBACK 1 - Bbox proportional filtering (70-85% accuracy)
-  return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, pageNumber, documentId)
+  return await fallbackToBboxProportional(containingChunk, markdownOffset, markdownLength, estimatedPageNumber, documentId)
 }
 
 /**

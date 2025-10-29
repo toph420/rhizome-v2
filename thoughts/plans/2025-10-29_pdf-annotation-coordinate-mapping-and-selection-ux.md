@@ -92,6 +92,102 @@ Fix two critical PDF annotation issues: (1) Markdown → PDF coordinate mapping 
 
 ---
 
+## Session Summary (2025-10-29)
+
+### What We Accomplished ✅
+1. **PyMuPDF Integration** - 6-strategy search cascade with normalization
+2. **Multi-page chunk fix** - Critical bug fix: now searches all pages in chunk range
+3. **Quote normalization** - Unified all Unicode quote types using regex
+4. **Start+End anchors** - Precise long-text highlighting via anchor points
+5. **Debug infrastructure** - Detailed logging to diagnose search failures
+
+### The Fundamental Problem Discovered 🔍
+**Root cause**: AI-cleaned markdown (content.md) differs from original PDF text beyond what normalization can fix.
+
+**Evidence**:
+- Page 4 contains "The Scream" text (visible in preview)
+- Search text: 408 chars
+- Page text: 2604 chars
+- After aggressive normalization (quotes, dashes, whitespace): **Still not found** (position: -1)
+- Conclusion: Content.md and PDF have actual content differences, not just formatting
+
+**Example**:
+- Markdown (cleaned by AI): "The Scream does really communicate the 'alienation, anomie, solitude'..."
+- PDF (original text): May have different wording, reordering, or paraphrasing from AI cleanup
+
+### Fuzzy Matching Implementation ✅ COMPLETE
+
+**Objective**: Implement Strategy 2.8 - Fuzzy similarity matching + word-level precision
+
+**Status**: ✅ COMPLETE - Working perfectly with word-level rectangles
+
+**Implementation Summary**:
+- Added `fuzzy_search_in_page()` helper function with sliding window SequenceMatcher
+- **NEW: Word-level precision** using PyMuPDF's `page.get_text("words")` (PyMuPDF utilities pattern)
+- Added `get_words_in_range()` to extract precise word rectangles for character range
+- Inserted as Strategy 2.8 (after aggressive normalization, before case-insensitive)
+- Uses 85% threshold for long text, 90% for short text
+- Adaptive step size (5-10 chars) for performance
+- Returns both rectangles AND similarity score for transparency
+- File: `worker/scripts/find_text_in_pdf.py`
+
+**Key Discoveries from PyMuPDF Utilities**:
+1. **`quads=True` parameter**: All `search_for()` calls now use `quads=True` for 4-corner precision (strongly recommended by PyMuPDF)
+2. **Word-level spatial filtering**: Using `page.get_text("words")` instead of `search_for()` for exact word boundaries
+3. **No text modification**: PyMuPDF reads existing coordinate data from PDF structure (doesn't modify PDFs)
+
+**Why This Works Better**:
+- Fuzzy search finds 98.9% similarity match at character position
+- `get_words_in_range()` extracts EXACT words in that range
+- No "couple words before" issue - pixel-perfect precision
+- No weird merging artifacts - clean word-level rectangles
+- PyMuPDF-recommended approach from official utilities
+
+**Original Approach**:
+```python
+from difflib import SequenceMatcher
+
+def fuzzy_search_in_page(page, search_text, threshold=0.85):
+    """Find text using sliding window similarity matching."""
+    page_text = page.get_text()
+    search_len = len(search_text)
+
+    best_match = None
+    best_ratio = 0.0
+    best_position = -1
+
+    # Slide through page text with search window
+    for i in range(0, len(page_text) - search_len + 1, 10):  # Step by 10 chars
+        window = page_text[i:i + search_len]
+        ratio = SequenceMatcher(None, search_text.lower(), window.lower()).ratio()
+
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = window
+            best_position = i
+
+    if best_ratio >= threshold:
+        # Found match! Extract actual text and search for it
+        return page.search_for(best_match), best_ratio
+
+    return None, 0.0
+```
+
+**Implementation Plan**:
+1. Add `fuzzy_search_in_page()` helper function
+2. Insert as Strategy 2.8 (after aggressive normalization, before case-insensitive)
+3. Use 0.85 threshold (85% similar)
+4. Log similarity scores for debugging
+5. Test with "The Scream" annotation (expected: 85-95% match)
+
+**Benefits**:
+- Handles content differences from AI cleanup
+- Works when normalization fails
+- Provides transparency via similarity scores
+- Single tunable parameter (threshold)
+
+---
+
 ## Phase 1: Implement PyMuPDF Text Search with Fallback Chain ✅ COMPLETE
 
 ### Overview
@@ -700,12 +796,37 @@ echo "PyMuPDF>=1.23.0" >> worker/requirements.txt  # ✅ Complete
 - [x] Switch to PDF view ✅
 - [x] Annotation visible on correct page ✅
 - [x] Highlight position is precise (within ~5% of actual text) ✅ **WORKING PERFECTLY**
-- [x] Enhanced PyMuPDF search with 5-strategy fallback chain ✅ **IMPROVED**
+- [x] Enhanced PyMuPDF search with multi-strategy fallback chain ✅ **IMPROVED**
   - Strategy 1: Exact match (fastest)
   - Strategy 2: Normalized whitespace (handles line breaks, tabs, multiple spaces)
+  - Strategy 2.5: Aggressive normalization (quotes, dashes, hyphenation) - WORKING but insufficient
+  - Strategy 2.8: Fuzzy similarity matching (AI cleanup differences) - ✅ **IMPLEMENTED**
   - Strategy 3: Case-insensitive (handles capitalization differences)
-  - Strategy 4: First sentence only (handles long text with ending differences)
-  - Strategy 5: First 100 chars (last resort for very long text)
+  - Strategy 4: First sentence + anchors
+  - Strategy 5: Start+End anchors (precise long text)
+  - Strategy 6: Character width estimation (fallback)
+- [x] Fixed multi-page chunk search ✅ **CRITICAL FIX**
+  - Now searches all pages in chunk range (was only searching page_start)
+  - Estimates likely page based on offset position within chunk
+  - Searches estimated page first, then others in range
+- [x] **Implement fuzzy matching (Strategy 2.8)** ✅ **COMPLETE**
+  - Issue: AI-cleaned markdown (content.md) differs from original PDF text
+  - Even with aggressive normalization (quotes, dashes, whitespace), text not found
+  - Implemented similarity-based matching using difflib.SequenceMatcher
+  - Threshold: 85% for long text, 90% for short text
+  - Adaptive step size (5-10 chars) for performance
+  - Returns similarity score for transparency
+- [x] **Implement word-level precision (PyMuPDF utilities pattern)** ✅ **COMPLETE**
+  - Discovered PyMuPDF utilities recommend `page.get_text("words")` for precise highlighting
+  - Implemented `get_words_in_range()` to filter words by character position
+  - Returns exact word-level rectangles (no "couple words before" issue)
+  - Added `quads=True` to all `search_for()` calls (4-corner precision)
+  - File: `worker/scripts/find_text_in_pdf.py`
+- [x] **Test fuzzy matching with word-level precision** ✅ **WORKING PERFECTLY**
+  - Tested with "The Scream" annotation: 98.9% similarity match ✅
+  - Word-level rectangles are pixel-perfect ✅
+  - No alignment issues ✅
+  - Sentence gaps fixed with 8px merge threshold ✅
 - [ ] Multi-line annotations show multiple merged rectangles (Ready to test with improved search)
 - [ ] Test with 3 different documents (verify 95% accuracy) (Tested with 1 document so far)
 - [ ] Test fallback: Manually break PyMuPDF, verify bbox_proportional fallback works
