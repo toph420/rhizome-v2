@@ -434,8 +434,10 @@ if (bestMatch.confidence >= FUZZY_CONFIG.MIN_CONFIDENCE) {
 
 ---
 
-### Phase 2: Bidirectional Sync **(4-6 hours)**
+### Phase 2: Bidirectional Sync ✅ **COMPLETE** (2025-10-28)
 **Impact**: Create annotations in markdown that appear in PDF with accurate coordinates
+
+**Status**: Implementation complete - markdown annotations now calculate PDF coordinates automatically
 
 **Key Insight** (2025-10-28 Developer Conversation):
 Don't search entire PDF - reuse stored Docling extraction! Annotations already reference chunks → chunks have pageNumber from Docling → load Docling output for that page → use element bboxes (already calculated).
@@ -670,6 +672,36 @@ return null
 - ✅ Page number accurate for all cases (100%)
 - ✅ Graceful degradation when bboxes unavailable
 - ✅ No PDF re-parsing required
+
+**Implementation Complete** (2025-10-28):
+1. ✅ Created `src/lib/reader/pdf-coordinate-mapper.ts` with `calculatePdfCoordinatesFromDocling()`
+2. ✅ Added Server Action wrapper `calculatePdfCoordinates()` in `src/app/actions/annotations.ts`
+   - **Critical Fix**: Client components cannot import server-only utilities (next/headers)
+   - Server Actions provide proper client/server boundary
+3. ✅ Updated `src/components/reader/QuickCapturePanel.tsx` to call mapper before creating annotations
+4. ✅ Updated type definitions across stack:
+   - `src/app/actions/annotations.ts` - Zod schema includes 'docling_bbox' and 'page_only'
+   - `src/lib/ecs/components.ts` - PositionComponent.syncMethod updated
+   - `src/lib/ecs/annotations.ts` - CreateAnnotationInput.syncMethod updated
+5. ✅ Confidence scoring: 0.85 for single-element, 0.80 for multi-element, 0.5 for page-only fallback
+6. ✅ Character ratio calculation for sub-element precision
+7. ✅ Type-safe implementation passes TypeScript type checker
+8. ✅ Fixed infinite loop bug in PDFViewer.tsx (useEffect dependency cycle)
+
+**Bug Fixes During Implementation**:
+- ✅ **Server/Client Boundary Error**: QuickCapturePanel (client) was directly importing server utility
+  - **Solution**: Created Server Action wrapper for pdf-coordinate-mapper
+  - **Pattern**: Client components → Server Actions → Server utilities
+- ✅ **Infinite Loop in PDFViewer**: `handleFitPage` in useEffect deps caused re-render cycle
+  - **Solution**: Used refs to track auto-fit state, only run once on load
+  - **Pattern**: useRef for tracking state without triggering re-renders
+
+**Testing Required**:
+- ⏳ Create annotation in markdown view
+- ⏳ Switch to PDF view
+- ⏳ Verify annotation appears with correct positioning
+- ⏳ Test graceful degradation when bboxes not available
+- ⏳ Verify round-trip preservation (markdown → PDF → markdown)
 
 ---
 
