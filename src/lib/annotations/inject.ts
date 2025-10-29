@@ -20,6 +20,86 @@ export interface AnnotationRange {
 }
 
 // ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Aggressive text normalization for matching PDF text with markdown.
+ * Matches the implementation in text-offset-calculator.ts (Phase 1.5).
+ *
+ * Handles:
+ * - ALL Unicode quote variants → @
+ * - ALL dash/hyphen variants → -
+ * - Soft hyphens removal
+ * - Whitespace collapse
+ */
+function normalizeTextAggressive(text: string): string {
+  let normalized = text
+
+  // Normalize ALL Unicode quote types → @ (consistent placeholder)
+  // Covers: " ' ` ´ ' ' ‚ ‛ " " „ ‟
+  normalized = normalized.replace(/[\u0022\u0027\u0060\u00B4\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F]/g, '@')
+
+  // Normalize dashes/hyphens → -
+  // Covers: ‐ ‑ ‒ – — ― −
+  normalized = normalized.replace(/[\u2010-\u2015\u2212]/g, '-')
+
+  // Remove soft hyphens (invisible hyphenation hints)
+  normalized = normalized.replace(/\u00AD/g, '')
+
+  // Collapse whitespace
+  normalized = normalized.replace(/\s+/g, ' ')
+
+  return normalized.trim()
+}
+
+/**
+ * Calculate similarity ratio between two strings using Levenshtein distance.
+ * Returns 0.0-1.0 where 1.0 is identical.
+ *
+ * Simple implementation for browser use (no dependencies).
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const maxLen = Math.max(str1.length, str2.length)
+  if (maxLen === 0) return 1.0
+
+  const distance = levenshteinDistance(str1, str2)
+  return 1.0 - (distance / maxLen)
+}
+
+/**
+ * Calculate Levenshtein distance between two strings.
+ * Simple browser-compatible implementation.
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const len1 = str1.length
+  const len2 = str2.length
+
+  // Create matrix
+  const matrix: number[][] = []
+  for (let i = 0; i <= len1; i++) {
+    matrix[i] = [i]
+  }
+  for (let j = 0; j <= len2; j++) {
+    matrix[0][j] = j
+  }
+
+  // Fill matrix
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = str1[i - 1] === str2[j - 1] ? 0 : 1
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,     // deletion
+        matrix[i][j - 1] + 1,     // insertion
+        matrix[i - 1][j - 1] + cost // substitution
+      )
+    }
+  }
+
+  return matrix[len1][len2]
+}
+
+// ============================================
 // CORE FUNCTION
 // ============================================
 
@@ -108,6 +188,54 @@ export function injectAnnotations(
         }
       }
 
+      // Try 3.5: AGGRESSIVE normalization (Phase 1.5 - quotes, dashes, hyphens)
+      // This handles AI cleanup differences between PDF and markdown
+      if (index === -1) {
+        const aggressiveNormBlock = normalizeTextAggressive(plainText)
+        const aggressiveNormSearch = normalizeTextAggressive(searchText)
+
+        const aggressiveIndex = aggressiveNormBlock.indexOf(aggressiveNormSearch)
+        if (aggressiveIndex !== -1) {
+          // Map position back to original text (approximate but good enough)
+          index = aggressiveIndex
+          matchMethod = 'aggressive-normalized'
+        }
+      }
+
+      // Try 3.75: FUZZY similarity matching (Phase 1.5 - handles content differences)
+      // This is the same fuzzy matching we use in text-offset-calculator.ts
+      if (index === -1) {
+        const searchLen = searchText.length
+        const normalizedSearch = normalizeTextAggressive(searchText).toLowerCase()
+        const normalizedBlock = normalizeTextAggressive(plainText).toLowerCase()
+
+        // Sliding window with 85% similarity threshold
+        const threshold = searchLen < 100 ? 0.90 : 0.85
+        const stepSize = searchLen < 100 ? 5 : 10
+
+        let bestRatio = 0
+        let bestPosition = -1
+
+        for (let i = 0; i <= normalizedBlock.length - searchLen; i += stepSize) {
+          const window = normalizedBlock.slice(i, i + searchLen)
+          const ratio = calculateSimilarity(normalizedSearch, window)
+
+          if (ratio > bestRatio) {
+            bestRatio = ratio
+            bestPosition = i
+          }
+
+          // Early exit if excellent match
+          if (ratio > 0.95) break
+        }
+
+        if (bestRatio >= threshold) {
+          index = bestPosition
+          matchMethod = `fuzzy-${(bestRatio * 100).toFixed(1)}%`
+          console.log(`[inject] Fuzzy match found: ${(bestRatio * 100).toFixed(1)}% similarity`)
+        }
+      }
+
       // Try 4: Space-agnostic matching (handles spaced-out text like "M A R R Y" vs "MARRY"
       // and missing spaces like "forwhat" vs "for what")
       if (index === -1) {
@@ -176,6 +304,11 @@ export function injectAnnotations(
 
       if (index !== -1) {
         // FOUND! Use discovered position
+        console.log(`[inject] ✅ Found annotation text using ${matchMethod}:`, {
+          annotationId: annotation.id,
+          searchTextLength: searchText.length,
+          foundAt: index,
+        })
         relativeStart = index
         relativeEnd = index + searchText.length
         annotationStartsInThisBlock = true
@@ -184,6 +317,12 @@ export function injectAnnotations(
         // CRITICAL: Text not found in this block!
         // This means the stored offsets are wrong for this block.
         // SKIP this block rather than highlighting the wrong text.
+        console.warn('[inject] ⚠️ Text search failed for annotation:', {
+          annotationId: annotation.id,
+          searchTextPreview: searchText.substring(0, 100),
+          blockTextPreview: plainText.substring(0, 200),
+          blockOffsets: { start: blockStartOffset, end: blockEndOffset },
+        })
         // Skip this annotation for this block (return early)
         return
       }
