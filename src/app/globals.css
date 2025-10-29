@@ -6,6 +6,45 @@
 @import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 @import "react-pdf/dist/esm/Page/TextLayer.css";
 
+/* ============================================
+   PDF.js Text Layer - Enhanced Selection UX
+   Phase 2A: Smooth selection styling to eliminate
+   word-by-word clunky feel during text selection
+   ============================================ */
+
+/* Smooth selection background (yellow highlight) */
+.textLayer ::selection {
+  background: rgba(254, 240, 138, 0.4); /* Yellow with transparency */
+  color: inherit; /* Keep text color */
+  text-shadow: none; /* Remove any shadows */
+}
+
+.textLayer ::-moz-selection {
+  background: rgba(254, 240, 138, 0.4);
+  color: inherit;
+}
+
+/* Style text layer spans for better selection continuity */
+.textLayer span {
+  /* Make selection feel more continuous */
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+
+  /* Reduce visible gaps between words */
+  letter-spacing: normal;
+  word-spacing: normal;
+}
+
+/* Add slight padding to reduce visual gaps during selection */
+.textLayer span::before,
+.textLayer span::after {
+  content: '';
+  display: inline-block;
+  width: 0.5px; /* Tiny padding to bridge gaps */
+  opacity: 0;
+}
+
 /* Google Fonts - Simple CSS import approach */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
