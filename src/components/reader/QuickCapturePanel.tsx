@@ -8,7 +8,7 @@ import { Input } from '@/components/rhizome/input'
 import { Badge } from '@/components/rhizome/badge'
 import { toast } from 'sonner'
 import { Loader2, X, Tag, Palette, Layers, GripVertical, Zap, Trash2 } from 'lucide-react'
-import { createAnnotation, updateAnnotation, deleteAnnotation } from '@/app/actions/annotations'
+import { createAnnotation, updateAnnotation, deleteAnnotation, calculatePdfCoordinates } from '@/app/actions/annotations'
 import { extractContext } from '@/lib/annotations/text-range'
 import type { TextSelection, Chunk, OptimisticAnnotation, AnnotationEntity } from '@/types/annotations'
 import { cn } from '@/lib/utils'
@@ -228,6 +228,30 @@ export function QuickCapturePanel({
             selection.range.endOffset
           )
 
+          // Calculate PDF coordinates from markdown offsets (Phase 2: Bidirectional Sync)
+          const textLength = selection.range.endOffset - selection.range.startOffset
+
+          console.log('[QuickCapturePanel] Calling calculatePdfCoordinates with:', {
+            documentId,
+            startOffset: selection.range.startOffset,
+            textLength,
+            chunksCount: chunks.length,
+            firstChunkHasCharspan: chunks[0]?.charspan ? 'yes' : 'no',
+          })
+
+          const pdfCoords = await calculatePdfCoordinates(
+            documentId,
+            selection.range.startOffset,
+            textLength,
+            chunks
+          )
+
+          console.log('[QuickCapturePanel] PDF coordinates calculated:', pdfCoords)
+
+          if (!pdfCoords.rects) {
+            console.warn('[QuickCapturePanel] ⚠️ No rects returned - will be page_only annotation. Check server logs for PdfCoordinateMapper details.')
+          }
+
           // Create optimistic annotation for immediate UI update
           const optimisticAnnotation: OptimisticAnnotation = {
             id: `temp-${Date.now()}`,
@@ -248,7 +272,7 @@ export function QuickCapturePanel({
             onAnnotationCreated(optimisticAnnotation)
           }
 
-          // Save to server in background
+          // Save to server in background with PDF coordinates
           const result = await createAnnotation({
             text: selection.text,
             chunkIds: selection.range.chunkIds,
@@ -259,6 +283,11 @@ export function QuickCapturePanel({
             note: note.trim() || undefined,
             tags: tags.length > 0 ? tags : undefined,
             textContext,
+            // Phase 2: Include PDF coordinates for bidirectional sync
+            pdfPageNumber: pdfCoords.found ? pdfCoords.pageNumber : undefined,
+            pdfRects: pdfCoords.found ? pdfCoords.rects : undefined,
+            syncMethod: pdfCoords.found ? pdfCoords.method : undefined,
+            syncConfidence: pdfCoords.found ? pdfCoords.confidence : undefined,
           })
 
           if (result.success) {
