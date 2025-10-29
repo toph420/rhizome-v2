@@ -3,6 +3,13 @@
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/rhizome/button'
 import { ActivityItem, ActivityItemProps } from '@/components/rhizome/activity-item'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/rhizome/dropdown-menu'
+import { ChevronDown } from 'lucide-react'
 
 /**
  * ActivityFeed Component
@@ -89,17 +96,49 @@ export function ActivityFeed() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header with filter buttons */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-heading text-sm font-bold">Activity Feed</h3>
-        <div className="flex gap-2 text-xs">
-          <button className="hover:underline">All▾</button>
-          <button className="hover:underline">24h▾</button>
+      {/* Header with neobrutalist filter dropdowns */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-heading text-lg font-black uppercase tracking-tight">
+          Activity Feed
+        </h3>
+        <div className="flex gap-2">
+          {/* Activity Type Filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="px-2 py-1 text-xs font-medium border-2 border-border rounded-base bg-white shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all flex items-center gap-1">
+                All <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="border-2 border-border shadow-shadow">
+              <DropdownMenuItem>All Activities</DropdownMenuItem>
+              <DropdownMenuItem>Connections</DropdownMenuItem>
+              <DropdownMenuItem>Annotations</DropdownMenuItem>
+              <DropdownMenuItem>Documents</DropdownMenuItem>
+              <DropdownMenuItem>Sparks</DropdownMenuItem>
+              <DropdownMenuItem>Flashcards</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Time Range Filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="px-2 py-1 text-xs font-medium border-2 border-border rounded-base bg-white shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all flex items-center gap-1">
+                24h <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="border-2 border-border shadow-shadow">
+              <DropdownMenuItem>Last Hour</DropdownMenuItem>
+              <DropdownMenuItem>Last 24 Hours</DropdownMenuItem>
+              <DropdownMenuItem>Last 7 Days</DropdownMenuItem>
+              <DropdownMenuItem>Last 30 Days</DropdownMenuItem>
+              <DropdownMenuItem>All Time</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {/* Scrollable activity list */}
-      <div className="space-y-3 flex-1 overflow-y-auto">
+      {/* Scrollable activity list with custom scrollbar */}
+      <div className="flex-1 overflow-y-auto pr-2 -mr-2 space-y-0">
         {mockActivities.map((activity) => (
           <ActivityItem
             key={activity.id}
@@ -109,8 +148,11 @@ export function ActivityFeed() {
         ))}
       </div>
 
-      {/* Load more button */}
-      <Button variant="ghost" className="w-full mt-2 text-xs">
+      {/* Load more button with neobrutalist styling */}
+      <Button
+        variant="outline"
+        className="w-full mt-3 font-bold border-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+      >
         Load more ↓
       </Button>
     </div>
