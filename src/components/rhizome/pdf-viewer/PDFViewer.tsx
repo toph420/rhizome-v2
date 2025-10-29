@@ -49,11 +49,12 @@ export function PDFViewer({ fileUrl, documentId, onMetadataLoad, onOutlineLoad, 
   // Use reader store page number
   const pageNumber = pdfPageNumber
 
-  // Text selection tracking
-  const { selection, clearSelection, longPressActive } = usePDFSelection({
+  // Text selection tracking (Phase 1.5: Now with PyMuPDF precision!)
+  const { selection, clearSelection, longPressActive, isEnhancing } = usePDFSelection({
     enabled: true,
     pageNumber,
     scale, // Pass current scale for coordinate conversion
+    documentId, // Phase 1.5: Enable PyMuPDF word-level precision
   })
 
   // Annotation store
