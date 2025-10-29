@@ -7,10 +7,11 @@ import { parseMarkdownToBlocks } from '@/lib/reader/block-parser'
 import { BlockRenderer } from './BlockRenderer'
 import { QuickCapturePanel } from './QuickCapturePanel'
 import { useTextSelection } from '@/hooks/useTextSelection'
+import { useAnnotationResize } from '@/hooks/useAnnotationResize'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
 import { useUIStore } from '@/stores/ui-store'
-import { getAnnotations } from '@/app/actions/annotations'
+import { getAnnotations, updateAnnotationRange } from '@/app/actions/annotations'
 import type { AnnotationEntity, OptimisticAnnotation, TextSelection } from '@/types/annotations'
 
 // Constant empty array to prevent infinite loops from new references
@@ -381,6 +382,51 @@ export function VirtualizedReader() {
     setCaptureSelection(textSelection)
   }, [annotations])
 
+  // Handle annotation resize completion
+  const handleAnnotationResize = useCallback(async (
+    annotationId: string,
+    newRange: { startOffset: number; endOffset: number; text: string }
+  ) => {
+    if (!documentId) return
+
+    try {
+      // Call Server Action to update
+      const result = await updateAnnotationRange(annotationId, newRange)
+
+      if (result.success) {
+        // Show success toast
+        toast.success('Annotation resized', {
+          description: 'Highlight boundaries updated',
+          duration: 2000,
+        })
+
+        // Reload annotations to get updated coordinates
+        const updatedAnnotations = await getAnnotations(documentId)
+        setAnnotations(documentId, updatedAnnotations)
+      } else {
+        toast.error('Failed to resize annotation', {
+          description: result.error || 'Unknown error',
+          duration: 3000,
+        })
+      }
+    } catch (error) {
+      console.error('[VirtualizedReader] Resize failed:', error)
+      toast.error('Failed to resize annotation', {
+        description: 'An unexpected error occurred',
+        duration: 3000,
+      })
+    }
+  }, [documentId, setAnnotations])
+
+  // Annotation resize hook (single instance for entire reader)
+  const { isResizing } = useAnnotationResize({
+    enabled: !correctionModeActive && !sparkCaptureOpen, // Disable during correction mode or spark capture
+    documentId: documentId || '',
+    chunks,
+    annotations: annotationsForBlocks, // Already flattened with startOffset, endOffset, text
+    onResizeComplete: handleAnnotationResize,
+  })
+
   // Guard: Wait for document to load
   if (!documentId || blocks.length === 0) {
     return (
@@ -402,12 +448,12 @@ export function VirtualizedReader() {
           const chunk = chunks.find(c => c.id === block.chunkId)
 
           // Create a key that changes when annotations in this block change
-          // This forces BlockRenderer to re-render when annotation colors/content change
+          // This forces BlockRenderer to re-render when annotation colors/content/offsets change
           const blockAnnotations = annotationsForBlocks.filter(
             ann => ann.endOffset > block.startOffset && ann.startOffset < block.endOffset
           )
           const annotationKey = blockAnnotations
-            .map(ann => `${ann.id}:${ann.color}`)
+            .map(ann => `${ann.id}:${ann.color}:${ann.startOffset}-${ann.endOffset}`)
             .join(',')
 
           return (

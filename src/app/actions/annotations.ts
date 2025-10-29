@@ -5,7 +5,7 @@ import { createECS } from '@/lib/ecs'
 import { AnnotationOperations } from '@/lib/ecs/annotations'
 import { getCurrentUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
-import { calculatePdfCoordinatesFromDocling } from '@/lib/reader/pdf-coordinate-mapper'
+import { calculatePdfCoordinatesFromMarkdown } from '@/lib/reader/pdf-coordinate-mapper'
 import { calculateMarkdownOffsets } from '@/lib/reader/text-offset-calculator'
 import type { AnnotationEntity, Chunk } from '@/types/annotations'
 
@@ -160,6 +160,181 @@ export async function updateAnnotation(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * Update annotation range after resize operation.
+ *
+ * Recalculates PDF coordinates using PyMuPDF to maintain bidirectional sync.
+ * Validates minimum length (3 chars) and maximum chunks (5).
+ */
+export async function updateAnnotationRange(
+  annotationId: string,
+  newRange: {
+    startOffset: number
+    endOffset: number
+    text: string
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Get authenticated user
+    const user = await getCurrentUser()
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // Validate inputs
+    const schema = z.object({
+      annotationId: z.string().uuid(),
+      newRange: z.object({
+        startOffset: z.number().int().min(0),
+        endOffset: z.number().int().min(0),
+        text: z.string().min(3).max(5000),
+      }),
+    })
+
+    const validated = schema.parse({ annotationId, newRange })
+
+    // Validate length
+    const length = validated.newRange.endOffset - validated.newRange.startOffset
+    if (length < 3) {
+      return { success: false, error: 'Annotation must be at least 3 characters' }
+    }
+
+    // Get annotation entity
+    const supabase = await createClient()
+    const ecs = createECS()
+
+    const entity = await ecs.getEntity(annotationId, user.id)
+    if (!entity) {
+      return { success: false, error: 'Annotation not found' }
+    }
+
+    // Find Position component
+    const positionComponent = entity.components?.find(
+      (c) => c.component_type === 'Position'
+    )
+
+    if (!positionComponent) {
+      return { success: false, error: 'Position component not found' }
+    }
+
+    const documentId = positionComponent.data.documentId
+    if (!documentId) {
+      return { success: false, error: 'Document ID not found' }
+    }
+
+    // Load chunks to validate chunk limit
+    const { data: chunks, error: chunksError } = await supabase
+      .from('chunks')
+      .select('id, start_offset, end_offset, page_start, page_end')
+      .eq('document_id', documentId)
+      .eq('is_current', true)
+      .order('start_offset')
+
+    if (chunksError || !chunks) {
+      return { success: false, error: 'Failed to load chunks' }
+    }
+
+    // Find spanned chunks
+    const spannedChunks = chunks.filter(c =>
+      validated.newRange.startOffset < c.end_offset &&
+      validated.newRange.endOffset > c.start_offset
+    )
+
+    const MAX_CHUNKS = 5
+    if (spannedChunks.length > MAX_CHUNKS) {
+      return {
+        success: false,
+        error: `Annotation spans too many chunks (max ${MAX_CHUNKS})`
+      }
+    }
+
+    // Recalculate PDF coordinates using PyMuPDF (cast chunks to Chunk[] type)
+    const pdfResult = await calculatePdfCoordinatesFromMarkdown(
+      documentId,
+      validated.newRange.startOffset,
+      length,
+      chunks as any // Type cast - chunks from DB have same structure as Chunk type
+    )
+
+    // Find ChunkRef component
+    const chunkRefComponent = entity.components?.find(
+      (c) => c.component_type === 'ChunkRef'
+    )
+
+    // Update Position component directly
+    await ecs.updateComponent(
+      positionComponent.id,
+      {
+        ...positionComponent.data,
+        // Markdown offsets
+        startOffset: validated.newRange.startOffset,
+        endOffset: validated.newRange.endOffset,
+        originalText: validated.newRange.text,
+
+        // PDF coordinates (recalculated)
+        pdfPageNumber: pdfResult.pageNumber,
+        pdfRects: pdfResult.rects,
+        pdfX: pdfResult.rects?.[0]?.x,
+        pdfY: pdfResult.rects?.[0]?.y,
+        pdfWidth: pdfResult.rects?.[0]?.width,
+        pdfHeight: pdfResult.rects?.[0]?.height,
+
+        // Sync metadata
+        syncMethod: pdfResult.method,
+        syncConfidence: pdfResult.confidence,
+        syncNeedsReview: pdfResult.confidence ? pdfResult.confidence < 0.85 : false,
+      },
+      user.id
+    )
+
+    // Update ChunkRef component
+    if (chunkRefComponent) {
+      await ecs.updateComponent(
+        chunkRefComponent.id,
+        {
+          ...chunkRefComponent.data,
+          chunkIds: spannedChunks.map(c => c.id),
+        },
+        user.id
+      )
+    }
+
+    // Update Temporal.updatedAt
+    const temporalComponent = entity.components?.find(
+      (c) => c.component_type === 'Temporal'
+    )
+    if (temporalComponent) {
+      await ecs.updateComponent(
+        temporalComponent.id,
+        {
+          ...temporalComponent.data,
+          updatedAt: new Date().toISOString(),
+        },
+        user.id
+      )
+    }
+
+    console.log(`[Annotations] ✓ Resized: ${annotationId}`)
+
+    return { success: true }
+
+  } catch (error) {
+    console.error('[updateAnnotationRange] Error:', error)
+
+    if (error instanceof z.ZodError) {
+      return {
+        success: false,
+        error: `Validation failed: ${error.errors.map(e => e.message).join(', ')}`
+      }
+    }
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
     }
   }
 }
@@ -558,7 +733,7 @@ export async function calculatePdfCoordinates(
 }> {
   try {
     // Call the utility function (runs in server context)
-    const result = await calculatePdfCoordinatesFromDocling(
+    const result = await calculatePdfCoordinatesFromMarkdown(
       documentId,
       startOffset,
       length,

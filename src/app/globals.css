@@ -382,6 +382,55 @@
   }
 
   /* ============================================
+     Annotation Resize Live Preview
+     Shows blue outline during drag operation
+     ============================================ */
+
+  /* During resize, show preview selection */
+  /* ============================================
+     Annotation Resize Live Preview
+     Shows blue outline overlay during drag
+     ============================================ */
+
+  /* Live preview overlay during resize */
+  .annotation-resize-preview {
+    position: fixed;
+    border: 2px solid rgb(59, 130, 246); /* Blue-500 */
+    background: rgba(59, 130, 246, 0.15); /* Semi-transparent blue */
+    pointer-events: none; /* Don't interfere with drag */
+    z-index: 9999; /* Always on top */
+    box-sizing: border-box;
+    transition: all 0.05s ease; /* Smooth updates at 60fps */
+  }
+
+  /* Dim original annotation during resize to emphasize preview */
+  body.annotation-resizing [data-annotation-id] {
+    opacity: 0.3; /* More dimmed to emphasize preview overlay */
+    transition: opacity 0.15s ease;
+  }
+
+  /* Prevent text selection during resize */
+  body.annotation-resizing {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+
+  /* Resize cursor during drag */
+  body.annotation-resizing {
+    cursor: ew-resize !important;
+  }
+
+  /* Edge hover feedback - enhance existing styles */
+  [data-annotation-start]:hover::before,
+  [data-annotation-end]:hover::after {
+    width: 4px;
+    opacity: 0.8;
+    background: rgb(59, 130, 246); /* Blue when hovering */
+  }
+
+  /* ============================================
      Spark Capture Mode Selection Indicator
      ============================================ */
 
