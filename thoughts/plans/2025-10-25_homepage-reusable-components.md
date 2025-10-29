@@ -124,45 +124,106 @@ interface StatCardProps {
 
 ---
 
-#### 2. ActivityItem (Medium - 45 min)
-**Location**: Inline in `src/app/homepage/page.tsx` (ActivityFeed section)
+#### 2. ActivityItem ✅ COMPLETE (Actual: 20 min)
+**Location**: `src/components/rhizome/activity-item.tsx` ✅
 **Why second**: Reusable across Activity Feed, Notifications, Document history
 
 **Features**:
-- Icon + timestamp + text layout
-- Click navigation
-- Time formatting helper
-- Activity type icons mapping
+- Lucide icon + timestamp + text layout
+- 7 activity type mappings with unique icons and colors
+- Click navigation with metadata routing
+- Time formatting using date-fns
+- Neobrutalist styling with colored accent borders
 
 **Props**:
 ```typescript
 interface ActivityItemProps {
   activity: {
     id: string
-    type: 'connection_validated' | 'annotation_added' | 'document_processed' | 'spark_created' | 'document_added'
-    timestamp: Date
+    type: 'connection_validated' | 'annotation_added' | 'document_processed' | 'spark_created' | 'document_added' | 'processing_started' | 'flashcard_reviewed'
+    timestamp: Date | string
     text: string
     metadata?: {
       documentId?: string
       connectionId?: string
       annotationId?: string
       sparkId?: string
+      entityId?: string
     }
   }
   onClick?: (activity: ActivityItem) => void
 }
 ```
 
-**Extraction target**: `src/components/rhizome/activity-item.tsx`
+**Extraction target**: `src/components/rhizome/activity-item.tsx` ✅
 
 **Used in**: Homepage feed, Notifications, Document history, Recent activity lists
 
-**Implementation Notes**:
+**Implementation Status**: ✅ Complete
+- 7 Lucide icons: CheckCircle2, FileEdit, Zap, Lightbulb, BookPlus, Play, Target
+- Color system using globals.css palette (forest, sky, mustard, lilac, cyan, coral, rose)
+- Colored left accent borders (border-l-4) per activity type
+- Icon badges with neobrutalist mini shadows
+- Background tints with /20 opacity
+- Hover "push" animation: translate-x/y + shadow-none
+- Time formatting: "2 hours ago", "Yesterday" via date-fns
+- Fully documented in `docs/frontend/HOMEPAGE_COMPONENTS.md`
+
+**Implementation Notes (Original)**:
 - Icon mapping per activity type (✓, 📝, ⚡, 💭, 📚)
 - Time formatting: "2h ago", "Yesterday", "2 days ago"
 - Border-b between items (not in component, in list container)
 - Hover: bg-muted transition
 - Click: navigate to relevant section (pass metadata to onClick)
+
+---
+
+#### 2b. ActivityFeed ✅ COMPLETE (Actual: 15 min)
+**Location**: `src/components/homepage/ActivityFeed.tsx` ✅
+**Pattern**: Client Component orchestrator (following StatsPanel pattern)
+
+**Features**:
+- Orchestrates ActivityItem instances
+- Navigation callbacks based on activity metadata
+- Real dropdown menu components (not fake buttons)
+- Scrollable container with overflow handling
+- Neobrutalist header with filter controls
+- "Load more" button with hover animation
+
+**Architecture**:
+```
+HomePage (Server Component)
+  └─ ActivityFeed (Client Component) ← Creates callbacks
+      └─ ActivityItem (Client Component) ← Accepts callbacks
+```
+
+**Implementation Status**: ✅ Complete
+- Two functional dropdown menus:
+  - Activity Type Filter (All/Connections/Annotations/Documents/Sparks/Flashcards)
+  - Time Range Filter (Last Hour/24 Hours/7 Days/30 Days/All Time)
+- DropdownMenu components from design system (Radix UI)
+- ChevronDown icons from Lucide React
+- Neobrutalist button styling with mini shadows
+- Mock data with 6 activity items and realistic timestamps
+- Navigation routing: documents, connections, annotations, sparks
+- Header: bold uppercase tracking-tight font-heading
+- Fully documented in `docs/frontend/HOMEPAGE_COMPONENTS.md`
+
+**Key Implementation Details**:
+```typescript
+// Real dropdown implementation
+<DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <button className="px-2 py-1 text-xs font-medium border-2 border-border rounded-base bg-white shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all flex items-center gap-1">
+      All <ChevronDown className="w-3 h-3" />
+    </button>
+  </DropdownMenuTrigger>
+  <DropdownMenuContent align="end" className="border-2 border-border shadow-shadow">
+    <DropdownMenuItem>All Activities</DropdownMenuItem>
+    {/* More items... */}
+  </DropdownMenuContent>
+</DropdownMenu>
+```
 
 ---
 

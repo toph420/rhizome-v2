@@ -109,15 +109,29 @@ import { StatsPanel } from '@/components/homepage/StatsPanel'
 
 **Status**: ✅ Complete
 **Implementation Date**: 2025-10-28
-**Pattern**: Reusable UI component
+**Pattern**: Reusable UI component with Lucide icons and neobrutalist styling
 
 **Features**:
-- Icon + timestamp + text layout
-- Activity type mapping for 7 types (✓, 📝, ⚡, 💭, 📚, 🎯)
+- Lucide icon + timestamp + text layout
+- 7 activity type mappings with unique icons and colors from globals.css
 - Time formatting using `date-fns` ("2 hours ago", "Yesterday")
 - Optional click handler for navigation
-- Hover state: `hover:bg-muted transition-colors`
+- Neobrutalist "push" hover animation
+- Colored left accent borders per activity type
+- Icon badges with mini shadows
+- Background tints with /20 opacity
 - Focus state for accessibility
+
+**Activity Type Configuration**:
+| Type | Lucide Icon | Accent Color | Background |
+|------|-------------|--------------|------------|
+| connection_validated | CheckCircle2 | border-forest | bg-mint-green/20 |
+| annotation_added | FileEdit | border-sky | bg-sky/20 |
+| document_processed | Zap | border-mustard | bg-mustard/20 |
+| spark_created | Lightbulb | border-lilac | bg-lilac/20 |
+| document_added | BookPlus | border-cyan | bg-cyan/20 |
+| processing_started | Play | border-coral | bg-coral/20 |
+| flashcard_reviewed | Target | border-rose | bg-rose/20 |
 
 **Props**:
 ```typescript
@@ -139,6 +153,25 @@ interface ActivityItemProps {
 }
 ```
 
+**Styling Pattern**:
+```tsx
+// Neobrutalist base with colored accent
+className={cn(
+  'w-full text-left p-3 mb-2',
+  'border-2 border-border rounded-base',
+  'shadow-shadow',
+  config.bgColor,           // Colored background tint
+  'border-l-4',             // Thick left accent border
+  config.accentColor,       // Color from globals.css
+  // Hover "push" animation
+  onClick && [
+    'cursor-pointer',
+    'hover:translate-x-boxShadowX hover:translate-y-boxShadowY hover:shadow-none',
+    'transition-all duration-200',
+  ],
+)}
+```
+
 **Usage**:
 ```tsx
 <ActivityItem
@@ -146,11 +179,21 @@ interface ActivityItemProps {
     id: '123',
     type: 'document_processed',
     timestamp: new Date(),
-    text: 'Thinking Fast & Slow processed successfully'
+    text: 'Thinking Fast & Slow processed successfully',
+    metadata: { documentId: 'doc-123' }
   }}
   onClick={(activity) => router.push(`/read/${activity.metadata.documentId}`)}
 />
 ```
+
+**Color System Integration**:
+Uses oklch colors from `globals.css`:
+- `--color-forest`, `--color-mint-green` (green success)
+- `--color-sky`, `--color-cyan` (blue info)
+- `--color-mustard`, `--color-gold` (yellow processing)
+- `--color-lilac`, `--color-purple` (purple creative)
+- `--color-coral` (orange progress)
+- `--color-rose`, `--color-pink` (pink review)
 
 **File**: `src/components/rhizome/activity-item.tsx`
 
@@ -160,7 +203,7 @@ interface ActivityItemProps {
 
 **Status**: ✅ Complete
 **Implementation Date**: 2025-10-28
-**Pattern**: Client Component orchestrator (like StatsPanel)
+**Pattern**: Client Component orchestrator with real dropdown menus
 
 **Architecture**:
 ```
@@ -172,10 +215,94 @@ HomePage (Server Component)
 **Features**:
 - Orchestrates ActivityItem instances
 - Navigation callbacks based on activity metadata
-- Mock data (6 activity items with realistic timestamps)
+- Two functional dropdown menus (Activity Type, Time Range)
 - Scrollable container with overflow handling
-- Header with filter buttons (All▾, 24h▾)
-- "Load more" button for pagination
+- Neobrutalist header with bold uppercase typography
+- "Load more" button with hover animation
+- Mock data (6 activity items with realistic timestamps)
+
+**Dropdown Implementation**:
+Uses Radix UI DropdownMenu components with neobrutalist styling:
+
+```tsx
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/rhizome/dropdown-menu'
+import { ChevronDown } from 'lucide-react'
+
+// Activity Type Filter
+<DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <button className="px-2 py-1 text-xs font-medium border-2 border-border rounded-base bg-white shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all flex items-center gap-1">
+      All <ChevronDown className="w-3 h-3" />
+    </button>
+  </DropdownMenuTrigger>
+  <DropdownMenuContent align="end" className="border-2 border-border shadow-shadow">
+    <DropdownMenuItem>All Activities</DropdownMenuItem>
+    <DropdownMenuItem>Connections</DropdownMenuItem>
+    <DropdownMenuItem>Annotations</DropdownMenuItem>
+    <DropdownMenuItem>Documents</DropdownMenuItem>
+    <DropdownMenuItem>Sparks</DropdownMenuItem>
+    <DropdownMenuItem>Flashcards</DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
+
+// Time Range Filter
+<DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <button className="px-2 py-1 text-xs font-medium border-2 border-border rounded-base bg-white shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all flex items-center gap-1">
+      24h <ChevronDown className="w-3 h-3" />
+    </button>
+  </DropdownMenuTrigger>
+  <DropdownMenuContent align="end" className="border-2 border-border shadow-shadow">
+    <DropdownMenuItem>Last Hour</DropdownMenuItem>
+    <DropdownMenuItem>Last 24 Hours</DropdownMenuItem>
+    <DropdownMenuItem>Last 7 Days</DropdownMenuItem>
+    <DropdownMenuItem>Last 30 Days</DropdownMenuItem>
+    <DropdownMenuItem>All Time</DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
+```
+
+**Header Styling**:
+```tsx
+<h3 className="font-heading text-lg font-black uppercase tracking-tight">
+  Activity Feed
+</h3>
+```
+
+**Navigation Logic**:
+```tsx
+const handleActivityClick = (activity: ActivityItemProps['activity']) => {
+  const { metadata } = activity
+
+  if (metadata?.documentId) {
+    router.push(`/read/${metadata.documentId}`)
+  } else if (metadata?.connectionId) {
+    // TODO: Navigate to connection view when implemented
+    console.log('Navigate to connection:', metadata.connectionId)
+  } else if (metadata?.annotationId) {
+    // TODO: Navigate to annotation when implemented
+    console.log('Navigate to annotation:', metadata.annotationId)
+  } else if (metadata?.sparkId) {
+    // TODO: Navigate to spark view when implemented
+    console.log('Navigate to spark:', metadata.sparkId)
+  }
+}
+```
+
+**Load More Button**:
+```tsx
+<Button
+  variant="outline"
+  className="w-full mt-3 font-bold border-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+>
+  Load more ↓
+</Button>
+```
 
 **Usage**:
 ```tsx
@@ -188,6 +315,15 @@ import { ActivityFeed } from '@/components/homepage/ActivityFeed'
   </Suspense>
 </section>
 ```
+
+**Key Implementation Details**:
+- Real dropdown menus (not fake buttons with ▾ unicode)
+- ChevronDown icons from Lucide React
+- Neobrutalist button styling with 1px mini shadows
+- Hover "push" animation on dropdown triggers
+- border-2 border-border on dropdown content
+- Activity metadata routing for navigation
+- Scrollable activity list with custom scrollbar spacing
 
 **File**: `src/components/homepage/ActivityFeed.tsx`
 
@@ -292,14 +428,14 @@ src/
 ├── components/
 │   ├── homepage/                 # Client Component orchestrators
 │   │   ├── StatsPanel.tsx        # ✅ Created
-│   │   ├── ActivityFeed.tsx      # 🔴 Next
-│   │   ├── LibraryGrid.tsx       # 🔴 Planned
+│   │   ├── ActivityFeed.tsx      # ✅ Created
+│   │   ├── LibraryGrid.tsx       # 🔴 Next
 │   │   ├── ConnectionsPanel.tsx  # 🔴 Planned
 │   │   ├── SparksGrid.tsx        # 🔴 Planned
 │   │   └── FlashcardsPanel.tsx   # 🔴 Planned
 │   └── rhizome/                  # Reusable UI components
 │       ├── stat-card.tsx         # ✅ Created
-│       ├── activity-item.tsx     # 🔴 Next
+│       ├── activity-item.tsx     # ✅ Created
 │       ├── document-card.tsx     # ⚠️ Exists, needs review
 │       └── [other components]
 ```
@@ -500,6 +636,8 @@ npm run build      # ✅ Passing
 ### Implementation Files
 - `src/components/rhizome/stat-card.tsx` - Reusable StatCard
 - `src/components/homepage/StatsPanel.tsx` - Stats section orchestrator
+- `src/components/rhizome/activity-item.tsx` - Reusable ActivityItem with Lucide icons
+- `src/components/homepage/ActivityFeed.tsx` - Activity feed orchestrator with dropdown menus
 - `src/app/homepage/page.tsx` - Homepage Server Component
 
 ### Documentation
