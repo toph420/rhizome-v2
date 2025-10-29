@@ -59,12 +59,21 @@ export interface PdfCoordinateResult {
 /**
  * Calculate PDF coordinates from markdown offsets using PyMuPDF text search.
  *
+ * RENAMED from calculatePdfCoordinatesFromDocling to reflect actual implementation.
+ * Uses PyMuPDF for 95% accuracy, NOT Docling charspan (which has coordinate mismatch).
+ *
  * Fallback chain:
  * 1. Try PyMuPDF search (95% accuracy)
  * 2. Fallback to bbox proportional filtering (70-85%)
  * 3. Last resort: page-only positioning (50%)
+ *
+ * @param documentId - Document UUID
+ * @param markdownOffset - Starting character offset in content.md
+ * @param markdownLength - Length of highlighted text
+ * @param chunks - Document chunks with page ranges
+ * @returns PDF coordinates with confidence and method
  */
-export async function calculatePdfCoordinatesFromDocling(
+export async function calculatePdfCoordinatesFromMarkdown(
   documentId: string,
   markdownOffset: number,
   markdownLength: number,
