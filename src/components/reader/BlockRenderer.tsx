@@ -38,6 +38,7 @@ const ALLOWED_ATTR = [
   'data-annotation-color',    // For CSS styling
   'data-annotation-start',    // For resize handles
   'data-annotation-end',      // For resize handles
+  'data-edge',                // For handle elements (start/end)
 ]
 
 export const BlockRenderer = memo(function BlockRenderer({

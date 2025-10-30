@@ -414,14 +414,35 @@ function markTextRange(
         span.setAttribute('data-annotation-color', color)
 
         // Mark first and last spans for resize handles
-        if (isFirstAnnotation && isFirstSpan) {
+        const hasStartMarker = isFirstAnnotation && isFirstSpan
+        const hasEndMarker = isLastAnnotation && isLastSpan
+
+        if (hasStartMarker) {
           span.setAttribute('data-annotation-start', 'true')
         }
-        if (isLastAnnotation && isLastSpan) {
+        if (hasEndMarker) {
           span.setAttribute('data-annotation-end', 'true')
         }
 
-        span.textContent = highlighted
+        // Add resize handle elements for hover-revealed handles
+        // Only add handles to first span (start) and last span (end)
+        if (hasStartMarker) {
+          const startHandle = document.createElement('span')
+          startHandle.className = 'resize-handle resize-handle-start'
+          startHandle.setAttribute('data-edge', 'start')
+          span.appendChild(startHandle)
+        }
+
+        // Add text content
+        span.appendChild(document.createTextNode(highlighted))
+
+        if (hasEndMarker) {
+          const endHandle = document.createElement('span')
+          endHandle.className = 'resize-handle resize-handle-end'
+          endHandle.setAttribute('data-edge', 'end')
+          span.appendChild(endHandle)
+        }
+
         fragment.appendChild(span)
 
         // Create after text if exists

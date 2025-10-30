@@ -1,9 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { calculateMultiBlockOffsets } from '@/lib/reader/offset-calculator'
 import { findSpannedChunks, MAX_CHUNKS_PER_ANNOTATION } from '@/lib/reader/chunk-utils'
+import { useAnnotationStore } from '@/stores/annotation-store'
 import type { Chunk } from '@/types/annotations'
+
+// Stable empty array to prevent infinite loops from new references
+const EMPTY_STORE_ANNOTATIONS: never[] = []
 
 // TypeScript types for cross-browser caret positioning APIs
 interface CaretPosition {
@@ -22,13 +26,7 @@ export interface AnnotationResizeOptions {
   enabled?: boolean
   documentId: string
   chunks: Chunk[]
-  // Pass annotations so we can look up offset data
-  annotations: Array<{
-    id: string
-    startOffset: number
-    endOffset: number
-    text?: string
-  }>
+  // REMOVED: annotations prop (now read from store directly)
   onResizeComplete: (annotationId: string, newRange: {
     startOffset: number
     endOffset: number
@@ -49,10 +47,7 @@ export interface ResizeState {
 export interface UseAnnotationResizeReturn {
   isResizing: boolean
   resizeState: ResizeState | null
-  hoveredEdge: { annotationId: string; edge: 'start' | 'end' } | null
 }
-
-const EDGE_DETECTION_THRESHOLD = 8 // pixels
 
 /**
  * Cross-browser helper for getting caret range at point.
@@ -94,35 +89,30 @@ export function useAnnotationResize({
   enabled = true,
   documentId,
   chunks,
-  annotations,
   onResizeComplete,
 }: AnnotationResizeOptions): UseAnnotationResizeReturn {
+  // NEW: Read directly from store (documentId-keyed!)
+  // CRITICAL: Use stable empty array to prevent infinite loop from new array references
+  const storeAnnotations = useAnnotationStore(
+    state => state.annotations[documentId] || EMPTY_STORE_ANNOTATIONS
+  )
+
+  // Transform to simple format (same as before)
+  const annotations = useMemo(() =>
+    storeAnnotations.map(ann => ({
+      id: ann.id,
+      startOffset: ann.components.Position?.startOffset ?? 0,
+      endOffset: ann.components.Position?.endOffset ?? 0,
+      text: ann.components.Position?.originalText,
+    })),
+    [storeAnnotations]
+  )
+
+  // Guard: Don't enable until annotations loaded
+  const actuallyEnabled = enabled && annotations.length > 0
+
   const [isResizing, setIsResizing] = useState(false)
   const [resizeState, setResizeState] = useState<ResizeState | null>(null)
-  const [hoveredEdge, setHoveredEdge] = useState<{ annotationId: string; edge: 'start' | 'end' } | null>(null)
-
-  // Diagnostic logging on mount and when annotations change
-  useEffect(() => {
-    console.log('[useAnnotationResize] Hook initialized:', {
-      enabled,
-      documentId,
-      annotationCount: annotations.length,
-      chunkCount: chunks.length,
-      annotationsWithText: annotations.filter(a => a.text).length,
-      sampleAnnotation: annotations[0] ? {
-        id: annotations[0].id.substring(0, 8),
-        hasText: !!annotations[0].text,
-        textLength: annotations[0].text?.length,
-        offsets: `${annotations[0].startOffset}-${annotations[0].endOffset}`
-      } : null
-    })
-  }, [enabled, documentId, annotations.length, chunks.length])
-
-  // Track mouse position for edge detection
-  const lastMousePosRef = useRef<{ x: number; y: number } | null>(null)
-
-  // Track hovered edge in ref to avoid re-attaching mousedown handler
-  const hoveredEdgeRef = useRef<{ annotationId: string; edge: 'start' | 'end' } | null>(null)
 
   // Keep fresh reference to annotations to avoid closure issues
   const annotationsRef = useRef(annotations)
@@ -137,9 +127,8 @@ export function useAnnotationResize({
 
   // Keep refs in sync with state/props
   useEffect(() => {
-    hoveredEdgeRef.current = hoveredEdge
     annotationsRef.current = annotations
-  }, [hoveredEdge, annotations])
+  }, [annotations])
 
   // Build block cache when starting resize
   useEffect(() => {
@@ -160,27 +149,6 @@ export function useAnnotationResize({
       }
     })
   }, [isResizing])
-
-  /**
-   * Detect if mouse is near edge of annotation span.
-   * Returns edge type if within threshold, null otherwise.
-   */
-  const detectEdge = useCallback((e: MouseEvent, spanElement: HTMLElement): 'start' | 'end' | null => {
-    const rect = spanElement.getBoundingClientRect()
-    const mouseX = e.clientX
-
-    // Check start edge (left side)
-    if (Math.abs(mouseX - rect.left) <= EDGE_DETECTION_THRESHOLD) {
-      return 'start'
-    }
-
-    // Check end edge (right side)
-    if (Math.abs(mouseX - rect.right) <= EDGE_DETECTION_THRESHOLD) {
-      return 'end'
-    }
-
-    return null
-  }, [])
 
   /**
    * Update preview overlay to show new annotation boundary in real-time.
@@ -285,96 +253,28 @@ export function useAnnotationResize({
   }, [])
 
   /**
-   * Handle mousemove for edge detection (when not resizing).
-   */
-  useEffect(() => {
-    if (!enabled || isResizing) return
-
-    const handleMouseMove = (e: MouseEvent) => {
-      lastMousePosRef.current = { x: e.clientX, y: e.clientY }
-
-      // Find annotation span at mouse position
-      const target = e.target as HTMLElement
-      const spanElement = target.closest('[data-annotation-id]') as HTMLElement | null
-
-      if (!spanElement) {
-        setHoveredEdge(null)
-        document.body.style.cursor = ''
-        return
-      }
-
-      // Check if this is a start or end span
-      const hasStartMarker = spanElement.hasAttribute('data-annotation-start')
-      const hasEndMarker = spanElement.hasAttribute('data-annotation-end')
-
-      if (!hasStartMarker && !hasEndMarker) {
-        // Middle span - no resize handles
-        setHoveredEdge(null)
-        document.body.style.cursor = ''
-        return
-      }
-
-      const annotationId = spanElement.getAttribute('data-annotation-id')!
-      const edge = detectEdge(e, spanElement)
-
-      if (edge) {
-        // Validate edge matches marker
-        if ((edge === 'start' && hasStartMarker) || (edge === 'end' && hasEndMarker)) {
-          console.log('[Edge Detection] SUCCESS:', {
-            annotationId: annotationId.substring(0, 8),
-            edge,
-            hasStartMarker,
-            hasEndMarker,
-            allAttributes: Array.from(spanElement.attributes).map(a => a.name)
-          })
-          setHoveredEdge({ annotationId, edge })
-          document.body.style.cursor = 'col-resize'
-        } else {
-          console.warn('[Edge Detection] MISMATCH:', {
-            edge,
-            hasStartMarker,
-            hasEndMarker,
-            reason: 'Edge detected but marker missing'
-          })
-          setHoveredEdge(null)
-          document.body.style.cursor = ''
-        }
-      } else {
-        setHoveredEdge(null)
-        document.body.style.cursor = ''
-      }
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.body.style.cursor = ''
-    }
-  }, [enabled, isResizing, detectEdge])
-
-  /**
    * Handle mousedown to initiate resize.
-   * Keep handler always attached to avoid race conditions with hoveredEdge state changes.
+   * NEW: Simplified - just check if click is on a resize handle!
    */
   useEffect(() => {
-    if (!enabled) return
+    if (!actuallyEnabled) return
 
     const handleMouseDown = (e: MouseEvent) => {
       // Only left click
       if (e.button !== 0) return
 
-      // Check if we're hovering over an edge (read from ref to get current value)
-      const currentHoveredEdge = hoveredEdgeRef.current
-      if (!currentHoveredEdge) return
+      // Find if click is on a resize handle
+      const handle = (e.target as HTMLElement).closest('.resize-handle') as HTMLElement | null
+      if (!handle) return // Not clicking on a handle, ignore
 
-      // Get annotation data from DOM
-      const spanElement = (e.target as HTMLElement).closest('[data-annotation-id]') as HTMLElement
-      if (!spanElement) return
+      const edge = handle.getAttribute('data-edge') as 'start' | 'end' | null
+      if (!edge) return // Handle without edge attribute, should not happen
 
-      const annotationId = spanElement.getAttribute('data-annotation-id')!
+      const spanElement = handle.closest('[data-annotation-id]') as HTMLElement | null
+      if (!spanElement) return // Handle not inside annotation span, should not happen
 
-      // Verify this is the annotation we're hovering over
-      if (annotationId !== currentHoveredEdge.annotationId) return
+      const annotationId = spanElement.getAttribute('data-annotation-id')
+      if (!annotationId) return // Span without annotation ID, should not happen
 
       // CRITICAL: Prevent text selection from starting
       e.preventDefault()
@@ -385,18 +285,18 @@ export function useAnnotationResize({
       const currentAnnotations = annotationsRef.current
       const annotation = currentAnnotations.find(ann => ann.id === annotationId)
       if (!annotation) {
-        console.warn('[useAnnotationResize] Annotation not found:', annotationId, 'Available:', currentAnnotations.length)
+        console.warn('[useAnnotationResize] Annotation not found:', annotationId)
         return
       }
 
       setResizeState({
         annotationId,
-        edge: currentHoveredEdge.edge,
+        edge,
         initialStartOffset: annotation.startOffset,
         initialEndOffset: annotation.endOffset,
         currentStartOffset: annotation.startOffset,
         currentEndOffset: annotation.endOffset,
-        text: annotation.text || '', // Start with existing text
+        text: annotation.text || '',
       })
       setIsResizing(true)
 
@@ -408,11 +308,9 @@ export function useAnnotationResize({
     }
 
     // Use capture phase + passive:false to intercept BEFORE text selection hook
-    // passive:false is CRITICAL - allows preventDefault() to actually work
-    // Keep handler always attached - check hoveredEdge inside handler to avoid race conditions
     document.addEventListener('mousedown', handleMouseDown, { capture: true, passive: false })
     return () => document.removeEventListener('mousedown', handleMouseDown, { capture: true })
-  }, [enabled, annotations]) // Remove hoveredEdge from deps - read it directly in handler
+  }, [actuallyEnabled, annotations])
 
   /**
    * Handle mousemove during resize - Calculate new offsets and show preview overlay
@@ -530,7 +428,7 @@ export function useAnnotationResize({
       // CRITICAL: Remove all preview overlays when effect cleans up
       document.querySelectorAll('.annotation-resize-preview').forEach(el => el.remove())
     }
-  }, [isResizing, resizeState, chunks, updatePreviewOverlay])
+  }, [isResizing, chunks, updatePreviewOverlay]) // Removed resizeState to prevent flashing on every update
 
   /**
    * Handle mouseup to complete resize and save.
@@ -608,7 +506,6 @@ export function useAnnotationResize({
         // Cleanup
         setIsResizing(false)
         setResizeState(null)
-        setHoveredEdge(null)
         document.body.style.cursor = ''
         document.body.classList.remove('annotation-resizing')
 
@@ -630,6 +527,5 @@ export function useAnnotationResize({
   return {
     isResizing,
     resizeState,
-    hoveredEdge,
   }
 }

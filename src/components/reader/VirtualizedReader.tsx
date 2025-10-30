@@ -11,7 +11,7 @@ import { useAnnotationResize } from '@/hooks/useAnnotationResize'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
 import { useUIStore } from '@/stores/ui-store'
-import { getAnnotations, updateAnnotationRange } from '@/app/actions/annotations'
+import { getAnnotations as getAnnotationsAction, updateAnnotationRange } from '@/app/actions/annotations'
 import type { AnnotationEntity, OptimisticAnnotation, TextSelection } from '@/types/annotations'
 
 // Constant empty array to prevent infinite loops from new references
@@ -39,6 +39,8 @@ export function VirtualizedReader() {
   const annotations = useAnnotationStore(
     state => state.annotations[documentId ?? ''] ?? EMPTY_ANNOTATIONS
   )
+  const loadAnnotations = useAnnotationStore(state => state.loadAnnotations)  // NEW: Async loader
+  const isLoading = useAnnotationStore(state => state.isLoading(documentId || ''))  // NEW: Loading state
   const setAnnotations = useAnnotationStore(state => state.setAnnotations)
   const addAnnotation = useAnnotationStore(state => state.addAnnotation)
   const updateStoreAnnotation = useAnnotationStore(state => state.updateAnnotation)
@@ -90,20 +92,13 @@ export function VirtualizedReader() {
   }, [pendingAnnotationSelection, setPendingAnnotationSelection])
 
   // Load annotations from database into Zustand store
+  // NEW: Use store's loadAnnotations method with built-in loading state
   useEffect(() => {
     if (!documentId) return
 
-    async function loadAnnotations() {
-      try {
-        const annotations = await getAnnotations(documentId!)
-        setAnnotations(documentId!, annotations)
-      } catch (error) {
-        console.error('[VirtualizedReader] Error loading annotations:', error)
-      }
-    }
-
-    void loadAnnotations()
-  }, [documentId, setAnnotations])
+    // Call store's async loader (handles loading state internally)
+    void loadAnnotations(documentId)
+  }, [documentId, loadAnnotations])
 
   // Parse markdown into blocks (without annotations - injection happens in BlockRenderer)
   const blocks = useMemo(() => {
@@ -202,10 +197,8 @@ export function VirtualizedReader() {
     return merged
   }, [annotations, optimisticAnnotations])
 
-  // Convert to format expected by BlockRenderer
-  const annotationsForBlocks = useMemo(() => {
-    return allAnnotations
-  }, [allAnnotations])
+  // Annotations for BlockRenderer (simplified - no longer needs separate transformation)
+  const annotationsForBlocks = allAnnotations
 
   // Track visible blocks and update ReaderStore scroll position
   const handleVisibleRangeChange = useCallback(
@@ -401,7 +394,7 @@ export function VirtualizedReader() {
         })
 
         // Reload annotations to get updated coordinates
-        const updatedAnnotations = await getAnnotations(documentId)
+        const updatedAnnotations = await getAnnotationsAction(documentId)
         setAnnotations(documentId, updatedAnnotations)
       } else {
         toast.error('Failed to resize annotation', {
@@ -419,11 +412,13 @@ export function VirtualizedReader() {
   }, [documentId, setAnnotations])
 
   // Annotation resize hook (single instance for entire reader)
-  const { isResizing } = useAnnotationResize({
+  // REFACTORED: Hook now reads annotations from store directly (no prop passing)
+  // Note: Return values unused, but hook must run for side effects (event listeners)
+  useAnnotationResize({
     enabled: !correctionModeActive && !sparkCaptureOpen, // Disable during correction mode or spark capture
     documentId: documentId || '',
     chunks,
-    annotations: annotationsForBlocks, // Already flattened with startOffset, endOffset, text
+    // REMOVED: annotations prop (hook reads from store directly)
     onResizeComplete: handleAnnotationResize,
   })
 

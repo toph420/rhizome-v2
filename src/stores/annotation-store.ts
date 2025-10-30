@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { StoredAnnotation, TextSelection } from '@/types/annotations'
+import { getAnnotations } from '@/app/actions/annotations'
 
 /**
  * Annotation store state.
@@ -14,7 +15,10 @@ interface AnnotationState {
 
   // Annotations per document (keyed by documentId)
   annotations: Record<string, StoredAnnotation[]>
+  loadingStates: Record<string, boolean>  // NEW: Per-document loading state
   setAnnotations: (documentId: string, annotations: StoredAnnotation[]) => void
+  loadAnnotations: (documentId: string) => Promise<void>  // NEW: Async loader
+  isLoading: (documentId: string) => boolean  // NEW: Helper to check loading state
   addAnnotation: (documentId: string, annotation: StoredAnnotation) => void
   updateAnnotation: (documentId: string, annotationId: string, updates: Partial<StoredAnnotation>) => void
   removeAnnotation: (documentId: string, annotationId: string) => void
@@ -25,7 +29,7 @@ interface AnnotationState {
  * Manages text selection and annotation CRUD operations.
  * UI state moved to UIStore, connection weights in ConnectionStore.
  */
-export const useAnnotationStore = create<AnnotationState>((set) => ({
+export const useAnnotationStore = create<AnnotationState>((set, get) => ({
   // Text selection state (temporary during annotation creation)
   selectedText: null,
   /**
@@ -38,6 +42,7 @@ export const useAnnotationStore = create<AnnotationState>((set) => ({
 
   // Annotations state (keyed by documentId for isolation)
   annotations: {},
+  loadingStates: {},  // NEW: Track loading per document
   /**
    * Sets all annotations for a document.
    * @param documentId - Document identifier.
@@ -48,6 +53,49 @@ export const useAnnotationStore = create<AnnotationState>((set) => ({
     set((state) => ({
       annotations: { ...state.annotations, [documentId]: annotations }
     })),
+
+  /**
+   * Loads annotations for a document from the server.
+   * Prevents duplicate loads and manages loading state.
+   * @param documentId - Document identifier.
+   * @returns {Promise<void>}
+   */
+  loadAnnotations: async (documentId) => {
+    // Prevent duplicate loads
+    if (get().loadingStates[documentId]) {
+      console.log(`[AnnotationStore] Already loading annotations for ${documentId}`)
+      return
+    }
+
+    // Set loading state
+    set(state => ({
+      loadingStates: { ...state.loadingStates, [documentId]: true }
+    }))
+
+    try {
+      console.log(`[AnnotationStore] Loading annotations for ${documentId}`)
+      const result = await getAnnotations(documentId)
+
+      set(state => ({
+        annotations: { ...state.annotations, [documentId]: result },
+        loadingStates: { ...state.loadingStates, [documentId]: false }
+      }))
+
+      console.log(`[AnnotationStore] Loaded ${result.length} annotations for ${documentId}`)
+    } catch (error) {
+      console.error('[AnnotationStore] Load failed:', error)
+      set(state => ({
+        loadingStates: { ...state.loadingStates, [documentId]: false }
+      }))
+    }
+  },
+
+  /**
+   * Checks if annotations are currently loading for a document.
+   * @param documentId - Document identifier.
+   * @returns {boolean} True if loading, false otherwise.
+   */
+  isLoading: (documentId) => get().loadingStates[documentId] || false,
   /**
    * Adds a new annotation to a document.
    * Prevents duplicates by checking if annotation ID already exists.
