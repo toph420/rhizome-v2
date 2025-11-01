@@ -601,11 +601,10 @@ ENABLE_OCR=true npm run dev:worker
 
 ### What Phase 2A Adds
 
-Phase 2A extracts 8 additional metadata fields from Docling chunks:
+Phase 2A extracts 7 additional metadata fields from Docling chunks:
 
 | Field | Type | Description | Use Case |
 |---|---|---|---|
-| `charspan` | int8range | Character range in cleaned markdown | 100x faster annotation search window |
 | `content_layer` | text | Content layer (BODY/FURNITURE/etc) | Filter headers/footers from connections |
 | `content_label` | text | Content type (TEXT/CODE/FORMULA/etc) | Content classification & smart rendering |
 | `section_level` | integer | Explicit section level (1-100) | Enhanced table of contents |
@@ -613,6 +612,8 @@ Phase 2A extracts 8 additional metadata fields from Docling chunks:
 | `list_marker` | text | List marker (1., •, a), etc.) | Preserve list formatting |
 | `code_language` | text | Programming language | Syntax highlighting metadata |
 | `hyperlink` | text | Hyperlink URL or file path | Link preservation & validation |
+
+**Note**: `charspan` was removed in October 2025 (migration 075) - page ranges and bboxes provide sufficient coordinate information.
 
 ### Critical Implementation Issues & Fixes
 
@@ -631,7 +632,6 @@ if chunk.meta and chunk.meta.doc_items:
         content_layer = doc_item.content_layer  # Exists here
         label = doc_item.label
         for prov in doc_item.prov:
-            charspan = prov.charspan  # [start, end] tuple
             bbox = prov.bbox
             page_no = prov.page_no
 ```
@@ -706,7 +706,6 @@ const chunksToInsert = result.chunks.map(chunk => ({
   // ... existing fields
 
   // Phase 2A: Enhanced Docling metadata
-  charspan: (chunk as any).charspan,
   content_layer: (chunk as any).content_layer,
   content_label: (chunk as any).content_label,
   section_level: (chunk as any).section_level,
@@ -719,33 +718,7 @@ const chunksToInsert = result.chunks.map(chunk => ({
 
 **Result**: Metadata extracted and transferred successfully, but all database columns remained NULL.
 
-**Fix**: Added all 8 Phase 2A fields to INSERT in `worker/lib/managers/document-processing-manager.ts`.
-
----
-
-### How Charspan Works
-
-**Critical Understanding**: Charspan values are **search windows**, not exact offsets.
-
-**Pipeline Flow**:
-```
-1. Docling HybridChunker: Creates 66 chunks with charspan in cleaned markdown
-2. Chonkie Recursive: Creates 12 NEW chunks (different strategy, different boundaries)
-3. Metadata Transfer: Aggregates charspan from overlapping Docling chunks
-```
-
-**Aggregation Strategy**:
-- Multiple Docling chunks may overlap with one Chonkie chunk
-- Charspan aggregated as `[min_start, max_end]` across all overlaps
-- Result: Character range in cleaned markdown where Chonkie chunk content exists
-- NOT the exact Chonkie chunk boundaries, but precise enough for 100x search speedup
-
-**Example**:
-```
-Annotation text: "Freud's notion of repetition"
-Without charspan: Search entire 116KB cleaned markdown (slow)
-With charspan [0,2063): Search only first 2,063 characters (100x faster)
-```
+**Fix**: Added all 7 Phase 2A fields to INSERT in `worker/lib/managers/document-processing-manager.ts`.
 
 ### Verification
 
@@ -754,19 +727,19 @@ Test Phase 2A metadata coverage on any processed document:
 ```sql
 SELECT
   COUNT(*) as total_chunks,
-  COUNT(charspan) as with_charspan,
   COUNT(content_layer) as with_layer,
   COUNT(content_label) as with_label,
-  ROUND(COUNT(charspan)::numeric / COUNT(*) * 100, 1) as charspan_coverage
+  ROUND(COUNT(content_layer)::numeric / COUNT(*) * 100, 1) as layer_coverage,
+  ROUND(COUNT(content_label)::numeric / COUNT(*) * 100, 1) as label_coverage
 FROM chunks
 WHERE document_id = 'YOUR_DOCUMENT_ID' AND is_current = true;
 ```
 
-**Expected Result**: 100% coverage on charspan, content_layer, and content_label.
+**Expected Result**: 100% coverage on content_layer and content_label.
 
 ### Benefits
 
-1. **Annotation Sync**: Charspan enables 100x faster search, improving accuracy from 95% → 99%+
+1. **Annotation Sync**: Page ranges and bboxes provide precise PDF↔Markdown synchronization
 2. **Connection Quality**: Content layer filtering removes header/footer noise (+5-10% quality)
 3. **Content Classification**: Enables type-specific rendering (TEXT/CODE/FORMULA)
 4. **Future Features**: Foundation for smart connection weighting and advanced filtering

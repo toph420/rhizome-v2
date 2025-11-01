@@ -8,38 +8,49 @@ Perform comprehensive multi-agent code review with specialized reviewers:
 
 ## Review Process
 
-### 1. Code Quality Review
-Use Task tool with subagent_type="code-reviewer" to examine:
-- Code style and readability
-- Adherence to SOLID principles
+### 1. Codebase Analysis & Pattern Review
+Use Task tool with subagent_type="codebase-analyst" to examine:
+- Code organization and patterns
+- Architectural pattern adherence
+- Code duplication and reusability opportunities
+- Naming conventions and coding standards
+- Integration patterns between components
+- Testing approaches and validation
+
+Prompt: "Perform comprehensive codebase analysis of: $ARGUMENTS. Identify patterns, conventions, duplicate code, and reusability opportunities. Focus on maintainability and consistency. Provide specific file paths and line numbers."
+
+### 2. Refactoring & Code Quality Review
+Use Task tool with subagent_type="refactoring-expert" to examine:
+- Code complexity and technical debt
+- SOLID principles adherence
 - Design patterns and anti-patterns
-- Code duplication and complexity
-- Documentation completeness
-- Test coverage and quality
+- Refactoring opportunities (without over-abstraction)
+- Code simplification possibilities
+- Quality metrics and improvements
 
-Prompt: "Perform detailed code review of: $ARGUMENTS. Focus on maintainability, readability, and best practices. Provide specific line-by-line feedback where appropriate."
+Prompt: "Review code quality and identify refactoring opportunities for: $ARGUMENTS. Focus on reducing complexity, eliminating duplication, and improving maintainability. Provide specific recommendations with file paths."
 
-### 2. Security Review
-Use Task tool with subagent_type="security-auditor" to check:
+### 3. Security Review
+Use Task tool with subagent_type="security-engineer" to check:
 - Authentication and authorization flaws
 - Input validation and sanitization
 - SQL injection and XSS vulnerabilities
 - Sensitive data exposure
 - Security misconfigurations
-- Dependency vulnerabilities
+- OWASP compliance issues
 
-Prompt: "Conduct security review of: $ARGUMENTS. Identify vulnerabilities, security risks, and OWASP compliance issues. Provide severity ratings and remediation steps."
+Prompt: "Conduct comprehensive security review of: $ARGUMENTS. Identify vulnerabilities, assess risk severity, and provide remediation steps. Focus on Server Actions, ECS operations, and worker handlers."
 
-### 3. Architecture Review
-Use Task tool with subagent_type="architect-reviewer" to evaluate:
+### 4. Architecture Review
+Use Task tool with subagent_type="architect-review" to evaluate:
+- Architectural pattern compliance
 - Service boundaries and coupling
-- Scalability considerations
+- Scalability and performance considerations
 - Design pattern appropriateness
-- Technology choices
-- API design quality
 - Data flow and dependencies
+- Long-term maintainability
 
-Prompt: "Review architecture and design of: $ARGUMENTS. Evaluate scalability, maintainability, and architectural patterns. Identify potential bottlenecks and design improvements."
+Prompt: "Review system architecture and design of: $ARGUMENTS. Evaluate architectural integrity, identify violations of stated patterns (ECS, dual-module, Server Actions, storage-first). Provide architectural recommendations."
 
 ## Consolidated Review Output
 

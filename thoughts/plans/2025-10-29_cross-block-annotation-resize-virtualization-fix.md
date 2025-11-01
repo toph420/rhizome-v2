@@ -266,14 +266,14 @@ export const useAnnotationResizeStore = create<AnnotationResizeState>((set) => (
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compilation: `npm run typecheck`
-- [ ] No lint errors: `npm run lint`
-- [ ] Store exports correctly: Check import in another file
+- [x] TypeScript compilation: `npm run typecheck`
+- [x] No lint errors: `npm run lint`
+- [x] Store exports correctly: Check import in another file
 
 #### Manual Verification:
-- [ ] Store can be imported without errors
-- [ ] Actions are type-safe (check autocomplete)
-- [ ] No console errors on app load
+- [x] Store can be imported without errors
+- [x] Actions are type-safe (check autocomplete)
+- [x] No console errors on app load
 
 **Implementation Note**: This phase is pure setup with no visual changes. Proceed to Phase 2 after verification passes.
 
@@ -1070,11 +1070,11 @@ describe('Cross-Block Annotation Resize', () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compilation: `npm run typecheck`
-- [ ] All tests pass: `npm run test:stable`
-- [ ] Test coverage for state persistence: ✅
-- [ ] Test coverage for edge validation: ✅
-- [ ] Test coverage for autoscroll triggers: ✅
+- [x] TypeScript compilation: `npm run typecheck`
+- [x] All tests pass: `npm run test:stable`
+- [x] Test coverage for state persistence: ✅
+- [x] Test coverage for edge validation: ✅
+- [x] Test coverage for autoscroll triggers: ✅
 
 #### Manual Verification:
 - [ ] Tests run in CI/CD pipeline
@@ -1140,10 +1140,10 @@ Comprehensive testing of single-block and cross-block resize functionality. Vali
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All TypeScript types valid: `npm run typecheck`
-- [ ] No lint errors: `npm run lint`
-- [ ] Build succeeds: `npm run build`
-- [ ] No console errors in test document
+- [x] All TypeScript types valid: `npm run typecheck`
+- [x] No lint errors: `npm run lint`
+- [x] Build succeeds: `npm run build`
+- [ ] No console errors in test document (requires manual testing)
 
 #### Manual Verification:
 - [ ] All testing checklist items pass

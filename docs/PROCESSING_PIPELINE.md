@@ -5,7 +5,8 @@
 **Status**: ✅ Fully Operational
 **Recent Improvements**:
 - Worker module refactored (Oct 2025) - eliminated 1,265 lines of duplication across handlers and processors
-- Phase 2A metadata extraction (Oct 2025) - 8 enhanced Docling fields for 99%+ annotation accuracy and 5-10% better connection quality
+- Phase 2A metadata extraction (Oct 2025) - 7 enhanced Docling fields for improved annotation accuracy and 5-10% better connection quality
+- Removed charspan field (Oct 2025) - simplified metadata system, eliminated coordinate system confusion
 
 ---
 
@@ -35,7 +36,7 @@ Rhizome V2 uses a **unified 10-stage processing pipeline** powered by Chonkie fo
 - ✅ **Metadata Preservation**: 70-90% overlap coverage via coordinate mapping
 - ✅ **Character Offset Validation**: Guaranteed accuracy for metadata transfer
 - ✅ **Quality Tracking**: Confidence scores (high/medium/low) for all chunks
-- ✅ **Phase 2A Metadata** (Oct 2025): 8 enhanced fields (charspan, content_layer, content_label, etc.) for 99%+ annotation accuracy and 5-10% better connections
+- ✅ **Phase 2A Metadata** (Oct 2025): 7 enhanced fields (content_layer, content_label, section_level, etc.) for improved annotation accuracy and 5-10% better connections
 
 ### Processing Times (500-Page Document)
 
@@ -149,7 +150,7 @@ Rhizome V2 uses a **unified 10-stage processing pipeline** powered by Chonkie fo
 │    1. Find overlapping Docling chunks via offsets   │
 │    2. Aggregate metadata (Phase 1 + Phase 2A):      │
 │       - Headings, pages, bboxes (Phase 1)           │
-│       - charspan, content_layer, content_label      │
+│       - content_layer, content_label,               │
 │         section_level, list fields (Phase 2A)       │
 │    3. Calculate confidence based on overlap count/  │
 │       percentage                                     │
@@ -424,19 +425,16 @@ For each Chonkie chunk:
 5. **Section markers** (first non-null, for EPUBs)
 
 **Phase 2A: Enhanced Docling Metadata** (Oct 2025):
-6. **charspan** - Aggregate character ranges (min start, max end from all overlaps)
-   - Enables 100x faster annotation sync (search window vs full document)
-   - Example: 3 Docling chunks [0,500), [400,900), [850,1200) → aggregate to [0,1200)
-7. **content_layer** - Select layer (prefer BODY over FURNITURE)
+6. **content_layer** - Select layer (prefer BODY over FURNITURE)
    - BODY = main content, FURNITURE = headers/footers
    - Used to filter noise in connection detection (5-10% quality improvement)
-8. **content_label** - Select label (prioritize semantic types)
+7. **content_label** - Select label (prioritize semantic types)
    - Priority: PARAGRAPH > CODE > FORMULA > LIST_ITEM > TEXT
    - Enables content-type-specific processing
-9. **section_level**, **list_enumerated**, **list_marker** - First non-null
-10. **code_language**, **hyperlink** - First non-null
+8. **section_level**, **list_enumerated**, **list_marker** - First non-null
+9. **code_language**, **hyperlink** - First non-null
 
-**Impact**: 100% Phase 2A coverage enables 99%+ annotation accuracy (up from 95%)
+**Impact**: Phase 2A metadata improves connection quality by 5-10% through content layer filtering
 
 #### 4. Calculate Confidence
 
@@ -472,7 +470,7 @@ export async function transferMetadataToChonkieChunks(
     1. Find overlapping Docling chunks
     2. If overlaps found:
          - Aggregate Phase 1 metadata (heading_path, pages, bboxes)
-         - Aggregate Phase 2A metadata (charspan, content_layer, content_label, etc.)
+         - Aggregate Phase 2A metadata (content_layer, content_label, section_level, etc.)
          - Calculate confidence (high/medium/low)
        Else:
          - Interpolate from nearest neighbors
@@ -516,16 +514,15 @@ if (overlapCoverage < 70) {
 ### Phase 2A: Enhanced Metadata Extraction
 
 **Implementation Date**: October 2025
-**Migration**: `073_enhanced_chunk_metadata.sql`
+**Migration**: `073_enhanced_chunk_metadata.sql` (charspan removed in `075_remove_unused_charspan.sql`)
 **Coverage**: 100% (all chunks have Phase 2A metadata)
 
 #### Overview
 
-Phase 2A adds 8 enhanced Docling fields to improve annotation accuracy and connection quality:
+Phase 2A adds 7 enhanced Docling fields to improve annotation accuracy and connection quality:
 
 | Field | Type | Purpose | Coverage |
 |-------|------|---------|----------|
-| `charspan` | `int8range` | Character offset range in cleaned markdown | 100% |
 | `content_layer` | `text` | Content layer (BODY, FURNITURE, BACKGROUND, etc.) | 100% |
 | `content_label` | `text` | Content type (TEXT, PARAGRAPH, CODE, FORMULA, etc.) | 100% |
 | `section_level` | `integer` | Explicit section level (1-100) | ~5% |
@@ -545,7 +542,6 @@ for doc_item in chunk.meta.doc_items:
     content_label = doc_item.label.value  # "PARAGRAPH" | "CODE" | ...
 
     for prov in doc_item.prov:
-        charspan = prov.charspan  # [start, end] in cleaned markdown
         bbox = prov.bbox  # {l, t, r, b}
         page_no = prov.page_no
 ```
@@ -555,15 +551,6 @@ for doc_item in chunk.meta.doc_items:
 #### Aggregation Strategy
 
 Since Chonkie chunks overlap with multiple Docling chunks, metadata is aggregated intelligently:
-
-**charspan**: Min start, max end across all provenance items
-```typescript
-// Example: 3 Docling chunks [0,500), [400,900), [850,1200) → [0,1200)
-const aggregatedCharspan = [
-  Math.min(...charspans.map(cs => cs[0])),
-  Math.max(...charspans.map(cs => cs[1]))
-]
-```
 
 **content_layer**: Prefer BODY over FURNITURE
 ```typescript
@@ -582,9 +569,9 @@ const content_label = labels.find(l => labelPriority.includes(l)) || labels[0]
 
 #### Benefits
 
-1. **99%+ Annotation Accuracy** (up from 95%)
-   - `charspan` provides character-level search windows (100x faster than full document search)
-   - Enables precise PDF↔Markdown synchronization
+1. **Improved Annotation Accuracy**
+   - Page ranges and bboxes provide precise PDF↔Markdown synchronization
+   - Content layer filtering reduces false matches
 
 2. **5-10% Better Connection Quality**
    - `content_layer` filtering removes noise (skip FURNITURE chunks in connection detection)
@@ -601,9 +588,8 @@ const content_label = labels.find(l => labelPriority.includes(l)) || labels[0]
 #### Database Schema
 
 ```sql
--- Migration 073
+-- Migration 073 (charspan removed in 075)
 ALTER TABLE chunks
-ADD COLUMN IF NOT EXISTS charspan INT8RANGE,
 ADD COLUMN IF NOT EXISTS content_layer TEXT,
 ADD COLUMN IF NOT EXISTS content_label TEXT,
 ADD COLUMN IF NOT EXISTS section_level INTEGER,
@@ -613,8 +599,6 @@ ADD COLUMN IF NOT EXISTS code_language TEXT,
 ADD COLUMN IF NOT EXISTS hyperlink TEXT;
 
 -- Indexes for filtering
-CREATE INDEX IF NOT EXISTS idx_chunks_charspan
-  ON chunks USING gist(charspan) WHERE charspan IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_chunks_content_layer
   ON chunks(content_layer) WHERE content_layer IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_chunks_content_label
