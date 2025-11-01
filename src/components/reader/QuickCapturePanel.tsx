@@ -236,7 +236,6 @@ export function QuickCapturePanel({
             startOffset: selection.range.startOffset,
             textLength,
             chunksCount: chunks.length,
-            firstChunkHasCharspan: chunks[0]?.charspan ? 'yes' : 'no',
           })
 
           const pdfCoords = await calculatePdfCoordinates(

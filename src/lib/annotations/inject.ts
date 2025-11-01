@@ -68,6 +68,207 @@ function calculateSimilarity(str1: string, str2: string): number {
 }
 
 /**
+ * Snap position to word boundaries in original text.
+ * Expands to include full words if position is mid-word.
+ *
+ * @param text - Full text context
+ * @param start - Start position
+ * @param end - End position
+ * @returns Snapped positions
+ */
+function snapToWordBoundariesInText(
+  text: string,
+  start: number,
+  end: number
+): { start: number; end: number } {
+  // Expand start backward if mid-word
+  let adjustedStart = start
+  while (adjustedStart > 0 && /[a-zA-Z0-9]/.test(text[adjustedStart - 1])) {
+    adjustedStart--
+  }
+
+  // Expand end forward if mid-word
+  let adjustedEnd = end
+  while (adjustedEnd < text.length && /[a-zA-Z0-9]/.test(text[adjustedEnd])) {
+    adjustedEnd++
+  }
+
+  return { start: adjustedStart, end: adjustedEnd }
+}
+
+/**
+ * Map a position from whitespace-normalized text back to original text.
+ * Simpler than full normalization mapping - only handles whitespace collapse.
+ *
+ * @param originalText - The original text with potentially multiple spaces
+ * @param normalizedStart - Start position in whitespace-collapsed text
+ * @param normalizedLength - Length in whitespace-collapsed text
+ * @returns Mapped start and end positions in original text
+ */
+function mapWhitespaceNormalizedPosition(
+  originalText: string,
+  normalizedStart: number,
+  normalizedLength: number
+): { start: number; end: number } {
+  let originalPos = 0
+  let normalizedPos = 0
+  let startPos = 0
+  let endPos = originalText.length
+  let foundStart = false
+
+  let i = 0
+  while (i < originalText.length && normalizedPos <= normalizedStart + normalizedLength) {
+    const char = originalText[i]
+
+    // Check if this starts a whitespace sequence
+    if (/\s/.test(char)) {
+      // Count consecutive whitespace
+      let wsCount = 1
+      let j = i + 1
+      while (j < originalText.length && /\s/.test(originalText[j])) {
+        wsCount++
+        j++
+      }
+
+      // Multiple whitespace → single space in normalized text
+      // So we only advance normalizedPos by 1
+      if (!foundStart && normalizedPos >= normalizedStart) {
+        startPos = i
+        foundStart = true
+      }
+
+      normalizedPos += 1 // Single space in normalized text
+
+      if (foundStart && normalizedPos >= normalizedStart + normalizedLength) {
+        endPos = i + 1 // Include at least one space
+        break
+      }
+
+      // Skip past all whitespace
+      if (wsCount > 1) {
+        i = j - 1 // Will be incremented at end of loop
+      }
+    } else {
+      // Non-whitespace character - 1:1 mapping
+      if (!foundStart && normalizedPos >= normalizedStart) {
+        startPos = i
+        foundStart = true
+      }
+
+      normalizedPos += 1
+
+      if (foundStart && normalizedPos >= normalizedStart + normalizedLength) {
+        endPos = i + 1
+        break
+      }
+    }
+
+    i++
+  }
+
+  // If we exhausted the original text, end is at the end
+  if (i >= originalText.length) {
+    endPos = originalText.length
+  }
+
+  return { start: startPos, end: endPos }
+}
+
+/**
+ * Map a position from normalized text space back to original text space.
+ *
+ * Handles character-level differences caused by normalization:
+ * - Removed characters (soft hyphens)
+ * - Collapsed whitespace (multiple spaces → single space)
+ * - Replaced characters (smart quotes → @, em dashes → -)
+ *
+ * @param originalText - The original unnormalized text
+ * @param normalizedText - The normalized version of originalText
+ * @param normalizedStart - Start position in normalized text
+ * @param normalizedLength - Length in normalized text
+ * @returns Mapped start and end positions in original text
+ */
+function mapNormalizedPositionToOriginal(
+  originalText: string,
+  normalizedText: string,
+  normalizedStart: number,
+  normalizedLength: number
+): { start: number; end: number } {
+  // Build a character map by walking through original text and applying normalization
+  // Track which original positions correspond to which normalized positions
+
+  let originalPos = 0
+  let normalizedPos = 0
+  let startPos = 0
+  let endPos = originalText.length
+  let foundStart = false
+
+  // We need to simulate the normalization process character-by-character
+  // to build an accurate position mapping
+  let i = 0
+  while (i < originalText.length && normalizedPos <= normalizedStart + normalizedLength) {
+    const char = originalText[i]
+
+    // Determine how this character would be normalized
+    let normalizedChar = char
+
+    // Soft hyphen → removed (length 0)
+    if (char === '\u00AD') {
+      normalizedChar = ''
+    }
+    // Whitespace → single space (but check if previous was also whitespace)
+    else if (/\s/.test(char)) {
+      // In normalizeTextAggressive, multiple whitespace collapses to one space
+      // So we need to check if this starts a whitespace sequence or continues one
+      let wsCount = 1
+      let j = i + 1
+      while (j < originalText.length && /\s/.test(originalText[j])) {
+        wsCount++
+        j++
+      }
+      // Multiple whitespace → single space in normalized text
+      normalizedChar = ' '
+
+      // Skip ahead past all the whitespace
+      if (wsCount > 1) {
+        i = j - 1 // Will be incremented at end of loop
+      }
+    }
+    // Quote normalization
+    else if (/[\u0022\u0027\u0060\u00B4\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F]/.test(char)) {
+      normalizedChar = '@'
+    }
+    // Dash/hyphen normalization
+    else if (/[\u2010-\u2015\u2212]/.test(char)) {
+      normalizedChar = '-'
+    }
+
+    // Check if we've reached the start position in normalized space
+    if (!foundStart && normalizedPos >= normalizedStart) {
+      startPos = i
+      foundStart = true
+    }
+
+    // Check if we've reached the end position in normalized space
+    if (foundStart && normalizedPos >= normalizedStart + normalizedLength) {
+      endPos = i
+      break
+    }
+
+    // Advance normalized position by the length of the normalized character
+    normalizedPos += normalizedChar.length
+    i++
+  }
+
+  // If we exhausted the original text, end is at the end
+  if (i >= originalText.length) {
+    endPos = originalText.length
+  }
+
+  return { start: startPos, end: endPos }
+}
+
+/**
  * Calculate Levenshtein distance between two strings.
  * Simple browser-compatible implementation.
  */
@@ -150,8 +351,14 @@ export function injectAnnotations(
     let annotationStartsInThisBlock: boolean
     let annotationEndsInThisBlock: boolean
 
-    // NEW: If annotation has text, SEARCH for it!
-    if (annotation.text) {
+    // NEW: Check if annotation spans multiple blocks
+    const annotationSpansMultipleBlocks =
+      annotation.startOffset < blockStartOffset ||
+      annotation.endOffset > blockEndOffset
+
+    // NEW: If annotation has text AND is single-block, SEARCH for it!
+    // For cross-block annotations, use offset-based matching (text not in any single block)
+    if (annotation.text && !annotationSpansMultipleBlocks) {
       // CRITICAL FIX: Handle PDF text extraction quirks
       // 1. Convert literal \n strings to actual newlines (if any)
       // 2. Remove hyphenated line breaks: "human-\nity" → "humanity"
@@ -165,13 +372,16 @@ export function injectAnnotations(
       // Try 1: Exact match
       let index = plainText.indexOf(searchText)
       let matchMethod = 'exact'
+      let matchLength = searchText.length
 
       // Try 2: Case-insensitive
       if (index === -1) {
         const lowerText = plainText.toLowerCase()
         const lowerSearch = searchText.toLowerCase()
         index = lowerText.indexOf(lowerSearch)
-        matchMethod = 'case-insensitive'
+        if (index !== -1) {
+          matchMethod = 'case-insensitive'
+        }
       }
 
       // Try 3: Whitespace-normalized matching (handles any whitespace differences)
@@ -183,8 +393,36 @@ export function injectAnnotations(
         const normalizedIndex = normalizedBlock.indexOf(normalizedSearch)
         if (normalizedIndex !== -1) {
           // Map normalized position back to original text
-          index = normalizedIndex
+          // For whitespace normalization, we use the simpler space-based mapping
+          const mapped = mapWhitespaceNormalizedPosition(
+            plainText,
+            normalizedIndex,
+            normalizedSearch.length
+          )
+
+          relativeStart = mapped.start
+          relativeEnd = mapped.end
+
+          // Snap to word boundaries
+          const snapped = snapToWordBoundariesInText(plainText, relativeStart, relativeEnd)
+          relativeStart = snapped.start
+          relativeEnd = snapped.end
+
+          annotationStartsInThisBlock = true
+          annotationEndsInThisBlock = true
           matchMethod = 'whitespace-normalized'
+
+          // Skip the normal relativeStart/relativeEnd calculation
+          markTextRange(
+            body,
+            relativeStart,
+            relativeEnd,
+            annotation.id,
+            annotation.color,
+            annotationStartsInThisBlock,
+            annotationEndsInThisBlock
+          )
+          return // Exit early - we've already marked this annotation
         }
       }
 
@@ -196,20 +434,49 @@ export function injectAnnotations(
 
         const aggressiveIndex = aggressiveNormBlock.indexOf(aggressiveNormSearch)
         if (aggressiveIndex !== -1) {
-          // Map position back to original text (approximate but good enough)
-          index = aggressiveIndex
+          // Map position from normalized space back to original text space
+          // We need to account for removed/collapsed characters during normalization
+          const mapped = mapNormalizedPositionToOriginal(
+            plainText,
+            aggressiveNormBlock,
+            aggressiveIndex,
+            aggressiveNormSearch.length
+          )
+
+          relativeStart = mapped.start
+          relativeEnd = mapped.end
+
+          // Snap to word boundaries
+          const snapped = snapToWordBoundariesInText(plainText, relativeStart, relativeEnd)
+          relativeStart = snapped.start
+          relativeEnd = snapped.end
+
+          annotationStartsInThisBlock = true
+          annotationEndsInThisBlock = true
           matchMethod = 'aggressive-normalized'
+
+          // Skip the normal relativeStart/relativeEnd calculation
+          markTextRange(
+            body,
+            relativeStart,
+            relativeEnd,
+            annotation.id,
+            annotation.color,
+            annotationStartsInThisBlock,
+            annotationEndsInThisBlock
+          )
+          return // Exit early - we've already marked this annotation
         }
       }
 
       // Try 3.75: FUZZY similarity matching (Phase 1.5 - handles content differences)
       // This is the same fuzzy matching we use in text-offset-calculator.ts
       if (index === -1) {
-        const searchLen = searchText.length
         const normalizedSearch = normalizeTextAggressive(searchText).toLowerCase()
         const normalizedBlock = normalizeTextAggressive(plainText).toLowerCase()
 
         // Sliding window with 85% similarity threshold
+        const searchLen = normalizedSearch.length // Use NORMALIZED length for sliding window
         const threshold = searchLen < 100 ? 0.90 : 0.85
         const stepSize = searchLen < 100 ? 5 : 10
 
@@ -230,9 +497,39 @@ export function injectAnnotations(
         }
 
         if (bestRatio >= threshold) {
-          index = bestPosition
+          // Map position from normalized space back to original text space
+          const mapped = mapNormalizedPositionToOriginal(
+            plainText,
+            normalizedBlock,
+            bestPosition,
+            searchLen
+          )
+
+          relativeStart = mapped.start
+          relativeEnd = mapped.end
+
+          // Snap to word boundaries
+          const snapped = snapToWordBoundariesInText(plainText, relativeStart, relativeEnd)
+          relativeStart = snapped.start
+          relativeEnd = snapped.end
+
+          annotationStartsInThisBlock = true
+          annotationEndsInThisBlock = true
           matchMethod = `fuzzy-${(bestRatio * 100).toFixed(1)}%`
+
           console.log(`[inject] Fuzzy match found: ${(bestRatio * 100).toFixed(1)}% similarity`)
+
+          // Skip the normal relativeStart/relativeEnd calculation
+          markTextRange(
+            body,
+            relativeStart,
+            relativeEnd,
+            annotation.id,
+            annotation.color,
+            annotationStartsInThisBlock,
+            annotationEndsInThisBlock
+          )
+          return // Exit early - we've already marked this annotation
         }
       }
 
@@ -297,20 +594,57 @@ export function injectAnnotations(
 
         const match = plainText.match(regex)
         if (match && match.index !== undefined) {
-          index = match.index
+          // Use the ACTUAL matched text length, not searchText.length
+          relativeStart = match.index
+          relativeEnd = match.index + match[0].length
+
+          // Snap to word boundaries
+          const snapped = snapToWordBoundariesInText(plainText, relativeStart, relativeEnd)
+          relativeStart = snapped.start
+          relativeEnd = snapped.end
+
+          annotationStartsInThisBlock = true
+          annotationEndsInThisBlock = true
           matchMethod = 'word-based'
+
+          console.log(`[inject] ✅ Found annotation text using ${matchMethod}:`, {
+            annotationId: annotation.id,
+            matchedTextLength: match[0].length,
+            foundAt: match.index,
+          })
+
+          // Skip the normal relativeStart/relativeEnd calculation
+          markTextRange(
+            body,
+            relativeStart,
+            relativeEnd,
+            annotation.id,
+            annotation.color,
+            annotationStartsInThisBlock,
+            annotationEndsInThisBlock
+          )
+          return // Exit early - we've already marked this annotation
         }
       }
 
       if (index !== -1) {
-        // FOUND! Use discovered position
+        // FOUND! Use discovered position (only reached by exact/case-insensitive matches)
+        relativeStart = index
+        relativeEnd = index + matchLength
+
+        // Snap to word boundaries to prevent partial words
+        // This handles cases where PDF extraction gives us "ld. The" instead of "world. The"
+        const snapped = snapToWordBoundariesInText(plainText, relativeStart, relativeEnd)
+        relativeStart = snapped.start
+        relativeEnd = snapped.end
+
         console.log(`[inject] ✅ Found annotation text using ${matchMethod}:`, {
           annotationId: annotation.id,
           searchTextLength: searchText.length,
           foundAt: index,
+          snapped: snapped.start !== index || snapped.end !== (index + matchLength),
         })
-        relativeStart = index
-        relativeEnd = index + searchText.length
+
         annotationStartsInThisBlock = true
         annotationEndsInThisBlock = true
       } else {

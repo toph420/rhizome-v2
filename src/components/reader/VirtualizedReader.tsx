@@ -8,6 +8,8 @@ import { BlockRenderer } from './BlockRenderer'
 import { QuickCapturePanel } from './QuickCapturePanel'
 import { useTextSelection } from '@/hooks/useTextSelection'
 import { useAnnotationResize } from '@/hooks/useAnnotationResize'
+import { useGlobalResizeHandler } from '@/hooks/useGlobalResizeHandler'
+import { useResizePreviewOverlay } from '@/hooks/useResizePreviewOverlay'
 import { useAnnotationStore } from '@/stores/annotation-store'
 import { useReaderStore } from '@/stores/reader-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -411,8 +413,22 @@ export function VirtualizedReader() {
     }
   }, [documentId, setAnnotations])
 
-  // Annotation resize hook (single instance for entire reader)
+  // ============================================================================
+  // RESIZE LIFECYCLE OWNERSHIP (3 hooks working together):
+  // 1. useAnnotationResize - Handle detection & initiation (mousedown on handles)
+  // 2. useGlobalResizeHandler - Drag tracking & autoscroll (mousemove/mouseup)
+  // 3. useResizePreviewOverlay - Visual feedback (scroll-synced preview)
+  // ============================================================================
+
+  // Hook #2: Global drag tracking + autoscroll
+  useGlobalResizeHandler(virtuosoRef, handleAnnotationResize)
+
+  // Hook #3: Preview overlay synchronized to scroll
+  useResizePreviewOverlay()
+
+  // Hook #1: Handle click detection and resize initiation
   // REFACTORED: Hook now reads annotations from store directly (no prop passing)
+  // Will be refactored in Phase 5 to use Zustand
   // Note: Return values unused, but hook must run for side effects (event listeners)
   useAnnotationResize({
     enabled: !correctionModeActive && !sparkCaptureOpen, // Disable during correction mode or spark capture

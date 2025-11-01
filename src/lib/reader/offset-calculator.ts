@@ -102,32 +102,78 @@ function findBlockElement(node: Node): HTMLElement | null {
 /**
  * Snap selection to word boundaries.
  *
- * Removes leading/trailing whitespace and ensures selection starts/ends on word boundaries.
- * @param text - Selected text.
- * @param startOffset - Original start offset.
- * @returns Snapped offsets or null if no snapping needed.
+ * Ensures selection starts and ends on word boundaries by:
+ * 1. Removing leading/trailing whitespace
+ * 2. Expanding partial words at start/end to full words
+ *
+ * Example: "...wor**ld. The question**..." → "...word**. The question**..."
+ *
+ * @param text - Selected text
+ * @param startOffset - Original start offset in markdown
+ * @param fullContext - Full text context to check word boundaries (optional)
+ * @returns Snapped offsets or null if no snapping needed
  */
 function snapToWordBoundaries(
   text: string,
-  startOffset: number
+  startOffset: number,
+  fullContext?: string
 ): { startOffset: number; endOffset: number } | null {
-  // Trim leading whitespace
+  // Step 1: Trim leading/trailing whitespace
   const leadingWhitespace = text.match(/^\s*/)?.[0].length || 0
-
-  // Trim trailing whitespace
   const trailingWhitespace = text.match(/\s*$/)?.[0].length || 0
 
-  if (leadingWhitespace === 0 && trailingWhitespace === 0) {
-    // No whitespace to trim
+  let adjustedStart = startOffset + leadingWhitespace
+  let adjustedEnd = startOffset + text.length - trailingWhitespace
+
+  // Step 2: Check if start/end are mid-word and expand if needed
+  let needsAdjustment = leadingWhitespace > 0 || trailingWhitespace > 0
+
+  // Check start boundary - if first character is alphanumeric, might be mid-word
+  const trimmedText = text.substring(leadingWhitespace, text.length - trailingWhitespace)
+  if (trimmedText.length > 0) {
+    const firstChar = trimmedText[0]
+    const lastChar = trimmedText[trimmedText.length - 1]
+
+    // If starting with alphanumeric and we have context, check if mid-word
+    if (fullContext && /[a-zA-Z0-9]/.test(firstChar)) {
+      // Look backward in context to find word start
+      const contextStart = adjustedStart
+      let wordStart = contextStart
+
+      while (wordStart > 0 && /[a-zA-Z0-9]/.test(fullContext[wordStart - 1])) {
+        wordStart--
+      }
+
+      if (wordStart < contextStart) {
+        adjustedStart = wordStart
+        needsAdjustment = true
+      }
+    }
+
+    // If ending with alphanumeric and we have context, check if mid-word
+    if (fullContext && /[a-zA-Z0-9]/.test(lastChar)) {
+      // Look forward in context to find word end
+      const contextEnd = adjustedEnd
+      let wordEnd = contextEnd
+
+      while (wordEnd < fullContext.length && /[a-zA-Z0-9]/.test(fullContext[wordEnd])) {
+        wordEnd++
+      }
+
+      if (wordEnd > contextEnd) {
+        adjustedEnd = wordEnd
+        needsAdjustment = true
+      }
+    }
+  }
+
+  if (!needsAdjustment) {
     return null
   }
 
-  const trimmedStart = startOffset + leadingWhitespace
-  const trimmedEnd = startOffset + text.length - trailingWhitespace
-
   return {
-    startOffset: trimmedStart,
-    endOffset: trimmedEnd
+    startOffset: adjustedStart,
+    endOffset: adjustedEnd
   }
 }
 

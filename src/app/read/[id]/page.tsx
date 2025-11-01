@@ -140,24 +140,6 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
 
     const signedUrl = data.signedUrl
 
-    // Phase 1A: Load Docling markdown for charspan search
-    let doclingMarkdown: string | undefined
-    try {
-      const { data: doclingData, error: doclingError } = await adminClient.storage
-        .from('documents')
-        .download(`${doc.storage_path}/docling.md`)
-
-      if (!doclingError && doclingData) {
-        doclingMarkdown = await doclingData.text()
-        console.log('[ReaderPage] Loaded docling.md for charspan search:', doclingMarkdown.length, 'chars')
-      } else {
-        console.warn('[ReaderPage] docling.md not available:', doclingError?.message || 'File not found')
-        // Continue without charspan search - will fall back to Phase 1 logic
-      }
-    } catch (error) {
-      console.warn('[ReaderPage] Failed to load docling.md:', error)
-      // Non-blocking - continue without charspan search
-    }
     const job = await getDocumentJob(id)
 
     // 🆕 ADD: Generate PDF signed URL
@@ -202,8 +184,7 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
         domain_metadata,
         bboxes,
         page_start,
-        page_end,
-        charspan
+        page_end
       `)
       .eq('document_id', id)
       .order('chunk_index', { ascending: true })
@@ -282,7 +263,6 @@ export default async function ReaderPage({ params }: ReaderPageProps) {
           connectionCount={connectionCount || 0}
           reviewResults={reviewResults}
           chunkerType={doc.chunker_type}
-          doclingMarkdown={doclingMarkdown}
         />
       </>
     )

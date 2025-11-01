@@ -43,7 +43,7 @@ const CreateAnnotationSchema = z.object({
   pdfHeight: z.number().optional(),
   // PDF ↔ Markdown sync metadata
   syncConfidence: z.number().min(0).max(1).optional(),
-  syncMethod: z.enum(['charspan_window', 'exact', 'fuzzy', 'bbox', 'docling_bbox', 'pymupdf', 'bbox_proportional', 'page_only', 'manual', 'pdf_selection']).optional(),
+  syncMethod: z.enum(['exact', 'fuzzy', 'bbox', 'docling_bbox', 'pymupdf', 'bbox_proportional', 'page_only', 'manual', 'pdf_selection']).optional(),
 })
 
 /**
@@ -792,25 +792,11 @@ export async function calculatePdfOffsets(
       chunksCount: chunks.length,
     })
 
-    // Load docling markdown from storage if available
-    // This enables charspan-based matching per PDF annotation sync plan
-    const supabase = await createClient()
-    const { data: markdown } = await supabase.storage
-      .from('documents')
-      .download(`${documentId}/docling.md`)
-
-    let doclingMarkdown: string | undefined
-    if (markdown) {
-      doclingMarkdown = await markdown.text()
-      console.log('[calculatePdfOffsets] Loaded docling.md:', doclingMarkdown.length, 'chars')
-    }
-
     // Calculate markdown offsets using text-offset-calculator
     const result = calculateMarkdownOffsets(
       text,
       pageNumber,
-      chunks,
-      doclingMarkdown // Can be undefined - calculator handles it
+      chunks
     )
 
     console.log('[calculatePdfOffsets] Result:', result)
