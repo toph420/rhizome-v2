@@ -62,6 +62,7 @@ interface ChunkMetadata {
   }
   themes?: string[]
   importance_score?: number
+  summary?: string
 }
 
 interface ChunkStore {
@@ -168,7 +169,8 @@ export const useChunkStore = create<ChunkStore>((set, get) => ({
         emotional_metadata: metadata.emotional_metadata || chunk.emotional_metadata,
         conceptual_metadata: metadata.conceptual_metadata || chunk.conceptual_metadata,
         themes: metadata.themes || chunk.themes,
-        importance_score: metadata.importance_score ?? chunk.importance_score
+        importance_score: metadata.importance_score ?? chunk.importance_score,
+        summary: metadata.summary ?? chunk.summary
       })
 
       return { detailedChunks: nextDetailed }

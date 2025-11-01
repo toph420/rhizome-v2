@@ -23,8 +23,6 @@ interface ChunkMetadataIconProps {
   documentTitle?: string  // NEW: For job display
   alwaysVisible?: boolean
   style?: React.CSSProperties
-  /** For accurate positioning based on text content */
-  textOffset?: number
 }
 
 /**
@@ -38,7 +36,7 @@ interface ChunkMetadataIconProps {
  * @param props.style - Optional inline styles for positioning
  * @returns Hover card with chunk metadata
  */
-export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle, alwaysVisible = false, style, textOffset }: ChunkMetadataIconProps) {
+export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle, alwaysVisible = false, style }: ChunkMetadataIconProps) {
   const [isDetecting, setIsDetecting] = useState(false)
   const [isEnriching, setIsEnriching] = useState(false)
   const [isEnrichingAndConnecting, setIsEnrichingAndConnecting] = useState(false)
@@ -66,12 +64,6 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   // Use store chunk if available (has latest enrichment data), fall back to prop
   // Type cast needed because ReaderStore.Chunk and annotations.Chunk are different types
   const freshChunk = (storeChunks.find(c => c.id === chunk.id) as Chunk | undefined) || chunk
-
-  // Debug: Log enrichment status changes
-  useEffect(() => {
-    const storeChunk = storeChunks.find(c => c.id === chunk.id)
-    //console.log(`[ChunkMetadataIcon c${chunkIndex}] freshChunkEnriched=${freshChunk.enrichments_detected}, propEnriched=${chunk.enrichments_detected}, storeHas=${!!storeChunk}, storeEnriched=${storeChunk?.enrichments_detected}`)
-  }, [freshChunk.enrichments_detected, storeChunks.length, chunkIndex, chunk.id, chunk.enrichments_detected])
 
   // Format job title with document name
   const jobTitle = documentTitle ? `${documentTitle} - Chunk ${chunkIndex}` : `Chunk ${chunkIndex}`
@@ -177,8 +169,7 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
   const handleSaveSummary = async () => {
     try {
       await updateChunkMetadata(chunk.id, {
-        // Summary might need to be stored differently - check your schema
-        themes: metadata.themes, // Preserve other fields
+        summary: tempSummary
       })
       setEditingSummary(false)
     } catch (error) {
@@ -254,13 +245,6 @@ export function ChunkMetadataIcon({ chunk, chunkIndex, documentId, documentTitle
     enrichmentsDetectedAt: freshChunk.enrichments_detected_at,
     enrichmentSkippedReason: freshChunk.enrichment_skipped_reason
   }
-
-  // Debug: Log metadata when button state might change
-  useEffect(() => {
-    if (!metadata.connectionsDetected) {
-      // console.log(`[ChunkMetadataIcon c${chunkIndex}] DetectBtn: enriched=${metadata.enrichmentsDetected}, disabled=${!metadata.enrichmentsDetected}, connected=${metadata.connectionsDetected}`)
-    }
-  }, [metadata.enrichmentsDetected, metadata.connectionsDetected, chunkIndex])
 
   // Use em-based positioning for better text alignment (scales with font size)
   // Default: top-[0.375em] aligns roughly with first line of text

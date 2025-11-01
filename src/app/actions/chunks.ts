@@ -479,6 +479,7 @@ export async function updateChunkMetadata(
     conceptual_metadata?: Record<string, any>
     themes?: string[]
     importance_score?: number
+    summary?: string
   }
 ) {
   const supabase = await createClient()
@@ -505,6 +506,9 @@ export async function updateChunkMetadata(
   }
   if (metadata.importance_score !== undefined) {
     updates.importance_score = metadata.importance_score
+  }
+  if (metadata.summary !== undefined) {
+    updates.summary = metadata.summary
   }
 
   const { error } = await supabase

@@ -481,46 +481,44 @@ export function DocumentCard({
 
       <CardContent>
         <div className="space-y-3">
-          {/* Publication Date (editable) */}
-          {(editingPubDate || document.publication_date) && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Published:</span>
-              {editingPubDate ? (
-                <Input
-                  type="date"
-                  value={pubDateValue}
-                  onChange={(e) => setPubDateValue(e.target.value)}
-                  onBlur={handlePubDateBlur}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.currentTarget.blur()
-                    } else if (e.key === 'Escape') {
-                      setPubDateValue(document.publication_date || '')
-                      setEditingPubDate(false)
-                    }
-                  }}
-                  autoFocus
-                  disabled={isSubmitting}
-                  className="h-6 text-xs max-w-[150px]"
-                  data-testid="pubdate-input"
-                />
-              ) : (
-                <span
-                  onClick={() => !isSubmitting && setEditingPubDate(true)}
-                  className={cn(
-                    "cursor-pointer transition-colors",
-                    !isSubmitting && "hover:text-foreground"
-                  )}
-                  data-testid="document-pubdate"
-                >
-                  {document.publication_date ?
-                    new Date(document.publication_date).toLocaleDateString() :
-                    'Add date...'
+          {/* Publication Date (editable) - Always show to allow adding */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Published:</span>
+            {editingPubDate ? (
+              <Input
+                type="date"
+                value={pubDateValue}
+                onChange={(e) => setPubDateValue(e.target.value)}
+                onBlur={handlePubDateBlur}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur()
+                  } else if (e.key === 'Escape') {
+                    setPubDateValue(document.publication_date || '')
+                    setEditingPubDate(false)
                   }
-                </span>
-              )}
-            </div>
-          )}
+                }}
+                autoFocus
+                disabled={isSubmitting}
+                className="h-6 text-xs max-w-[150px]"
+                data-testid="pubdate-input"
+              />
+            ) : (
+              <span
+                onClick={() => !isSubmitting && setEditingPubDate(true)}
+                className={cn(
+                  "cursor-pointer transition-colors text-muted-foreground",
+                  !isSubmitting && "hover:text-foreground"
+                )}
+                data-testid="document-pubdate"
+              >
+                {document.publication_date ?
+                  new Date(document.publication_date).toLocaleDateString() :
+                  'Add date...'
+                }
+              </span>
+            )}
+          </div>
 
           {/* Document Stats */}
           <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
