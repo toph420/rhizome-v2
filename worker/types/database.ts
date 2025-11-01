@@ -75,7 +75,6 @@ export interface Chunk {
   bboxes: Json | null
 
   // Phase 2A: Enhanced Docling metadata (migration 073)
-  charspan: Json | null  // [start, end] tuple
   content_layer: string | null  // BODY, FURNITURE, BACKGROUND, etc.
   content_label: string | null  // PARAGRAPH, CODE, FORMULA, etc.
   section_level: number | null  // 1-100 explicit level
@@ -162,7 +161,6 @@ export interface ChunkInsert {
   bboxes?: Json | null
 
   // Phase 2A: Enhanced Docling metadata (migration 073)
-  charspan?: Json | null
   content_layer?: string | null
   content_label?: string | null
   section_level?: number | null
@@ -234,7 +232,6 @@ export interface ChunkUpdate {
   bboxes?: Json | null
 
   // Phase 2A: Enhanced Docling metadata (migration 073)
-  charspan?: Json | null
   content_layer?: string | null
   content_label?: string | null
   section_level?: number | null

@@ -90,8 +90,6 @@ export interface ProcessedChunk {
   // === PHASE 2A: Enhanced Docling Metadata (Migration 073) ===
   // These fields provide additional metadata from Docling for improved annotation sync
 
-  /** Character span in cleaned markdown (before chunking) - enables 99%+ annotation accuracy */
-  charspan?: [number, number] | null
   /** Content layer (BODY, FURNITURE, BACKGROUND, etc.) - filters noise for better connections */
   content_layer?: string | null
   /** Content type label (PARAGRAPH, CODE, FORMULA, etc.) - better classification */

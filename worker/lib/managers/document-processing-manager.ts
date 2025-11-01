@@ -440,7 +440,6 @@ export class DocumentProcessingManager extends HandlerJobManager {
       position_validated: (chunk as any).position_validated,
 
       // Phase 2A: Enhanced Docling metadata (from metadata transfer)
-      charspan: (chunk as any).charspan,
       content_layer: (chunk as any).content_layer,
       content_label: (chunk as any).content_label,
       section_level: (chunk as any).section_level,

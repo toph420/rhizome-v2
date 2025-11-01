@@ -140,7 +140,6 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
             'section_marker': str | None,
             'bboxes': list[dict],
             # Phase 2A enhancements:
-            'charspan': tuple[int, int] | None,
             'content_layer': str | None,
             'content_label': str | None,
             'section_level': int | None,
@@ -162,7 +161,6 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
         'section_marker': None,
         'bboxes': [],
         # Phase 2A enhancements (no defaults - we'll aggregate from doc_items)
-        'charspan': None,
         'content_layer': None,
         'content_label': None,
         'section_level': None,
@@ -197,7 +195,6 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
 
                 # Aggregation containers
                 pages = []
-                charspans = []
                 bboxes_list = []
                 content_layers = []
                 content_labels = []
@@ -258,16 +255,12 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                             formatting_data['script'].append(script_value)
                         print(f"[Phase2B Debug] DocItem {idx}: formatting extracted={fmt}", file=sys.stderr)
 
-                    # Extract provenance (page_no, bbox, charspan)
+                    # Extract provenance (page_no, bbox)
                     if hasattr(doc_item, 'prov') and doc_item.prov:
                         for prov_idx, prov in enumerate(doc_item.prov):
                             # Page number
                             if hasattr(prov, 'page_no'):
                                 pages.append(prov.page_no)
-
-                            # Charspan [start, end]
-                            if hasattr(prov, 'charspan') and prov.charspan:
-                                charspans.append(tuple(prov.charspan))
 
                             # Bounding box {l, t, r, b}
                             if hasattr(prov, 'bbox') and prov.bbox:
@@ -286,14 +279,6 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
                     meta['page_start'] = min(pages)
                     meta['page_end'] = max(pages)
                     print(f"[Phase2A Debug] Aggregated pages: {meta['page_start']}-{meta['page_end']}", file=sys.stderr)
-
-                if charspans:
-                    # Get earliest start, latest end
-                    meta['charspan'] = (
-                        min(cs[0] for cs in charspans),
-                        max(cs[1] for cs in charspans)
-                    )
-                    print(f"[Phase2A Debug] Aggregated charspan: {meta['charspan']} (from {len(charspans)} prov items)", file=sys.stderr)
 
                 if bboxes_list:
                     meta['bboxes'] = bboxes_list
@@ -370,7 +355,6 @@ def extract_chunk_metadata(chunk, doc) -> Dict[str, Any]:
 
     # 🔍 DEBUG: Log final Phase 2A metadata summary
     phase2a_summary = {
-        'charspan': f"{meta['charspan']}" if meta['charspan'] else 'NULL',
         'content_layer': meta['content_layer'] or 'NULL',
         'content_label': meta['content_label'] or 'NULL',
         'page_range': f"{meta['page_start']}-{meta['page_end']}" if meta['page_start'] else 'NULL',

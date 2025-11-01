@@ -78,13 +78,11 @@ export function calculateOverlapPercentage(
  * Validate and sanitize Phase 2A metadata fields.
  *
  * Prevents invalid data from entering the database:
- * - Charspan format validation (array, length 2, valid range)
  * - Content layer enum validation (BODY, FURNITURE, etc.)
  * - Section level range validation (1-100)
  * - NULL-safe handling for backward compatibility
  */
 function validatePhase2AMetadata(meta: {
-  charspan: [number, number] | null
   content_layer: string | null
   content_label: string | null
   section_level: number | null
@@ -93,17 +91,6 @@ function validatePhase2AMetadata(meta: {
   code_language: string | null
   hyperlink: string | null
 }): void {
-  // Validate charspan format
-  if (meta.charspan !== null) {
-    if (!Array.isArray(meta.charspan) || meta.charspan.length !== 2) {
-      console.warn('[MetadataTransfer] Invalid charspan format:', meta.charspan)
-      meta.charspan = null
-    } else if (meta.charspan[0] < 0 || meta.charspan[0] >= meta.charspan[1]) {
-      console.warn('[MetadataTransfer] Invalid charspan range:', meta.charspan)
-      meta.charspan = null
-    }
-  }
-
   // Validate content_layer enum
   const validLayers = ['BODY', 'FURNITURE', 'BACKGROUND', 'INVISIBLE', 'NOTES']
   if (meta.content_layer !== null && !validLayers.includes(meta.content_layer)) {
@@ -152,7 +139,6 @@ export function aggregateMetadata(
   section_marker: string | null
   bboxes: any[] | null
   // Phase 2A enhancements
-  charspan: [number, number] | null
   content_layer: string | null
   content_label: string | null
   section_level: number | null
@@ -176,7 +162,6 @@ export function aggregateMetadata(
       page_end: null,
       section_marker: null,
       bboxes: null,
-      charspan: null,
       content_layer: null,
       content_label: null,
       section_level: null,
@@ -211,18 +196,6 @@ export function aggregateMetadata(
   const sectionMarkers = overlappingChunks
     .map(c => c.chunk.meta.section_marker)
     .filter(s => s !== null && s !== undefined)
-
-  // Phase 2A: Aggregate charspan (earliest start, latest end)
-  const charspans = overlappingChunks
-    .map(c => c.chunk.meta.charspan)
-    .filter(cs => cs !== null && cs !== undefined) as [number, number][]
-
-  const aggregatedCharspan = charspans.length > 0 ? [
-    Math.min(...charspans.map(cs => cs[0])),
-    Math.max(...charspans.map(cs => cs[1]))
-  ] as [number, number] : null
-
-  console.log(`[Phase2A Transfer] Charspans: found=${charspans.length}, result=${JSON.stringify(aggregatedCharspan)}`)
 
   // Phase 2A: Aggregate content_layer (prefer BODY over FURNITURE)
   const layers = overlappingChunks
@@ -296,7 +269,6 @@ export function aggregateMetadata(
 
   // Phase 2A: Validate metadata before returning
   const phase2AMetadata = {
-    charspan: aggregatedCharspan,
     content_layer,
     content_label,
     section_level,
@@ -382,7 +354,6 @@ function interpolateMetadata(
   section_marker: string | null
   bboxes: any[] | null
   // Phase 2A enhancements
-  charspan: [number, number] | null
   content_layer: string | null
   content_label: string | null
   section_level: number | null
@@ -410,7 +381,6 @@ function interpolateMetadata(
       page_end: null,
       section_marker: null,
       bboxes: null,
-      charspan: null,
       content_layer: null,
       content_label: null,
       section_level: null,
@@ -428,7 +398,6 @@ function interpolateMetadata(
     page_end: source.chunk.meta.page_end,
     section_marker: source.chunk.meta.section_marker,
     bboxes: source.chunk.meta.bboxes,
-    charspan: source.chunk.meta.charspan,
     content_layer: source.chunk.meta.content_layer,
     content_label: source.chunk.meta.content_label,
     section_level: source.chunk.meta.section_level,
@@ -530,7 +499,6 @@ export async function transferMetadataToChonkieChunks(
       bboxes: metadata.bboxes,
 
       // Phase 2A: Enhanced Docling metadata
-      charspan: metadata.charspan,
       content_layer: metadata.content_layer,
       content_label: metadata.content_label,
       section_level: metadata.section_level,
